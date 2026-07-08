@@ -21,4 +21,9 @@ export interface TradeListItemDTO {
   entryModelNames: string[];
   confluenceLabels: string[];
   executionLabels: string[];
+  psychology: {
+    rawScore: number;
+    percent: number;
+    grade: "A" | "B" | "C" | "D" | "F";
+  } | null;
 }

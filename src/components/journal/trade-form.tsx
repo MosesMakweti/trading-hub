@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { TradeAccountRow } from "@/components/journal/trade-account-row";
 import { TagToggleGroup } from "@/components/journal/tag-toggle-group";
+import { PsychologyQuestionnaire } from "@/components/journal/psychology-questionnaire";
 import { minutesToTimeString, timeStringToMinutes } from "@/lib/date";
 import { tradeSchema, type TradeFormValues, type TradeInput } from "@/lib/validation/trades";
 import { createTrade, updateTrade } from "@/actions/trades.actions";
@@ -47,6 +48,7 @@ const emptyDefaults: TradeFormValues = {
   allocations: [],
   checklistItemIds: [],
   entryModelIds: [],
+  psychologyAnswers: {},
 };
 
 interface TradeFormProps {
@@ -136,7 +138,11 @@ export function TradeForm({
               control={control}
               name="assetId"
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select
+                  items={assets.map((a) => ({ value: a.id, label: a.symbol }))}
+                  value={field.value}
+                  onValueChange={field.onChange}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select asset" />
                   </SelectTrigger>
@@ -175,7 +181,11 @@ export function TradeForm({
               control={control}
               name="direction"
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select
+                  items={{ LONG: "Long", SHORT: "Short" }}
+                  value={field.value}
+                  onValueChange={field.onChange}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -195,6 +205,10 @@ export function TradeForm({
               name="sessionId"
               render={({ field }) => (
                 <Select
+                  items={[
+                    { value: NO_SESSION, label: "None" },
+                    ...sessions.map((s) => ({ value: s.id, label: s.name })),
+                  ]}
                   value={field.value ?? NO_SESSION}
                   onValueChange={(v) => field.onChange(v === NO_SESSION ? null : v)}
                 >
@@ -220,7 +234,11 @@ export function TradeForm({
               control={control}
               name="higherTimeframeBias"
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select
+                  items={{ BULLISH: "Bullish", BEARISH: "Bearish" }}
+                  value={field.value}
+                  onValueChange={field.onChange}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -425,6 +443,16 @@ export function TradeForm({
             />
           </div>
         </div>
+      </section>
+
+      <section className="glass space-y-3 rounded-2xl p-4">
+        <h2 className="text-sm font-medium text-muted-foreground">
+          Post-Trade Honest Questionnaire
+        </h2>
+        <PsychologyQuestionnaire control={control} />
+        {errors.psychologyAnswers && (
+          <p className="text-xs text-danger">Please answer every question above.</p>
+        )}
       </section>
 
       <div className="flex justify-end gap-2">

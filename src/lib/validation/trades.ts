@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { psychologyAnswersSchema } from "@/lib/validation/psychology";
+
 export const directionSchema = z.enum(["LONG", "SHORT"]);
 export const biasSchema = z.enum(["BULLISH", "BEARISH"]);
 export const riskInputTypeSchema = z.enum(["PERCENT", "AMOUNT"]);
@@ -33,6 +35,7 @@ export const tradeSchema = z
     allocations: z.array(tradeAllocationSchema).min(1, "Select at least one account."),
     checklistItemIds: z.array(z.string()).default([]),
     entryModelIds: z.array(z.string()).default([]),
+    psychologyAnswers: psychologyAnswersSchema,
   })
   .refine(
     (data) => new Set(data.allocations.map((a) => a.tradingAccountId)).size === data.allocations.length,

@@ -149,7 +149,7 @@ export function PropFirmAccountDialog({
               control={control}
               name="phase"
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select items={PHASE_LABELS} value={field.value} onValueChange={field.onChange}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -169,7 +169,7 @@ export function PropFirmAccountDialog({
               control={control}
               name="status"
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select items={STATUS_LABELS} value={field.value} onValueChange={field.onChange}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>

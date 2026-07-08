@@ -14,6 +14,14 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { archiveTrade } from "@/actions/trades.actions";
 import type { TradeListItemDTO } from "@/types/trades";
 
+const GRADE_VARIANT: Record<"A" | "B" | "C" | "D" | "F", "success" | "warning" | "danger"> = {
+  A: "success",
+  B: "success",
+  C: "warning",
+  D: "warning",
+  F: "danger",
+};
+
 function percent(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
 }
@@ -76,6 +84,16 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
               {trade.actualRR == null ? "Open" : percent(trade.actualRR)}
             </span>
           </div>
+          {trade.psychology && (
+            <div className="mt-1 flex items-center justify-end gap-1.5">
+              <Badge variant={GRADE_VARIANT[trade.psychology.grade]}>
+                {trade.psychology.grade}
+              </Badge>
+              <span className="text-xs text-muted-foreground">
+                {trade.psychology.percent.toFixed(1)}% discipline
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

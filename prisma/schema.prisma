@@ -264,8 +264,38 @@ model Trade {
   images              TradeImage[]
   checklistSelections TradeChecklistSelection[]
   entryModels         TradeEntryModel[]
+  psychology          PsychologyQuestionnaireResponse?
 
   @@index([userId, tradeDate])
+}
+
+enum Grade {
+  A
+  B
+  C
+  D
+  F
+}
+
+// The 8 questions themselves are fixed in code (domain/psychology/questions.ts),
+// not user-customizable, so only answers are persisted here. rawScore/
+// psychologyPercent/grade are denormalized — computed once at write time by
+// the pure scoring function — because analytics needs fast aggregation/
+// sorting/filtering by score across many trades, and the algorithm is fixed
+// and versioned, so recomputing from `answers` on every query would be pure
+// waste. This is different from account ROI/net-profit (Phase 3), which are
+// trivial arithmetic derived on read every time — psychology scoring is
+// comparatively expensive/complex, which is what justifies persisting it.
+model PsychologyQuestionnaireResponse {
+  id                String   @id @default(cuid())
+  tradeId           String   @unique
+  trade             Trade    @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  answers           Json
+  rawScore          Int
+  psychologyPercent Float
+  grade             Grade
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 // Per-account risk input and closing PnL for a trade that may span multiple

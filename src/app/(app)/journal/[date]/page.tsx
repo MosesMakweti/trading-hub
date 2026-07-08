@@ -53,6 +53,13 @@ export default async function JournalDayPage({
     executionLabels: t.checklistSelections
       .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
       .map((c) => c.checklistItem.label),
+    psychology: t.psychology
+      ? {
+          rawScore: t.psychology.rawScore,
+          percent: t.psychology.psychologyPercent,
+          grade: t.psychology.grade,
+        }
+      : null,
   }));
 
   const isToday = dateKey === localDateToKey(new Date());

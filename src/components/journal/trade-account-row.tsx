@@ -37,7 +37,11 @@ export function TradeAccountRow({
             control={control}
             name={`allocations.${index}.riskInputType`}
             render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
+              <Select
+                items={{ PERCENT: "% Risk", AMOUNT: "$ Amount" }}
+                value={field.value}
+                onValueChange={field.onChange}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>

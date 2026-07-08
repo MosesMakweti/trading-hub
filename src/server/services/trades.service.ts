@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { dailyPercentFromTrades } from "@/domain/performance/rr";
+import { scorePsychology, type PsychologyAnswer } from "@/domain/psychology/scoring";
 import type { TradeInput } from "@/lib/validation/trades";
 import { listTradingAccounts } from "@/server/services/accounts.service";
 import { listAssets } from "@/server/services/assets.service";
@@ -32,7 +33,20 @@ const tradeInclude = {
   checklistSelections: { include: { checklistItem: true } },
   entryModels: { include: { entryModel: true } },
   images: true,
+  psychology: true,
 } as const;
+
+// Score is always (re)computed server-side from the answers, never trusted
+// from the client — this is what guarantees a persisted score/grade can
+// never drift from what the pure scoring function would produce.
+function scorePsychologyAnswers(answers: TradeInput["psychologyAnswers"]) {
+  const answerList: PsychologyAnswer[] = Object.entries(answers).map(([key, value]) => ({
+    key,
+    value,
+  }));
+  const { rawScore, percent, grade } = scorePsychology(answerList);
+  return { answers, rawScore, psychologyPercent: percent, grade };
+}
 
 function tradeWriteData(data: TradeInput) {
   return {
@@ -86,17 +100,20 @@ export async function getTrade(userId: string, tradeId: string) {
 }
 
 export async function createTrade(userId: string, dateKey: string, data: TradeInput) {
+  const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   return prisma.trade.create({
     data: {
       userId,
       tradeDate: dateKeyToUtcDate(dateKey),
       ...tradeWriteData(data),
+      psychology: { create: psychology },
     },
     include: tradeInclude,
   });
 }
 
 export async function updateTrade(userId: string, tradeId: string, data: TradeInput) {
+  const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   return prisma.$transaction(async (tx) => {
     const existing = await tx.trade.findFirst({ where: { id: tradeId, userId } });
     if (!existing) throw new Error("Trade not found.");
@@ -107,7 +124,10 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
 
     return tx.trade.update({
       where: { id: tradeId },
-      data: tradeWriteData(data),
+      data: {
+        ...tradeWriteData(data),
+        psychology: { upsert: { create: psychology, update: psychology } },
+      },
       include: tradeInclude,
     });
   });

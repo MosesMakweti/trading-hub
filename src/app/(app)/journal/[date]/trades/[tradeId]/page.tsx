@@ -52,6 +52,7 @@ export default async function EditTradePage({
     })),
     checklistItemIds: trade.checklistSelections.map((c) => c.checklistItemId),
     entryModelIds: trade.entryModels.map((m) => m.entryModelId),
+    psychologyAnswers: (trade.psychology?.answers as Record<string, string | number>) ?? {},
   };
 
   return (
