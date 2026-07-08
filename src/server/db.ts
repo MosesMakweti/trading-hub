@@ -7,6 +7,7 @@ const SOFT_DELETE_MODELS = new Set([
   "TradingSession",
   "PsychologicalAnchor",
   "ChecklistItemDefinition",
+  "TradingAccount",
 ]);
 
 function withSoftDelete(client: PrismaClient) {

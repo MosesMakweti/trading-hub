@@ -30,6 +30,59 @@ model User {
   tradingSessions TradingSession[]
   psychAnchors    PsychologicalAnchor[]
   checklistItems  ChecklistItemDefinition[]
+  tradingAccounts TradingAccount[]
+}
+
+enum AccountKind {
+  PROP_FIRM
+  PERSONAL_BROKERAGE
+}
+
+enum AccountStatus {
+  ACTIVE
+  PASSED
+  FAILED
+  SUSPENDED
+  CLOSED
+}
+
+enum PropFirmPhase {
+  PHASE_1
+  PHASE_2
+  MASTER
+}
+
+// One table for both prop-firm and personal-brokerage accounts (kind
+// discriminator + kind-specific nullable columns) so a future Trade can
+// allocate risk/PnL against either kind through a single clean FK, instead
+// of a polymorphic two-FK join.
+model TradingAccount {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      AccountKind
+  name      String
+  status    AccountStatus @default(ACTIVE)
+  notes     String?
+  createdAt DateTime      @default(now())
+  deletedAt DateTime?
+
+  currentBalance Decimal @db.Decimal(14, 2)
+
+  // prop-firm-only
+  propFirmName String?
+  accountSize  Decimal?       @db.Decimal(14, 2)
+  phase        PropFirmPhase?
+  purchaseCost Decimal?       @db.Decimal(14, 2)
+  totalPayouts Decimal?       @db.Decimal(14, 2)
+
+  // personal-brokerage-only
+  brokerName       String?
+  startingBalance  Decimal? @db.Decimal(14, 2)
+  totalWithdrawals Decimal? @db.Decimal(14, 2)
+  totalDeposits    Decimal? @db.Decimal(14, 2)
+
+  @@index([userId, kind, deletedAt])
 }
 
 enum ChecklistType {
