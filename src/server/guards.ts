@@ -2,7 +2,10 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/server/auth";
 
-export default async function RootPage() {
+export async function requireUser() {
   const session = await auth();
-  redirect(session?.user ? "/dashboard" : "/login");
+  if (!session?.user?.id) {
+    redirect("/login");
+  }
+  return session.user;
 }

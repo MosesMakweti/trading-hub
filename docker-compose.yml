@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trading_hub
+      POSTGRES_PASSWORD: trading_hub_dev
+      POSTGRES_DB: trading_hub
+    ports:
+      - "5432:5432"
+    volumes:
+      - trading_hub_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  trading_hub_postgres_data:
