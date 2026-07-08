@@ -31,6 +31,21 @@ model User {
   psychAnchors    PsychologicalAnchor[]
   checklistItems  ChecklistItemDefinition[]
   tradingAccounts TradingAccount[]
+  dailyNotes      DailyNote[]
+}
+
+// "The trading day" the user considers it, independent of instants — stored
+// as a date-only column (no time/timezone) to avoid off-by-one bugs for
+// users west of UTC. Independent of any trades logged that day.
+model DailyNote {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime  @db.Date
+  content   Json?
+  deletedAt DateTime?
+
+  @@unique([userId, date])
 }
 
 enum AccountKind {
