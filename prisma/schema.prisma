@@ -23,6 +23,114 @@ model User {
 
   accounts Account[]
   sessions Session[]
+
+  tradingPlan     TradingPlan?
+  assets          Asset[]
+  entryModels     EntryModel[]
+  tradingSessions TradingSession[]
+  psychAnchors    PsychologicalAnchor[]
+  checklistItems  ChecklistItemDefinition[]
+}
+
+enum ChecklistType {
+  CONFLUENCE
+  EXECUTION_CONFIRMATION
+}
+
+// Singleton per user. Rich-text fields store Tiptap JSON documents.
+model TradingPlan {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  dailyRoutineMorning     Json?
+  dailyRoutinePreMarket   Json?
+  dailyRoutinePostSession Json?
+  strategyFramework       Json?
+  profitTakingRules       Json?
+  stopLossPlacement       Json?
+  riskManagementRules     Json?
+
+  maxDailyRiskPercent    Decimal? @db.Decimal(6, 2)
+  maxWeeklyRiskPercent   Decimal? @db.Decimal(6, 2)
+  maxOpenPositions       Int?
+  maxRiskPerTradePercent Decimal? @db.Decimal(6, 2)
+
+  updatedAt DateTime @updatedAt
+}
+
+// Watchlist entry. Populates the asset dropdown in the journal (later phase).
+model Asset {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  symbol    String
+  label     String?
+  sortOrder Int        @default(0)
+  createdAt DateTime   @default(now())
+  deletedAt DateTime?
+
+  @@unique([userId, symbol])
+  @@index([userId, sortOrder])
+}
+
+// Custom entry model (e.g. "Liquidity Sweep", "SMT"). Selectable per trade later.
+model EntryModel {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+
+  @@index([userId, sortOrder])
+}
+
+// Named trading session (e.g. "London Open"). Modeled as a list to support
+// multiple sessions, even though a trader may only define one today.
+model TradingSession {
+  id                     String    @id @default(cuid())
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                   String
+  startMinutes           Int
+  endMinutes             Int
+  maxDailyTradingMinutes Int?
+  maxTradesPerDay        Int?
+  sortOrder              Int       @default(0)
+  createdAt              DateTime  @default(now())
+  deletedAt              DateTime?
+
+  @@index([userId, sortOrder])
+}
+
+model PsychologicalAnchor {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text      String
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  @@index([userId, sortOrder])
+}
+
+// Powers both the Confluence and Execution-Confirmation checklists via a
+// type discriminator, avoiding duplicated CRUD/reorder models.
+model ChecklistItemDefinition {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      ChecklistType
+  label     String
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+  deletedAt DateTime?
+
+  @@index([userId, type, sortOrder])
 }
 
 model Account {
