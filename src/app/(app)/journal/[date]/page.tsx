@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, ChevronRight, ListChecks } from "lucide-react";
+import { ChevronLeft, ChevronRight, ListChecks, Plus } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
 import { getDailyNote } from "@/server/services/journal.service";
+import { listTradesForDay } from "@/server/services/trades.service";
 import { addDaysToKey, formatDateKeyLong, isValidDateKey, localDateToKey } from "@/lib/date";
 import { Button } from "@/components/ui/button";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
+import { TradeCard } from "@/components/journal/trade-card";
 import { EmptyState } from "@/components/shared/empty-state";
+import type { TradeListItemDTO } from "@/types/trades";
 
 export default async function JournalDayPage({
   params,
@@ -18,7 +21,39 @@ export default async function JournalDayPage({
   if (!isValidDateKey(dateKey)) notFound();
 
   const user = await requireUser();
-  const note = await getDailyNote(user.id, dateKey);
+  const [note, trades] = await Promise.all([
+    getDailyNote(user.id, dateKey),
+    listTradesForDay(user.id, dateKey),
+  ]);
+
+  const tradeDtos: TradeListItemDTO[] = trades.map((t) => ({
+    id: t.id,
+    assetSymbol: t.asset.symbol,
+    executionMinutes: t.executionMinutes,
+    direction: t.direction,
+    higherTimeframeBias: t.higherTimeframeBias,
+    biasConfidencePercent: t.biasConfidencePercent,
+    expectedRR: t.expectedRR.toNumber(),
+    actualRR: t.actualRR ? t.actualRR.toNumber() : null,
+    hitTP1: t.hitTP1,
+    hitTP2: t.hitTP2,
+    hitTP3: t.hitTP3,
+    hitFullTP: t.hitFullTP,
+    accounts: t.allocations.map((a) => ({
+      name: a.tradingAccount.name,
+      riskInputType: a.riskInputType,
+      riskValue: a.riskValue.toNumber(),
+      closingPnlGross: a.closingPnlGross.toNumber(),
+      closingPnlNet: a.closingPnlNet.toNumber(),
+    })),
+    entryModelNames: t.entryModels.map((m) => m.entryModel.name),
+    confluenceLabels: t.checklistSelections
+      .filter((c) => c.checklistItem.type === "CONFLUENCE")
+      .map((c) => c.checklistItem.label),
+    executionLabels: t.checklistSelections
+      .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
+      .map((c) => c.checklistItem.label),
+  }));
 
   const isToday = dateKey === localDateToKey(new Date());
   const prevKey = addDaysToKey(dateKey, -1);
@@ -64,15 +99,29 @@ export default async function JournalDayPage({
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium text-muted-foreground">Trades</h2>
-          <Button size="sm" disabled title="Trade logging arrives in Phase 5">
+          <Button
+            size="sm"
+            className="gap-1.5"
+            nativeButton={false}
+            render={<Link href={`/journal/${dateKey}/trades/new`} />}
+          >
+            <Plus className="size-3.5" />
             Add Trade
           </Button>
         </div>
-        <EmptyState
-          icon={ListChecks}
-          title="No trades logged yet"
-          description="Trade entry, per-account risk/PnL, checklists, and psychology scoring are built in the next phase."
-        />
+        {tradeDtos.length === 0 ? (
+          <EmptyState
+            icon={ListChecks}
+            title="No trades logged yet"
+            description="Log your first trade for this day — accounts, risk/PnL, checklists, and RR are all tracked per trade."
+          />
+        ) : (
+          <div className="space-y-3">
+            {tradeDtos.map((trade) => (
+              <TradeCard key={trade.id} dateKey={dateKey} trade={trade} />
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

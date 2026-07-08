@@ -32,6 +32,7 @@ model User {
   checklistItems  ChecklistItemDefinition[]
   tradingAccounts TradingAccount[]
   dailyNotes      DailyNote[]
+  trades          Trade[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -97,6 +98,8 @@ model TradingAccount {
   totalWithdrawals Decimal? @db.Decimal(14, 2)
   totalDeposits    Decimal? @db.Decimal(14, 2)
 
+  allocations TradeAccountAllocation[]
+
   @@index([userId, kind, deletedAt])
 }
 
@@ -138,6 +141,8 @@ model Asset {
   createdAt DateTime   @default(now())
   deletedAt DateTime?
 
+  trades Trade[]
+
   @@unique([userId, symbol])
   @@index([userId, sortOrder])
 }
@@ -152,6 +157,8 @@ model EntryModel {
   sortOrder   Int       @default(0)
   createdAt   DateTime  @default(now())
   deletedAt   DateTime?
+
+  tradeSelections TradeEntryModel[]
 
   @@index([userId, sortOrder])
 }
@@ -170,6 +177,8 @@ model TradingSession {
   sortOrder              Int       @default(0)
   createdAt              DateTime  @default(now())
   deletedAt              DateTime?
+
+  trades Trade[]
 
   @@index([userId, sortOrder])
 }
@@ -198,7 +207,113 @@ model ChecklistItemDefinition {
   createdAt DateTime      @default(now())
   deletedAt DateTime?
 
+  selections TradeChecklistSelection[]
+
   @@index([userId, type, sortOrder])
+}
+
+enum Direction {
+  LONG
+  SHORT
+}
+
+enum Bias {
+  BULLISH
+  BEARISH
+}
+
+enum RiskInputType {
+  PERCENT
+  AMOUNT
+}
+
+enum ImageCategory {
+  ANALYSIS
+  BEFORE
+  AFTER
+}
+
+model Trade {
+  id                       String    @id @default(cuid())
+  userId                   String
+  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeDate                DateTime  @db.Date
+  assetId                  String
+  asset                    Asset     @relation(fields: [assetId], references: [id])
+  executionMinutes         Int
+  direction                Direction
+  higherTimeframeBias      Bias
+  biasConfidencePercent    Int
+  sessionId                String?
+  session                  TradingSession? @relation(fields: [sessionId], references: [id])
+  expectedRR               Decimal   @db.Decimal(8, 2)
+  actualRR                 Decimal?  @db.Decimal(8, 2)
+  hitTP1                   Boolean   @default(false)
+  hitTP2                   Boolean   @default(false)
+  hitTP3                   Boolean   @default(false)
+  hitFullTP                Boolean   @default(false)
+  psychPreTradeMindset     String?
+  psychPostTradeReflection String?
+  psychLessonsLearned      String?
+  psychWhatToWorkOn        String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  deletedAt                DateTime?
+
+  allocations         TradeAccountAllocation[]
+  images              TradeImage[]
+  checklistSelections TradeChecklistSelection[]
+  entryModels         TradeEntryModel[]
+
+  @@index([userId, tradeDate])
+}
+
+// Per-account risk input and closing PnL for a trade that may span multiple
+// accounts of different sizes.
+model TradeAccountAllocation {
+  id               String        @id @default(cuid())
+  tradeId          String
+  trade            Trade         @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  tradingAccountId String
+  tradingAccount   TradingAccount @relation(fields: [tradingAccountId], references: [id])
+  riskInputType    RiskInputType
+  riskValue        Decimal       @db.Decimal(14, 2)
+  closingPnlGross  Decimal       @db.Decimal(14, 2)
+  closingPnlNet    Decimal       @db.Decimal(14, 2)
+
+  @@unique([tradeId, tradingAccountId])
+}
+
+model TradeImage {
+  id             String        @id @default(cuid())
+  tradeId        String
+  trade          Trade         @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  category       ImageCategory
+  url            String
+  uploadthingKey String
+  sortOrder      Int           @default(0)
+  createdAt      DateTime      @default(now())
+}
+
+// Join for both the Confluence and Execution-Confirmation checklists
+// (distinguished by the linked ChecklistItemDefinition's own type).
+model TradeChecklistSelection {
+  id              String                  @id @default(cuid())
+  tradeId         String
+  trade           Trade                   @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  checklistItemId String
+  checklistItem   ChecklistItemDefinition @relation(fields: [checklistItemId], references: [id])
+
+  @@unique([tradeId, checklistItemId])
+}
+
+model TradeEntryModel {
+  tradeId      String
+  trade        Trade      @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  entryModelId String
+  entryModel   EntryModel @relation(fields: [entryModelId], references: [id])
+
+  @@id([tradeId, entryModelId])
 }
 
 model Account {

@@ -24,19 +24,16 @@ import { listChecklistItems } from "@/server/services/checklist-items.service";
 import { Accordion } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { PlanSectionCard } from "@/components/plan/plan-section-card";
-import { RichTextEditor } from "@/components/plan/rich-text-editor";
 import { DailyRoutineSection } from "@/components/plan/sections/daily-routine-section";
 import { AssetsSection } from "@/components/plan/sections/assets-section";
 import { TradingSessionsSection } from "@/components/plan/sections/trading-sessions-section";
+import { StrategyFrameworkSection } from "@/components/plan/sections/strategy-framework-section";
 import { RiskManagementSection } from "@/components/plan/sections/risk-management-section";
 import { EntryModelsSection } from "@/components/plan/sections/entry-models-section";
+import { ProfitTakingSection } from "@/components/plan/sections/profit-taking-section";
+import { StopLossSection } from "@/components/plan/sections/stop-loss-section";
 import { PsychAnchorsSection } from "@/components/plan/sections/psych-anchors-section";
 import { ChecklistSection } from "@/components/plan/sections/checklist-section";
-import {
-  updateProfitTakingRules,
-  updateStopLossPlacement,
-  updateStrategyFramework,
-} from "@/actions/trading-plan.actions";
 
 export default async function TradingPlanPage() {
   const user = await requireUser();
@@ -80,11 +77,7 @@ export default async function TradingPlanPage() {
         </PlanSectionCard>
 
         <PlanSectionCard value="strategy-framework" icon={Target} title="Strategy Framework">
-          <RichTextEditor
-            initialContent={plan.strategyFramework}
-            placeholder="Write out your strategy framework..."
-            onSave={(content) => updateStrategyFramework({ strategyFramework: content })}
-          />
+          <StrategyFrameworkSection strategyFramework={plan.strategyFramework} />
         </PlanSectionCard>
 
         <PlanSectionCard value="risk-management" icon={ShieldAlert} title="Risk Management">
@@ -101,19 +94,11 @@ export default async function TradingPlanPage() {
         </PlanSectionCard>
 
         <PlanSectionCard value="profit-taking" icon={Sparkles} title="Profit Taking Rules">
-          <RichTextEditor
-            initialContent={plan.profitTakingRules}
-            placeholder="When and how do you take profit?"
-            onSave={(content) => updateProfitTakingRules({ profitTakingRules: content })}
-          />
+          <ProfitTakingSection profitTakingRules={plan.profitTakingRules} />
         </PlanSectionCard>
 
         <PlanSectionCard value="stop-loss" icon={ShieldOff} title="Stop Loss Placement">
-          <RichTextEditor
-            initialContent={plan.stopLossPlacement}
-            placeholder="How do you decide where to place your stop?"
-            onSave={(content) => updateStopLossPlacement({ stopLossPlacement: content })}
-          />
+          <StopLossSection stopLossPlacement={plan.stopLossPlacement} />
         </PlanSectionCard>
 
         <PlanSectionCard

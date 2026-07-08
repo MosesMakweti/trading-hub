@@ -10,9 +10,22 @@ import { JournalDayButton } from "@/components/journal/journal-day-button";
 import { YearView } from "@/components/journal/year-view";
 import { localDateToKey } from "@/lib/date";
 
-export function JournalCalendar({ noteDates }: { noteDates: string[] }) {
+interface DailyPnl {
+  dateKey: string;
+  percent: number;
+  tradeCount: number;
+}
+
+export function JournalCalendar({
+  noteDates,
+  dailyPnl,
+}: {
+  noteDates: string[];
+  dailyPnl: DailyPnl[];
+}) {
   const router = useRouter();
   const noteDateSet = useMemo(() => new Set(noteDates), [noteDates]);
+  const dailyPnlMap = useMemo(() => new Map(dailyPnl.map((d) => [d.dateKey, d])), [dailyPnl]);
   const [view, setView] = useState<"month" | "year">("month");
   const [month, setMonth] = useState<Date>(new Date());
 
@@ -24,6 +37,15 @@ export function JournalCalendar({ noteDates }: { noteDates: string[] }) {
     }
     return counts;
   }, [noteDates, month]);
+
+  const percentByMonth = useMemo(() => {
+    const totals = new Array(12).fill(0);
+    for (const d of dailyPnl) {
+      const [y, m] = d.dateKey.split("-").map(Number);
+      if (y === month.getFullYear()) totals[m - 1] += d.percent;
+    }
+    return totals;
+  }, [dailyPnl, month]);
 
   function goToDay(date: Date) {
     router.push(`/journal/${localDateToKey(date)}`);
@@ -48,16 +70,19 @@ export function JournalCalendar({ noteDates }: { noteDates: string[] }) {
           month={month}
           onMonthChange={setMonth}
           onDayClick={goToDay}
-          className="glass w-full max-w-none rounded-2xl p-4"
+          className="glass w-full max-w-none rounded-2xl p-4 [--cell-size:4.5rem]"
           classNames={{ months: "w-full", month: "w-full", month_grid: "w-full" }}
           components={{
-            DayButton: (props) => <JournalDayButton {...props} noteDates={noteDateSet} />,
+            DayButton: (props) => (
+              <JournalDayButton {...props} noteDates={noteDateSet} dailyPnl={dailyPnlMap} />
+            ),
           }}
         />
       ) : (
         <YearView
           year={month.getFullYear()}
           noteCountsByMonth={noteCountsByMonth}
+          percentByMonth={percentByMonth}
           onSelectMonth={(i) => {
             setMonth(new Date(month.getFullYear(), i, 1));
             setView("month");

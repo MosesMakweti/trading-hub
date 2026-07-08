@@ -2,6 +2,7 @@
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 const MONTH_NAMES = [
@@ -19,14 +20,20 @@ const MONTH_NAMES = [
   "December",
 ];
 
+function formatPercent(n: number) {
+  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
+}
+
 export function YearView({
   year,
   noteCountsByMonth,
+  percentByMonth,
   onSelectMonth,
   onChangeYear,
 }: {
   year: number;
   noteCountsByMonth: number[];
+  percentByMonth: number[];
   onSelectMonth: (monthIndex: number) => void;
   onChangeYear: (year: number) => void;
 }) {
@@ -49,7 +56,19 @@ export function YearView({
             onClick={() => onSelectMonth(i)}
             className="rounded-xl border border-border bg-background/40 p-4 text-left transition-colors hover:bg-accent"
           >
-            <div className="font-medium">{name}</div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium">{name}</span>
+              {percentByMonth[i] !== 0 && (
+                <span
+                  className={cn(
+                    "text-xs font-semibold",
+                    percentByMonth[i] > 0 ? "text-success" : "text-danger",
+                  )}
+                >
+                  {formatPercent(percentByMonth[i])}
+                </span>
+              )}
+            </div>
             <div className="text-xs text-muted-foreground">
               {noteCountsByMonth[i] > 0
                 ? `${noteCountsByMonth[i]} note${noteCountsByMonth[i] === 1 ? "" : "s"}`

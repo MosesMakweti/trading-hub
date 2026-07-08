@@ -57,3 +57,17 @@ export function localDateToKey(date: Date): string {
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
+
+// Trade execution time is stored as minutes-since-midnight (0-1439), not a
+// Time/DateTime — trivially sortable and sidesteps timezone handling for a
+// value that's really just "what time of day."
+export function minutesToTimeString(minutes: number): string {
+  const h = String(Math.floor(minutes / 60)).padStart(2, "0");
+  const m = String(minutes % 60).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+export function timeStringToMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}

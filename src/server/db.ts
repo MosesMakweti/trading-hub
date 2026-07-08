@@ -9,6 +9,7 @@ const SOFT_DELETE_MODELS = new Set([
   "ChecklistItemDefinition",
   "TradingAccount",
   "DailyNote",
+  "Trade",
 ]);
 
 function withSoftDelete(client: PrismaClient) {
