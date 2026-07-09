@@ -1,10 +1,11 @@
 /**
- * Two distinct numbers exist per trade and must not be conflated:
- *  1. Real per-account risk/PnL (dollars/percent the user enters per
- *     account) — used for real profitability in My Accounts.
- *  2. This normalized "1R = 1%" journal metric — used only for calendar
- *     badges and the equity curve, so trades can be compared/aggregated
- *     across accounts of different sizes without needing real balances.
+ * `actualRR` is a self-reported R-multiple the trader records per trade —
+ * useful as a journal/discipline metric, but no longer what analytics is
+ * built from. Every dashboard number now derives from the Performance
+ * Account's real dollar PnL (the app's single source of truth — see
+ * accounts.service.ts / analytics.service.ts), converted to daily % returns
+ * via `dailyPercentsFromBalanceHistory` below and fed through the same
+ * `buildEquityCurve` pipeline either way.
  */
 
 export type CalendarColor = "green" | "red" | "gray";
@@ -59,5 +60,24 @@ export function buildEquityCurve(
       cumulativeCompounding: (equity / 100 - 1) * 100,
       cumulativeAdditive: additive,
     };
+  });
+}
+
+/**
+ * Bridges real dollar PnL history into `buildEquityCurve`'s daily-percent
+ * input: each day's return is its PnL relative to the balance at the start
+ * of that day, so real accounting (the Performance Account) and the
+ * abstract "1% per R" convention both compound through the same pipeline.
+ */
+export function dailyPercentsFromBalanceHistory(
+  startingBalance: number,
+  dailyPnl: { dateKey: string; pnl: number }[],
+): { dateKey: string; percent: number }[] {
+  const sorted = [...dailyPnl].sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+  let balance = startingBalance;
+  return sorted.map(({ dateKey, pnl }) => {
+    const percent = balance !== 0 ? (pnl / balance) * 100 : 0;
+    balance += pnl;
+    return { dateKey, percent };
   });
 }

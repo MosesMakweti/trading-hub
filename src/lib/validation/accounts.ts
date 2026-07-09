@@ -10,11 +10,12 @@ const optionalNote = z
   .optional()
   .transform((v) => (v ? v : undefined));
 
+// currentBalance is not user input — it's baseline (accountSize) + this
+// account's trade PnL history, derived in accounts.service.ts.
 export const propFirmAccountSchema = z.object({
   name: z.string().trim().min(1, "Account name is required.").max(80),
   propFirmName: z.string().trim().min(1, "Prop firm is required.").max(80),
   accountSize: z.coerce.number().min(0),
-  currentBalance: z.coerce.number().min(0),
   phase: propFirmPhaseSchema,
   purchaseCost: z.coerce.number().min(0),
   totalPayouts: z.coerce.number().min(0),
@@ -22,11 +23,12 @@ export const propFirmAccountSchema = z.object({
   notes: optionalNote,
 });
 
+// currentBalance is not user input — it's baseline (startingBalance) + this
+// account's trade PnL history, derived in accounts.service.ts.
 export const brokerageAccountSchema = z.object({
   name: z.string().trim().min(1, "Account name is required.").max(80),
   brokerName: z.string().trim().min(1, "Broker is required.").max(80),
   startingBalance: z.coerce.number().min(0),
-  currentBalance: z.coerce.number().min(0),
   totalWithdrawals: z.coerce.number().min(0),
   totalDeposits: z.coerce.number().min(0),
   status: accountStatusSchema,

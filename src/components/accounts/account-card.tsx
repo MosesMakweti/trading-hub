@@ -13,6 +13,8 @@ import { PropFirmAccountDialog } from "@/components/accounts/prop-firm-account-d
 import { BrokerageAccountDialog } from "@/components/accounts/brokerage-account-dialog";
 import { archiveTradingAccount } from "@/actions/accounts.actions";
 import { computeBrokerageMetrics, computePropFirmRoi } from "@/domain/accounts/derived";
+import { MiniEquityCurve } from "@/components/analytics/mini-equity-curve";
+import { TrackRecordTable } from "@/components/accounts/track-record-table";
 import type { TradingAccountDTO } from "@/types/accounts";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -139,6 +141,19 @@ export function AccountCard({ account }: { account: TradingAccountDTO }) {
 
       {account.notes && <p className="text-xs text-muted-foreground">{account.notes}</p>}
 
+      <MiniEquityCurve points={account.trackRecord.map((e) => ({ balance: e.runningBalance }))} />
+
+      {account.trackRecord.length > 0 && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+            Recent trade track record
+          </summary>
+          <div className="mt-2">
+            <TrackRecordTable entries={account.trackRecord} limit={5} />
+          </div>
+        </details>
+      )}
+
       <div className="flex items-center justify-end gap-1 border-t border-border pt-2">
         {isPropFirm ? (
           <PropFirmAccountDialog
@@ -148,7 +163,6 @@ export function AccountCard({ account }: { account: TradingAccountDTO }) {
               name: account.name,
               propFirmName: account.propFirmName ?? "",
               accountSize: account.accountSize ?? 0,
-              currentBalance: account.currentBalance,
               phase: account.phase ?? "PHASE_1",
               purchaseCost: account.purchaseCost ?? 0,
               totalPayouts: account.totalPayouts ?? 0,
@@ -164,7 +178,6 @@ export function AccountCard({ account }: { account: TradingAccountDTO }) {
               name: account.name,
               brokerName: account.brokerName ?? "",
               startingBalance: account.startingBalance ?? 0,
-              currentBalance: account.currentBalance,
               totalWithdrawals: account.totalWithdrawals ?? 0,
               totalDeposits: account.totalDeposits ?? 0,
               status: account.status,

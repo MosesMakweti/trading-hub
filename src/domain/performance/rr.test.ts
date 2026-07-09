@@ -4,6 +4,7 @@ import {
   buildEquityCurve,
   calendarColorForPercent,
   dailyPercentFromTrades,
+  dailyPercentsFromBalanceHistory,
   tradeContributionPercent,
 } from "./rr";
 
@@ -78,5 +79,37 @@ describe("buildEquityCurve", () => {
 
   it("returns an empty array for no data", () => {
     expect(buildEquityCurve([])).toEqual([]);
+  });
+});
+
+describe("dailyPercentsFromBalanceHistory", () => {
+  it("matches the spec's worked example (1% risk, +$2,500 on $100k)", () => {
+    const [point] = dailyPercentsFromBalanceHistory(100_000, [
+      { dateKey: "2026-01-01", pnl: 2500 },
+    ]);
+    expect(point.percent).toBeCloseTo(2.5);
+  });
+
+  it("compounds the balance across multiple days chronologically", () => {
+    const points = dailyPercentsFromBalanceHistory(100_000, [
+      { dateKey: "2026-01-02", pnl: -1000 }, // balance 102,000 -> 101,000
+      { dateKey: "2026-01-01", pnl: 2000 }, // balance 100,000 -> 102,000
+    ]);
+    expect(points[0]).toEqual({ dateKey: "2026-01-01", percent: 2 });
+    // day 2 pnl is relative to the balance AFTER day 1 (102,000), not the original 100,000
+    expect(points[1].percent).toBeCloseTo((-1000 / 102_000) * 100);
+  });
+
+  it("feeds cleanly into buildEquityCurve for a real dollar-based equity curve", () => {
+    const dailyPercents = dailyPercentsFromBalanceHistory(100_000, [
+      { dateKey: "2026-01-01", pnl: 5000 },
+    ]);
+    const curve = buildEquityCurve(dailyPercents);
+    expect(curve[0].cumulativeCompounding).toBeCloseTo(5);
+  });
+
+  it("returns 0% for a zero balance rather than dividing by zero", () => {
+    const [point] = dailyPercentsFromBalanceHistory(0, [{ dateKey: "2026-01-01", pnl: 100 }]);
+    expect(point.percent).toBe(0);
   });
 });

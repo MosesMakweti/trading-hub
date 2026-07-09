@@ -52,6 +52,11 @@ model DailyNote {
 enum AccountKind {
   PROP_FIRM
   PERSONAL_BROKERAGE
+  // The permanent, undeletable, unrenamable master ledger. Exactly one per
+  // user, lazily created (see accounts.service.ts). Every other account's
+  // trade PnL is derived from this account's entered PnL, scaled by relative
+  // risk% — see domain/performance/allocation.ts.
+  PERFORMANCE
 }
 
 enum AccountStatus {
@@ -83,8 +88,6 @@ model TradingAccount {
   createdAt DateTime      @default(now())
   deletedAt DateTime?
 
-  currentBalance Decimal @db.Decimal(14, 2)
-
   // prop-firm-only
   propFirmName String?
   accountSize  Decimal?       @db.Decimal(14, 2)
@@ -92,12 +95,17 @@ model TradingAccount {
   purchaseCost Decimal?       @db.Decimal(14, 2)
   totalPayouts Decimal?       @db.Decimal(14, 2)
 
-  // personal-brokerage-only
+  // personal-brokerage-only AND performance (its $100k baseline lives here too)
   brokerName       String?
   startingBalance  Decimal? @db.Decimal(14, 2)
   totalWithdrawals Decimal? @db.Decimal(14, 2)
   totalDeposits    Decimal? @db.Decimal(14, 2)
 
+  // currentBalance is intentionally not a column — it's always baseline
+  // (accountSize for prop-firm, startingBalance for brokerage/performance)
+  // plus the sum of this account's trade allocation PnLs, computed on read
+  // in accounts.service.ts. Persisting it would risk drifting from the
+  // trade history that's supposed to be its source of truth.
   allocations TradeAccountAllocation[]
 
   @@index([userId, kind, deletedAt])
@@ -299,7 +307,12 @@ model PsychologyQuestionnaireResponse {
 }
 
 // Per-account risk input and closing PnL for a trade that may span multiple
-// accounts of different sizes.
+// accounts of different sizes. Exactly one allocation per trade belongs to
+// the user's PERFORMANCE account (identified via `tradingAccount.kind`) and
+// its closingPnlGross/closingPnlNet are the only ones directly entered by
+// the trader; every other account's are auto-calculated at write time by
+// scaling the Performance Account's PnL by relative risk% (see
+// domain/performance/allocation.ts) — never entered manually.
 model TradeAccountAllocation {
   id               String        @id @default(cuid())
   tradeId          String

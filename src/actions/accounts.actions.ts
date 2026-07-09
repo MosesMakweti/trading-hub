@@ -58,7 +58,20 @@ export async function updateBrokerageAccount(id: string, input: unknown): Promis
 
 export async function archiveTradingAccount(id: string): Promise<ActionResult> {
   const user = await requireUser();
-  await accountsService.archiveTradingAccount(user.id, id);
+  try {
+    await accountsService.archiveTradingAccount(user.id, id);
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Failed to remove." };
+  }
   revalidatePath("/accounts");
+  return { success: true };
+}
+
+export async function resetPerformanceAccountAction(): Promise<ActionResult> {
+  const user = await requireUser();
+  await accountsService.resetPerformanceAccount(user.id);
+  revalidatePath("/accounts");
+  revalidatePath("/journal");
+  revalidatePath("/dashboard");
   return { success: true };
 }

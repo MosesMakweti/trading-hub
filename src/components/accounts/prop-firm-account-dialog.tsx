@@ -52,7 +52,6 @@ const emptyDefaults: PropFirmAccountInput = {
   name: "",
   propFirmName: "",
   accountSize: 0,
-  currentBalance: 0,
   phase: "PHASE_1",
   purchaseCost: 0,
   totalPayouts: 0,
@@ -134,9 +133,6 @@ export function PropFirmAccountDialog({
           </FormField>
           <FormField label="Account size" error={errors.accountSize?.message}>
             <Input type="number" step="0.01" {...register("accountSize")} />
-          </FormField>
-          <FormField label="Current balance" error={errors.currentBalance?.message}>
-            <Input type="number" step="0.01" {...register("currentBalance")} />
           </FormField>
           <FormField label="Purchase cost" error={errors.purchaseCost?.message}>
             <Input type="number" step="0.01" {...register("purchaseCost")} />

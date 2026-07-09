@@ -26,6 +26,13 @@ export default async function EditTradePage({
 
   const { accounts, assets, sessions, entryModels, confluenceItems, executionItems } = options;
 
+  const performanceAllocation = trade.allocations.find(
+    (a) => a.tradingAccount.kind === "PERFORMANCE",
+  );
+  const participatingAllocations = trade.allocations.filter(
+    (a) => a.tradingAccount.kind !== "PERFORMANCE",
+  );
+
   const defaultValues: TradeFormValues = {
     assetId: trade.assetId,
     executionMinutes: trade.executionMinutes,
@@ -35,6 +42,8 @@ export default async function EditTradePage({
     sessionId: trade.sessionId,
     expectedRR: trade.expectedRR.toNumber(),
     actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
+    performanceClosingPnlGross: performanceAllocation?.closingPnlGross.toNumber() ?? 0,
+    performanceClosingPnlNet: performanceAllocation?.closingPnlNet.toNumber() ?? 0,
     hitTP1: trade.hitTP1,
     hitTP2: trade.hitTP2,
     hitTP3: trade.hitTP3,
@@ -43,12 +52,10 @@ export default async function EditTradePage({
     psychPostTradeReflection: trade.psychPostTradeReflection,
     psychLessonsLearned: trade.psychLessonsLearned,
     psychWhatToWorkOn: trade.psychWhatToWorkOn,
-    allocations: trade.allocations.map((a) => ({
+    allocations: participatingAllocations.map((a) => ({
       tradingAccountId: a.tradingAccountId,
       riskInputType: a.riskInputType,
       riskValue: a.riskValue.toNumber(),
-      closingPnlGross: a.closingPnlGross.toNumber(),
-      closingPnlNet: a.closingPnlNet.toNumber(),
     })),
     checklistItemIds: trade.checklistSelections.map((c) => c.checklistItemId),
     entryModelIds: trade.entryModels.map((m) => m.entryModelId),

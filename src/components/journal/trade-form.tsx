@@ -37,6 +37,8 @@ const emptyDefaults: TradeFormValues = {
   sessionId: null,
   expectedRR: 2,
   actualRR: null,
+  performanceClosingPnlGross: 0,
+  performanceClosingPnlNet: 0,
   hitTP1: false,
   hitTP2: false,
   hitTP3: false,
@@ -104,8 +106,6 @@ export function TradeForm({
         tradingAccountId: accountId,
         riskInputType: "PERCENT",
         riskValue: 1,
-        closingPnlGross: 0,
-        closingPnlNet: 0,
       });
     }
   }
@@ -259,7 +259,54 @@ export function TradeForm({
       </section>
 
       <section className="glass space-y-3 rounded-2xl p-4">
-        <h2 className="text-sm font-medium text-muted-foreground">Accounts &amp; Risk / PnL</h2>
+        <h2 className="text-sm font-medium text-muted-foreground">Performance Account — Closing PnL</h2>
+        <p className="text-xs text-muted-foreground">
+          The one PnL you enter for this trade. Every participating account below mirrors it
+          automatically, scaled by its own risk%.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Gross PnL ($)</Label>
+            <Input type="number" step="0.01" {...register("performanceClosingPnlGross")} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Net PnL ($)</Label>
+            <Input type="number" step="0.01" {...register("performanceClosingPnlNet")} />
+          </div>
+        </div>
+      </section>
+
+      <section className="glass grid grid-cols-2 gap-3 rounded-2xl p-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Expected RR</Label>
+          <Input type="number" step="0.01" {...register("expectedRR")} />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Actual RR (leave blank if still open)</Label>
+          <Controller
+            control={control}
+            name="actualRR"
+            render={({ field }) => (
+              <Input
+                type="number"
+                step="0.01"
+                name={field.name}
+                value={(field.value as number | null) ?? ""}
+                onChange={(e) => field.onChange(e.target.value === "" ? null : e.target.valueAsNumber)}
+              />
+            )}
+          />
+        </div>
+      </section>
+
+      <section className="glass space-y-3 rounded-2xl p-4">
+        <h2 className="text-sm font-medium text-muted-foreground">
+          Other Participating Accounts &amp; Risk
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Optional — select any prop-firm/brokerage accounts this trade also affects. Their PnL is
+          calculated automatically, never entered manually.
+        </p>
         <div className="flex flex-wrap gap-2">
           {accounts.map((a) => (
             <label
@@ -289,29 +336,6 @@ export function TradeForm({
               onRemove={() => remove(index)}
             />
           ))}
-        </div>
-      </section>
-
-      <section className="glass grid grid-cols-2 gap-3 rounded-2xl p-4">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Expected RR</Label>
-          <Input type="number" step="0.01" {...register("expectedRR")} />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">Actual RR (leave blank if still open)</Label>
-          <Controller
-            control={control}
-            name="actualRR"
-            render={({ field }) => (
-              <Input
-                type="number"
-                step="0.01"
-                name={field.name}
-                value={(field.value as number | null) ?? ""}
-                onChange={(e) => field.onChange(e.target.value === "" ? null : e.target.valueAsNumber)}
-              />
-            )}
-          />
         </div>
       </section>
 

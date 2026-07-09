@@ -46,7 +46,6 @@ const emptyDefaults: BrokerageAccountInput = {
   name: "",
   brokerName: "",
   startingBalance: 0,
-  currentBalance: 0,
   totalWithdrawals: 0,
   totalDeposits: 0,
   status: "ACTIVE",
@@ -125,9 +124,6 @@ export function BrokerageAccountDialog({
           </FormField>
           <FormField label="Starting balance" error={errors.startingBalance?.message}>
             <Input type="number" step="0.01" {...register("startingBalance")} />
-          </FormField>
-          <FormField label="Current balance" error={errors.currentBalance?.message}>
-            <Input type="number" step="0.01" {...register("currentBalance")} />
           </FormField>
           <FormField label="Total withdrawals" error={errors.totalWithdrawals?.message}>
             <Input type="number" step="0.01" {...register("totalWithdrawals")} />

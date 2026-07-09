@@ -1,9 +1,16 @@
 import { prisma } from "@/server/db";
-import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
-import { dailyPercentFromTrades } from "@/domain/performance/rr";
+import { dateKeyToUtcDate } from "@/lib/date";
+import { dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
+import { effectiveRiskPercent, scalePnlByRisk, PERFORMANCE_ACCOUNT_RISK_PERCENT } from "@/domain/performance/allocation";
 import { scorePsychology, type PsychologyAnswer } from "@/domain/psychology/scoring";
-import type { TradeInput } from "@/lib/validation/trades";
-import { listTradingAccounts } from "@/server/services/accounts.service";
+import type { RiskInputType, TradeInput } from "@/lib/validation/trades";
+import {
+  getAccountBalance,
+  getAccountTrackRecord,
+  getOrCreatePerformanceAccount,
+  listTradingAccounts,
+  PERFORMANCE_ACCOUNT_STARTING_BALANCE,
+} from "@/server/services/accounts.service";
 import { listAssets } from "@/server/services/assets.service";
 import { listTradingSessions } from "@/server/services/trading-sessions.service";
 import { listEntryModels } from "@/server/services/entry-models.service";
@@ -48,7 +55,7 @@ function scorePsychologyAnswers(answers: TradeInput["psychologyAnswers"]) {
   return { answers, rawScore, psychologyPercent: percent, grade };
 }
 
-function tradeWriteData(data: TradeInput) {
+function tradeScalarData(data: TradeInput) {
   return {
     assetId: data.assetId,
     executionMinutes: data.executionMinutes,
@@ -66,22 +73,57 @@ function tradeWriteData(data: TradeInput) {
     psychPostTradeReflection: data.psychPostTradeReflection,
     psychLessonsLearned: data.psychLessonsLearned,
     psychWhatToWorkOn: data.psychWhatToWorkOn,
-    allocations: {
-      create: data.allocations.map((a) => ({
+  };
+}
+
+/**
+ * Builds every allocation row for a trade: the Performance Account's own
+ * (user-entered, fixed 1% risk) allocation, plus one auto-calculated
+ * allocation per additional participating account, scaled from the
+ * Performance Account's PnL by that account's relative risk%. When editing
+ * an existing trade, `excludeTradeId` excludes the trade's own prior
+ * allocations from each account's balance lookup, so risk% is computed
+ * against the balance as it stood before this trade — not double-counted.
+ */
+async function buildAllocations(userId: string, data: TradeInput, excludeTradeId?: string) {
+  const performanceAccount = await getOrCreatePerformanceAccount(userId);
+
+  const participatingAccounts = data.allocations.length
+    ? await prisma.tradingAccount.findMany({
+        where: { userId, id: { in: data.allocations.map((a) => a.tradingAccountId) } },
+      })
+    : [];
+
+  const participating = await Promise.all(
+    data.allocations.map(async (a) => {
+      const account = participatingAccounts.find((acc) => acc.id === a.tradingAccountId);
+      if (!account) throw new Error("Selected account not found.");
+      const balance = await getAccountBalance(account.id, excludeTradeId);
+      const riskPercent = effectiveRiskPercent(
+        a.riskInputType as RiskInputType,
+        a.riskValue,
+        balance,
+      );
+      return {
         tradingAccountId: a.tradingAccountId,
         riskInputType: a.riskInputType,
         riskValue: a.riskValue,
-        closingPnlGross: a.closingPnlGross,
-        closingPnlNet: a.closingPnlNet,
-      })),
+        closingPnlGross: scalePnlByRisk(data.performanceClosingPnlGross, riskPercent),
+        closingPnlNet: scalePnlByRisk(data.performanceClosingPnlNet, riskPercent),
+      };
+    }),
+  );
+
+  return [
+    {
+      tradingAccountId: performanceAccount.id,
+      riskInputType: "PERCENT" as const,
+      riskValue: PERFORMANCE_ACCOUNT_RISK_PERCENT,
+      closingPnlGross: data.performanceClosingPnlGross,
+      closingPnlNet: data.performanceClosingPnlNet,
     },
-    checklistSelections: {
-      create: data.checklistItemIds.map((checklistItemId) => ({ checklistItemId })),
-    },
-    entryModels: {
-      create: data.entryModelIds.map((entryModelId) => ({ entryModelId })),
-    },
-  };
+    ...participating,
+  ];
 }
 
 export async function listTradesForDay(userId: string, dateKey: string) {
@@ -101,11 +143,18 @@ export async function getTrade(userId: string, tradeId: string) {
 
 export async function createTrade(userId: string, dateKey: string, data: TradeInput) {
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
+  const allocations = await buildAllocations(userId, data);
+
   return prisma.trade.create({
     data: {
       userId,
       tradeDate: dateKeyToUtcDate(dateKey),
-      ...tradeWriteData(data),
+      ...tradeScalarData(data),
+      allocations: { create: allocations },
+      checklistSelections: {
+        create: data.checklistItemIds.map((checklistItemId) => ({ checklistItemId })),
+      },
+      entryModels: { create: data.entryModelIds.map((entryModelId) => ({ entryModelId })) },
       psychology: { create: psychology },
     },
     include: tradeInclude,
@@ -114,6 +163,8 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
 
 export async function updateTrade(userId: string, tradeId: string, data: TradeInput) {
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
+  const allocations = await buildAllocations(userId, data, tradeId);
+
   return prisma.$transaction(async (tx) => {
     const existing = await tx.trade.findFirst({ where: { id: tradeId, userId } });
     if (!existing) throw new Error("Trade not found.");
@@ -125,7 +176,12 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
     return tx.trade.update({
       where: { id: tradeId },
       data: {
-        ...tradeWriteData(data),
+        ...tradeScalarData(data),
+        allocations: { create: allocations },
+        checklistSelections: {
+          create: data.checklistItemIds.map((checklistItemId) => ({ checklistItemId })),
+        },
+        entryModels: { create: data.entryModelIds.map((entryModelId) => ({ entryModelId })) },
         psychology: { upsert: { create: psychology, update: psychology } },
       },
       include: tradeInclude,
@@ -140,25 +196,32 @@ export async function archiveTrade(userId: string, tradeId: string) {
   });
 }
 
-// Backs the calendar's daily P&L badges. Returns every day with at least one
-// trade — small dataset for MVP, same rationale as listNoteDateKeys.
+/**
+ * Backs the journal calendar's daily P&L badges — derived entirely from the
+ * Performance Account's real dollar track record (the single source of
+ * truth for all analytics), not from any self-reported RR.
+ */
 export async function listDailyPnl(userId: string) {
-  const trades = await prisma.trade.findMany({
-    where: { userId },
-    select: { tradeDate: true, actualRR: true },
-  });
+  const performanceAccount = await getOrCreatePerformanceAccount(userId);
+  const { entries } = await getAccountTrackRecord(performanceAccount.id);
 
-  const byDay = new Map<string, { actualRR: number | null }[]>();
-  for (const t of trades) {
-    const key = utcDateToKey(t.tradeDate);
-    const list = byDay.get(key) ?? [];
-    list.push({ actualRR: t.actualRR ? t.actualRR.toNumber() : null });
-    byDay.set(key, list);
+  const byDay = new Map<string, { pnl: number; count: number }>();
+  for (const e of entries) {
+    const existing = byDay.get(e.dateKey) ?? { pnl: 0, count: 0 };
+    existing.pnl += e.pnl;
+    existing.count += 1;
+    byDay.set(e.dateKey, existing);
   }
 
-  return Array.from(byDay.entries()).map(([dateKey, dayTrades]) => ({
+  const dailyPercents = dailyPercentsFromBalanceHistory(
+    PERFORMANCE_ACCOUNT_STARTING_BALANCE,
+    Array.from(byDay.entries()).map(([dateKey, { pnl }]) => ({ dateKey, pnl })),
+  );
+  const percentByDay = new Map(dailyPercents.map((d) => [d.dateKey, d.percent]));
+
+  return Array.from(byDay.entries()).map(([dateKey, { count }]) => ({
     dateKey,
-    percent: dailyPercentFromTrades(dayTrades),
-    tradeCount: dayTrades.length,
+    percent: percentByDay.get(dateKey) ?? 0,
+    tradeCount: count,
   }));
 }
