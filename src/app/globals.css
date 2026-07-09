@@ -48,6 +48,9 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-glass: var(--glass);
   --color-glass-border: var(--glass-border);
+  --color-brand: var(--brand);
+  --color-brand-from: var(--brand-from);
+  --color-brand-to: var(--brand-to);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -57,56 +60,117 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Dark-only trading terminal palette. There is no light theme — the app never
-   removes the `dark` class from <html>, so :root and .dark carry identical
-   values (kept in sync intentionally, not a stray duplicate). */
-:root,
+/* ------------------------------------------------------------------ *
+ * LIGHT THEME (default :root) — clean, cool-white, premium SaaS look. *
+ * ------------------------------------------------------------------ */
+:root {
+  --background: oklch(0.985 0.003 265);
+  --foreground: oklch(0.21 0.02 265);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.02 265);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.02 265);
+  --primary: oklch(0.55 0.2 266);
+  --primary-foreground: oklch(0.99 0.005 265);
+  --secondary: oklch(0.965 0.008 265);
+  --secondary-foreground: oklch(0.28 0.02 265);
+  --muted: oklch(0.965 0.006 265);
+  --muted-foreground: oklch(0.5 0.02 265);
+  --accent: oklch(0.945 0.025 266);
+  --accent-foreground: oklch(0.32 0.05 266);
+  --destructive: oklch(0.58 0.22 25);
+  --border: oklch(0.21 0.02 265 / 10%);
+  --input: oklch(0.21 0.02 265 / 14%);
+  --ring: oklch(0.55 0.2 266 / 45%);
+
+  /* Semantic P&L / grade colors */
+  --success: oklch(0.58 0.15 158);
+  --success-foreground: oklch(0.99 0.01 158);
+  --danger: oklch(0.58 0.22 25);
+  --danger-foreground: oklch(0.99 0.01 25);
+  --warning: oklch(0.7 0.16 75);
+  --warning-foreground: oklch(0.25 0.04 75);
+
+  /* Brand gradient (blue → violet) */
+  --brand: oklch(0.55 0.2 266);
+  --brand-from: oklch(0.58 0.2 258);
+  --brand-to: oklch(0.58 0.21 305);
+
+  /* Glassmorphism surfaces */
+  --glass: oklch(1 0 0 / 65%);
+  --glass-border: oklch(0.21 0.02 265 / 8%);
+  --shadow-color: 240 30% 30%;
+
+  --chart-1: oklch(0.55 0.2 266);
+  --chart-2: oklch(0.58 0.15 158);
+  --chart-3: oklch(0.7 0.16 75);
+  --chart-4: oklch(0.58 0.22 25);
+  --chart-5: oklch(0.6 0.19 305);
+  --radius: 0.75rem;
+  --sidebar: oklch(0.99 0.003 265);
+  --sidebar-foreground: oklch(0.21 0.02 265);
+  --sidebar-primary: oklch(0.55 0.2 266);
+  --sidebar-primary-foreground: oklch(0.99 0.005 265);
+  --sidebar-accent: oklch(0.955 0.02 266);
+  --sidebar-accent-foreground: oklch(0.32 0.05 266);
+  --sidebar-border: oklch(0.21 0.02 265 / 8%);
+  --sidebar-ring: oklch(0.55 0.2 266 / 45%);
+}
+
+/* ------------------------------------------------------------------ *
+ * DARK THEME — deep blue-black trading terminal with vivid accents.   *
+ * ------------------------------------------------------------------ */
 .dark {
-  --background: oklch(0.145 0.012 260);
-  --foreground: oklch(0.96 0.006 260);
-  --card: oklch(0.195 0.014 260);
-  --card-foreground: oklch(0.96 0.006 260);
-  --popover: oklch(0.205 0.014 260);
-  --popover-foreground: oklch(0.96 0.006 260);
-  --primary: oklch(0.72 0.14 235);
-  --primary-foreground: oklch(0.145 0.012 260);
-  --secondary: oklch(0.26 0.014 260);
-  --secondary-foreground: oklch(0.96 0.006 260);
-  --muted: oklch(0.24 0.012 260);
-  --muted-foreground: oklch(0.66 0.014 260);
-  --accent: oklch(0.28 0.03 235);
-  --accent-foreground: oklch(0.96 0.006 260);
+  --background: oklch(0.16 0.014 265);
+  --foreground: oklch(0.97 0.005 265);
+  --card: oklch(0.205 0.017 265);
+  --card-foreground: oklch(0.97 0.005 265);
+  --popover: oklch(0.215 0.017 265);
+  --popover-foreground: oklch(0.97 0.005 265);
+  --primary: oklch(0.65 0.18 266);
+  --primary-foreground: oklch(0.15 0.02 265);
+  --secondary: oklch(0.27 0.016 265);
+  --secondary-foreground: oklch(0.97 0.005 265);
+  --muted: oklch(0.25 0.014 265);
+  --muted-foreground: oklch(0.7 0.02 265);
+  --accent: oklch(0.3 0.045 266);
+  --accent-foreground: oklch(0.97 0.005 265);
   --destructive: oklch(0.64 0.21 25);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.72 0.14 235 / 50%);
+  --ring: oklch(0.65 0.18 266 / 55%);
 
   /* Semantic P&L / grade colors */
-  --success: oklch(0.75 0.17 155);
-  --success-foreground: oklch(0.145 0.03 155);
-  --danger: oklch(0.64 0.21 25);
-  --danger-foreground: oklch(0.97 0.01 25);
-  --warning: oklch(0.8 0.16 90);
-  --warning-foreground: oklch(0.2 0.03 90);
+  --success: oklch(0.75 0.17 158);
+  --success-foreground: oklch(0.15 0.03 158);
+  --danger: oklch(0.66 0.21 25);
+  --danger-foreground: oklch(0.98 0.01 25);
+  --warning: oklch(0.8 0.16 85);
+  --warning-foreground: oklch(0.2 0.03 85);
+
+  /* Brand gradient (blue → violet) */
+  --brand: oklch(0.65 0.18 266);
+  --brand-from: oklch(0.62 0.19 258);
+  --brand-to: oklch(0.64 0.2 305);
 
   /* Glassmorphism surfaces */
-  --glass: oklch(0.5 0.02 260 / 8%);
+  --glass: oklch(0.7 0.03 265 / 8%);
   --glass-border: oklch(1 0 0 / 10%);
+  --shadow-color: 240 60% 3%;
 
-  --chart-1: oklch(0.72 0.14 235);
-  --chart-2: oklch(0.75 0.17 155);
-  --chart-3: oklch(0.8 0.16 90);
-  --chart-4: oklch(0.64 0.21 25);
-  --chart-5: oklch(0.7 0.12 300);
-  --radius: 0.75rem;
-  --sidebar: oklch(0.13 0.014 260);
-  --sidebar-foreground: oklch(0.96 0.006 260);
-  --sidebar-primary: oklch(0.72 0.14 235);
-  --sidebar-primary-foreground: oklch(0.145 0.012 260);
-  --sidebar-accent: oklch(0.22 0.02 260);
-  --sidebar-accent-foreground: oklch(0.96 0.006 260);
+  --chart-1: oklch(0.65 0.18 266);
+  --chart-2: oklch(0.75 0.17 158);
+  --chart-3: oklch(0.8 0.16 85);
+  --chart-4: oklch(0.66 0.21 25);
+  --chart-5: oklch(0.7 0.16 305);
+  --sidebar: oklch(0.14 0.015 265);
+  --sidebar-foreground: oklch(0.97 0.005 265);
+  --sidebar-primary: oklch(0.65 0.18 266);
+  --sidebar-primary-foreground: oklch(0.15 0.02 265);
+  --sidebar-accent: oklch(0.23 0.022 265);
+  --sidebar-accent-foreground: oklch(0.97 0.005 265);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.72 0.14 235 / 50%);
+  --sidebar-ring: oklch(0.65 0.18 266 / 55%);
 }
 
 @layer base {
@@ -116,12 +180,22 @@
   body {
     @apply bg-background text-foreground;
     background-image:
-      radial-gradient(ellipse 80% 50% at 20% -10%, oklch(0.72 0.14 235 / 12%), transparent),
-      radial-gradient(ellipse 60% 40% at 100% 0%, oklch(0.75 0.17 155 / 6%), transparent);
+      radial-gradient(ellipse 70% 45% at 12% -8%, var(--brand-from), transparent 70%),
+      radial-gradient(ellipse 55% 40% at 100% 0%, var(--brand-to), transparent 65%),
+      radial-gradient(ellipse 90% 60% at 50% 120%, var(--brand-from), transparent 75%);
     background-attachment: fixed;
+    /* keep the wash subtle; the gradients above use full-strength tokens */
+    background-blend-mode: soft-light;
   }
   html {
     @apply font-sans;
+  }
+  /* Smoothly cross-fade theme swaps on color surfaces */
+  body,
+  body * {
+    transition:
+      background-color 0.3s ease,
+      border-color 0.3s ease;
   }
 }
 
@@ -129,7 +203,66 @@
   .glass {
     background: var(--glass);
     border: 1px solid var(--glass-border);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(18px) saturate(1.4);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  }
+
+  /* Brand gradient fill for CTAs and accents */
+  .bg-brand-gradient {
+    background-image: linear-gradient(
+      135deg,
+      var(--brand-from) 0%,
+      var(--brand-to) 100%
+    );
+  }
+
+  /* Gradient-clipped text for hero headings */
+  .text-gradient {
+    background-image: linear-gradient(
+      120deg,
+      var(--brand-from) 0%,
+      var(--brand-to) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Soft elevated shadow that adapts to theme via --shadow-color */
+  .shadow-elevated {
+    box-shadow:
+      0 1px 2px hsl(var(--shadow-color) / 0.15),
+      0 8px 24px -6px hsl(var(--shadow-color) / 0.2),
+      0 2px 8px -4px hsl(var(--shadow-color) / 0.12);
+  }
+
+  .shadow-glow {
+    box-shadow:
+      0 0 0 1px var(--glass-border),
+      0 10px 40px -10px color-mix(in oklch, var(--brand) 55%, transparent);
+  }
+
+  /* Subtle animated gradient border wrapper */
+  .gradient-ring {
+    position: relative;
+  }
+  .gradient-ring::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      135deg,
+      color-mix(in oklch, var(--brand-from) 60%, transparent),
+      transparent 40%,
+      color-mix(in oklch, var(--brand-to) 50%, transparent)
+    );
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
   }
 }

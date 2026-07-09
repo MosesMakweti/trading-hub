@@ -13,13 +13,6 @@ import { registerUser } from "@/actions/auth.actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -59,46 +52,47 @@ export default function RegisterPage() {
   };
 
   return (
-    <Card className="glass border-0">
-      <CardHeader>
-        <CardTitle className="text-2xl">Create your desk</CardTitle>
-        <CardDescription>Set up your private Trading Hub account.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
-            <Input id="name" autoComplete="name" {...register("name")} />
-            {errors.name && <p className="text-sm text-danger">{errors.name.message}</p>}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" autoComplete="email" {...register("email")} />
-            {errors.email && <p className="text-sm text-danger">{errors.email.message}</p>}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              autoComplete="new-password"
-              {...register("password")}
-            />
-            {errors.password && (
-              <p className="text-sm text-danger">{errors.password.message}</p>
-            )}
-          </div>
-          <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? "Creating account..." : "Create account"}
-          </Button>
-        </form>
-        <p className="mt-4 text-center text-sm text-muted-foreground">
-          Already have an account?{" "}
-          <Link href="/login" className="text-primary underline underline-offset-4">
-            Log in
-          </Link>
-        </p>
-      </CardContent>
-    </Card>
+    <div className="space-y-8">
+      <div className="space-y-2">
+        <h1 className="text-3xl font-semibold tracking-tight">Create your desk</h1>
+        <p className="text-muted-foreground">Set up your private Trading Hub account.</p>
+      </div>
+
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="name">Name</Label>
+          <Input id="name" autoComplete="name" placeholder="Jane Trader" {...register("name")} />
+          {errors.name && <p className="text-sm text-danger">{errors.name.message}</p>}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="email">Email</Label>
+          <Input id="email" type="email" autoComplete="email" placeholder="you@desk.com" {...register("email")} />
+          {errors.email && <p className="text-sm text-danger">{errors.email.message}</p>}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="password">Password</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="new-password"
+            placeholder="At least 8 characters"
+            {...register("password")}
+          />
+          {errors.password && (
+            <p className="text-sm text-danger">{errors.password.message}</p>
+          )}
+        </div>
+        <Button type="submit" size="lg" className="h-11 w-full text-sm" disabled={isSubmitting}>
+          {isSubmitting ? "Creating account..." : "Create account"}
+        </Button>
+      </form>
+
+      <p className="text-center text-sm text-muted-foreground">
+        Already have an account?{" "}
+        <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
+          Log in
+        </Link>
+      </p>
+    </div>
   );
 }

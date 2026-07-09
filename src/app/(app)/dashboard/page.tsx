@@ -41,10 +41,15 @@ export default async function DashboardPage() {
     <FadeIn className="mx-auto max-w-6xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Welcome back{user.name ? `, ${user.name}` : ""}
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            Welcome back
+            {user.name ? (
+              <>
+                , <span className="text-gradient">{user.name}</span>
+              </>
+            ) : null}
           </h1>
-          <p className="text-sm text-muted-foreground">{formatDateKeyLong(data.todayKey)}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{formatDateKeyLong(data.todayKey)}</p>
         </div>
         <div className="flex gap-2">
           <Button

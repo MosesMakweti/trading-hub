@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpenText, LayoutDashboard, Wallet } from "lucide-react";
+import { BookOpenText, CandlestickChart, LayoutDashboard, Wallet } from "lucide-react";
 
 import {
   Sidebar,
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/sidebar";
 
 const navItems = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/journal", label: "Journal", icon: BookOpenText },
   { href: "/accounts", label: "My Accounts", icon: Wallet },
 ];
@@ -29,9 +30,11 @@ export function AppSidebar() {
       <SidebarHeader>
         <Link
           href="/dashboard"
-          className="flex items-center gap-2 px-2 py-1.5 text-sm font-semibold tracking-tight"
+          className="flex items-center gap-2.5 px-1 py-1.5 text-sm font-semibold tracking-tight"
         >
-          <LayoutDashboard className="size-5 text-primary" />
+          <span className="bg-brand-gradient flex size-8 shrink-0 items-center justify-center rounded-lg text-white shadow-glow">
+            <CandlestickChart className="size-4.5" />
+          </span>
           <span className="group-data-[collapsible=icon]:hidden">Trading Hub</span>
         </Link>
       </SidebarHeader>

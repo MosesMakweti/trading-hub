@@ -14,11 +14,20 @@ export function KpiCard({
   className?: string;
 }) {
   return (
-    <div className={cn("glass rounded-2xl p-4", className)}>
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div
+      className={cn(
+        "glass group relative overflow-hidden rounded-2xl p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-elevated",
+        className,
+      )}
+    >
+      {/* subtle brand sheen that lifts on hover */}
+      <div className="bg-brand-gradient pointer-events-none absolute -top-8 -right-8 size-24 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-20" />
+      <div className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {label}
+      </div>
       <div
         className={cn(
-          "mt-1 text-2xl font-semibold tracking-tight",
+          "mt-1.5 text-2xl font-semibold tracking-tight tabular-nums",
           tone === "success" && "text-success",
           tone === "danger" && "text-danger",
         )}

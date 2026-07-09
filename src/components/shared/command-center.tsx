@@ -52,8 +52,15 @@ export function CommandCenter() {
         setHelpOpen((o) => !o);
       }
     }
+    function onOpenSearch() {
+      setSearchOpen(true);
+    }
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("open-command-search", onOpenSearch);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("open-command-search", onOpenSearch);
+    };
   }, []);
 
   useEffect(() => {
