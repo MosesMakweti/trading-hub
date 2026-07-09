@@ -25,6 +25,7 @@ export function AssetsSection({ initialItems }: { initialItems: Asset[] }) {
       }}
       emptyMessage="Your watchlist is empty."
       addLabel="Add asset"
+      itemLabel="asset"
     />
   );
 }

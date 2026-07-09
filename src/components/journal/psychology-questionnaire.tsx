@@ -7,16 +7,9 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { PSYCHOLOGY_QUESTIONS } from "@/domain/psychology/questions";
-import { scorePsychology, type PsychologyGrade } from "@/domain/psychology/scoring";
+import { scorePsychology } from "@/domain/psychology/scoring";
+import { GRADE_VARIANT } from "@/lib/grade-variant";
 import type { TradeFormValues } from "@/lib/validation/trades";
-
-const GRADE_VARIANT: Record<PsychologyGrade, "success" | "warning" | "danger"> = {
-  A: "success",
-  B: "success",
-  C: "warning",
-  D: "warning",
-  F: "danger",
-};
 
 export function PsychologyQuestionnaire({ control }: { control: Control<TradeFormValues> }) {
   return (

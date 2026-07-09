@@ -70,7 +70,7 @@ export function JournalCalendar({
           month={month}
           onMonthChange={setMonth}
           onDayClick={goToDay}
-          className="glass w-full max-w-none rounded-2xl p-4 [--cell-size:4.5rem]"
+          className="glass w-full max-w-none rounded-2xl p-2 [--cell-size:2.75rem] sm:p-4 sm:[--cell-size:3.5rem] lg:[--cell-size:4.5rem]"
           classNames={{ months: "w-full", month: "w-full", month_grid: "w-full" }}
           components={{
             DayButton: (props) => (

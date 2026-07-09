@@ -6,6 +6,7 @@ import { AccountCard } from "@/components/accounts/account-card";
 import { PropFirmAccountDialog } from "@/components/accounts/prop-firm-account-dialog";
 import { BrokerageAccountDialog } from "@/components/accounts/brokerage-account-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
+import { StaggerList, StaggerItem } from "@/components/shared/motion";
 import type { TradingAccountDTO } from "@/types/accounts";
 
 export function AccountsView({
@@ -34,11 +35,13 @@ export function AccountsView({
             description="Add your first challenge or funded account to start tracking ROI."
           />
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <StaggerList className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {propFirmAccounts.map((account) => (
-              <AccountCard key={account.id} account={account} />
+              <StaggerItem key={account.id}>
+                <AccountCard account={account} />
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerList>
         )}
       </section>
 
@@ -59,11 +62,13 @@ export function AccountsView({
             description="Add a personal account to start tracking profit and return."
           />
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <StaggerList className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {brokerageAccounts.map((account) => (
-              <AccountCard key={account.id} account={account} />
+              <StaggerItem key={account.id}>
+                <AccountCard account={account} />
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerList>
         )}
       </section>
     </div>

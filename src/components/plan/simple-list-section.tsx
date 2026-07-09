@@ -8,6 +8,7 @@ import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SortableList } from "@/components/plan/sortable-list";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 
 type ActionResult = { success: boolean; error?: string };
 
@@ -26,6 +27,7 @@ export function SimpleListSection<T extends ListItem>({
   actions,
   emptyMessage,
   addLabel,
+  itemLabel = "item",
 }: {
   initialItems: T[];
   fields: FieldConfig[];
@@ -37,12 +39,14 @@ export function SimpleListSection<T extends ListItem>({
   };
   emptyMessage: string;
   addLabel: string;
+  itemLabel?: string;
 }) {
   const router = useRouter();
   const [localOrder, setLocalOrder] = useState<string[] | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const items = localOrder
@@ -85,9 +89,12 @@ export function SimpleListSection<T extends ListItem>({
     });
   }
 
-  function handleDelete(id: string) {
+  function confirmDelete() {
+    const id = deleteTargetId;
+    if (!id) return;
     startTransition(async () => {
       const result = await actions.archive(id);
+      setDeleteTargetId(null);
       if (!result.success) {
         toast.error(result.error ?? "Failed to remove.");
         return;
@@ -139,6 +146,7 @@ export function SimpleListSection<T extends ListItem>({
                   type="button"
                   variant="ghost"
                   size="icon-sm"
+                  aria-label={`Edit ${itemLabel}`}
                   onClick={() => startEdit(item)}
                   disabled={isPending}
                 >
@@ -148,7 +156,8 @@ export function SimpleListSection<T extends ListItem>({
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => handleDelete(item.id)}
+                  aria-label={`Delete ${itemLabel}`}
+                  onClick={() => setDeleteTargetId(item.id)}
                   disabled={isPending}
                 >
                   <Trash2 />
@@ -176,6 +185,17 @@ export function SimpleListSection<T extends ListItem>({
           {addLabel}
         </Button>
       )}
+
+      <ConfirmDialog
+        open={deleteTargetId !== null}
+        onOpenChange={(open) => !open && setDeleteTargetId(null)}
+        title={`Delete this ${itemLabel}?`}
+        description="This can't be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        isPending={isPending}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }
@@ -214,10 +234,17 @@ function InlineForm({
         />
       ))}
       <div className="flex shrink-0 items-center gap-1">
-        <Button type="submit" variant="ghost" size="icon-sm" disabled={isPending}>
+        <Button type="submit" variant="ghost" size="icon-sm" aria-label="Save" disabled={isPending}>
           <Check />
         </Button>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={onCancel} disabled={isPending}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Cancel"
+          onClick={onCancel}
+          disabled={isPending}
+        >
           <X />
         </Button>
       </div>

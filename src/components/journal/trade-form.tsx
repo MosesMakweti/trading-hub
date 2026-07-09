@@ -264,7 +264,7 @@ export function TradeForm({
           The one PnL you enter for this trade. Every participating account below mirrors it
           automatically, scaled by its own risk%.
         </p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label className="text-xs">Gross PnL ($)</Label>
             <Input type="number" step="0.01" {...register("performanceClosingPnlGross")} />
@@ -276,7 +276,7 @@ export function TradeForm({
         </div>
       </section>
 
-      <section className="glass grid grid-cols-2 gap-3 rounded-2xl p-4">
+      <section className="glass grid grid-cols-1 gap-3 rounded-2xl p-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label className="text-xs">Expected RR</Label>
           <Input type="number" step="0.01" {...register("expectedRR")} />

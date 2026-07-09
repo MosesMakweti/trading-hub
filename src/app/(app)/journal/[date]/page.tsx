@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
 import { TradeCard } from "@/components/journal/trade-card";
 import { EmptyState } from "@/components/shared/empty-state";
+import { FadeIn, StaggerList, StaggerItem } from "@/components/shared/motion";
 import type { TradeListItemDTO } from "@/types/trades";
 
 export default async function JournalDayPage({
@@ -67,12 +68,13 @@ export default async function JournalDayPage({
   const nextKey = addDaysToKey(dateKey, 1);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center justify-between gap-3">
+    <FadeIn className="mx-auto max-w-4xl space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
             size="icon-sm"
+            aria-label="Previous day"
             nativeButton={false}
             render={<Link href={`/journal/${prevKey}`} />}
           >
@@ -87,6 +89,7 @@ export default async function JournalDayPage({
           <Button
             variant="ghost"
             size="icon-sm"
+            aria-label="Next day"
             nativeButton={false}
             render={<Link href={`/journal/${nextKey}`} />}
           >
@@ -123,13 +126,15 @@ export default async function JournalDayPage({
             description="Log your first trade for this day — accounts, risk/PnL, checklists, and RR are all tracked per trade."
           />
         ) : (
-          <div className="space-y-3">
+          <StaggerList className="space-y-3">
             {tradeDtos.map((trade) => (
-              <TradeCard key={trade.id} dateKey={dateKey} trade={trade} />
+              <StaggerItem key={trade.id}>
+                <TradeCard dateKey={dateKey} trade={trade} />
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerList>
         )}
       </section>
-    </div>
+    </FadeIn>
   );
 }

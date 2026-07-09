@@ -12,15 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { archiveTrade } from "@/actions/trades.actions";
+import { GRADE_VARIANT } from "@/lib/grade-variant";
 import type { TradeListItemDTO } from "@/types/trades";
-
-const GRADE_VARIANT: Record<"A" | "B" | "C" | "D" | "F", "success" | "warning" | "danger"> = {
-  A: "success",
-  B: "success",
-  C: "warning",
-  D: "warning",
-  F: "danger",
-};
 
 function percent(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
@@ -144,12 +137,18 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
         <Button
           variant="ghost"
           size="icon-sm"
+          aria-label="Edit trade"
           nativeButton={false}
           render={<Link href={`/journal/${dateKey}/trades/${trade.id}`} />}
         >
           <Pencil />
         </Button>
-        <Button variant="ghost" size="icon-sm" onClick={() => setConfirmOpen(true)}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Delete trade"
+          onClick={() => setConfirmOpen(true)}
+        >
           <Trash2 />
         </Button>
       </div>

@@ -11,6 +11,7 @@ import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
 import { SessionCountdown } from "@/components/dashboard/session-countdown";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
 import { RecentTradesList, type RecentTradeSummary } from "@/components/dashboard/recent-trades-list";
+import { FadeIn } from "@/components/shared/motion";
 
 export default async function DashboardPage() {
   const user = await requireUser();
@@ -37,7 +38,7 @@ export default async function DashboardPage() {
   const planExcerpt = tiptapToPlainText(data.plan.strategyFramework) || tiptapToPlainText(data.plan.dailyRoutineMorning);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <FadeIn className="mx-auto max-w-6xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -164,6 +165,6 @@ export default async function DashboardPage() {
           )}
         </section>
       </div>
-    </div>
+    </FadeIn>
   );
 }

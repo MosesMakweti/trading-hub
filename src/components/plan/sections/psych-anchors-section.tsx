@@ -26,6 +26,7 @@ export function PsychAnchorsSection({ initialItems }: { initialItems: PsychAncho
       }}
       emptyMessage="No reminders added yet."
       addLabel="Add reminder"
+      itemLabel="reminder"
     />
   );
 }

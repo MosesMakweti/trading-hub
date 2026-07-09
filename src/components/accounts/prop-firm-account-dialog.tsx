@@ -120,7 +120,7 @@ export function PropFirmAccountDialog({
           <DialogTitle>{mode === "create" ? "Add prop firm account" : "Edit account"}</DialogTitle>
           <DialogDescription>Track a funded/challenge account and its payouts.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="grid grid-cols-2 gap-3">
+        <form onSubmit={handleSubmit(onSubmit)} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <FormField label="Account name" error={errors.name?.message} className="col-span-2">
             <Input {...register("name")} placeholder="e.g. FTMO 100k #1" />
           </FormField>

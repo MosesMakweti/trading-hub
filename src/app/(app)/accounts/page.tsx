@@ -9,6 +9,7 @@ import { buildEquityCurve, dailyPercentsFromBalanceHistory } from "@/domain/perf
 import { winRate as computeWinRate, profitFactor as computeProfitFactor } from "@/domain/performance/metrics";
 import { PerformanceAccountSection } from "@/components/accounts/performance-account-section";
 import { AccountsView } from "@/components/accounts/accounts-view";
+import { FadeIn } from "@/components/shared/motion";
 import type { AccountTrackRecordEntryDTO, PerformanceAccountDTO, TradingAccountDTO } from "@/types/accounts";
 
 function toNumber(value: { toNumber(): number } | null): number | null {
@@ -83,7 +84,7 @@ export default async function AccountsPage() {
   const brokerageAccounts = accounts.filter((a) => a.kind === "PERSONAL_BROKERAGE");
 
   return (
-    <div className="mx-auto max-w-6xl space-y-10">
+    <FadeIn className="mx-auto max-w-6xl space-y-10">
       <h1 className="text-2xl font-semibold tracking-tight">My Accounts</h1>
 
       <PerformanceAccountSection
@@ -94,6 +95,6 @@ export default async function AccountsPage() {
       />
 
       <AccountsView propFirmAccounts={propFirmAccounts} brokerageAccounts={brokerageAccounts} />
-    </div>
+    </FadeIn>
   );
 }

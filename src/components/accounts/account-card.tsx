@@ -185,7 +185,12 @@ export function AccountCard({ account }: { account: TradingAccountDTO }) {
             }}
           />
         )}
-        <Button variant="ghost" size="icon-sm" onClick={() => setConfirmOpen(true)}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Delete account"
+          onClick={() => setConfirmOpen(true)}
+        >
           <Trash2 />
         </Button>
       </div>

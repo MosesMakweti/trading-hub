@@ -71,7 +71,13 @@ export function TradeAccountRow({
           />
         </div>
       </div>
-      <Button type="button" variant="ghost" size="icon-sm" onClick={onRemove}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Remove account from trade"
+        onClick={onRemove}
+      >
         <X />
       </Button>
     </div>

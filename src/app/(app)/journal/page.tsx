@@ -6,6 +6,7 @@ import { isValidDateKey } from "@/lib/date";
 import { presetToRange, type DateRangePreset } from "@/lib/date-ranges";
 import { JournalCalendar } from "@/components/journal/journal-calendar";
 import { AnalyticsDashboard } from "@/components/analytics/analytics-dashboard";
+import { FadeIn } from "@/components/shared/motion";
 
 const VALID_PRESETS: DateRangePreset[] = ["week", "month", "3months", "year", "custom"];
 
@@ -33,13 +34,13 @@ export default async function JournalPage({
   ]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-10">
+    <FadeIn className="mx-auto max-w-5xl space-y-10">
       <div>
         <h1 className="mb-6 text-2xl font-semibold tracking-tight">Journal</h1>
         <JournalCalendar noteDates={noteDates} dailyPnl={dailyPnl} />
       </div>
 
       <AnalyticsDashboard preset={preset} from={from} to={to} data={analyticsData} />
-    </div>
+    </FadeIn>
   );
 }

@@ -40,11 +40,21 @@ export function YearView({
   return (
     <div className="glass space-y-5 rounded-2xl p-4">
       <div className="flex items-center justify-center gap-4">
-        <Button variant="ghost" size="icon-sm" onClick={() => onChangeYear(year - 1)}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Previous year"
+          onClick={() => onChangeYear(year - 1)}
+        >
           <ChevronLeft />
         </Button>
         <span className="text-sm font-medium">{year}</span>
-        <Button variant="ghost" size="icon-sm" onClick={() => onChangeYear(year + 1)}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Next year"
+          onClick={() => onChangeYear(year + 1)}
+        >
           <ChevronRight />
         </Button>
       </div>

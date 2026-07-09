@@ -115,7 +115,7 @@ export function BrokerageAccountDialog({
           </DialogTitle>
           <DialogDescription>Track a personal live/demo brokerage account.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="grid grid-cols-2 gap-3">
+        <form onSubmit={handleSubmit(onSubmit)} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <FormField label="Account name" error={errors.name?.message} className="col-span-2">
             <Input {...register("name")} placeholder="e.g. Main Live Account" />
           </FormField>

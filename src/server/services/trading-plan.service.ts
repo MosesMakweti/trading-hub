@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import type {
@@ -10,10 +10,23 @@ import type {
 } from "@/lib/validation/trading-plan";
 
 export async function getTradingPlan(userId: string) {
-  const plan = await prisma.tradingPlan.findUnique({ where: { userId } });
-  if (plan) return plan;
-
-  return prisma.tradingPlan.create({ data: { userId } });
+  // upsert (not find-then-create) because a brand-new user's first page load
+  // often fires multiple concurrent requests that all need this row to exist.
+  // Even upsert can lose a race under concurrent writers (Prisma doesn't
+  // always compile it to a single atomic INSERT ... ON CONFLICT), so on a
+  // unique-constraint conflict the row now exists — just re-fetch it.
+  try {
+    return await prisma.tradingPlan.upsert({
+      where: { userId },
+      create: { userId },
+      update: {},
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return prisma.tradingPlan.findUniqueOrThrow({ where: { userId } });
+    }
+    throw error;
+  }
 }
 
 type PlanFieldUpdate =

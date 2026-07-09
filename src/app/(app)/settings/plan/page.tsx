@@ -34,6 +34,7 @@ import { ProfitTakingSection } from "@/components/plan/sections/profit-taking-se
 import { StopLossSection } from "@/components/plan/sections/stop-loss-section";
 import { PsychAnchorsSection } from "@/components/plan/sections/psych-anchors-section";
 import { ChecklistSection } from "@/components/plan/sections/checklist-section";
+import { FadeIn } from "@/components/shared/motion";
 
 export default async function TradingPlanPage() {
   const user = await requireUser();
@@ -50,7 +51,7 @@ export default async function TradingPlanPage() {
     ]);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 pb-16">
+    <FadeIn className="mx-auto max-w-3xl space-y-6 pb-16">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Trading Plan</h1>
         <p className="text-sm text-muted-foreground">
@@ -134,6 +135,6 @@ export default async function TradingPlanPage() {
           Open Trading Journal
         </Button>
       </div>
-    </div>
+    </FadeIn>
   );
 }

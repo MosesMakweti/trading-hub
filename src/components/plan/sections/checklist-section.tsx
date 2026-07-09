@@ -33,6 +33,7 @@ export function ChecklistSection({
       }}
       emptyMessage="No checklist items yet."
       addLabel="Add item"
+      itemLabel="checklist item"
     />
   );
 }

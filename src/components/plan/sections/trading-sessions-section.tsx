@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SortableList } from "@/components/plan/sortable-list";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
   archiveTradingSession,
   createTradingSession,
@@ -58,6 +59,7 @@ export function TradingSessionsSection({ initialItems }: { initialItems: Trading
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const items = localOrder
@@ -109,9 +111,12 @@ export function TradingSessionsSection({ initialItems }: { initialItems: Trading
     });
   }
 
-  function handleDelete(id: string) {
+  function confirmDelete() {
+    const id = deleteTargetId;
+    if (!id) return;
     startTransition(async () => {
       const result = await archiveTradingSession(id);
+      setDeleteTargetId(null);
       if (!result.success) {
         toast.error(result.error ?? "Failed to remove.");
         return;
@@ -162,6 +167,7 @@ export function TradingSessionsSection({ initialItems }: { initialItems: Trading
                   type="button"
                   variant="ghost"
                   size="icon-sm"
+                  aria-label="Edit session"
                   onClick={() => startEdit(session)}
                   disabled={isPending}
                 >
@@ -171,7 +177,8 @@ export function TradingSessionsSection({ initialItems }: { initialItems: Trading
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => handleDelete(session.id)}
+                  aria-label="Delete session"
+                  onClick={() => setDeleteTargetId(session.id)}
                   disabled={isPending}
                 >
                   <Trash2 />
@@ -208,6 +215,17 @@ export function TradingSessionsSection({ initialItems }: { initialItems: Trading
           Add session
         </Button>
       )}
+
+      <ConfirmDialog
+        open={deleteTargetId !== null}
+        onOpenChange={(open) => !open && setDeleteTargetId(null)}
+        title="Delete this trading session?"
+        description="This can't be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        isPending={isPending}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }
@@ -282,10 +300,17 @@ function SessionForm({
         />
       </div>
       <div className="flex items-end gap-1">
-        <Button type="submit" variant="ghost" size="icon-sm" disabled={isPending}>
+        <Button type="submit" variant="ghost" size="icon-sm" aria-label="Save" disabled={isPending}>
           <Check />
         </Button>
-        <Button type="button" variant="ghost" size="icon-sm" onClick={onCancel} disabled={isPending}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Cancel"
+          onClick={onCancel}
+          disabled={isPending}
+        >
           <X />
         </Button>
       </div>

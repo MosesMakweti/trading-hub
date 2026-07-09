@@ -30,6 +30,7 @@ export function EntryModelsSection({ initialItems }: { initialItems: EntryModel[
       }}
       emptyMessage="No entry models defined yet."
       addLabel="Add entry model"
+      itemLabel="entry model"
     />
   );
 }
