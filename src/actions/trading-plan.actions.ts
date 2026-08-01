@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
 import {
-  dailyRoutineSchema,
   profitTakingSchema,
   riskManagementSchema,
   stopLossSchema,
@@ -13,16 +12,6 @@ import {
 import * as tradingPlanService from "@/server/services/trading-plan.service";
 
 type ActionResult = { success: true } | { success: false; error: string };
-
-export async function updateDailyRoutine(input: unknown): Promise<ActionResult> {
-  const user = await requireUser();
-  const parsed = dailyRoutineSchema.safeParse(input);
-  if (!parsed.success) return { success: false, error: "Invalid input." };
-
-  await tradingPlanService.updateDailyRoutine(user.id, parsed.data);
-  revalidatePath("/settings/plan");
-  return { success: true };
-}
 
 export async function updateStrategyFramework(input: unknown): Promise<ActionResult> {
   const user = await requireUser();

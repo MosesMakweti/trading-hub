@@ -114,6 +114,7 @@ model TradingAccount {
 enum ChecklistType {
   CONFLUENCE
   EXECUTION_CONFIRMATION
+  PRE_SESSION_ROUTINE
 }
 
 // Singleton per user. Rich-text fields store Tiptap JSON documents.

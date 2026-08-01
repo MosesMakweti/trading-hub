@@ -2,7 +2,6 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import type {
-  DailyRoutineInput,
   ProfitTakingInput,
   RiskManagementInput,
   StopLossInput,
@@ -30,7 +29,6 @@ export async function getTradingPlan(userId: string) {
 }
 
 type PlanFieldUpdate =
-  | DailyRoutineInput
   | ProfitTakingInput
   | RiskManagementInput
   | StopLossInput
@@ -45,9 +43,6 @@ function upsertPlan(userId: string, data: PlanFieldUpdate) {
   });
 }
 
-export async function updateDailyRoutine(userId: string, data: DailyRoutineInput) {
-  return upsertPlan(userId, data);
-}
 
 export async function updateStrategyFramework(userId: string, data: StrategyFrameworkInput) {
   return upsertPlan(userId, data);

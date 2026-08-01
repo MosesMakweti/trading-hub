@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { SortableList } from "@/components/plan/sortable-list";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -28,6 +30,7 @@ export function SimpleListSection<T extends ListItem>({
   emptyMessage,
   addLabel,
   itemLabel = "item",
+  checkable = false,
 }: {
   initialItems: T[];
   fields: FieldConfig[];
@@ -40,6 +43,13 @@ export function SimpleListSection<T extends ListItem>({
   emptyMessage: string;
   addLabel: string;
   itemLabel?: string;
+  /**
+   * When true, each row shows a leading checkbox for ticking the item off.
+   * The checked state is intentionally local/ephemeral — it's a "run through
+   * this before every session" affordance, not persisted plan data, so it
+   * resets on reload (a fresh checklist each session).
+   */
+  checkable?: boolean;
 }) {
   const router = useRouter();
   const [localOrder, setLocalOrder] = useState<string[] | null>(null);
@@ -47,7 +57,17 @@ export function SimpleListSection<T extends ListItem>({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [isPending, startTransition] = useTransition();
+
+  function toggleChecked(id: string, checked: boolean) {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
 
   const items = localOrder
     ? (localOrder
@@ -131,15 +151,29 @@ export function SimpleListSection<T extends ListItem>({
             />
           ) : (
             <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm">
-                {fields.map((f, i) => (
-                  <span
-                    key={f.key}
-                    className={i === 0 ? "font-medium" : "truncate text-muted-foreground"}
-                  >
-                    {String((item as unknown as Record<string, unknown>)[f.key] ?? "")}
-                  </span>
-                ))}
+              <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                {checkable && (
+                  <Checkbox
+                    checked={checkedIds.has(item.id)}
+                    onCheckedChange={(checked) => toggleChecked(item.id, checked === true)}
+                    aria-label={`Mark ${itemLabel} done`}
+                  />
+                )}
+                <div
+                  className={cn(
+                    "flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm",
+                    checkable && checkedIds.has(item.id) && "text-muted-foreground line-through",
+                  )}
+                >
+                  {fields.map((f, i) => (
+                    <span
+                      key={f.key}
+                      className={i === 0 ? "font-medium" : "truncate text-muted-foreground"}
+                    >
+                      {String((item as unknown as Record<string, unknown>)[f.key] ?? "")}
+                    </span>
+                  ))}
+                </div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <Button

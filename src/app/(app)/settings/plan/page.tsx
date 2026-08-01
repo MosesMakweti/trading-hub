@@ -6,10 +6,10 @@ import {
   Clock,
   Layers,
   LineChart,
+  ListChecks,
   ShieldAlert,
   ShieldOff,
   Sparkles,
-  Sunrise,
   Target,
 } from "lucide-react";
 
@@ -24,7 +24,7 @@ import { listChecklistItems } from "@/server/services/checklist-items.service";
 import { Accordion } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { PlanSectionCard } from "@/components/plan/plan-section-card";
-import { DailyRoutineSection } from "@/components/plan/sections/daily-routine-section";
+import { PreSessionRoutineSection } from "@/components/plan/sections/pre-session-routine-section";
 import { AssetsSection } from "@/components/plan/sections/assets-section";
 import { TradingSessionsSection } from "@/components/plan/sections/trading-sessions-section";
 import { StrategyFrameworkSection } from "@/components/plan/sections/strategy-framework-section";
@@ -39,13 +39,14 @@ import { FadeIn } from "@/components/shared/motion";
 export default async function TradingPlanPage() {
   const user = await requireUser();
 
-  const [plan, assets, entryModels, sessions, anchors, confluences, executionItems] =
+  const [plan, assets, entryModels, sessions, anchors, routineItems, confluences, executionItems] =
     await Promise.all([
       getTradingPlan(user.id),
       listAssets(user.id),
       listEntryModels(user.id),
       listTradingSessions(user.id),
       listPsychAnchors(user.id),
+      listChecklistItems(user.id, "PRE_SESSION_ROUTINE"),
       listChecklistItems(user.id, "CONFLUENCE"),
       listChecklistItems(user.id, "EXECUTION_CONFIRMATION"),
     ]);
@@ -60,8 +61,13 @@ export default async function TradingPlanPage() {
       </div>
 
       <Accordion multiple className="space-y-0">
-        <PlanSectionCard value="daily-routine" icon={Sunrise} title="Daily Routine">
-          <DailyRoutineSection plan={plan} />
+        <PlanSectionCard
+          value="pre-session-routine"
+          icon={ListChecks}
+          title="Pre-Session Routine"
+          description="Your checklist to run through before every session."
+        >
+          <PreSessionRoutineSection initialItems={routineItems} />
         </PlanSectionCard>
 
         <PlanSectionCard

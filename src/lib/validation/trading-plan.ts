@@ -3,12 +3,6 @@ import { z } from "zod";
 // Tiptap documents are arbitrary JSON; structural validation happens in the editor itself.
 const richText = z.unknown().nullable();
 
-export const dailyRoutineSchema = z.object({
-  dailyRoutineMorning: richText,
-  dailyRoutinePreMarket: richText,
-  dailyRoutinePostSession: richText,
-});
-
 export const strategyFrameworkSchema = z.object({
   strategyFramework: richText,
 });
@@ -66,7 +60,11 @@ export const psychAnchorSchema = z.object({
   text: z.string().trim().min(1, "Text is required.").max(280),
 });
 
-export const checklistTypeSchema = z.enum(["CONFLUENCE", "EXECUTION_CONFIRMATION"]);
+export const checklistTypeSchema = z.enum([
+  "CONFLUENCE",
+  "EXECUTION_CONFIRMATION",
+  "PRE_SESSION_ROUTINE",
+]);
 
 export const checklistItemSchema = z.object({
   type: checklistTypeSchema,
@@ -77,7 +75,6 @@ export const reorderSchema = z.object({
   orderedIds: z.array(z.string()).min(1),
 });
 
-export type DailyRoutineInput = z.infer<typeof dailyRoutineSchema>;
 export type StrategyFrameworkInput = z.infer<typeof strategyFrameworkSchema>;
 export type ProfitTakingInput = z.infer<typeof profitTakingSchema>;
 export type StopLossInput = z.infer<typeof stopLossSchema>;

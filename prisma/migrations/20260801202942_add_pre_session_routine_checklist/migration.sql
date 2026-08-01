@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "ChecklistType" ADD VALUE 'PRE_SESSION_ROUTINE';
