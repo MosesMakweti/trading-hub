@@ -12,6 +12,7 @@ const SOFT_DELETE_MODELS = new Set([
   "Trade",
   "Strategy",
   "ArsenalConcept",
+  "StrategyFrameworkStep",
 ]);
 
 function withSoftDelete(client: PrismaClient) {

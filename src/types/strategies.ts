@@ -25,3 +25,11 @@ export interface ArsenalConceptDTO {
   examples: unknown;
   personalNotes: unknown;
 }
+
+/** Section 2 — Framework. An ordered decision step; description/notes are Tiptap JSON. */
+export interface FrameworkStepDTO {
+  id: string;
+  title: string;
+  description: unknown;
+  notes: unknown;
+}

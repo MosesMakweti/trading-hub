@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/guards";
 import { getStrategy } from "@/server/services/strategies.service";
 import { listArsenalConcepts } from "@/server/services/arsenal.service";
+import { listFrameworkSteps } from "@/server/services/framework.service";
 import { FadeIn } from "@/components/shared/motion";
 import { StrategyWorkspace } from "@/components/strategy-lab/strategy-workspace";
-import type { ArsenalConceptDTO, StrategyDTO } from "@/types/strategies";
+import type { ArsenalConceptDTO, FrameworkStepDTO, StrategyDTO } from "@/types/strategies";
 
 export default async function StrategyWorkspacePage({
   params,
@@ -17,7 +18,10 @@ export default async function StrategyWorkspacePage({
   const strategy = await getStrategy(user.id, strategyId);
   if (!strategy) notFound();
 
-  const concepts = await listArsenalConcepts(user.id, strategyId);
+  const [concepts, steps] = await Promise.all([
+    listArsenalConcepts(user.id, strategyId),
+    listFrameworkSteps(user.id, strategyId),
+  ]);
 
   const dto: StrategyDTO = {
     id: strategy.id,
@@ -43,9 +47,20 @@ export default async function StrategyWorkspacePage({
     personalNotes: c.personalNotes,
   }));
 
+  const frameworkSteps: FrameworkStepDTO[] = steps.map((s) => ({
+    id: s.id,
+    title: s.title,
+    description: s.description,
+    notes: s.notes,
+  }));
+
   return (
     <FadeIn>
-      <StrategyWorkspace strategy={dto} arsenalConcepts={arsenalConcepts} />
+      <StrategyWorkspace
+        strategy={dto}
+        arsenalConcepts={arsenalConcepts}
+        frameworkSteps={frameworkSteps}
+      />
     </FadeIn>
   );
 }

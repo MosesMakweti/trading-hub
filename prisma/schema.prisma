@@ -441,9 +441,9 @@ model Strategy {
   deletedAt DateTime? // soft delete (registered in server/db.ts); Archive is a status, Delete sets this
 
   // ── Workspace sections ─────────────────────────────────────────────────────
-  arsenalConcepts ArsenalConcept[] // Section 1 — Arsenal (expandable concept cards)
-  // ── Phase 3+ extension points (add the models, then uncomment) ─────────────
-  // frameworkSteps  StrategyFrameworkStep[]  // Section 2 — Framework (ordered decision steps)
+  arsenalConcepts ArsenalConcept[]        // Section 1 — Arsenal (expandable concept cards)
+  frameworkSteps  StrategyFrameworkStep[] // Section 2 — Framework (ordered decision steps)
+  // ── Phase 4+ extension points (add the models, then uncomment) ─────────────
   // timeframes      StrategyTimeframe[]      // Section 3 — Timeframe workspace (each has checkpoints)
   // entryModels     StrategyEntryModel[]     // Section 4 — Entry Models
   // tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (+ partial TPs, custom rules)
@@ -471,6 +471,26 @@ model ArsenalConcept {
   whenIIgnore   Json?
   examples      Json?
   personalNotes Json?
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([strategyId, deletedAt, sortOrder])
+}
+
+// Strategy Lab · Section 2 — Framework. An ordered, drag-and-drop sequence of
+// decision steps (e.g. Determine HTF bias → … → Manage position). Description
+// and notes are Tiptap rich-text JSON. Scoped to a user via its parent Strategy.
+model StrategyFrameworkStep {
+  id         String   @id @default(cuid())
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  title       String
+  description Json?
+  notes       Json?
 
   sortOrder Int       @default(0)
   createdAt DateTime  @default(now())

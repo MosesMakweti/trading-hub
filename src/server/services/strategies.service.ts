@@ -108,6 +108,7 @@ export async function duplicateStrategy(userId: string, id: string) {
     include: {
       // Only live rows; the extension doesn't filter nested relations.
       arsenalConcepts: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+      frameworkSteps: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
     },
   });
   if (!source) throw new Error("Strategy not found.");
@@ -146,6 +147,19 @@ export async function duplicateStrategy(userId: string, id: string) {
           whenIIgnore: toJsonInput(c.whenIIgnore),
           examples: toJsonInput(c.examples),
           personalNotes: toJsonInput(c.personalNotes),
+        })),
+      });
+    }
+
+    // Section 2 — Framework:
+    if (source.frameworkSteps.length > 0) {
+      await tx.strategyFrameworkStep.createMany({
+        data: source.frameworkSteps.map((s) => ({
+          strategyId: copy.id,
+          title: s.title,
+          sortOrder: s.sortOrder,
+          description: toJsonInput(s.description),
+          notes: toJsonInput(s.notes),
         })),
       });
     }

@@ -122,38 +122,85 @@ lint, 103 tests pass.
 
 ---
 
-## ▶️ Phase 3 — Section 2: FRAMEWORK (BUILD THIS NEXT)
+## ✅ Phase 3 — Section 2: FRAMEWORK (DONE)
 
-The decision process as an ordered, drag-and-drop sequence of steps. Don't touch
-Phases 1–2.
+The decision process as an ordered, drag-and-drop sequence of steps. Live in the
+Framework tab.
 
-**Data model** — add and uncomment `Strategy.frameworkSteps`:
+- **Schema**: `StrategyFrameworkStep` (title + two Tiptap rich-text Json fields,
+  `description` and `notes`, plus sortOrder, soft-delete). Migration
+  `20260802220316_add_framework_step`. `Strategy.frameworkSteps` uncommented;
+  registered in `SOFT_DELETE_MODELS`. (Chose rich text for description/notes to
+  match Arsenal and the Notion feel.)
+- **Service / actions / validation** mirror Phase 2 exactly (`framework.service.ts`
+  scoped via parent strategy, `framework.actions.ts`, `src/lib/validation/framework.ts`
+  with `FRAMEWORK_RICH_FIELDS = ["description","notes"]`).
+- **UI**: `FrameworkSection` (numbered, dnd-kit card reorder, inline add, empty
+  state) + `FrameworkStepCard` — a gradient **number badge** (position, updates on
+  reorder) + title input (autosaved) + expandable body with the two rich editors
+  (same lazy-mount + local-field-cache pattern as Arsenal). Wired into
+  `strategy-workspace.tsx` (Framework tab); steps loaded in the workspace page
+  alongside concepts (`Promise.all`).
+- **Duplicate**: `duplicateStrategy` now also deep-copies framework steps
+  (verified: titles + rich-text description copy over).
+
+Verified end-to-end (empty → add 3 → expand → Description autosave → persists on
+reload → delete → duplicate deep-copies) with zero console errors; `tsc`, lint, 103
+tests pass.
+
+**Reuse note for the remaining phases:** `FrameworkStepCard`/`ArsenalConceptCard`
+are near-identical (title/name input autosave + expandable rich fields + delete +
+grip). If Timeframes/Entry Models want the same shape, consider factoring a shared
+`ExpandableItemCard`, but only if it stays simpler than the duplication — don't
+abstract prematurely.
+
+---
+
+## ▶️ Phase 4 — Section 3: TIMEFRAME WORKSPACE (BUILD THIS NEXT)
+
+What the trader looks for on each timeframe. Two levels: unlimited **timeframes**,
+each holding unlimited **checkpoints**. Don't touch Phases 1–3.
+
+**Data model** — add both, and uncomment `Strategy.timeframes`:
 
 ```prisma
-model StrategyFrameworkStep {
+model StrategyTimeframe {
   id          String   @id @default(cuid())
   strategyId  String
   strategy    Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  title       String
-  description String?  // plain text (or Json? for rich text, to match Arsenal)
-  notes       String?
-  sortOrder   Int       @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  name        String   // e.g. Monthly, Weekly, Daily, H4, M15
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
   deletedAt   DateTime?
+  checkpoints StrategyCheckpoint[]
   @@index([strategyId, deletedAt, sortOrder])
+}
+
+model StrategyCheckpoint {
+  id          String   @id @default(cuid())
+  timeframeId String
+  timeframe   StrategyTimeframe @relation(fields: [timeframeId], references: [id], onDelete: Cascade)
+  title       String
+  description Json?    // rich text; images deferred (UploadThing)
+  notes       Json?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  @@index([timeframeId, deletedAt, sortOrder])
 }
 ```
 
-Register in `SOFT_DELETE_MODELS`. Then mirror Phase 2's shape exactly:
-1. `framework.service.ts` (scoped via parent strategy), `framework.actions.ts`.
-2. Validation in `src/lib/validation/framework.ts`.
-3. UI: replace the Framework `SectionPlaceholder` with a `FrameworkSection`. Steps
-   are simpler than Arsenal concepts (title + description + notes) — a numbered,
-   reorderable list. Reuse the dnd-kit pattern from `arsenal-section.tsx` (or the
-   compact `SortableList` since steps are small) and `useDebouncedAutosave`.
-4. Extend `duplicateStrategy`: `include` `frameworkSteps` and `createMany` them onto
-   the copy in the same transaction (next to the Arsenal copy).
+Register **both** in `SOFT_DELETE_MODELS`. Scope checkpoints to the user via
+`timeframe: { strategy: { userId } }`. Then:
+1. `timeframes.service.ts` + `timeframes.actions.ts` + `src/lib/validation/timeframes.ts`.
+2. UI: replace the Timeframes `SectionPlaceholder` with a `TimeframesSection` —
+   expandable timeframe cards (name), each containing a reorderable checkpoint list
+   (title + rich description/notes), mirroring Framework nested one level deeper.
+3. Extend `duplicateStrategy`: `include` `timeframes: { include: { checkpoints } }`
+   and re-create timeframes **then** their checkpoints in the transaction (create the
+   timeframe first to get its new id, then its checkpoints).
 
 Leave the app working. Update this file. Then stop.
 
@@ -161,9 +208,7 @@ Leave the app working. Update this file. Then stop.
 
 ## Later phases (design already accommodates them — no refactor needed)
 
-- **Phase 3 — Framework**: see the spec above (this is the next build).
-- **Phase 4 — Timeframes**: `StrategyTimeframe` (name) → `StrategyCheckpoint`
-  (title, description, notes, images) one-to-many. Replace the Timeframes placeholder.
+- **Phase 4 — Timeframes**: see the spec above (this is the next build).
 - **Phase 5 — Entry Models**: `StrategyEntryModel` (name, description, conditions,
   confirmationChecklist, invalidation, stopPlacement, targetLogic, images, notes).
   Replace the Entry Models placeholder.
