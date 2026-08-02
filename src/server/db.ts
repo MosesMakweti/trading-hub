@@ -15,6 +15,7 @@ const SOFT_DELETE_MODELS = new Set([
   "StrategyFrameworkStep",
   "StrategyTimeframe",
   "StrategyCheckpoint",
+  "StrategyEntryModel",
 ]);
 
 function withSoftDelete(client: PrismaClient) {

@@ -24,10 +24,12 @@ import { SectionPlaceholder } from "@/components/strategy-lab/section-placeholde
 import { ArsenalSection } from "@/components/strategy-lab/arsenal-section";
 import { FrameworkSection } from "@/components/strategy-lab/framework-section";
 import { TimeframesSection } from "@/components/strategy-lab/timeframes-section";
+import { EntryModelsSection } from "@/components/strategy-lab/entry-models-section";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { updateStrategySettings } from "@/actions/strategies.actions";
 import type {
   ArsenalConceptDTO,
+  EntryModelDTO,
   FrameworkStepDTO,
   StrategyDTO,
   TimeframeDTO,
@@ -104,11 +106,13 @@ export function StrategyWorkspace({
   arsenalConcepts,
   frameworkSteps,
   timeframes,
+  entryModels,
 }: {
   strategy: StrategyDTO;
   arsenalConcepts: ArsenalConceptDTO[];
   frameworkSteps: FrameworkStepDTO[];
   timeframes: TimeframeDTO[];
+  entryModels: EntryModelDTO[];
 }) {
   const [settings, setSettings] = useState<StrategySettingsState>({
     name: strategy.name,
@@ -194,9 +198,18 @@ export function StrategyWorkspace({
           <TimeframesSection strategyId={strategy.id} initialTimeframes={timeframes} />
         </TabsContent>
 
+        {/* Section 4 — Entry Models is live (Phase 5). */}
+        <TabsContent value="entry-models" className="mt-4">
+          <EntryModelsSection strategyId={strategy.id} initialModels={entryModels} />
+        </TabsContent>
+
         {/* The remaining sections are documented placeholders until their phase. */}
         {SECTIONS.filter(
-          (s) => s.value !== "arsenal" && s.value !== "framework" && s.value !== "timeframes",
+          (s) =>
+            s.value !== "arsenal" &&
+            s.value !== "framework" &&
+            s.value !== "timeframes" &&
+            s.value !== "entry-models",
         ).map((s) => (
           <TabsContent key={s.value} value={s.value} className="mt-4">
             <SectionPlaceholder

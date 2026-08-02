@@ -47,3 +47,16 @@ export interface TimeframeDTO {
   name: string;
   checkpoints: CheckpointDTO[];
 }
+
+/** Section 4 — Entry Models. Rich-text fields are Tiptap JSON documents (or null). */
+export interface EntryModelDTO {
+  id: string;
+  name: string;
+  description: unknown;
+  conditions: unknown;
+  confirmationChecklist: unknown;
+  invalidation: unknown;
+  stopPlacement: unknown;
+  targetLogic: unknown;
+  notes: unknown;
+}

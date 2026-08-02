@@ -444,8 +444,8 @@ model Strategy {
   arsenalConcepts ArsenalConcept[]        // Section 1 — Arsenal (expandable concept cards)
   frameworkSteps  StrategyFrameworkStep[] // Section 2 — Framework (ordered decision steps)
   timeframes      StrategyTimeframe[]     // Section 3 — Timeframe workspace (each has checkpoints)
-  // ── Phase 5+ extension points (add the models, then uncomment) ─────────────
-  // entryModels     StrategyEntryModel[]     // Section 4 — Entry Models
+  entryModels     StrategyEntryModel[]    // Section 4 — Entry Models
+  // ── Phase 6+ extension points (add the models, then uncomment) ─────────────
   // tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (+ partial TPs, custom rules)
   // trades          Trade[]                  // Journal link: Trade.strategyId -> Strategy (reference, not copy)
 
@@ -537,4 +537,31 @@ model StrategyCheckpoint {
   deletedAt DateTime?
 
   @@index([timeframeId, deletedAt, sortOrder])
+}
+
+// Strategy Lab · Section 4 — Entry Models. A strategy may have several distinct
+// entry models, each a documented setup. All descriptive fields are Tiptap
+// rich-text JSON. Named StrategyEntryModel to avoid colliding with the Journal's
+// EntryModel. Example images deferred (UploadThing). Scoped via parent Strategy.
+model StrategyEntryModel {
+  id         String   @id @default(cuid())
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  name String
+
+  description           Json?
+  conditions            Json?
+  confirmationChecklist Json?
+  invalidation          Json?
+  stopPlacement         Json?
+  targetLogic           Json?
+  notes                 Json?
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([strategyId, deletedAt, sortOrder])
 }

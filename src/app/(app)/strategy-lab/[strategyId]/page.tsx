@@ -5,10 +5,12 @@ import { getStrategy } from "@/server/services/strategies.service";
 import { listArsenalConcepts } from "@/server/services/arsenal.service";
 import { listFrameworkSteps } from "@/server/services/framework.service";
 import { listTimeframes } from "@/server/services/timeframes.service";
+import { listEntryModels } from "@/server/services/strategy-entry-models.service";
 import { FadeIn } from "@/components/shared/motion";
 import { StrategyWorkspace } from "@/components/strategy-lab/strategy-workspace";
 import type {
   ArsenalConceptDTO,
+  EntryModelDTO,
   FrameworkStepDTO,
   StrategyDTO,
   TimeframeDTO,
@@ -24,10 +26,11 @@ export default async function StrategyWorkspacePage({
   const strategy = await getStrategy(user.id, strategyId);
   if (!strategy) notFound();
 
-  const [concepts, steps, timeframes] = await Promise.all([
+  const [concepts, steps, timeframes, entryModels] = await Promise.all([
     listArsenalConcepts(user.id, strategyId),
     listFrameworkSteps(user.id, strategyId),
     listTimeframes(user.id, strategyId),
+    listEntryModels(user.id, strategyId),
   ]);
 
   const dto: StrategyDTO = {
@@ -72,6 +75,18 @@ export default async function StrategyWorkspacePage({
     })),
   }));
 
+  const entryModelDtos: EntryModelDTO[] = entryModels.map((m) => ({
+    id: m.id,
+    name: m.name,
+    description: m.description,
+    conditions: m.conditions,
+    confirmationChecklist: m.confirmationChecklist,
+    invalidation: m.invalidation,
+    stopPlacement: m.stopPlacement,
+    targetLogic: m.targetLogic,
+    notes: m.notes,
+  }));
+
   return (
     <FadeIn>
       <StrategyWorkspace
@@ -79,6 +94,7 @@ export default async function StrategyWorkspacePage({
         arsenalConcepts={arsenalConcepts}
         frameworkSteps={frameworkSteps}
         timeframes={timeframeDtos}
+        entryModels={entryModelDtos}
       />
     </FadeIn>
   );

@@ -114,6 +114,7 @@ export async function duplicateStrategy(userId: string, id: string) {
         orderBy: { sortOrder: "asc" },
         include: { checkpoints: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } } },
       },
+      entryModels: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
     },
   });
   if (!source) throw new Error("Strategy not found.");
@@ -186,6 +187,24 @@ export async function duplicateStrategy(userId: string, id: string) {
           })),
         });
       }
+    }
+
+    // Section 4 — Entry Models:
+    if (source.entryModels.length > 0) {
+      await tx.strategyEntryModel.createMany({
+        data: source.entryModels.map((m) => ({
+          strategyId: copy.id,
+          name: m.name,
+          sortOrder: m.sortOrder,
+          description: toJsonInput(m.description),
+          conditions: toJsonInput(m.conditions),
+          confirmationChecklist: toJsonInput(m.confirmationChecklist),
+          invalidation: toJsonInput(m.invalidation),
+          stopPlacement: toJsonInput(m.stopPlacement),
+          targetLogic: toJsonInput(m.targetLogic),
+          notes: toJsonInput(m.notes),
+        })),
+      });
     }
 
     return copy;

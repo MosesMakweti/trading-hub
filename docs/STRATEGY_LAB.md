@@ -190,59 +190,106 @@ grips; keep that pattern if any later section nests lists.
 
 ---
 
-## ▶️ Phase 5 — Section 4: ENTRY MODELS (BUILD THIS NEXT)
+## ✅ Phase 5 — Section 4: ENTRY MODELS (DONE)
 
-Multiple entry models per strategy, each a documented setup. Single-level (like
-Arsenal). Don't touch Phases 1–4.
+Multiple documented entry models per strategy. Single-level, structurally identical
+to Arsenal. Live in the Entry Models tab.
 
-**Data model** — add and uncomment `Strategy.entryModels`:
+- **Schema**: `StrategyEntryModel` — name + **7** rich-text Json fields (description,
+  conditions, confirmationChecklist, invalidation, stopPlacement, targetLogic,
+  notes), sortOrder, soft-delete. **Named `StrategyEntryModel`** to avoid colliding
+  with the Journal's existing `EntryModel`. Migration
+  `20260802230423_add_strategy_entry_model`; registered in `SOFT_DELETE_MODELS`.
+- **Service / actions / validation** are the Arsenal shape, but the files are
+  prefixed **`strategy-entry-models.*`** (service, actions, `src/lib/validation/`)
+  to avoid colliding with the Journal's `entry-models.service.ts`/`.actions.ts`.
+  `ENTRY_MODEL_RICH_FIELDS` drives both UI and duplicate.
+- **UI**: `EntryModelsSection` + `EntryModelCard` (name autosaved, 7 expandable rich
+  fields in a 2-col grid, dnd reorder, delete-confirm, deferred-images note). Wired
+  into the Entry Models tab; loaded in the workspace page's `Promise.all`.
+- **Duplicate**: `duplicateStrategy` now also `createMany`s entry models onto the
+  copy (verified: name + rich text copy over).
+
+Verified end-to-end (empty → add 2 → expand → autosave → persists on reload →
+delete → duplicate deep-copies) with zero console errors; `tsc`, lint, 103 tests pass.
+
+**Note:** `confirmationChecklist` is rich text for now; a future phase could make it
+a real checkable list if desired.
+
+---
+
+## ▶️ Phase 6 — Section 5: TRADE MANAGEMENT (BUILD THIS NEXT — LAST SECTION)
+
+How a trade is managed after entry. This is the **last workspace section**; it's a
+1:1 record plus two child lists, not a card list. Don't touch Phases 1–5.
+
+**Data model** — add and uncomment `Strategy.tradeManagement` (1:1) + two children:
 
 ```prisma
-model StrategyEntryModel {
-  id           String   @id @default(cuid())
-  strategyId   String
-  strategy     Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  name         String
+model StrategyTradeManagement {
+  id         String   @id @default(cuid())
+  strategyId String   @unique
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
   // rich-text (Tiptap JSON) fields:
-  description           Json?
-  conditions            Json?
-  confirmationChecklist Json?
-  invalidation          Json?
-  stopPlacement         Json?
-  targetLogic           Json?
-  notes                 Json?
-  sortOrder    Int       @default(0)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
-  @@index([strategyId, deletedAt, sortOrder])
+  takeProfitPhilosophy Json?
+  initialStopPlacement Json?
+  breakEvenRules       Json?
+  trailingStopRules    Json?
+  scalingInRules       Json?
+  scalingOutRules      Json?
+  // structured limits:
+  maxHoldingTime   String?   // free text (e.g. "2 hours", "1 session")
+  maxRiskPercent   Decimal?  @db.Decimal(6, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  partialTakeProfits PartialTakeProfit[]
+  customRules        TradeManagementRule[]
+}
+
+model PartialTakeProfit {
+  id                 String @id @default(cuid())
+  tradeManagementId  String
+  tradeManagement    StrategyTradeManagement @relation(fields: [tradeManagementId], references: [id], onDelete: Cascade)
+  trigger         String?   // e.g. "at 2R", "prior day high"
+  percentToClose  Decimal?  @db.Decimal(5, 2)
+  reason          String?
+  sortOrder Int       @default(0)
+  deletedAt DateTime?
+  @@index([tradeManagementId, deletedAt, sortOrder])
+}
+
+model TradeManagementRule {
+  id                 String @id @default(cuid())
+  tradeManagementId  String
+  tradeManagement    StrategyTradeManagement @relation(fields: [tradeManagementId], references: [id], onDelete: Cascade)
+  text      String
+  sortOrder Int       @default(0)
+  deletedAt DateTime?
+  @@index([tradeManagementId, deletedAt, sortOrder])
 }
 ```
 
-Register in `SOFT_DELETE_MODELS`. This is structurally **identical to Arsenal**
-(Phase 2) — an expandable card with N rich-text fields. Fastest path: copy the
-Arsenal service/actions/validation/UI (`arsenal-*`, `ARSENAL_RICH_FIELDS`) and swap
-the model + field list (`ENTRY_MODEL_RICH_FIELDS = [description, conditions,
-confirmationChecklist, invalidation, stopPlacement, targetLogic, notes]`). Then
-replace the Entry Models `SectionPlaceholder` and extend `duplicateStrategy`
-(`createMany` like Arsenal). Note: `confirmationChecklist` is rich text for now; a
-future phase could make it a real checkable list if desired.
+Register all three in `SOFT_DELETE_MODELS`. Approach:
+1. `getOrCreateTradeManagement(userId, strategyId)` (lazy singleton, like the
+   trading-plan upsert) so the section always has a row to edit.
+2. Service/actions/validation prefixed `strategy-trade-management.*`. Top-level
+   fields autosave (reuse `useDebouncedAutosave` for the rich fields via
+   `RichTextEditor`, and a small form for maxHoldingTime / maxRiskPercent). Partial
+   TPs and custom rules are add/edit/reorder/delete lists (custom rules can reuse
+   the `SimpleListSection`-style pattern; partial TPs need trigger+percent+reason).
+3. UI: replace the Trade Management `SectionPlaceholder` with `TradeManagementSection`.
+4. Extend `duplicateStrategy`: copy the 1:1 record (create it, then its partial TPs +
+   custom rules) in the transaction.
 
-Leave the app working. Update this file. Then stop.
-
-**Reuse reminder:** four near-identical expandable-card sections now exist
-(Arsenal, Framework, Checkpoint, and soon Entry Models). If the duplication bites,
-factor a shared `ExpandableRichCard` — but only if it ends up simpler.
+After this, **all five workspace sections are done** → next is **Phase 7: Journal
+integration** (see below). Leave the app working, update this file, then stop.
 
 ---
 
 ## Later phases (design already accommodates them — no refactor needed)
 
-- **Phase 5 — Entry Models**: see the spec above (this is the next build).
-- **Phase 6 — Trade Management**: `StrategyTradeManagement` (1:1 — TP philosophy,
-  stop/BE/trailing/scaling rules, max hold, max risk) + `PartialTakeProfit`
-  (trigger, percentToClose, reason) + `TradeManagementRule` (custom rules).
-  Replace the Trade Management placeholder.
+- **Phase 6 — Trade Management**: see the spec above (this is the next build).
 - **Phase 7 — Journal integration**: add `strategyId String?` to `Trade` →
   `Strategy` (reference, not copy). Add a Strategy selector to the trade form; on
   select, auto-populate Applicable Assets, Entry Models, Framework, and Trade
