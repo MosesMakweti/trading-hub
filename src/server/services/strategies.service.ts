@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import type {
@@ -8,6 +8,12 @@ import type {
 
 // Everything here is scoped by `userId` (tenant isolation) and the soft-delete
 // extension in server/db.ts auto-filters `deletedAt: null` on find/list/count.
+
+// When re-inserting a nullable Json column, a stored SQL NULL reads back as
+// `null` but must be written as `Prisma.DbNull` (not the literal `null`).
+function toJsonInput(value: Prisma.JsonValue | null): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  return value === null ? Prisma.DbNull : (value as Prisma.InputJsonValue);
+}
 
 export async function listStrategies(userId: string) {
   return prisma.strategy.findMany({
@@ -99,7 +105,10 @@ export async function deleteStrategy(userId: string, id: string) {
 export async function duplicateStrategy(userId: string, id: string) {
   const source = await prisma.strategy.findFirst({
     where: { id, userId },
-    // Phase 2+: `include` the nested relations here so they can be re-created.
+    include: {
+      // Only live rows; the extension doesn't filter nested relations.
+      arsenalConcepts: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+    },
   });
   if (!source) throw new Error("Strategy not found.");
 
@@ -121,10 +130,25 @@ export async function duplicateStrategy(userId: string, id: string) {
       },
     });
 
-    // ── Phase 2+ extension point: deep-copy nested sections here ────────────
-    // For each future section, map source rows -> new rows with
-    // `strategyId: copy.id`, using `tx` so everything commits atomically.
-    // e.g. await tx.arsenalConcept.createMany({ data: source.arsenalConcepts.map(...) });
+    // ── Deep-copy nested sections into `copy` (add future sections here) ─────
+    // Section 1 — Arsenal:
+    if (source.arsenalConcepts.length > 0) {
+      await tx.arsenalConcept.createMany({
+        data: source.arsenalConcepts.map((c) => ({
+          strategyId: copy.id,
+          name: c.name,
+          sortOrder: c.sortOrder,
+          definition: toJsonInput(c.definition),
+          purpose: toJsonInput(c.purpose),
+          howIIdentify: toJsonInput(c.howIIdentify),
+          whyItMatters: toJsonInput(c.whyItMatters),
+          whenIUse: toJsonInput(c.whenIUse),
+          whenIIgnore: toJsonInput(c.whenIIgnore),
+          examples: toJsonInput(c.examples),
+          personalNotes: toJsonInput(c.personalNotes),
+        })),
+      });
+    }
 
     return copy;
   });

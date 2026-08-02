@@ -440,8 +440,9 @@ model Strategy {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime? // soft delete (registered in server/db.ts); Archive is a status, Delete sets this
 
-  // ── Phase 2+ extension points (add the models, then uncomment) ─────────────
-  // arsenalConcepts ArsenalConcept[]         // Section 1 — Arsenal (expandable concept cards)
+  // ── Workspace sections ─────────────────────────────────────────────────────
+  arsenalConcepts ArsenalConcept[] // Section 1 — Arsenal (expandable concept cards)
+  // ── Phase 3+ extension points (add the models, then uncomment) ─────────────
   // frameworkSteps  StrategyFrameworkStep[]  // Section 2 — Framework (ordered decision steps)
   // timeframes      StrategyTimeframe[]      // Section 3 — Timeframe workspace (each has checkpoints)
   // entryModels     StrategyEntryModel[]     // Section 4 — Entry Models
@@ -449,4 +450,32 @@ model Strategy {
   // trades          Trade[]                  // Journal link: Trade.strategyId -> Strategy (reference, not copy)
 
   @@index([userId, deletedAt, sortOrder])
+}
+
+// Strategy Lab · Section 1 — Arsenal. Each concept is an expandable card in the
+// strategy workspace. All descriptive fields are Tiptap rich-text JSON (edited
+// with RichTextEditor). Scoped to a user through its parent Strategy. Charts /
+// image attachments are deferred app-wide (UploadThing) and will attach here.
+model ArsenalConcept {
+  id         String   @id @default(cuid())
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  name String
+
+  definition    Json?
+  purpose       Json?
+  howIIdentify  Json?
+  whyItMatters  Json?
+  whenIUse      Json?
+  whenIIgnore   Json?
+  examples      Json?
+  personalNotes Json?
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([strategyId, deletedAt, sortOrder])
 }

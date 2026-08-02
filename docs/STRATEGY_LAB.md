@@ -81,49 +81,79 @@ and the full test suite pass.
 
 ---
 
-## ▶️ Phase 2 — Section 1: ARSENAL (BUILD THIS NEXT)
+## ✅ Phase 2 — Section 1: ARSENAL (DONE)
 
-The trader's toolbox of concepts. Build it, don't touch Phase 1.
+The trader's toolbox of concepts, live in the workspace's Arsenal tab.
 
-**Data model** — add to `prisma/schema.prisma` and uncomment the `arsenalConcepts`
-relation on `Strategy`:
+- **Schema**: `ArsenalConcept` (8 rich-text Json fields — definition, purpose,
+  howIIdentify, whyItMatters, whenIUse, whenIIgnore, examples, personalNotes —
+  plus name, sortOrder, soft-delete). Migration `20260802212245_add_arsenal_concept`.
+  `Strategy.arsenalConcepts` relation uncommented; registered in `SOFT_DELETE_MODELS`.
+- **Service** (`arsenal.service.ts`): list/create/update/archive/reorder, all scoped
+  to the user **through the parent strategy** (`strategy: { userId }`) since concepts
+  have no `userId`. `updateArsenalConcept` maps a cleared rich field (`null`) to
+  `Prisma.DbNull`.
+- **Actions** (`arsenal.actions.ts`): revalidate `/strategy-lab/[id]`.
+- **Validation** (`src/lib/validation/arsenal.ts`): create (name), partial update
+  (name + any rich field), reorder. Exports `ARSENAL_RICH_FIELDS` (the ordered key
+  list, reused by the UI and duplicate logic).
+- **UI**: `ArsenalSection` (dnd-kit **card-styled** reorder — not the compact
+  `SortableList` — inline add, empty state) + `ArsenalConceptCard` (name autosaved via
+  `useDebouncedAutosave`; expandable body lazy-mounts 8 `RichTextEditor`s, each
+  autosaving its own field; delete confirm-gated). Card keeps a local copy of each
+  field so a collapse→expand remount shows the latest saved content without a page
+  refresh. Wired into `strategy-workspace.tsx` (Arsenal tab) with concepts loaded in
+  the workspace page.
+- **Duplicate**: `duplicateStrategy` now `include`s live concepts and `createMany`s
+  them onto the copy inside the same transaction (verified: name + rich-text content
+  copy over).
+
+Verified end-to-end (empty state → add → expand → rich-text autosave → persists on
+reload → delete-confirm → duplicate deep-copies the concept & its content). `tsc`,
+lint, 103 tests pass.
+
+### Notes for later
+- Concept **name** is an editable `<input>` (not static text) — tests read it via the
+  `Concept name` textbox role, not `getByText`.
+- **Charts / images** per concept are deferred (UploadThing is deferred app-wide);
+  the card shows a note. Add an `ArsenalConceptImage[]` relation when hosting lands.
+- Rich text uses the shared `RichTextEditor` (`prose-invert`) — a pre-existing
+  light-mode prose-contrast quirk affects all rich text app-wide, out of scope here.
+
+---
+
+## ▶️ Phase 3 — Section 2: FRAMEWORK (BUILD THIS NEXT)
+
+The decision process as an ordered, drag-and-drop sequence of steps. Don't touch
+Phases 1–2.
+
+**Data model** — add and uncomment `Strategy.frameworkSteps`:
 
 ```prisma
-model ArsenalConcept {
-  id         String   @id @default(cuid())
-  strategyId String
-  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  name       String
-  // Rich-text (Tiptap JSON) fields — reuse RichTextEditor + tiptapToPlainText:
-  definition     Json?
-  purpose        Json?
-  howIIdentify   Json?
-  whyItMatters   Json?
-  whenIUse       Json?
-  whenIIgnore    Json?
-  examples       Json?
-  personalNotes  Json?
-  sortOrder  Int       @default(0)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  deletedAt  DateTime?
-  // images ArsenalConceptImage[]  // when image upload lands (UploadThing is deferred app-wide)
+model StrategyFrameworkStep {
+  id          String   @id @default(cuid())
+  strategyId  String
+  strategy    Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  title       String
+  description String?  // plain text (or Json? for rich text, to match Arsenal)
+  notes       String?
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
   @@index([strategyId, deletedAt, sortOrder])
 }
 ```
 
-Register `ArsenalConcept` in `SOFT_DELETE_MODELS` (`src/server/db.ts`).
-
-**Then:**
-1. Service `arsenal.service.ts` (list/create/update/archive/reorder by `strategyId`,
-   all scoped through the parent strategy's `userId`).
-2. Actions `arsenal.actions.ts` (revalidate `/strategy-lab/[id]`).
-3. UI: replace the Arsenal `SectionPlaceholder` in `strategy-workspace.tsx` with an
-   `ArsenalSection` — expandable concept cards (Accordion), each field a
-   `RichTextEditor` autosaved via `useDebouncedAutosave`; add/reorder (SortableList)/
-   delete (ConfirmDialog).
-4. **Duplicate**: in `duplicateStrategy`, at the marked extension point, deep-copy
-   the source strategy's concepts to `copy.id` inside the same transaction.
+Register in `SOFT_DELETE_MODELS`. Then mirror Phase 2's shape exactly:
+1. `framework.service.ts` (scoped via parent strategy), `framework.actions.ts`.
+2. Validation in `src/lib/validation/framework.ts`.
+3. UI: replace the Framework `SectionPlaceholder` with a `FrameworkSection`. Steps
+   are simpler than Arsenal concepts (title + description + notes) — a numbered,
+   reorderable list. Reuse the dnd-kit pattern from `arsenal-section.tsx` (or the
+   compact `SortableList` since steps are small) and `useDebouncedAutosave`.
+4. Extend `duplicateStrategy`: `include` `frameworkSteps` and `createMany` them onto
+   the copy in the same transaction (next to the Arsenal copy).
 
 Leave the app working. Update this file. Then stop.
 
@@ -131,8 +161,7 @@ Leave the app working. Update this file. Then stop.
 
 ## Later phases (design already accommodates them — no refactor needed)
 
-- **Phase 3 — Framework**: `StrategyFrameworkStep` (title, description, notes,
-  `sortOrder`), ordered drag-and-drop steps. Replace the Framework placeholder.
+- **Phase 3 — Framework**: see the spec above (this is the next build).
 - **Phase 4 — Timeframes**: `StrategyTimeframe` (name) → `StrategyCheckpoint`
   (title, description, notes, images) one-to-many. Replace the Timeframes placeholder.
 - **Phase 5 — Entry Models**: `StrategyEntryModel` (name, description, conditions,

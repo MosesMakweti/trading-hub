@@ -2,9 +2,10 @@ import { notFound } from "next/navigation";
 
 import { requireUser } from "@/server/guards";
 import { getStrategy } from "@/server/services/strategies.service";
+import { listArsenalConcepts } from "@/server/services/arsenal.service";
 import { FadeIn } from "@/components/shared/motion";
 import { StrategyWorkspace } from "@/components/strategy-lab/strategy-workspace";
-import type { StrategyDTO } from "@/types/strategies";
+import type { ArsenalConceptDTO, StrategyDTO } from "@/types/strategies";
 
 export default async function StrategyWorkspacePage({
   params,
@@ -15,6 +16,8 @@ export default async function StrategyWorkspacePage({
   const user = await requireUser();
   const strategy = await getStrategy(user.id, strategyId);
   if (!strategy) notFound();
+
+  const concepts = await listArsenalConcepts(user.id, strategyId);
 
   const dto: StrategyDTO = {
     id: strategy.id,
@@ -27,9 +30,22 @@ export default async function StrategyWorkspacePage({
     updatedAt: strategy.updatedAt.toISOString(),
   };
 
+  const arsenalConcepts: ArsenalConceptDTO[] = concepts.map((c) => ({
+    id: c.id,
+    name: c.name,
+    definition: c.definition,
+    purpose: c.purpose,
+    howIIdentify: c.howIIdentify,
+    whyItMatters: c.whyItMatters,
+    whenIUse: c.whenIUse,
+    whenIIgnore: c.whenIIgnore,
+    examples: c.examples,
+    personalNotes: c.personalNotes,
+  }));
+
   return (
     <FadeIn>
-      <StrategyWorkspace strategy={dto} />
+      <StrategyWorkspace strategy={dto} arsenalConcepts={arsenalConcepts} />
     </FadeIn>
   );
 }

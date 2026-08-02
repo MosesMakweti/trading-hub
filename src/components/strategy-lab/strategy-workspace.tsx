@@ -21,9 +21,10 @@ import {
   type StrategySettingsState,
 } from "@/components/strategy-lab/strategy-settings-form";
 import { SectionPlaceholder } from "@/components/strategy-lab/section-placeholder";
+import { ArsenalSection } from "@/components/strategy-lab/arsenal-section";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { updateStrategySettings } from "@/actions/strategies.actions";
-import type { StrategyDTO } from "@/types/strategies";
+import type { ArsenalConceptDTO, StrategyDTO } from "@/types/strategies";
 
 // Section tabs. Settings is live in Phase 1; the rest are documented placeholders
 // whose phase components slot straight into these panels (see STRATEGY_LAB.md).
@@ -91,7 +92,13 @@ const SECTIONS = [
   },
 ] as const;
 
-export function StrategyWorkspace({ strategy }: { strategy: StrategyDTO }) {
+export function StrategyWorkspace({
+  strategy,
+  arsenalConcepts,
+}: {
+  strategy: StrategyDTO;
+  arsenalConcepts: ArsenalConceptDTO[];
+}) {
   const [settings, setSettings] = useState<StrategySettingsState>({
     name: strategy.name,
     description: strategy.description ?? "",
@@ -161,7 +168,13 @@ export function StrategyWorkspace({ strategy }: { strategy: StrategyDTO }) {
           <StrategySettingsForm value={settings} onChange={setSettings} saveState={saveState} />
         </TabsContent>
 
-        {SECTIONS.map((s) => (
+        {/* Section 1 — Arsenal is live (Phase 2). */}
+        <TabsContent value="arsenal" className="mt-4">
+          <ArsenalSection strategyId={strategy.id} initialConcepts={arsenalConcepts} />
+        </TabsContent>
+
+        {/* The remaining sections are documented placeholders until their phase. */}
+        {SECTIONS.filter((s) => s.value !== "arsenal").map((s) => (
           <TabsContent key={s.value} value={s.value} className="mt-4">
             <SectionPlaceholder
               icon={s.icon}

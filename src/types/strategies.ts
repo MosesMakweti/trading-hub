@@ -11,3 +11,17 @@ export interface StrategyDTO {
   createdAt: string; // ISO
   updatedAt: string; // ISO
 }
+
+/** Section 1 — Arsenal. Rich-text fields are Tiptap JSON documents (or null). */
+export interface ArsenalConceptDTO {
+  id: string;
+  name: string;
+  definition: unknown;
+  purpose: unknown;
+  howIIdentify: unknown;
+  whyItMatters: unknown;
+  whenIUse: unknown;
+  whenIIgnore: unknown;
+  examples: unknown;
+  personalNotes: unknown;
+}
