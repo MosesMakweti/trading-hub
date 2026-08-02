@@ -156,62 +156,89 @@ abstract prematurely.
 
 ---
 
-## ▶️ Phase 4 — Section 3: TIMEFRAME WORKSPACE (BUILD THIS NEXT)
+## ✅ Phase 4 — Section 3: TIMEFRAME WORKSPACE (DONE)
 
-What the trader looks for on each timeframe. Two levels: unlimited **timeframes**,
-each holding unlimited **checkpoints**. Don't touch Phases 1–3.
+The first two-level nested section: unlimited **timeframes**, each holding unlimited
+**checkpoints**. Live in the Timeframes tab.
 
-**Data model** — add both, and uncomment `Strategy.timeframes`:
+- **Schema**: `StrategyTimeframe` (name) 1→many `StrategyCheckpoint` (title + rich
+  `description`/`notes`), both with sortOrder + soft-delete; cascade deletes down the
+  tree. Migration `20260802223315_add_timeframe_workspace`; both registered in
+  `SOFT_DELETE_MODELS`; `Strategy.timeframes` uncommented.
+- **Service** (`timeframes.service.ts`): timeframe CRUD scoped via
+  `strategy: { userId }`; checkpoint CRUD scoped via
+  `timeframe: { strategy: { userId } }`. `listTimeframes` includes checkpoints
+  (nested `where deletedAt:null` + order). Actions/validation mirror prior phases
+  (`CHECKPOINT_RICH_FIELDS`). Checkpoint actions take `strategyId` (for revalidate)
+  **and** the parent id.
+- **UI**: `TimeframesSection` → `TimeframeCard` (name autosaved, expanded by default,
+  checkpoint-count badge) → `CheckpointList` → `CheckpointCard` (title autosaved,
+  expandable rich description/notes). **Two independent dnd-kit contexts** — one for
+  timeframes, one per timeframe's checkpoints — so dragging at either level doesn't
+  interfere (each grip drives only its own SortableContext). Add-inline + delete-
+  confirm at both levels.
+- **Duplicate**: `duplicateStrategy` now also deep-copies the nested tree —
+  per source timeframe it `create`s the timeframe (to get the new id) then
+  `createMany`s its checkpoints, all in the transaction. Verified.
+
+Verified end-to-end (empty → add 2 timeframes → add checkpoints → expand → rich-text
+autosave → persists on reload → delete checkpoint → duplicate deep-copies timeframes
++ checkpoints + rich text) with zero console errors; `tsc`, lint, 103 tests pass.
+
+**Note:** nested dnd works because contexts are separate DOM subtrees with their own
+grips; keep that pattern if any later section nests lists.
+
+---
+
+## ▶️ Phase 5 — Section 4: ENTRY MODELS (BUILD THIS NEXT)
+
+Multiple entry models per strategy, each a documented setup. Single-level (like
+Arsenal). Don't touch Phases 1–4.
+
+**Data model** — add and uncomment `Strategy.entryModels`:
 
 ```prisma
-model StrategyTimeframe {
-  id          String   @id @default(cuid())
-  strategyId  String
-  strategy    Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  name        String   // e.g. Monthly, Weekly, Daily, H4, M15
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime?
-  checkpoints StrategyCheckpoint[]
+model StrategyEntryModel {
+  id           String   @id @default(cuid())
+  strategyId   String
+  strategy     Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  name         String
+  // rich-text (Tiptap JSON) fields:
+  description           Json?
+  conditions            Json?
+  confirmationChecklist Json?
+  invalidation          Json?
+  stopPlacement         Json?
+  targetLogic           Json?
+  notes                 Json?
+  sortOrder    Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
   @@index([strategyId, deletedAt, sortOrder])
-}
-
-model StrategyCheckpoint {
-  id          String   @id @default(cuid())
-  timeframeId String
-  timeframe   StrategyTimeframe @relation(fields: [timeframeId], references: [id], onDelete: Cascade)
-  title       String
-  description Json?    // rich text; images deferred (UploadThing)
-  notes       Json?
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime?
-  @@index([timeframeId, deletedAt, sortOrder])
 }
 ```
 
-Register **both** in `SOFT_DELETE_MODELS`. Scope checkpoints to the user via
-`timeframe: { strategy: { userId } }`. Then:
-1. `timeframes.service.ts` + `timeframes.actions.ts` + `src/lib/validation/timeframes.ts`.
-2. UI: replace the Timeframes `SectionPlaceholder` with a `TimeframesSection` —
-   expandable timeframe cards (name), each containing a reorderable checkpoint list
-   (title + rich description/notes), mirroring Framework nested one level deeper.
-3. Extend `duplicateStrategy`: `include` `timeframes: { include: { checkpoints } }`
-   and re-create timeframes **then** their checkpoints in the transaction (create the
-   timeframe first to get its new id, then its checkpoints).
+Register in `SOFT_DELETE_MODELS`. This is structurally **identical to Arsenal**
+(Phase 2) — an expandable card with N rich-text fields. Fastest path: copy the
+Arsenal service/actions/validation/UI (`arsenal-*`, `ARSENAL_RICH_FIELDS`) and swap
+the model + field list (`ENTRY_MODEL_RICH_FIELDS = [description, conditions,
+confirmationChecklist, invalidation, stopPlacement, targetLogic, notes]`). Then
+replace the Entry Models `SectionPlaceholder` and extend `duplicateStrategy`
+(`createMany` like Arsenal). Note: `confirmationChecklist` is rich text for now; a
+future phase could make it a real checkable list if desired.
 
 Leave the app working. Update this file. Then stop.
+
+**Reuse reminder:** four near-identical expandable-card sections now exist
+(Arsenal, Framework, Checkpoint, and soon Entry Models). If the duplication bites,
+factor a shared `ExpandableRichCard` — but only if it ends up simpler.
 
 ---
 
 ## Later phases (design already accommodates them — no refactor needed)
 
-- **Phase 4 — Timeframes**: see the spec above (this is the next build).
-- **Phase 5 — Entry Models**: `StrategyEntryModel` (name, description, conditions,
-  confirmationChecklist, invalidation, stopPlacement, targetLogic, images, notes).
-  Replace the Entry Models placeholder.
+- **Phase 5 — Entry Models**: see the spec above (this is the next build).
 - **Phase 6 — Trade Management**: `StrategyTradeManagement` (1:1 — TP philosophy,
   stop/BE/trailing/scaling rules, max hold, max risk) + `PartialTakeProfit`
   (trigger, percentToClose, reason) + `TradeManagementRule` (custom rules).

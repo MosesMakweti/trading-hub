@@ -443,8 +443,8 @@ model Strategy {
   // ── Workspace sections ─────────────────────────────────────────────────────
   arsenalConcepts ArsenalConcept[]        // Section 1 — Arsenal (expandable concept cards)
   frameworkSteps  StrategyFrameworkStep[] // Section 2 — Framework (ordered decision steps)
-  // ── Phase 4+ extension points (add the models, then uncomment) ─────────────
-  // timeframes      StrategyTimeframe[]      // Section 3 — Timeframe workspace (each has checkpoints)
+  timeframes      StrategyTimeframe[]     // Section 3 — Timeframe workspace (each has checkpoints)
+  // ── Phase 5+ extension points (add the models, then uncomment) ─────────────
   // entryModels     StrategyEntryModel[]     // Section 4 — Entry Models
   // tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (+ partial TPs, custom rules)
   // trades          Trade[]                  // Journal link: Trade.strategyId -> Strategy (reference, not copy)
@@ -498,4 +498,43 @@ model StrategyFrameworkStep {
   deletedAt DateTime?
 
   @@index([strategyId, deletedAt, sortOrder])
+}
+
+// Strategy Lab · Section 3 — Timeframe Workspace. Two levels: a strategy has
+// unlimited timeframes (Monthly … M1), each holding unlimited checkpoints. Scoped
+// to a user via Strategy; checkpoints via their timeframe's strategy.
+model StrategyTimeframe {
+  id         String   @id @default(cuid())
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  name String // e.g. Monthly, Weekly, Daily, H4, M15
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  checkpoints StrategyCheckpoint[]
+
+  @@index([strategyId, deletedAt, sortOrder])
+}
+
+// A checkpoint within a timeframe (e.g. Daily → "Determine trend"). Description
+// and notes are Tiptap rich-text JSON; images deferred (UploadThing).
+model StrategyCheckpoint {
+  id          String            @id @default(cuid())
+  timeframeId String
+  timeframe   StrategyTimeframe @relation(fields: [timeframeId], references: [id], onDelete: Cascade)
+
+  title       String
+  description Json?
+  notes       Json?
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([timeframeId, deletedAt, sortOrder])
 }

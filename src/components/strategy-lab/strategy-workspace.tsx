@@ -23,9 +23,15 @@ import {
 import { SectionPlaceholder } from "@/components/strategy-lab/section-placeholder";
 import { ArsenalSection } from "@/components/strategy-lab/arsenal-section";
 import { FrameworkSection } from "@/components/strategy-lab/framework-section";
+import { TimeframesSection } from "@/components/strategy-lab/timeframes-section";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { updateStrategySettings } from "@/actions/strategies.actions";
-import type { ArsenalConceptDTO, FrameworkStepDTO, StrategyDTO } from "@/types/strategies";
+import type {
+  ArsenalConceptDTO,
+  FrameworkStepDTO,
+  StrategyDTO,
+  TimeframeDTO,
+} from "@/types/strategies";
 
 // Section tabs. Settings is live in Phase 1; the rest are documented placeholders
 // whose phase components slot straight into these panels (see STRATEGY_LAB.md).
@@ -97,10 +103,12 @@ export function StrategyWorkspace({
   strategy,
   arsenalConcepts,
   frameworkSteps,
+  timeframes,
 }: {
   strategy: StrategyDTO;
   arsenalConcepts: ArsenalConceptDTO[];
   frameworkSteps: FrameworkStepDTO[];
+  timeframes: TimeframeDTO[];
 }) {
   const [settings, setSettings] = useState<StrategySettingsState>({
     name: strategy.name,
@@ -181,8 +189,15 @@ export function StrategyWorkspace({
           <FrameworkSection strategyId={strategy.id} initialSteps={frameworkSteps} />
         </TabsContent>
 
+        {/* Section 3 — Timeframe workspace is live (Phase 4). */}
+        <TabsContent value="timeframes" className="mt-4">
+          <TimeframesSection strategyId={strategy.id} initialTimeframes={timeframes} />
+        </TabsContent>
+
         {/* The remaining sections are documented placeholders until their phase. */}
-        {SECTIONS.filter((s) => s.value !== "arsenal" && s.value !== "framework").map((s) => (
+        {SECTIONS.filter(
+          (s) => s.value !== "arsenal" && s.value !== "framework" && s.value !== "timeframes",
+        ).map((s) => (
           <TabsContent key={s.value} value={s.value} className="mt-4">
             <SectionPlaceholder
               icon={s.icon}

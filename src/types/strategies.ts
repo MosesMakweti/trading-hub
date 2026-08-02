@@ -33,3 +33,17 @@ export interface FrameworkStepDTO {
   description: unknown;
   notes: unknown;
 }
+
+/** Section 3 — Timeframe workspace. A checkpoint within a timeframe. */
+export interface CheckpointDTO {
+  id: string;
+  title: string;
+  description: unknown;
+  notes: unknown;
+}
+
+export interface TimeframeDTO {
+  id: string;
+  name: string;
+  checkpoints: CheckpointDTO[];
+}

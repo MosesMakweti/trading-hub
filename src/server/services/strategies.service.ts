@@ -109,6 +109,11 @@ export async function duplicateStrategy(userId: string, id: string) {
       // Only live rows; the extension doesn't filter nested relations.
       arsenalConcepts: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
       frameworkSteps: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+      timeframes: {
+        where: { deletedAt: null },
+        orderBy: { sortOrder: "asc" },
+        include: { checkpoints: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } } },
+      },
     },
   });
   if (!source) throw new Error("Strategy not found.");
@@ -162,6 +167,25 @@ export async function duplicateStrategy(userId: string, id: string) {
           notes: toJsonInput(s.notes),
         })),
       });
+    }
+
+    // Section 3 — Timeframes (nested): create each timeframe, then its checkpoints
+    // under the new timeframe id, all inside this transaction.
+    for (const tf of source.timeframes) {
+      const newTf = await tx.strategyTimeframe.create({
+        data: { strategyId: copy.id, name: tf.name, sortOrder: tf.sortOrder },
+      });
+      if (tf.checkpoints.length > 0) {
+        await tx.strategyCheckpoint.createMany({
+          data: tf.checkpoints.map((cp) => ({
+            timeframeId: newTf.id,
+            title: cp.title,
+            sortOrder: cp.sortOrder,
+            description: toJsonInput(cp.description),
+            notes: toJsonInput(cp.notes),
+          })),
+        });
+      }
     }
 
     return copy;
