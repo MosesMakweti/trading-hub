@@ -10,6 +10,7 @@ const SOFT_DELETE_MODELS = new Set([
   "TradingAccount",
   "DailyNote",
   "Trade",
+  "Strategy",
 ]);
 
 function withSoftDelete(client: PrismaClient) {

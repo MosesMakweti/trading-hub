@@ -33,6 +33,7 @@ model User {
   tradingAccounts TradingAccount[]
   dailyNotes      DailyNote[]
   trades          Trade[]
+  strategies      Strategy[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -394,4 +395,58 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STRATEGY LAB
+//
+// A trader's methodology workspace. `Strategy` is the hub; every workspace
+// section (Arsenal / Framework / Timeframes / Entry Models / Trade Management)
+// attaches to it by `strategyId` with `onDelete: Cascade`, so deleting or
+// duplicating a strategy fans out to its whole tree in one operation.
+//
+// Built in phases — see docs/STRATEGY_LAB.md. Phase 1 ships the hub + settings;
+// the commented relations below are the exact extension points for later phases.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum StrategyStatus {
+  DRAFT
+  TESTING
+  LIVE
+  ARCHIVED
+}
+
+model Strategy {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String? // plain-text summary shown on the strategy card
+
+  // Free-text market symbols (XAUUSD, NAS100, …). Stored as a scalar list for
+  // simple tag-style editing; surfaced inside the Journal when the strategy is
+  // selected (Journal integration — a later phase).
+  applicableAssets String[]
+
+  status StrategyStatus @default(DRAFT)
+
+  // Versioning-ready: a future `StrategyVersion` model can snapshot the full
+  // nested tree keyed by (strategyId, version); this counter is the anchor.
+  version Int @default(1)
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft delete (registered in server/db.ts); Archive is a status, Delete sets this
+
+  // ── Phase 2+ extension points (add the models, then uncomment) ─────────────
+  // arsenalConcepts ArsenalConcept[]         // Section 1 — Arsenal (expandable concept cards)
+  // frameworkSteps  StrategyFrameworkStep[]  // Section 2 — Framework (ordered decision steps)
+  // timeframes      StrategyTimeframe[]      // Section 3 — Timeframe workspace (each has checkpoints)
+  // entryModels     StrategyEntryModel[]     // Section 4 — Entry Models
+  // tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (+ partial TPs, custom rules)
+  // trades          Trade[]                  // Journal link: Trade.strategyId -> Strategy (reference, not copy)
+
+  @@index([userId, deletedAt, sortOrder])
 }

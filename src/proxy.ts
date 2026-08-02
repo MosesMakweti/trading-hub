@@ -15,6 +15,7 @@ export const config = {
     "/dashboard/:path*",
     "/journal/:path*",
     "/accounts/:path*",
+    "/strategy-lab/:path*",
     "/analytics/:path*",
     "/settings/:path*",
   ],
