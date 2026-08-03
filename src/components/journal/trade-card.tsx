@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Pencil, Trash2 } from "lucide-react";
+import { SquareArrowOutUpRight, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { minutesToTimeString } from "@/lib/date";
@@ -135,13 +135,15 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
 
       <div className="flex items-center justify-end gap-1 border-t border-border pt-2">
         <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Edit trade"
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          aria-label="Open trade workspace"
           nativeButton={false}
           render={<Link href={`/journal/${dateKey}/trades/${trade.id}`} />}
         >
-          <Pencil />
+          <SquareArrowOutUpRight className="size-3.5" />
+          Open
         </Button>
         <Button
           variant="ghost"

@@ -151,6 +151,17 @@ export async function getTrade(userId: string, tradeId: string) {
   });
 }
 
+/**
+ * A stable-ish "Trade #N" for the workspace header: this trade's position in the
+ * user's creation-ordered history. Derived (not persisted) so Phase 1 needs no
+ * schema change — a real monotonic trade number is a suggested later DB addition.
+ */
+export async function getTradeOrdinal(userId: string, createdAt: Date) {
+  return prisma.trade.count({
+    where: { userId, createdAt: { lte: createdAt } },
+  });
+}
+
 export async function createTrade(userId: string, dateKey: string, data: TradeInput) {
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   const allocations = await buildAllocations(userId, data);

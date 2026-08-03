@@ -1,15 +1,13 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
-import { getTrade, getTradeFormOptions } from "@/server/services/trades.service";
-import { isValidDateKey, formatDateKeyLong } from "@/lib/date";
-import { Button } from "@/components/ui/button";
-import { TradeForm } from "@/components/journal/trade-form";
-import type { TradeFormValues } from "@/lib/validation/trades";
+import { getTrade, getTradeOrdinal } from "@/server/services/trades.service";
+import { isValidDateKey, utcDateToKey } from "@/lib/date";
+import { FadeIn } from "@/components/shared/motion";
+import { TradeWorkspace } from "@/components/journal/workspace/trade-workspace";
+import type { TradeStatus, TradeWorkspaceDTO } from "@/types/trades";
 
-export default async function EditTradePage({
+export default async function TradeWorkspacePage({
   params,
 }: {
   params: Promise<{ date: string; tradeId: string }>;
@@ -18,78 +16,75 @@ export default async function EditTradePage({
   if (!isValidDateKey(dateKey)) notFound();
 
   const user = await requireUser();
-  const [trade, options] = await Promise.all([
-    getTrade(user.id, tradeId),
-    getTradeFormOptions(user.id),
-  ]);
+  const trade = await getTrade(user.id, tradeId);
   if (!trade) notFound();
 
-  const { accounts, assets, sessions, entryModels, confluenceItems, executionItems } = options;
+  const tradeNumber = await getTradeOrdinal(user.id, trade.createdAt);
 
-  const performanceAllocation = trade.allocations.find(
-    (a) => a.tradingAccount.kind === "PERFORMANCE",
-  );
-  const participatingAllocations = trade.allocations.filter(
-    (a) => a.tradingAccount.kind !== "PERFORMANCE",
-  );
+  const performance = trade.allocations.find((a) => a.tradingAccount.kind === "PERFORMANCE");
+  const actualRR = trade.actualRR ? trade.actualRR.toNumber() : null;
 
-  const defaultValues: TradeFormValues = {
-    assetId: trade.assetId,
-    executionMinutes: trade.executionMinutes,
+  // Derived lifecycle status (no DB status column in Phase 1).
+  const hasReview = Boolean(
+    trade.psychPostTradeReflection || trade.psychLessonsLearned || trade.psychWhatToWorkOn,
+  );
+  const status: TradeStatus =
+    actualRR != null ? (hasReview ? "REVIEWED" : "CLOSED") : "OPEN";
+
+  const dto: TradeWorkspaceDTO = {
+    id: trade.id,
+    dateKey: utcDateToKey(trade.tradeDate),
+    tradeNumber,
+    assetSymbol: trade.asset.symbol,
+    assetLabel: trade.asset.label,
     direction: trade.direction,
+    executionMinutes: trade.executionMinutes,
+    sessionName: trade.session?.name ?? null,
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
-    sessionId: trade.sessionId,
     expectedRR: trade.expectedRR.toNumber(),
-    actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
-    performanceClosingPnlGross: performanceAllocation?.closingPnlGross.toNumber() ?? 0,
-    performanceClosingPnlNet: performanceAllocation?.closingPnlNet.toNumber() ?? 0,
+    actualRR,
     hitTP1: trade.hitTP1,
     hitTP2: trade.hitTP2,
     hitTP3: trade.hitTP3,
     hitFullTP: trade.hitFullTP,
-    psychPreTradeMindset: trade.psychPreTradeMindset,
-    psychPostTradeReflection: trade.psychPostTradeReflection,
-    psychLessonsLearned: trade.psychLessonsLearned,
-    psychWhatToWorkOn: trade.psychWhatToWorkOn,
-    allocations: participatingAllocations.map((a) => ({
-      tradingAccountId: a.tradingAccountId,
+    entryModelNames: trade.entryModels.map((m) => m.entryModel.name),
+    confluenceLabels: trade.checklistSelections
+      .filter((c) => c.checklistItem.type === "CONFLUENCE")
+      .map((c) => c.checklistItem.label),
+    executionLabels: trade.checklistSelections
+      .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
+      .map((c) => c.checklistItem.label),
+    accounts: trade.allocations.map((a) => ({
+      name: a.tradingAccount.name,
+      kind: a.tradingAccount.kind as TradeWorkspaceDTO["accounts"][number]["kind"],
       riskInputType: a.riskInputType,
       riskValue: a.riskValue.toNumber(),
+      closingPnlGross: a.closingPnlGross.toNumber(),
+      closingPnlNet: a.closingPnlNet.toNumber(),
     })),
-    checklistItemIds: trade.checklistSelections.map((c) => c.checklistItemId),
-    entryModelIds: trade.entryModels.map((m) => m.entryModelId),
-    psychologyAnswers: (trade.psychology?.answers as Record<string, string | number>) ?? {},
+    performancePnlGross: performance?.closingPnlGross.toNumber() ?? 0,
+    performancePnlNet: performance?.closingPnlNet.toNumber() ?? 0,
+    preTradeNotes: trade.psychPreTradeMindset,
+    postTradeReflection: trade.psychPostTradeReflection,
+    lessonsLearned: trade.psychLessonsLearned,
+    whatToWorkOn: trade.psychWhatToWorkOn,
+    psychology: trade.psychology
+      ? {
+          rawScore: trade.psychology.rawScore,
+          percent: trade.psychology.psychologyPercent,
+          grade: trade.psychology.grade,
+        }
+      : null,
+    images: trade.images.map((img) => ({ id: img.id, category: img.category, url: img.url })),
+    status,
+    createdAt: trade.createdAt.toISOString(),
+    updatedAt: trade.updatedAt.toISOString(),
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          nativeButton={false}
-          render={<Link href={`/journal/${dateKey}`} />}
-        >
-          <ChevronLeft />
-        </Button>
-        <h1 className="text-xl font-semibold tracking-tight">
-          Edit Trade — {formatDateKeyLong(dateKey)}
-        </h1>
-      </div>
-
-      <TradeForm
-        dateKey={dateKey}
-        mode="edit"
-        tradeId={tradeId}
-        accounts={accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind }))}
-        assets={assets.map((a) => ({ id: a.id, symbol: a.symbol, label: a.label }))}
-        sessions={sessions.map((s) => ({ id: s.id, name: s.name }))}
-        entryModels={entryModels.map((m) => ({ id: m.id, name: m.name }))}
-        confluenceItems={confluenceItems.map((c) => ({ id: c.id, label: c.label }))}
-        executionItems={executionItems.map((c) => ({ id: c.id, label: c.label }))}
-        defaultValues={defaultValues}
-      />
-    </div>
+    <FadeIn>
+      <TradeWorkspace trade={dto} />
+    </FadeIn>
   );
 }

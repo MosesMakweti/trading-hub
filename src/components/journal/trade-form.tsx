@@ -123,7 +123,10 @@ export function TradeForm({
       return;
     }
     toast.success(mode === "create" ? "Trade added." : "Trade updated.");
-    router.push(`/journal/${dateKey}`);
+    // After an edit, return to that trade's workspace; after create, to the day.
+    router.push(
+      mode === "edit" && tradeId ? `/journal/${dateKey}/trades/${tradeId}` : `/journal/${dateKey}`,
+    );
     router.refresh();
   }
 

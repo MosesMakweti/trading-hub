@@ -1,0 +1,133 @@
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { minutesToTimeString } from "@/lib/date";
+import {
+  ComingSoon,
+  WorkspaceField,
+  formatRR,
+  formatSignedCurrency,
+} from "@/components/journal/workspace/workspace-ui";
+import type { TradeWorkspaceDTO } from "@/types/trades";
+
+const ACCOUNT_KIND_LABEL: Record<string, string> = {
+  PERFORMANCE: "Performance",
+  PROP_FIRM: "Prop firm",
+  PERSONAL_BROKERAGE: "Brokerage",
+};
+
+// Section 2 — Trade Execution: what actually happened. Kept separate from the plan.
+export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
+  const tpHits = [
+    trade.hitTP1 && "TP1",
+    trade.hitTP2 && "TP2",
+    trade.hitTP3 && "TP3",
+    trade.hitFullTP && "Full TP",
+  ].filter(Boolean) as string[];
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+        <WorkspaceField label="Execution time" value={minutesToTimeString(trade.executionMinutes)} />
+        <WorkspaceField
+          label="Direction"
+          value={
+            <Badge variant={trade.direction === "LONG" ? "success" : "danger"}>
+              {trade.direction === "LONG" ? "Long" : "Short"}
+            </Badge>
+          }
+        />
+        <WorkspaceField
+          label="Performance PnL (net)"
+          value={
+            <span className={trade.performancePnlNet >= 0 ? "text-success" : "text-danger"}>
+              {formatSignedCurrency(trade.performancePnlNet)}
+            </span>
+          }
+        />
+        <WorkspaceField
+          label="Performance PnL (gross)"
+          value={formatSignedCurrency(trade.performancePnlGross)}
+        />
+      </div>
+
+      {/* Planned vs actual RR — the core "did it play out?" comparison. */}
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-background/40 p-3">
+        <div className="flex-1">
+          <div className="text-xs text-muted-foreground">Expected RR</div>
+          <div className="text-lg font-semibold tabular-nums">{trade.expectedRR.toFixed(2)}R</div>
+        </div>
+        <div className="text-muted-foreground">→</div>
+        <div className="flex-1 text-right">
+          <div className="text-xs text-muted-foreground">Actual RR</div>
+          <div
+            className={cn(
+              "text-lg font-semibold tabular-nums",
+              trade.actualRR == null
+                ? "text-muted-foreground"
+                : trade.actualRR >= 0
+                  ? "text-success"
+                  : "text-danger",
+            )}
+          >
+            {trade.actualRR == null ? "Open" : formatRR(trade.actualRR)}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-1.5 text-xs text-muted-foreground">Accounts &amp; risk allocation</div>
+        <div className="space-y-1.5">
+          {trade.accounts.map((a) => (
+            <div
+              key={`${a.name}-${a.kind}`}
+              className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background/40 px-3 py-2 text-sm"
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{a.name}</span>
+                <Badge variant="outline">{ACCOUNT_KIND_LABEL[a.kind] ?? a.kind}</Badge>
+                <span className="text-xs text-muted-foreground">
+                  Risk {a.riskValue}
+                  {a.riskInputType === "PERCENT" ? "%" : "$"}
+                </span>
+              </div>
+              <span
+                className={cn(
+                  "font-medium tabular-nums",
+                  a.closingPnlNet >= 0 ? "text-success" : "text-danger",
+                )}
+              >
+                {formatSignedCurrency(a.closingPnlNet)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {(tpHits.length > 0 || trade.executionLabels.length > 0) && (
+        <div className="flex flex-wrap gap-1.5">
+          {tpHits.map((label) => (
+            <Badge key={label} variant="success">
+              {label}
+            </Badge>
+          ))}
+          {trade.executionLabels.map((label) => (
+            <Badge key={label} variant="outline">
+              {label}
+            </Badge>
+          ))}
+        </div>
+      )}
+
+      {/* Actual entry/exit prices and execution notes are new fields for a later phase. */}
+      <div className="grid grid-cols-1 gap-3 rounded-xl border border-dashed border-border p-3 sm:grid-cols-2">
+        <div className="flex items-center gap-2 sm:col-span-2">
+          <span className="text-xs font-medium text-muted-foreground">Execution details</span>
+          <ComingSoon label="Phase 2+" />
+        </div>
+        <WorkspaceField label="Actual entry" placeholder="—" />
+        <WorkspaceField label="Actual exit" placeholder="—" />
+        <WorkspaceField label="Execution notes" placeholder="—" className="sm:col-span-2" />
+      </div>
+    </div>
+  );
+}
