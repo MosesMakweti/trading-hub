@@ -4,44 +4,16 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, CircleCheck, Loader2 } from "lucide-react";
+import { CircleCheck, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RichTextEditor } from "@/components/plan/rich-text-editor";
+import { SaveDot, SectionCard } from "@/components/today/today-ui";
 import { updateMorningPrep } from "@/actions/today.actions";
 import type { SaveState } from "@/hooks/use-debounced-autosave";
 import type { MorningPrepDTO } from "@/types/today";
-
-function SaveDot({ state }: { state: SaveState }) {
-  return (
-    <span className="inline-flex w-4 items-center justify-center">
-      {state === "saving" && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-      {state === "saved" && <Check className="size-3.5 text-success" />}
-    </span>
-  );
-}
-
-function Card({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="glass space-y-3 rounded-2xl p-4">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">{title}</h3>
-        {action}
-      </div>
-      {children}
-    </div>
-  );
-}
 
 export function MorningPrepSection({
   dateKey,
@@ -109,7 +81,7 @@ export function MorningPrepSection({
       </p>
 
       {/* Pre-session routine */}
-      <Card
+      <SectionCard
         title="Pre-session routine"
         action={
           routineCount > 0 ? (
@@ -145,19 +117,19 @@ export function MorningPrepSection({
             })}
           </ul>
         )}
-      </Card>
+      </SectionCard>
 
       {/* Market context */}
-      <Card title="Market context">
+      <SectionCard title="Market context">
         <RichTextEditor
           initialContent={prep.marketContext}
           placeholder="Key news, higher-timeframe bias, levels to watch, overall tone…"
           onSave={(content) => updateMorningPrep(dateKey, { marketContext: content })}
         />
-      </Card>
+      </SectionCard>
 
       {/* Readiness */}
-      <Card title="Readiness" action={<SaveDot state={readySave} />}>
+      <SectionCard title="Readiness" action={<SaveDot state={readySave} />}>
         <p className="text-xs text-muted-foreground">
           How prepared and clear-headed do you feel right now? (1 = not ready, 5 = dialed in)
         </p>
@@ -176,7 +148,7 @@ export function MorningPrepSection({
             </Button>
           ))}
         </div>
-      </Card>
+      </SectionCard>
 
       {/* Finalize */}
       <div className="flex items-center justify-end gap-3">

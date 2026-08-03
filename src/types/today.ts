@@ -20,3 +20,16 @@ export interface MorningPrepDTO {
   readiness: number | null; // 1–5
   prepComplete: boolean;
 }
+
+/** Today's Trading Plan section data (P4). The watchlist template comes from the
+ *  user's Assets; the risk-limit hint from the Trading Plan; state on TradingDay. */
+export interface TodaysPlanDTO {
+  assets: { id: string; symbol: string; label: string | null }[];
+  bias: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
+  conviction: number | null; // 1–5
+  watchlistFocus: string[]; // Asset ids
+  keyLevels: unknown; // Tiptap JSON or null
+  riskBudgetPercent: number | null;
+  planRiskLimit: number | null; // plan's maxDailyRiskPercent (display hint)
+  planComplete: boolean;
+}

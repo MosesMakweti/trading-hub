@@ -2,20 +2,24 @@ import { requireUser } from "@/server/guards";
 import { getOrCreateTradingDay, toTradingDayDTO } from "@/server/services/trading-day.service";
 import { listTradesForDay } from "@/server/services/trades.service";
 import { listChecklistItems } from "@/server/services/checklist-items.service";
+import { listAssets } from "@/server/services/assets.service";
+import { getTradingPlan } from "@/server/services/trading-plan.service";
 import { localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 import { FadeIn } from "@/components/shared/motion";
 import { TodayWorkspace } from "@/components/today/today-workspace";
-import type { MorningPrepDTO } from "@/types/today";
+import type { MorningPrepDTO, TodaysPlanDTO } from "@/types/today";
 
 export default async function TodayPage() {
   const user = await requireUser();
   const todayKey = localDateToKey(new Date());
 
-  const [day, trades, routineItems] = await Promise.all([
+  const [day, trades, routineItems, assets, plan] = await Promise.all([
     getOrCreateTradingDay(user.id, todayKey),
     listTradesForDay(user.id, todayKey),
     listChecklistItems(user.id, "PRE_SESSION_ROUTINE"),
+    listAssets(user.id),
+    getTradingPlan(user.id),
   ]);
 
   const morningPrep: MorningPrepDTO = {
@@ -24,6 +28,17 @@ export default async function TodayPage() {
     marketContext: day.marketContext,
     readiness: day.readiness,
     prepComplete: day.prepCompletedAt != null,
+  };
+
+  const todaysPlan: TodaysPlanDTO = {
+    assets: assets.map((a) => ({ id: a.id, symbol: a.symbol, label: a.label })),
+    bias: (day.bias as TodaysPlanDTO["bias"]) ?? null,
+    conviction: day.conviction,
+    watchlistFocus: (day.watchlistFocus as string[] | null) ?? [],
+    keyLevels: day.keyLevels,
+    riskBudgetPercent: day.riskBudgetPercent ? day.riskBudgetPercent.toNumber() : null,
+    planRiskLimit: plan.maxDailyRiskPercent ? plan.maxDailyRiskPercent.toNumber() : null,
+    planComplete: day.planCompletedAt != null,
   };
 
   // Prep/Plan/Analyze are owned by the TradingDay; Trade/Review are derived from
@@ -43,6 +58,7 @@ export default async function TodayPage() {
         day={toTradingDayDTO(day)}
         stepStatuses={stepStatuses}
         morningPrep={morningPrep}
+        todaysPlan={todaysPlan}
       />
     </FadeIn>
   );

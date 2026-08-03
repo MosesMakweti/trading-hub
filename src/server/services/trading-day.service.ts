@@ -2,7 +2,7 @@ import { Prisma, type TradingDay } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
-import type { MorningPrepInput } from "@/lib/validation/today";
+import type { MorningPrepInput, TodaysPlanInput } from "@/lib/validation/today";
 import type { TradingDayDTO } from "@/types/today";
 
 /**
@@ -48,6 +48,33 @@ export async function updateMorningPrep(
   }
   if ("readiness" in input) data.readiness = input.readiness ?? null;
   if ("prepComplete" in input) data.prepCompletedAt = input.prepComplete ? new Date() : null;
+
+  return prisma.tradingDay.update({ where: { id: day.id }, data });
+}
+
+/**
+ * Applies a Today's Trading Plan patch (P4) — mirrors updateMorningPrep.
+ * `planComplete` toggles the day's planCompletedAt so the workflow advances.
+ */
+export async function updateTodaysPlan(
+  userId: string,
+  dateKey: string,
+  input: TodaysPlanInput,
+): Promise<TradingDay> {
+  const day = await getOrCreateTradingDay(userId, dateKey);
+
+  const data: Prisma.TradingDayUpdateInput = {};
+  if ("bias" in input) data.bias = input.bias ?? null;
+  if ("conviction" in input) data.conviction = input.conviction ?? null;
+  if ("watchlistFocus" in input) {
+    data.watchlistFocus = (input.watchlistFocus ?? []) as Prisma.InputJsonValue;
+  }
+  if ("keyLevels" in input) {
+    data.keyLevels =
+      input.keyLevels == null ? Prisma.DbNull : (input.keyLevels as Prisma.InputJsonValue);
+  }
+  if ("riskBudgetPercent" in input) data.riskBudgetPercent = input.riskBudgetPercent ?? null;
+  if ("planComplete" in input) data.planCompletedAt = input.planComplete ? new Date() : null;
 
   return prisma.tradingDay.update({ where: { id: day.id }, data });
 }

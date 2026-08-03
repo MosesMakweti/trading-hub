@@ -85,6 +85,16 @@ model TradingDay {
   marketContext     Json?
   readiness         Int?
 
+  // Today's Trading Plan (P4). Day intentions: higher-timeframe bias
+  // (BULLISH/BEARISH/NEUTRAL) + 1–5 conviction, today's watchlist focus (Asset
+  // ids from the user's watchlist), key levels / areas of interest (Tiptap JSON),
+  // and the day's intended risk budget (% — defaults from the plan's daily limit).
+  bias              String?
+  conviction        Int?
+  watchlistFocus    Json?
+  keyLevels         Json?
+  riskBudgetPercent Decimal? @db.Decimal(6, 2)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

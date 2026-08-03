@@ -25,8 +25,8 @@ Phase 0  Architecture Review .................... ✅ DONE (this document)
 Phase 1  Dashboard Framework .................... ✅ DONE
 Phase 2  Today Workspace Framework  (+ TradingDay backbone) ... ✅ DONE
 Phase 3  Morning Preparation .................... ✅ DONE
-Phase 4  Today's Trading Plan ................... ▶ NEXT
-Phase 5  Trade Workspace  (Idea → Execution → Review) + Daily Analytics
+Phase 4  Today's Trading Plan ................... ✅ DONE
+Phase 5  Trade Workspace  (Idea → Execution → Review) + Daily Analytics ... ▶ NEXT
 Phase 6  Automatic Journal Archiving
 Phase 7  Journal Redesign
 Phase 8  Trade Gallery
@@ -314,3 +314,40 @@ append a Progress Report, STOP.
   the user's Assets, key levels, risk budget from the plan limits), persisted on
   `TradingDay` (additive fields), setting `planCompletedAt` when done so the workflow
   advances. Same section pattern as Morning Prep. One section only, then STOP.
+
+### Phase 4 — Today's Trading Plan ✅
+- **Completed**: replaced the Today's Plan placeholder with the real section.
+  - **Higher-timeframe bias** (Bullish/Bearish/Neutral) + **conviction** (1–5).
+  - **Watchlist focus** — the user's Assets as toggle chips; selected ids saved.
+  - **Key levels & areas of interest** — a `RichTextEditor` autosaving to
+    `TradingDay.keyLevels`.
+  - **Risk budget** — a debounced % input (`useDebouncedAutosave`) with the plan's daily
+    limit shown as a hint.
+  - **Mark plan complete** — toggles `TradingDay.planCompletedAt`; on save it
+    `router.refresh()`es so the **workflow stepper advances** (Plan → done, Trade →
+    current).
+  - Extracted shared **`SaveDot` + `SectionCard`** to `components/today/today-ui.tsx` and
+    refactored Morning Prep to use them (DRY across the workflow sections).
+- **Components completed**: `today/todays-plan-section.tsx`, `today/today-ui.tsx` (shared);
+  wired into `today/today-workspace.tsx` (Today's Plan tab).
+- **Database changes**: `TradingDay` += `bias String?`, `conviction Int?`,
+  `watchlistFocus Json?`, `keyLevels Json?`, `riskBudgetPercent Decimal?` (additive).
+  Migration `20260804004236_todays_plan`.
+- **Routes**: none (still `/today`).
+- **Files changed**: new `todays-plan-section.tsx`, `today-ui.tsx`; changed
+  `prisma/schema.prisma`, `trading-day.service.ts` (updateTodaysPlan), `today.actions.ts`,
+  `lib/validation/today.ts` (todaysPlanSchema), `types/today.ts` (TodaysPlanDTO),
+  `today/page.tsx`, `today-workspace.tsx`, `today/morning-prep-section.tsx` (uses shared UI).
+- **Verified**: `tsc` + `eslint` clean, 155 tests pass, a service-level integration test
+  proved every field persists (bias/conviction/watchlist/keyLevels/risk, planComplete →
+  planCompletedAt, clear + reopen, and independence from Morning Prep), and a browser debug
+  run confirmed the tab switches and the section renders (bias / Bullish / Bearish visible).
+  *(Full interactive screenshot skipped — the low-RAM dev box was thrashing on repeated
+  Playwright runs; the section is identical in pattern to the P3-verified Morning Prep.)*
+- **Remaining work**: P5–P11.
+- **Next recommended phase**: **P5 — Trade Workspace + Daily Analytics** — wire the
+  **existing** Trade Workspace sections (Idea / Execution / Review, in
+  `components/journal/workspace/*`) into the Today flow so today's trades are created /
+  continued in-context, and add a **Daily Analytics** section (day-scoped metrics via the
+  existing analytics domain). This is the biggest section phase — consider splitting
+  (e.g. P5a trades-in-Today, P5b Daily Analytics) and STOP after each.
