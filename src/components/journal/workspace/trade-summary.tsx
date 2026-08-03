@@ -2,7 +2,6 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { GRADE_VARIANT } from "@/lib/grade-variant";
 import {
-  ComingSoon,
   StrategyRef,
   formatRR,
   formatSignedCurrency,
@@ -83,7 +82,11 @@ export function TradeSummary({ trade }: { trade: TradeWorkspaceDTO }) {
         )}
       </Stat>
       <Stat label="Strategy adherence">
-        <ComingSoon label="Scoring — later" />
+        {trade.adherencePercent == null ? (
+          <span className="text-muted-foreground/40 italic">Not scored</span>
+        ) : (
+          <span className="tabular-nums">{trade.adherencePercent}%</span>
+        )}
       </Stat>
       <Stat label="Lessons">
         {lessonsCount > 0 ? (

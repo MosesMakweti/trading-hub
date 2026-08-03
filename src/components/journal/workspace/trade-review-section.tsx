@@ -32,7 +32,11 @@ export function TradeReviewSection({ trade }: { trade: TradeWorkspaceDTO }) {
         )}
       </div>
 
-      <StrategyAdherencePanel />
+      <StrategyAdherencePanel
+        dateKey={trade.dateKey}
+        tradeId={trade.id}
+        initialAnswers={trade.adherenceAnswers}
+      />
 
       {/* Lessons learned (existing free-text review fields) */}
       <div className="space-y-4">

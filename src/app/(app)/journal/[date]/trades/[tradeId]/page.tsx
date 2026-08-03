@@ -6,7 +6,7 @@ import { isValidDateKey, utcDateToKey } from "@/lib/date";
 import { executedAtFromTrade } from "@/domain/trades/lifecycle";
 import { FadeIn } from "@/components/shared/motion";
 import { TradeWorkspace } from "@/components/journal/workspace/trade-workspace";
-import type { TradeStatus, TradeWorkspaceDTO } from "@/types/trades";
+import type { TradeWorkspaceDTO } from "@/types/trades";
 
 export default async function TradeWorkspacePage({
   params,
@@ -20,17 +20,12 @@ export default async function TradeWorkspacePage({
   const trade = await getTrade(user.id, tradeId);
   if (!trade) notFound();
 
-  const tradeNumber = await getTradeOrdinal(user.id, trade.createdAt);
+  // Persisted per-user trade number (Phase 5); fall back to the derived ordinal
+  // for any legacy row that somehow lacks one.
+  const tradeNumber = trade.tradeNumber ?? (await getTradeOrdinal(user.id, trade.createdAt));
 
   const performance = trade.allocations.find((a) => a.tradingAccount.kind === "PERFORMANCE");
   const actualRR = trade.actualRR ? trade.actualRR.toNumber() : null;
-
-  // Derived lifecycle status (no DB status column in Phase 1).
-  const hasReview = Boolean(
-    trade.psychPostTradeReflection || trade.psychLessonsLearned || trade.psychWhatToWorkOn,
-  );
-  const status: TradeStatus =
-    actualRR != null ? (hasReview ? "REVIEWED" : "CLOSED") : "OPEN";
 
   const dto: TradeWorkspaceDTO = {
     id: trade.id,
@@ -97,7 +92,9 @@ export default async function TradeWorkspacePage({
         }
       : null,
     images: trade.images.map((img) => ({ id: img.id, category: img.category, url: img.url })),
-    status,
+    adherenceAnswers: (trade.adherenceAnswers as Record<string, boolean> | null) ?? {},
+    adherencePercent: trade.adherencePercent,
+    status: trade.status,
     createdAt: trade.createdAt.toISOString(),
     updatedAt: trade.updatedAt.toISOString(),
     executedAt: executedAtFromTrade(trade.tradeDate, trade.executionMinutes).toISOString(),

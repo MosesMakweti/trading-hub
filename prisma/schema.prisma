@@ -299,6 +299,16 @@ model Trade {
   strategyNameSnapshot     String?
   strategyVersionSnapshot  Int?
   entryModelNameSnapshot   String?
+  // Phase 5 (polish extras). tradeNumber is a stable, per-user monotonic counter
+  // (unlike the derived ordinal it never shifts when a trade is deleted). status
+  // is the materialized lifecycle stage (derived from closedAt/reviewedAt, kept
+  // in sync at write time for indexed filtering). adherence* hold the optional
+  // strategy-adherence self-scoring: answers as a {key: bool} Json map, plus the
+  // denormalized percent computed by the pure scorer.
+  tradeNumber              Int?
+  status                   TradeStatus @default(OPEN)
+  adherenceAnswers         Json?
+  adherencePercent         Float?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   deletedAt                DateTime?
@@ -309,7 +319,15 @@ model Trade {
   entryModels         TradeEntryModel[]
   psychology          PsychologyQuestionnaireResponse?
 
+  @@unique([userId, tradeNumber])
   @@index([userId, tradeDate])
+  @@index([userId, status])
+}
+
+enum TradeStatus {
+  OPEN
+  CLOSED
+  REVIEWED
 }
 
 enum Grade {

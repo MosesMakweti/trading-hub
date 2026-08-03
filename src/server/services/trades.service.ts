@@ -3,7 +3,8 @@ import { dateKeyToUtcDate } from "@/lib/date";
 import { dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import { effectiveRiskPercent, scalePnlByRisk, PERFORMANCE_ACCOUNT_RISK_PERCENT } from "@/domain/performance/allocation";
 import { scorePsychology, type PsychologyAnswer } from "@/domain/psychology/scoring";
-import { nextClosedAt, nextReviewedAt } from "@/domain/trades/lifecycle";
+import { deriveStatus, nextClosedAt, nextReviewedAt } from "@/domain/trades/lifecycle";
+import { sanitizeAdherenceAnswers, scoreAdherence } from "@/domain/trades/adherence";
 import type {
   RiskInputType,
   TradeInput,
@@ -228,15 +229,31 @@ export async function getTradeOrdinal(userId: string, createdAt: Date) {
   });
 }
 
+/**
+ * The next per-user trade number: MAX(tradeNumber)+1 including soft-deleted rows
+ * (raw query bypasses the soft-delete filter) so numbers are stable and never
+ * reused. The @@unique([userId, tradeNumber]) guards against a rare concurrent
+ * collision — the second create would fail and can be retried.
+ */
+async function nextTradeNumber(userId: string): Promise<number> {
+  const rows = await prisma.$queryRaw<{ max: number }[]>`
+    SELECT COALESCE(MAX("tradeNumber"), 0)::int AS max FROM "Trade" WHERE "userId" = ${userId}
+  `;
+  return (rows[0]?.max ?? 0) + 1;
+}
+
 export async function createTrade(userId: string, dateKey: string, data: TradeInput) {
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   const allocations = await buildAllocations(userId, data);
   const snapshots = await buildTradeSnapshots(userId, data);
+  const tradeNumber = await nextTradeNumber(userId);
 
   const now = new Date();
   const hasReview = hasText(data.psychPostTradeReflection) ||
     hasText(data.psychLessonsLearned) ||
     hasText(data.psychWhatToWorkOn);
+  const closedAt = nextClosedAt(null, data.actualRR != null, now);
+  const reviewedAt = nextReviewedAt(null, hasReview, now);
 
   return prisma.trade.create({
     data: {
@@ -244,8 +261,10 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
       tradeDate: dateKeyToUtcDate(dateKey),
       ...tradeScalarData(data),
       ...snapshots,
-      closedAt: nextClosedAt(null, data.actualRR != null, now),
-      reviewedAt: nextReviewedAt(null, hasReview, now),
+      tradeNumber,
+      closedAt,
+      reviewedAt,
+      status: deriveStatus(closedAt, reviewedAt),
       allocations: { create: allocations },
       checklistSelections: {
         create: data.checklistItemIds.map((checklistItemId) => ({ checklistItemId })),
@@ -281,13 +300,17 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
       hasText(existing.whatWentWrong) ||
       hasText(existing.whatSurprisedMe);
 
+    const closedAt = nextClosedAt(existing.closedAt, data.actualRR != null, now);
+    const reviewedAt = nextReviewedAt(existing.reviewedAt, hasReview, now);
+
     return tx.trade.update({
       where: { id: tradeId },
       data: {
         ...tradeScalarData(data),
         ...snapshots,
-        closedAt: nextClosedAt(existing.closedAt, data.actualRR != null, now),
-        reviewedAt: nextReviewedAt(existing.reviewedAt, hasReview, now),
+        closedAt,
+        reviewedAt,
+        status: deriveStatus(closedAt, reviewedAt),
         allocations: { create: allocations },
         checklistSelections: {
           create: data.checklistItemIds.map((checklistItemId) => ({ checklistItemId })),
@@ -323,12 +346,25 @@ export async function updateTradeSections(
   const hasReview = REVIEW_TEXT_FIELDS.some((field) =>
     hasText(field in patchRecord ? patchRecord[field] : existingRecord[field]),
   );
+  const reviewedAt = nextReviewedAt(existing.reviewedAt, hasReview, new Date());
+
+  // Adherence answers, when present, are sanitized to known keys and rescored
+  // server-side so the denormalized percent can never drift from the answers.
+  const adherence =
+    "adherenceAnswers" in patchRecord
+      ? (() => {
+          const answers = sanitizeAdherenceAnswers(patchRecord.adherenceAnswers);
+          return { adherenceAnswers: answers, adherencePercent: scoreAdherence(answers).percent };
+        })()
+      : {};
 
   return prisma.trade.update({
     where: { id: tradeId },
     data: {
       ...patch,
-      reviewedAt: nextReviewedAt(existing.reviewedAt, hasReview, new Date()),
+      ...adherence,
+      reviewedAt,
+      status: deriveStatus(existing.closedAt, reviewedAt),
     },
     include: tradeInclude,
   });

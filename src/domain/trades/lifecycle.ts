@@ -47,3 +47,19 @@ export function nextReviewedAt(
 export function executedAtFromTrade(tradeDate: Date, executionMinutes: number): Date {
   return new Date(tradeDate.getTime() + executionMinutes * 60_000);
 }
+
+export type TradeLifecycleStatus = "OPEN" | "CLOSED" | "REVIEWED";
+
+/**
+ * The trade's lifecycle stage, derived from its stamps: a trade must be closed
+ * before it can count as reviewed. Materialized onto Trade.status at write time
+ * (from the same closedAt/reviewedAt this module computes) for indexed filtering.
+ */
+export function deriveStatus(
+  closedAt: Date | null,
+  reviewedAt: Date | null,
+): TradeLifecycleStatus {
+  if (closedAt && reviewedAt) return "REVIEWED";
+  if (closedAt) return "CLOSED";
+  return "OPEN";
+}

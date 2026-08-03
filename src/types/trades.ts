@@ -108,6 +108,10 @@ export interface TradeWorkspaceDTO {
   whatSurprisedMe: string | null;
   wouldTakeAgain: boolean | null;
 
+  // Phase 5 — strategy-adherence self-score (answers keyed by ADHERENCE_QUESTIONS).
+  adherenceAnswers: Record<string, boolean>;
+  adherencePercent: number | null;
+
   psychology: {
     rawScore: number;
     percent: number;
@@ -123,13 +127,3 @@ export interface TradeWorkspaceDTO {
   closedAt: string | null; // ISO — result first recorded
   reviewedAt: string | null; // ISO — first reviewed
 }
-
-/** Strategy-adherence prompts. Displayed read-only in Phase 1; a scoring system
- *  plugs in later without changing this list or the panel's layout. */
-export const STRATEGY_ADHERENCE_QUESTIONS = [
-  "Did I follow my strategy?",
-  "Did I follow my entry model?",
-  "Did I follow my trade-management rules?",
-  "Did I remain patient?",
-  "Did I execute according to plan?",
-] as const;

@@ -1,25 +1,98 @@
-import { ComingSoon } from "@/components/journal/workspace/workspace-ui";
-import { STRATEGY_ADHERENCE_QUESTIONS } from "@/types/trades";
+"use client";
+
+import { useState } from "react";
+import { toast } from "sonner";
+import { Check, Loader2 } from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { updateTradeSection } from "@/actions/trades.actions";
+import { ADHERENCE_QUESTIONS, scoreAdherence } from "@/domain/trades/adherence";
+import type { SaveState } from "@/hooks/use-debounced-autosave";
 
 /**
- * Read-only in Phase 1. The row structure (one prompt per line, a control slot on
- * the right) is deliberately scoring-ready: a later phase drops a yes/no toggle and
- * an adherence score into the right column without changing this layout.
+ * Strategy-adherence self-score (Phase 5). One Yes/No per question; clicking the
+ * selected answer again clears it (unanswered). Each change persists the whole
+ * answer map via the section-patch action, which rescores server-side. The
+ * percent shown here is computed with the same pure scorer for instant feedback.
  */
-export function StrategyAdherencePanel() {
+export function StrategyAdherencePanel({
+  dateKey,
+  tradeId,
+  initialAnswers,
+}: {
+  dateKey: string;
+  tradeId: string;
+  initialAnswers: Record<string, boolean>;
+}) {
+  const [answers, setAnswers] = useState<Record<string, boolean>>(initialAnswers);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+
+  const score = scoreAdherence(answers);
+
+  async function set(key: string, value: boolean) {
+    const next = { ...answers };
+    if (next[key] === value) delete next[key]; // toggle off -> unanswered
+    else next[key] = value;
+
+    setAnswers(next);
+    setSaveState("saving");
+    const result = await updateTradeSection(dateKey, tradeId, { adherenceAnswers: next });
+    if (result.success) setSaveState("saved");
+    else {
+      setSaveState("error");
+      toast.error(result.error);
+    }
+  }
+
   return (
-    <div className="space-y-2 rounded-xl border border-dashed border-border p-3">
+    <div className="space-y-2 rounded-xl border border-border bg-background/30 p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">Strategy adherence</span>
-        <ComingSoon label="Scoring — later" />
+        <div className="flex items-center gap-2">
+          {saveState === "saving" && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+          {saveState === "saved" && <Check className="size-3.5 text-success" />}
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {score.percent == null ? (
+              <span className="text-muted-foreground/50 italic">Not scored</span>
+            ) : (
+              <>
+                <span className="font-semibold text-foreground">{score.percent}%</span> ·{" "}
+                {score.answeredCount}/{score.total} answered
+              </>
+            )}
+          </span>
+        </div>
       </div>
       <ul className="divide-y divide-border/60">
-        {STRATEGY_ADHERENCE_QUESTIONS.map((q) => (
-          <li key={q} className="flex items-center justify-between gap-3 py-1.5 text-sm">
-            <span className="text-muted-foreground">{q}</span>
-            <span className="text-xs text-muted-foreground/40">—</span>
-          </li>
-        ))}
+        {ADHERENCE_QUESTIONS.map((q) => {
+          const answer = answers[q.key];
+          return (
+            <li key={q.key} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <span className={cn(answer === undefined && "text-muted-foreground")}>{q.prompt}</span>
+              <div className="flex shrink-0 gap-1.5">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant={answer === true ? "default" : "outline"}
+                  aria-pressed={answer === true}
+                  onClick={() => set(q.key, true)}
+                >
+                  Yes
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant={answer === false ? "destructive" : "outline"}
+                  aria-pressed={answer === false}
+                  onClick={() => set(q.key, false)}
+                >
+                  No
+                </Button>
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

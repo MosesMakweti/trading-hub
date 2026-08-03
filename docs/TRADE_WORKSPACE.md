@@ -66,9 +66,10 @@ fully functional**. No schema change.
   derived, not persisted.
 
 ### Remaining tasks (later phases)
-- Still placeholders after Phase 4: **strategy-adherence scoring**, a persisted trade
-  number, and a real `status` column (all derived for now). None are currently
-  scheduled.
+- The former placeholders — strategy-adherence scoring, a persisted trade number, and
+  a real `status` column — are all **done in Phase 5** (below). No workspace items
+  remain; the Strategy Lab Phase 7 Journal integration can now build on
+  `Trade.strategyId`.
 
 ---
 
@@ -221,6 +222,51 @@ identity so the record stays historically accurate forever.
 integration (`docs/STRATEGY_LAB.md`) was waiting on — that phase can build the
 strategy→journal views (auto-suggesting the strategy's assets / entry models /
 framework) on top of this reference. Still **no Arsenal auto-population**.
+
+## ✅ Phase 5 — Polish extras (DONE)
+
+The three items previously deferred as placeholders, now real.
+
+### Completed work
+- **Persisted trade number** (`Trade.tradeNumber`, `@@unique([userId, tradeNumber])`):
+  a stable per-user counter assigned at create as `MAX(tradeNumber)+1` (raw query, so
+  soft-deleted rows still reserve their number — numbers never shift or repeat, unlike
+  the old derived ordinal). Legacy rows backfilled by creation order. The workspace
+  header uses it (falling back to the derived ordinal only if somehow null).
+- **Materialized `status`** (`TradeStatus` enum OPEN/CLOSED/REVIEWED, `@@index`):
+  derived from `closedAt`/`reviewedAt` by the pure `deriveStatus` and written at every
+  write path (create / edit / inline section), so status is a fast indexed column
+  instead of a per-render computation. A trade must be closed to count as reviewed.
+- **Strategy-adherence self-scoring**: five fixed keyed questions
+  (`domain/trades/adherence.ts`), answered Yes/No inline in the workspace. The panel is
+  now interactive (autosaves the whole answer map through the section-patch action);
+  the server sanitizes to known keys and recomputes the denormalized
+  `adherencePercent` (scored over *answered* questions). Shown in the panel and the
+  Trade Summary tile.
+
+### Files changed
+- Schema: `Trade.tradeNumber`/`status`/`adherenceAnswers`/`adherencePercent` +
+  `TradeStatus` enum + indexes. Migration `20260803162420_trade_polish_extras` (backfills
+  tradeNumber by creation order and status from the lifecycle stamps).
+- New: `src/domain/trades/adherence.ts` (+ test); `deriveStatus` added to
+  `lifecycle.ts` (+ tests).
+- `trades.service.ts` — `nextTradeNumber`; status + number set in create/update;
+  status + adherence handled in `updateTradeSections`. `lib/validation/trades.ts` —
+  `adherenceAnswers` on the section patch.
+- `strategy-adherence-panel.tsx` rewritten as an interactive client component;
+  `trade-review-section.tsx` passes answers; `trade-summary.tsx` shows the percent;
+  workspace page maps real `status`/`tradeNumber`/adherence; the stale
+  `STRATEGY_ADHERENCE_QUESTIONS` constant was removed from `types/trades.ts`.
+
+### Database changes
+- **Additive** — 4 columns + 1 enum + 2 indexes + 1 unique constraint on `Trade`.
+  tradeNumber and status are backfilled in the migration; existing behaviour is
+  preserved (status matches what was previously derived per render).
+
+### Verification
+- 11 new domain unit tests (deriveStatus + adherence) and an integration test
+  (sequential trade numbers, OPEN/CLOSED/REVIEWED materialization, adherence 50% with
+  unknown-key sanitization). tsc + eslint clean; 133 tests pass.
 
 ## Historical integrity (architectural requirement — honor in every phase)
 A completed trade must never lose its context: strategy + version, entry model, market

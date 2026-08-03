@@ -95,6 +95,9 @@ export const tradeWorkspaceSectionSchema = z
     whatWentWrong: workspaceNote,
     whatSurprisedMe: workspaceNote,
     wouldTakeAgain: z.boolean().nullable(),
+    // Strategy-adherence answers: a map of question key -> yes/no. Unknown keys
+    // are dropped and the percent is recomputed server-side (service layer).
+    adherenceAnswers: z.record(z.string(), z.boolean()),
   })
   .partial()
   .refine((data) => Object.keys(data).length > 0, { message: "Nothing to update." });

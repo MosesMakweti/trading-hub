@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  deriveStatus,
   executedAtFromTrade,
   nextClosedAt,
   nextReviewedAt,
@@ -42,6 +43,25 @@ describe("nextReviewedAt", () => {
 
   it("stays null when there is no review content yet", () => {
     expect(nextReviewedAt(null, false, NOW)).toBeNull();
+  });
+});
+
+describe("deriveStatus", () => {
+  it("is OPEN with no stamps", () => {
+    expect(deriveStatus(null, null)).toBe("OPEN");
+  });
+
+  it("is CLOSED when closed but not reviewed", () => {
+    expect(deriveStatus(NOW, null)).toBe("CLOSED");
+  });
+
+  it("is REVIEWED only when both closed and reviewed", () => {
+    expect(deriveStatus(NOW, NOW)).toBe("REVIEWED");
+  });
+
+  it("stays OPEN when reviewed but not yet closed", () => {
+    // A review can be captured on an open trade; it isn't REVIEWED until closed.
+    expect(deriveStatus(null, NOW)).toBe("OPEN");
   });
 });
 
