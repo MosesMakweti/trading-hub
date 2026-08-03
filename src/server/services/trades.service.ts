@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate } from "@/lib/date";
 import { dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
@@ -67,6 +69,10 @@ const tradeInclude = {
   images: true,
   psychology: true,
 } as const;
+
+/** A Trade with all the relations the Trade Workspace DTO needs. Returned by
+ *  getTrade / listTradesForDay / listRecentTrades; mapped by toTradeWorkspaceDTO. */
+export type TradeWithWorkspaceRelations = Prisma.TradeGetPayload<{ include: typeof tradeInclude }>;
 
 // Score is always (re)computed server-side from the answers, never trusted
 // from the client — this is what guarantees a persisted score/grade can

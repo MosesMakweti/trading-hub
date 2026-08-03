@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
   BookOpenCheck,
+  CandlestickChart,
   ClipboardList,
   Lightbulb,
   Sunrise,
@@ -13,9 +15,14 @@ import {
 import { formatDateKeyLong } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EmptyState } from "@/components/shared/empty-state";
 import { SectionPlaceholder } from "@/components/shared/section-placeholder";
 import { MorningPrepSection } from "@/components/today/morning-prep-section";
 import { TodaysPlanSection } from "@/components/today/todays-plan-section";
+import { TodayTradeBar } from "@/components/today/today-trade-bar";
+import { TradeIdeaSection } from "@/components/journal/workspace/trade-idea-section";
+import { TradeExecutionSection } from "@/components/journal/workspace/trade-execution-section";
+import { TradeReviewSection } from "@/components/journal/workspace/trade-review-section";
 import {
   WorkflowProgress,
   WORKFLOW_STEP_META,
@@ -23,6 +30,7 @@ import {
 } from "@/components/dashboard/workflow-progress";
 import type { WorkflowStepKey, WorkflowStepStatus } from "@/domain/today/workflow";
 import type { MorningPrepDTO, TodaysPlanDTO, TradingDayDTO } from "@/types/today";
+import type { TradeWorkspaceDTO } from "@/types/trades";
 
 // The Today workflow sections. Placeholders in Phase 2; each section's real
 // component slots into the same TabsContent when its phase lands (P3–P5).
@@ -101,6 +109,7 @@ export function TodayWorkspace({
   stepStatuses,
   morningPrep,
   todaysPlan,
+  trades,
 }: {
   day: TradingDayDTO;
   // Only serializable data crosses the server→client boundary; the icon-bearing
@@ -108,7 +117,40 @@ export function TodayWorkspace({
   stepStatuses: { key: WorkflowStepKey; status: WorkflowStepStatus }[];
   morningPrep: MorningPrepDTO;
   todaysPlan: TodaysPlanDTO;
+  trades: TradeWorkspaceDTO[];
 }) {
+  const [focusedId, setFocusedId] = useState<string | null>(trades[0]?.id ?? null);
+  const focusedTrade = trades.find((t) => t.id === focusedId) ?? null;
+
+  // The three trade tabs share one focused trade and render the *existing* Trade
+  // Workspace sections for it — create/continue today's trades in-context.
+  function tradeTab(section: "idea" | "execution" | "review") {
+    return (
+      <div className="space-y-4">
+        <TodayTradeBar
+          trades={trades}
+          focusedId={focusedId}
+          onFocus={setFocusedId}
+          todayKey={day.dateKey}
+        />
+        {focusedTrade ? (
+          section === "idea" ? (
+            <TradeIdeaSection trade={focusedTrade} />
+          ) : section === "execution" ? (
+            <TradeExecutionSection trade={focusedTrade} />
+          ) : (
+            <TradeReviewSection trade={focusedTrade} />
+          )
+        ) : (
+          <EmptyState
+            icon={CandlestickChart}
+            title="No trades logged today yet"
+            description="Add a trade to plan it, record how it played out, and review it — all in today's flow."
+          />
+        )}
+      </div>
+    );
+  }
   const statusByKey = new Map(stepStatuses.map((s) => [s.key, s.status]));
   const steps: WorkflowStep[] = WORKFLOW_STEP_META.map((m) => ({
     ...m,
@@ -147,6 +189,12 @@ export function TodayWorkspace({
               <MorningPrepSection dateKey={day.dateKey} prep={morningPrep} />
             ) : s.value === "todays-plan" ? (
               <TodaysPlanSection dateKey={day.dateKey} plan={todaysPlan} />
+            ) : s.value === "trade-idea" ? (
+              tradeTab("idea")
+            ) : s.value === "trade-execution" ? (
+              tradeTab("execution")
+            ) : s.value === "trade-review" ? (
+              tradeTab("review")
             ) : (
               <SectionPlaceholder
                 icon={s.icon}

@@ -26,7 +26,8 @@ Phase 1  Dashboard Framework .................... ✅ DONE
 Phase 2  Today Workspace Framework  (+ TradingDay backbone) ... ✅ DONE
 Phase 3  Morning Preparation .................... ✅ DONE
 Phase 4  Today's Trading Plan ................... ✅ DONE
-Phase 5  Trade Workspace  (Idea → Execution → Review) + Daily Analytics ... ▶ NEXT
+Phase 5a Trades in the Today flow ............... ✅ DONE
+Phase 5b Daily Analytics ........................ ▶ NEXT
 Phase 6  Automatic Journal Archiving
 Phase 7  Journal Redesign
 Phase 8  Trade Gallery
@@ -351,3 +352,38 @@ append a Progress Report, STOP.
   continued in-context, and add a **Daily Analytics** section (day-scoped metrics via the
   existing analytics domain). This is the biggest section phase — consider splitting
   (e.g. P5a trades-in-Today, P5b Daily Analytics) and STOP after each.
+
+### Phase 5a — Trades in the Today flow ✅
+- **Completed**: wired the **existing** Trade Workspace sections into the Today flow —
+  maximum reuse, no duplication.
+  - Extracted the Trade Workspace DTO mapping into **`toTradeWorkspaceDTO`**
+    (`server/services/trade-workspace.mapper.ts`) + exported the payload type
+    `TradeWithWorkspaceRelations` from `trades.service`. The trade workspace **page now
+    uses the shared mapper** (dropped ~75 lines of duplicated mapping + the getTradeOrdinal
+    fallback — `tradeNumber`/`status` are persisted columns now).
+  - The three trade tabs (Trade Idea / Execution / Review) share one **focused trade**
+    and render the exact existing `TradeIdeaSection` / `TradeExecutionSection` /
+    `TradeReviewSection` (with the Strategy Adherence panel) for it — full inline editing,
+    in-context.
+  - **`TodayTradeBar`**: a chip selector of today's trades (`#N · symbol · status`) +
+    **Open** (→ full Trade Workspace) + **Add trade** (→ new-trade form). Empty state when
+    no trades yet.
+- **Components completed**: `today/today-trade-bar.tsx`,
+  `server/services/trade-workspace.mapper.ts` (shared); `today-workspace.tsx` renders the
+  sections for the focused trade.
+- **Database changes**: none.
+- **Routes**: none (still `/today`; "Add trade"/"Open" link to the existing journal
+  routes).
+- **Files changed**: new `today-trade-bar.tsx`, `trade-workspace.mapper.ts`; changed
+  `trades.service.ts` (export payload type), the trade workspace `page.tsx` (use mapper),
+  `today/page.tsx` (map today's trades), `today-workspace.tsx`.
+- **Verified**: `tsc` + `eslint` clean, 155 tests pass, and a browser run confirmed the
+  trade workspace page still renders after the mapper refactor **and** the three Today
+  trade tabs render the focused trade's Idea/Execution/Review sections + the trade bar —
+  zero console errors.
+- **Remaining work**: P5b, P6–P11.
+- **Next recommended phase**: **P5b — Daily Analytics** — replace the Daily Analytics
+  placeholder with a day-scoped analytics section (win rate, R, PnL, psychology for
+  today's trades), reusing `domain/performance/*` + the analytics service pattern; set
+  `TradingDay.analyzedAt` (a "Mark day reviewed" action) so the workflow's Analyze step
+  advances. One section, then STOP.

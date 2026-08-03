@@ -1,6 +1,7 @@
 import { requireUser } from "@/server/guards";
 import { getOrCreateTradingDay, toTradingDayDTO } from "@/server/services/trading-day.service";
 import { listTradesForDay } from "@/server/services/trades.service";
+import { toTradeWorkspaceDTO } from "@/server/services/trade-workspace.mapper";
 import { listChecklistItems } from "@/server/services/checklist-items.service";
 import { listAssets } from "@/server/services/assets.service";
 import { getTradingPlan } from "@/server/services/trading-plan.service";
@@ -59,6 +60,7 @@ export default async function TodayPage() {
         stepStatuses={stepStatuses}
         morningPrep={morningPrep}
         todaysPlan={todaysPlan}
+        trades={trades.map(toTradeWorkspaceDTO)}
       />
     </FadeIn>
   );
