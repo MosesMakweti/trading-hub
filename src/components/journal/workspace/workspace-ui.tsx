@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import Link from "next/link";
 
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -97,6 +98,53 @@ export function ComingSoon({ label = "Later phase" }: { label?: string }) {
   return (
     <span className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
       {label}
+    </span>
+  );
+}
+
+/**
+ * The strategy a trade was taken under, shown from the frozen snapshot (name +
+ * version) so it stays correct even after the strategy changes. Links to the
+ * live strategy when it still exists; when it's been deleted (strategyId null but
+ * a snapshot remains) the name is shown plain with a muted "deleted" note.
+ */
+export function StrategyRef({
+  strategyId,
+  name,
+  version,
+  showVersion = true,
+}: {
+  strategyId: string | null;
+  name: string | null;
+  version: number | null;
+  showVersion?: boolean;
+}) {
+  if (!name) return <span className="text-muted-foreground/40 italic">No strategy</span>;
+
+  const versionTag =
+    showVersion && version != null ? (
+      <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">v{version}</span>
+    ) : null;
+
+  if (strategyId) {
+    return (
+      <span className="inline-flex items-baseline">
+        <Link
+          href={`/strategy-lab/${strategyId}`}
+          className="font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {name}
+        </Link>
+        {versionTag}
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-baseline">
+      <span className="font-medium">{name}</span>
+      {versionTag}
+      <span className="ml-1.5 text-xs text-muted-foreground/60 italic">deleted</span>
     </span>
   );
 }

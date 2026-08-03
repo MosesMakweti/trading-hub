@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import {
-  ComingSoon,
   NoteBlock,
+  StrategyRef,
   WorkspaceField,
 } from "@/components/journal/workspace/workspace-ui";
 import {
@@ -20,7 +20,19 @@ export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
-        <WorkspaceField label="Strategy" value={<ComingSoon label="Phase 4" />} />
+        <WorkspaceField
+          label="Strategy"
+          value={
+            trade.strategyName ? (
+              <StrategyRef
+                strategyId={trade.strategyId}
+                name={trade.strategyName}
+                version={trade.strategyVersion}
+              />
+            ) : undefined
+          }
+          placeholder="No strategy"
+        />
         <WorkspaceField
           label="Entry model"
           value={trade.entryModelNames.length ? trade.entryModelNames.join(", ") : undefined}

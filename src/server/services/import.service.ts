@@ -143,6 +143,7 @@ export async function importTrades(
         higherTimeframeBias: record.higherTimeframeBias,
         biasConfidencePercent: record.biasConfidencePercent,
         sessionId: session?.id ?? null,
+        strategyId: null,
         expectedRR: record.expectedRR,
         actualRR: record.actualRR,
         performanceClosingPnlGross: record.performanceClosingPnlGross,

@@ -76,6 +76,13 @@ export interface TradeWorkspaceDTO {
   confluenceLabels: string[];
   executionLabels: string[];
 
+  // Strategy Lab reference + historical snapshot (Phase 4). name/version are the
+  // frozen snapshot (shown even if the strategy was later deleted); strategyId is
+  // the live link, null once the strategy no longer exists.
+  strategyId: string | null;
+  strategyName: string | null;
+  strategyVersion: number | null;
+
   accounts: TradeWorkspaceAccountDTO[]; // includes the Performance Account allocation
   performancePnlGross: number;
   performancePnlNet: number;

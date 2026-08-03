@@ -17,7 +17,7 @@ export default async function NewTradePage({
   if (!isValidDateKey(dateKey)) notFound();
 
   const user = await requireUser();
-  const { accounts, assets, sessions, entryModels, confluenceItems, executionItems } =
+  const { accounts, assets, sessions, entryModels, confluenceItems, executionItems, strategies } =
     await getTradeFormOptions(user.id);
 
   return (
@@ -45,6 +45,7 @@ export default async function NewTradePage({
         entryModels={entryModels.map((m) => ({ id: m.id, name: m.name }))}
         confluenceItems={confluenceItems.map((c) => ({ id: c.id, label: c.label }))}
         executionItems={executionItems.map((c) => ({ id: c.id, label: c.label }))}
+        strategies={strategies.map((s) => ({ id: s.id, name: s.name, version: s.version }))}
       />
     </div>
   );

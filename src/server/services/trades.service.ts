@@ -20,12 +20,13 @@ import { listAssets } from "@/server/services/assets.service";
 import { listTradingSessions } from "@/server/services/trading-sessions.service";
 import { listEntryModels } from "@/server/services/entry-models.service";
 import { listChecklistItems } from "@/server/services/checklist-items.service";
+import { listStrategies } from "@/server/services/strategies.service";
 
 // Composes the reference data the trade form needs (accounts/assets/
 // sessions/entry-models/checklists), reusing each feature's own service
 // rather than re-querying Prisma directly.
 export async function getTradeFormOptions(userId: string) {
-  const [accounts, assets, sessions, entryModels, confluenceItems, executionItems] =
+  const [accounts, assets, sessions, entryModels, confluenceItems, executionItems, strategies] =
     await Promise.all([
       listTradingAccounts(userId),
       listAssets(userId),
@@ -33,14 +34,20 @@ export async function getTradeFormOptions(userId: string) {
       listEntryModels(userId),
       listChecklistItems(userId, "CONFLUENCE"),
       listChecklistItems(userId, "EXECUTION_CONFIRMATION"),
+      listStrategies(userId),
     ]);
 
-  return { accounts, assets, sessions, entryModels, confluenceItems, executionItems };
+  return { accounts, assets, sessions, entryModels, confluenceItems, executionItems, strategies };
 }
 
 const tradeInclude = {
   asset: true,
   session: true,
+  // Live reference for linking only. The nested include is NOT soft-delete
+  // filtered (the extension only guards top-level queries), so `deletedAt` is
+  // selected too — a soft-deleted strategy must not render a live link. The
+  // *Snapshot columns on Trade preserve the strategy identity regardless.
+  strategy: { select: { id: true, name: true, version: true, status: true, deletedAt: true } },
   allocations: { include: { tradingAccount: true } },
   checklistSelections: { include: { checklistItem: true } },
   entryModels: { include: { entryModel: true } },
@@ -146,6 +153,45 @@ async function buildAllocations(userId: string, data: TradeInput, excludeTradeId
   ];
 }
 
+/**
+ * Freezes the strategy reference + display snapshots at save time. The strategy
+ * name/version come from the strategy's *current* state; the entry-model names
+ * are the selected models' names joined in selection order. All are stored on the
+ * Trade so a completed trade keeps showing the strategy as it was when saved,
+ * even if the strategy is later versioned, renamed, or deleted. A strategyId that
+ * doesn't belong to the user is dropped (treated as no strategy).
+ */
+async function buildTradeSnapshots(userId: string, data: TradeInput) {
+  const entryModels = data.entryModelIds.length
+    ? await prisma.entryModel.findMany({
+        where: { userId, id: { in: data.entryModelIds } },
+      })
+    : [];
+  const nameById = new Map(entryModels.map((m) => [m.id, m.name]));
+  const orderedNames = data.entryModelIds
+    .map((id) => nameById.get(id))
+    .filter((name): name is string => Boolean(name));
+  const entryModelNameSnapshot = orderedNames.length ? orderedNames.join(", ") : null;
+
+  let strategyId: string | null = null;
+  let strategyNameSnapshot: string | null = null;
+  let strategyVersionSnapshot: number | null = null;
+
+  if (data.strategyId) {
+    const strategy = await prisma.strategy.findFirst({
+      where: { id: data.strategyId, userId },
+      select: { id: true, name: true, version: true },
+    });
+    if (strategy) {
+      strategyId = strategy.id;
+      strategyNameSnapshot = strategy.name;
+      strategyVersionSnapshot = strategy.version;
+    }
+  }
+
+  return { strategyId, strategyNameSnapshot, strategyVersionSnapshot, entryModelNameSnapshot };
+}
+
 export async function listTradesForDay(userId: string, dateKey: string) {
   return prisma.trade.findMany({
     where: { userId, tradeDate: dateKeyToUtcDate(dateKey) },
@@ -185,6 +231,7 @@ export async function getTradeOrdinal(userId: string, createdAt: Date) {
 export async function createTrade(userId: string, dateKey: string, data: TradeInput) {
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   const allocations = await buildAllocations(userId, data);
+  const snapshots = await buildTradeSnapshots(userId, data);
 
   const now = new Date();
   const hasReview = hasText(data.psychPostTradeReflection) ||
@@ -196,6 +243,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
       userId,
       tradeDate: dateKeyToUtcDate(dateKey),
       ...tradeScalarData(data),
+      ...snapshots,
       closedAt: nextClosedAt(null, data.actualRR != null, now),
       reviewedAt: nextReviewedAt(null, hasReview, now),
       allocations: { create: allocations },
@@ -212,6 +260,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
 export async function updateTrade(userId: string, tradeId: string, data: TradeInput) {
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   const allocations = await buildAllocations(userId, data, tradeId);
+  const snapshots = await buildTradeSnapshots(userId, data);
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.trade.findFirst({ where: { id: tradeId, userId } });
@@ -236,6 +285,7 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
       where: { id: tradeId },
       data: {
         ...tradeScalarData(data),
+        ...snapshots,
         closedAt: nextClosedAt(existing.closedAt, data.actualRR != null, now),
         reviewedAt: nextReviewedAt(existing.reviewedAt, hasReview, now),
         allocations: { create: allocations },

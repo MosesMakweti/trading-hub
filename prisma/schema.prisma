@@ -289,6 +289,16 @@ model Trade {
   // executionMinutes), and updatedAt is the last edit.
   closedAt                 DateTime?
   reviewedAt               DateTime?
+  // Strategy Lab reference + historical snapshots (Phase 4). strategyId is a live
+  // reference (SetNull on strategy delete so the trade survives); the *Snapshot
+  // columns freeze the strategy's name/version and the entry-model names at save
+  // time, so a completed trade always shows the strategy as it was when taken,
+  // even after the strategy is versioned, renamed, or deleted.
+  strategyId               String?
+  strategy                 Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  strategyNameSnapshot     String?
+  strategyVersionSnapshot  Int?
+  entryModelNameSnapshot   String?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   deletedAt                DateTime?
@@ -469,8 +479,9 @@ model Strategy {
   timeframes      StrategyTimeframe[]      // Section 3 — Timeframe workspace (each has checkpoints)
   entryModels     StrategyEntryModel[]     // Section 4 — Entry Models
   tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (1:1 + partial TPs, custom rules)
-  // ── Phase 7 extension point (add the model, then uncomment) ────────────────
-  // trades          Trade[]                  // Journal link: Trade.strategyId -> Strategy (reference, not copy)
+  // Journal link: a trade references a strategy (not a copy). onDelete: SetNull
+  // on the Trade side keeps completed trades (with their snapshots) intact.
+  trades          Trade[]
 
   @@index([userId, deletedAt, sortOrder])
 }

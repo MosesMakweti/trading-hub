@@ -50,6 +50,12 @@ export default async function TradeWorkspacePage({
     hitTP3: trade.hitTP3,
     hitFullTP: trade.hitFullTP,
     entryModelNames: trade.entryModels.map((m) => m.entryModel.name),
+    // Only link to the strategy while it still exists (not soft-deleted). The
+    // name/version always come from the snapshot, so a deleted strategy still
+    // shows what it was.
+    strategyId: trade.strategy && !trade.strategy.deletedAt ? trade.strategy.id : null,
+    strategyName: trade.strategyNameSnapshot,
+    strategyVersion: trade.strategyVersionSnapshot,
     confluenceLabels: trade.checklistSelections
       .filter((c) => c.checklistItem.type === "CONFLUENCE")
       .map((c) => c.checklistItem.label),

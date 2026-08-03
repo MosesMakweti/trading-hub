@@ -27,6 +27,7 @@ import { tradeSchema, type TradeFormValues, type TradeInput } from "@/lib/valida
 import { createTrade, updateTrade } from "@/actions/trades.actions";
 
 const NO_SESSION = "__none__";
+const NO_STRATEGY = "__none__";
 
 const emptyDefaults: TradeFormValues = {
   assetId: "",
@@ -35,6 +36,7 @@ const emptyDefaults: TradeFormValues = {
   higherTimeframeBias: "BULLISH",
   biasConfidencePercent: 50,
   sessionId: null,
+  strategyId: null,
   expectedRR: 2,
   actualRR: null,
   performanceClosingPnlGross: 0,
@@ -63,6 +65,7 @@ interface TradeFormProps {
   entryModels: { id: string; name: string }[];
   confluenceItems: { id: string; label: string }[];
   executionItems: { id: string; label: string }[];
+  strategies: { id: string; name: string; version: number }[];
   defaultValues?: TradeFormValues;
 }
 
@@ -76,6 +79,7 @@ export function TradeForm({
   entryModels,
   confluenceItems,
   executionItems,
+  strategies,
   defaultValues,
 }: TradeFormProps) {
   const router = useRouter();
@@ -258,6 +262,40 @@ export function TradeForm({
             <Label className="text-xs">Bias confidence %</Label>
             <Input type="number" min={0} max={100} {...register("biasConfidencePercent")} />
           </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs">Strategy</Label>
+          <Controller
+            control={control}
+            name="strategyId"
+            render={({ field }) => (
+              <Select
+                items={[
+                  { value: NO_STRATEGY, label: "None" },
+                  ...strategies.map((s) => ({ value: s.id, label: `${s.name} · v${s.version}` })),
+                ]}
+                value={field.value ?? NO_STRATEGY}
+                onValueChange={(v) => field.onChange(v === NO_STRATEGY ? null : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="No strategy" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_STRATEGY}>None</SelectItem>
+                  {strategies.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name} · v{s.version}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+          <p className="text-xs text-muted-foreground">
+            Links this trade to a Strategy Lab strategy and snapshots its name &amp; version at
+            save time, so the record stays accurate even if the strategy changes later.
+          </p>
         </div>
       </section>
 

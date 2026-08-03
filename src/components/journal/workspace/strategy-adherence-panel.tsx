@@ -11,7 +11,7 @@ export function StrategyAdherencePanel() {
     <div className="space-y-2 rounded-xl border border-dashed border-border p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">Strategy adherence</span>
-        <ComingSoon label="Scoring — Phase 4" />
+        <ComingSoon label="Scoring — later" />
       </div>
       <ul className="divide-y divide-border/60">
         {STRATEGY_ADHERENCE_QUESTIONS.map((q) => (

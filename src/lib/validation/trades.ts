@@ -23,6 +23,7 @@ export const tradeSchema = z
     higherTimeframeBias: biasSchema,
     biasConfidencePercent: z.coerce.number().int().min(0).max(100),
     sessionId: z.string().nullable().default(null),
+    strategyId: z.string().nullable().default(null),
     expectedRR: z.coerce.number(),
     actualRR: z.coerce.number().nullable().default(null),
     // The one Closing PnL the trader manually enters — always the

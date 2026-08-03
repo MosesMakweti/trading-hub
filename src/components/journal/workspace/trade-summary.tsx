@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { GRADE_VARIANT } from "@/lib/grade-variant";
 import {
   ComingSoon,
+  StrategyRef,
   formatRR,
   formatSignedCurrency,
 } from "@/components/journal/workspace/workspace-ui";
@@ -46,10 +47,23 @@ export function TradeSummary({ trade }: { trade: TradeWorkspaceDTO }) {
         )}
       </Stat>
       <Stat label="Strategy">
-        <ComingSoon label="Phase 4" />
+        {trade.strategyName ? (
+          <StrategyRef
+            strategyId={trade.strategyId}
+            name={trade.strategyName}
+            version={trade.strategyVersion}
+            showVersion={false}
+          />
+        ) : (
+          <span className="text-muted-foreground/40 italic">None</span>
+        )}
       </Stat>
       <Stat label="Strategy version">
-        <ComingSoon label="Phase 4" />
+        {trade.strategyVersion != null ? (
+          <span className="tabular-nums">v{trade.strategyVersion}</span>
+        ) : (
+          <span className="text-muted-foreground/40 italic">—</span>
+        )}
       </Stat>
       <Stat label="Entry model">
         {trade.entryModelNames.length ? (
@@ -69,7 +83,7 @@ export function TradeSummary({ trade }: { trade: TradeWorkspaceDTO }) {
         )}
       </Stat>
       <Stat label="Strategy adherence">
-        <ComingSoon label="Phase 4" />
+        <ComingSoon label="Scoring — later" />
       </Stat>
       <Stat label="Lessons">
         {lessonsCount > 0 ? (

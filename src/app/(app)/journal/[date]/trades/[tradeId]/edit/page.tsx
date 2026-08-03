@@ -24,7 +24,8 @@ export default async function EditTradePage({
   ]);
   if (!trade) notFound();
 
-  const { accounts, assets, sessions, entryModels, confluenceItems, executionItems } = options;
+  const { accounts, assets, sessions, entryModels, confluenceItems, executionItems, strategies } =
+    options;
 
   const performanceAllocation = trade.allocations.find(
     (a) => a.tradingAccount.kind === "PERFORMANCE",
@@ -40,6 +41,7 @@ export default async function EditTradePage({
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
     sessionId: trade.sessionId,
+    strategyId: trade.strategyId,
     expectedRR: trade.expectedRR.toNumber(),
     actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
     performanceClosingPnlGross: performanceAllocation?.closingPnlGross.toNumber() ?? 0,
@@ -89,6 +91,7 @@ export default async function EditTradePage({
         entryModels={entryModels.map((m) => ({ id: m.id, name: m.name }))}
         confluenceItems={confluenceItems.map((c) => ({ id: c.id, label: c.label }))}
         executionItems={executionItems.map((c) => ({ id: c.id, label: c.label }))}
+        strategies={strategies.map((s) => ({ id: s.id, name: s.name, version: s.version }))}
         defaultValues={defaultValues}
       />
     </div>

@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { formatDateKeyLong, minutesToTimeString } from "@/lib/date";
 import {
-  ComingSoon,
+  StrategyRef,
   TradeStatusBadge,
   WorkspaceField,
   formatRR,
@@ -77,7 +77,16 @@ export function TradeHeader({ trade }: { trade: TradeWorkspaceDTO }) {
         />
         <WorkspaceField
           label="Strategy"
-          value={<ComingSoon label="Phase 4" />}
+          value={
+            trade.strategyName ? (
+              <StrategyRef
+                strategyId={trade.strategyId}
+                name={trade.strategyName}
+                version={trade.strategyVersion}
+              />
+            ) : undefined
+          }
+          placeholder="No strategy"
         />
       </div>
     </div>

@@ -66,9 +66,9 @@ fully functional**. No schema change.
   derived, not persisted.
 
 ### Remaining tasks (later phases)
-- Phase 4: strategy references + historical snapshots.
-- Still surfaced as placeholders after Phase 3: adherence scoring, a persisted trade
-  number, and a real `status` column (all derived for now).
+- Still placeholders after Phase 4: **strategy-adherence scoring**, a persisted trade
+  number, and a real `status` column (all derived for now). None are currently
+  scheduled.
 
 ---
 
@@ -173,16 +173,54 @@ The workspace now shows the trade's real lifecycle as a vertical, semantic timel
 
 ---
 
-## Later phases
+## ✅ Phase 4 — Strategy integration + historical snapshots (DONE)
 
-- **▶️ Phase 4 — Strategy integration + historical snapshots (BUILD THIS NEXT)**: add `Trade.strategyId`
-  (reference to Strategy Lab, `onDelete: SetNull`) **and** snapshot columns
-  (`strategyNameSnapshot`, `strategyVersionSnapshot`, `entryModelNameSnapshot`) written
-  at save time so a completed trade always shows the strategy **as it was when taken**,
-  even if the strategy later changes. Selecting a strategy references (not duplicates)
-  its Framework/Entry Models. This dovetails with Strategy Lab's own Phase 7 Journal
-  integration (`docs/STRATEGY_LAB.md`) — coordinate the `Trade.strategyId` migration so
-  the two efforts share one column. **Do NOT auto-populate Arsenal.**
+A trade can now reference a Strategy Lab strategy, and freezes that strategy's
+identity so the record stays historically accurate forever.
+
+### Completed work
+- **Reference**: `Trade.strategyId` → `Strategy` (`onDelete: SetNull`), selectable via
+  a new **Strategy** dropdown in the trade form (create + edit). It *references* a
+  strategy; it does not copy its Framework/Entry Models, and **Arsenal is never
+  auto-populated**.
+- **Snapshots** frozen at save time in `buildTradeSnapshots`: `strategyNameSnapshot`,
+  `strategyVersionSnapshot` (from the strategy's current state) and
+  `entryModelNameSnapshot` (the selected entry models' names, in selection order). A
+  strategyId that isn't the user's is dropped (tenant isolation).
+- **Display**: the header, Trade Idea, and Trade Summary now show the strategy from
+  the **snapshot** (via a shared `StrategyRef`), linking to the live strategy while it
+  exists. Because Strategy delete is a *soft* delete (the FK `SetNull` only fires on a
+  hard delete), the include also selects `deletedAt` and the page drops the live link
+  when the strategy is soft-deleted — the snapshot name/version still show (marked
+  "deleted"), never a dead link.
+
+### Files changed
+- Schema: `prisma/schema.prisma` — `Trade.strategyId` + `strategy` relation +
+  `strategyNameSnapshot`/`strategyVersionSnapshot`/`entryModelNameSnapshot`;
+  `Strategy.trades` back-relation. Migration `20260803134554_trade_strategy_reference`.
+- `trades.service.ts` — `buildTradeSnapshots`, wired into create/update; `strategy`
+  (incl. `deletedAt`) added to `tradeInclude`; strategies added to
+  `getTradeFormOptions`. `lib/validation/trades.ts` — `strategyId`.
+- `trade-form.tsx` (+ new/edit pages) — strategy selector & default.
+  `types/trades.ts` + workspace page mapping — strategy DTO fields.
+  `workspace-ui.tsx` (`StrategyRef`), `trade-header.tsx`, `trade-idea-section.tsx`,
+  `trade-summary.tsx` — snapshot display. `import.service.ts` — `strategyId: null`.
+
+### Database changes
+- **Additive only** — one nullable FK column + 3 nullable snapshot columns on `Trade`,
+  and the Strategy↔Trade relation. No existing column changed. Legacy trades read back
+  with a null strategy (no snapshot), exactly as before.
+
+### Verification
+- Integration test covering: snapshot captured (name/version/entry-model order),
+  foreign strategyId dropped, rename+version-bump frozen, soft-delete keeps the
+  snapshot and drops the live link. tsc + eslint clean; 122 tests pass.
+
+### Coordination note (Strategy Lab Phase 7)
+`Trade.strategyId` is now the shared column Strategy Lab's own Phase 7 Journal
+integration (`docs/STRATEGY_LAB.md`) was waiting on — that phase can build the
+strategy→journal views (auto-suggesting the strategy's assets / entry models /
+framework) on top of this reference. Still **no Arsenal auto-population**.
 
 ## Historical integrity (architectural requirement — honor in every phase)
 A completed trade must never lose its context: strategy + version, entry model, market
