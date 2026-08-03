@@ -66,39 +66,69 @@ fully functional**. No schema change.
   derived, not persisted.
 
 ### Remaining tasks (later phases)
-- Phase 2: move fields into sections with inline editing.
 - Phase 3: the real lifecycle timeline.
 - Phase 4: strategy references + historical snapshots.
-- New fields surfaced as placeholders: planned entry/stop/target, market context,
-  areas of interest, reason, actual entry/exit, execution notes, extra review prompts,
-  adherence scoring, a persisted trade number, and a real status column.
+- Still surfaced as placeholders after Phase 2: adherence scoring, a persisted trade
+  number, and a real `status` column (all derived for now).
 
 ---
 
-## ▶️ Phase 2 — Move fields into their sections (BUILD THIS NEXT)
+## ✅ Phase 2 — Move fields into their sections (DONE)
 
-Make the workspace sections **editable in place** and add the new plan/execution/
-review fields, so the workspace becomes the primary edit surface (the monolithic
-`/edit` form can then be retired or kept as a fallback).
+The workspace sections are now **editable in place**, and the new plan / execution /
+review case-file fields are live. The workspace is the primary edit surface for the
+narrative fields; the monolithic `/edit` form still owns the structured core (asset,
+RR, accounts, checklists, psychology) and is untouched.
 
-1. **Schema** (additive, nullable — safe): on `Trade` add plan fields (`plannedEntry`,
-   `plannedStopLoss`, `plannedTarget` as `Decimal?`; `marketContext`, `areasOfInterest`,
-   `reasonForTrade` as `String?`/`Json?`), execution fields (`actualEntry`,
-   `actualExit` `Decimal?`; `executionNotes` `String?`), and review fields
-   (`whatWentWell`, `whatWentWrong`, `whatSurprisedMe`, `wouldTakeAgain` `String?`/
-   `Boolean?`). Optionally a real `status` enum + a persisted `tradeNumber`. Migration.
-2. Extend `tradeSchema`/`TradeInput` (`src/lib/validation/trades.ts`) and the trade
-   service create/update to persist them.
-3. Make each workspace section editable — reuse `useDebouncedAutosave` per section (or
-   a per-section save action), and fill the placeholders wired in Phase 1 (they're
-   already labelled and positioned). Keep `/edit` working during the transition.
-4. Verify create + edit still round-trip; update this doc.
+### Completed work
+- Added the case-file fields to the three sections, each **autosaving inline** (800 ms
+  debounce, per-field save + "saving / saved" indicator), reusing the same
+  `useDebouncedAutosave` pattern as Strategy Lab:
+  - **Trade Idea**: planned entry / stop-loss / target (prices) + market context /
+    areas of interest / reason for trade (notes).
+  - **Trade Execution**: actual entry / exit (prices) + execution notes.
+  - **Trade Review**: what went well / wrong / surprised (notes) + a tri-state
+    "Would I take this trade again?" (Yes / No / —).
+- A single lightweight patch path — `updateTradeSection` action →
+  `updateTradeSections` service — writes **only the keys present** in a patch
+  (one field can save alone), userId-scoped, without touching allocations,
+  psychology, checklists, or the `/edit` form's fields.
+- The Phase-1 dashed "coming later" placeholders are replaced by real, populated
+  inputs (solid section cards).
+
+### Files changed
+- Schema: `prisma/schema.prisma` — 13 nullable columns on `Trade`
+  (`plannedEntry`/`plannedStopLoss`/`plannedTarget`/`actualEntry`/`actualExit` as
+  `Decimal(18,8)`; `marketContext`/`areasOfInterest`/`reasonForTrade`/`executionNotes`/
+  `whatWentWell`/`whatWentWrong`/`whatSurprisedMe` as `String`; `wouldTakeAgain` as
+  `Boolean`). Migration `20260803114316_trade_workspace_fields`.
+- Validation: `src/lib/validation/trades.ts` — `tradeWorkspaceSectionSchema` (partial
+  patch; price coercion + empty→null, note trim + empty→null, tri-state boolean).
+  Tested in `src/lib/validation/trade-workspace-section.test.ts` (9 tests).
+- Service/action: `updateTradeSections` (`trades.service.ts`), `updateTradeSection`
+  (`trades.actions.ts`).
+- UI: new `src/components/journal/workspace/workspace-fields.tsx`
+  (`WorkspacePriceField`, `WorkspaceNoteField`, `WorkspaceDecisionField`); the three
+  section components wired to them; `TradeWorkspaceDTO` + the workspace page mapping
+  extended for the new fields.
+
+### Database changes
+- **Additive only** — 13 new nullable columns on `Trade` (migration above). No column
+  was renamed, retyped, or dropped; existing trades read back as `null` for the new
+  fields, so nothing regresses.
+
+### Remaining tasks
+- Adherence scoring, a persisted trade number, and a real `status` column are still
+  derived / placeholder (planned for Phase 3–4).
+
+### Recommended next phase
+- **Phase 3 — Trade Timeline** (below).
 
 ---
 
 ## Later phases
 
-- **Phase 3 — Trade Timeline**: capture/derive per-event timestamps (idea saved,
+- **▶️ Phase 3 — Trade Timeline (BUILD THIS NEXT)**: capture/derive per-event timestamps (idea saved,
   executed, closed, reviewed) and render the full vertical timeline (replace the
   minimal `trade-timeline.tsx`). May need a lightweight `TradeEvent` log or derived
   transitions from status changes.

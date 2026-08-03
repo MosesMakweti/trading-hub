@@ -53,3 +53,49 @@ export type TradeInput = z.infer<typeof tradeSchema>;
 export type TradeFormValues = z.input<typeof tradeSchema>;
 export type TradeAllocationInput = z.infer<typeof tradeAllocationSchema>;
 export type RiskInputType = z.infer<typeof riskInputTypeSchema>;
+
+// --- Trade Workspace case-file fields (Phase 2) ---------------------------
+// Edited inline in the workspace sections, one field at a time, via a small
+// patch action — kept separate from the full tradeSchema so the /edit form
+// and these narrative fields never fight over the same payload.
+
+// Empty string -> null; otherwise trimmed, length-capped free text.
+const workspaceNote = z
+  .string()
+  .trim()
+  .max(4000)
+  .transform((v) => (v === "" ? null : v))
+  .nullable();
+
+// Empty string -> null; otherwise a finite, non-negative price.
+const workspacePrice = z
+  .union([z.string(), z.number()])
+  .transform((v) => (typeof v === "string" ? v.trim() : v))
+  .transform((v) => (v === "" ? null : Number(v)))
+  .refine((v) => v === null || (Number.isFinite(v) && v >= 0), {
+    message: "Enter a valid non-negative price.",
+  })
+  .nullable();
+
+// A patch of one-to-many workspace fields. Every key is optional; only the
+// keys actually present are written, so a single field can autosave alone.
+export const tradeWorkspaceSectionSchema = z
+  .object({
+    plannedEntry: workspacePrice,
+    plannedStopLoss: workspacePrice,
+    plannedTarget: workspacePrice,
+    marketContext: workspaceNote,
+    areasOfInterest: workspaceNote,
+    reasonForTrade: workspaceNote,
+    actualEntry: workspacePrice,
+    actualExit: workspacePrice,
+    executionNotes: workspaceNote,
+    whatWentWell: workspaceNote,
+    whatWentWrong: workspaceNote,
+    whatSurprisedMe: workspaceNote,
+    wouldTakeAgain: z.boolean().nullable(),
+  })
+  .partial()
+  .refine((data) => Object.keys(data).length > 0, { message: "Nothing to update." });
+
+export type TradeWorkspaceSectionInput = z.infer<typeof tradeWorkspaceSectionSchema>;

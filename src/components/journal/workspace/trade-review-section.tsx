@@ -1,10 +1,10 @@
 import { Badge } from "@/components/ui/badge";
 import { GRADE_VARIANT } from "@/lib/grade-variant";
+import { NoteBlock } from "@/components/journal/workspace/workspace-ui";
 import {
-  ComingSoon,
-  NoteBlock,
-  WorkspaceField,
-} from "@/components/journal/workspace/workspace-ui";
+  WorkspaceDecisionField,
+  WorkspaceNoteField,
+} from "@/components/journal/workspace/workspace-fields";
 import { StrategyAdherencePanel } from "@/components/journal/workspace/strategy-adherence-panel";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
@@ -41,16 +41,41 @@ export function TradeReviewSection({ trade }: { trade: TradeWorkspaceDTO }) {
         <NoteBlock label="Lessons learned" text={trade.lessonsLearned} />
         <NoteBlock label="What will I improve?" text={trade.whatToWorkOn} />
 
-        {/* Additional review prompts arrive with new fields in a later phase. */}
-        <div className="grid grid-cols-1 gap-3 rounded-xl border border-dashed border-border p-3 sm:grid-cols-2">
-          <div className="flex items-center gap-2 sm:col-span-2">
-            <span className="text-xs font-medium text-muted-foreground">More review prompts</span>
-            <ComingSoon label="Phase 2+" />
+        {/* Additional review prompts — editable inline (Phase 2). */}
+        <div className="grid grid-cols-1 gap-3 rounded-xl border border-border bg-background/30 p-3 sm:grid-cols-2">
+          <div className="text-xs font-medium text-muted-foreground sm:col-span-2">
+            More review prompts
           </div>
-          <WorkspaceField label="What went well?" placeholder="—" />
-          <WorkspaceField label="What went wrong?" placeholder="—" />
-          <WorkspaceField label="What surprised me?" placeholder="—" />
-          <WorkspaceField label="Would I take this trade again?" placeholder="—" />
+          <WorkspaceNoteField
+            dateKey={trade.dateKey}
+            tradeId={trade.id}
+            field="whatWentWell"
+            label="What went well?"
+            initialValue={trade.whatWentWell}
+            rows={2}
+          />
+          <WorkspaceNoteField
+            dateKey={trade.dateKey}
+            tradeId={trade.id}
+            field="whatWentWrong"
+            label="What went wrong?"
+            initialValue={trade.whatWentWrong}
+            rows={2}
+          />
+          <WorkspaceNoteField
+            dateKey={trade.dateKey}
+            tradeId={trade.id}
+            field="whatSurprisedMe"
+            label="What surprised me?"
+            initialValue={trade.whatSurprisedMe}
+            rows={2}
+          />
+          <WorkspaceDecisionField
+            dateKey={trade.dateKey}
+            tradeId={trade.id}
+            label="Would I take this trade again?"
+            initialValue={trade.wouldTakeAgain}
+          />
         </div>
       </div>
     </div>

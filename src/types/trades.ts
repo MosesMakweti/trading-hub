@@ -86,6 +86,21 @@ export interface TradeWorkspaceDTO {
   lessonsLearned: string | null; // psychLessonsLearned
   whatToWorkOn: string | null; // psychWhatToWorkOn
 
+  // Phase 2 case-file fields — editable inline in the workspace sections.
+  plannedEntry: number | null;
+  plannedStopLoss: number | null;
+  plannedTarget: number | null;
+  marketContext: string | null;
+  areasOfInterest: string | null;
+  reasonForTrade: string | null;
+  actualEntry: number | null;
+  actualExit: number | null;
+  executionNotes: string | null;
+  whatWentWell: string | null;
+  whatWentWrong: string | null;
+  whatSurprisedMe: string | null;
+  wouldTakeAgain: boolean | null;
+
   psychology: {
     rawScore: number;
     percent: number;

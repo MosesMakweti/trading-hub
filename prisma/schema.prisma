@@ -266,6 +266,23 @@ model Trade {
   psychPostTradeReflection String?
   psychLessonsLearned      String?
   psychWhatToWorkOn        String?
+  // Trade Workspace case-file fields (Phase 2) — all nullable, edited inline
+  // in the workspace sections; the /edit form leaves them untouched. Prices
+  // use Decimal(18,8) for FX/crypto precision. wouldTakeAgain is tri-state
+  // (null = not answered yet).
+  plannedEntry             Decimal?  @db.Decimal(18, 8)
+  plannedStopLoss          Decimal?  @db.Decimal(18, 8)
+  plannedTarget            Decimal?  @db.Decimal(18, 8)
+  marketContext            String?
+  areasOfInterest          String?
+  reasonForTrade           String?
+  actualEntry              Decimal?  @db.Decimal(18, 8)
+  actualExit               Decimal?  @db.Decimal(18, 8)
+  executionNotes           String?
+  whatWentWell             String?
+  whatWentWrong            String?
+  whatSurprisedMe          String?
+  wouldTakeAgain           Boolean?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   deletedAt                DateTime?

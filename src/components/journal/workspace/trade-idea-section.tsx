@@ -4,6 +4,10 @@ import {
   NoteBlock,
   WorkspaceField,
 } from "@/components/journal/workspace/workspace-ui";
+import {
+  WorkspaceNoteField,
+  WorkspacePriceField,
+} from "@/components/journal/workspace/workspace-fields";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
 // Section 1 — Trade Idea: what the trader planned, before the trade.
@@ -48,19 +52,59 @@ export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
 
       <NoteBlock label="Pre-trade notes" text={trade.preTradeNotes} />
 
-      {/* Planned prices, market context, areas of interest, and reason are new
-          fields that a later phase will add to the schema and the editor. */}
-      <div className="grid grid-cols-1 gap-3 rounded-xl border border-dashed border-border p-3 sm:grid-cols-3">
-        <div className="flex items-center gap-2 sm:col-span-3">
-          <span className="text-xs font-medium text-muted-foreground">Trade plan details</span>
-          <ComingSoon label="Phase 2+" />
+      {/* Trade plan details — editable inline (Phase 2). */}
+      <div className="grid grid-cols-1 gap-3 rounded-xl border border-border bg-background/30 p-3 sm:grid-cols-3">
+        <div className="text-xs font-medium text-muted-foreground sm:col-span-3">
+          Trade plan details
         </div>
-        <WorkspaceField label="Planned entry" placeholder="—" />
-        <WorkspaceField label="Planned stop-loss" placeholder="—" />
-        <WorkspaceField label="Planned target" placeholder="—" />
-        <WorkspaceField label="Market context" placeholder="—" className="sm:col-span-3" />
-        <WorkspaceField label="Areas of interest" placeholder="—" className="sm:col-span-3" />
-        <WorkspaceField label="Reason for trade" placeholder="—" className="sm:col-span-3" />
+        <WorkspacePriceField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="plannedEntry"
+          label="Planned entry"
+          initialValue={trade.plannedEntry}
+        />
+        <WorkspacePriceField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="plannedStopLoss"
+          label="Planned stop-loss"
+          initialValue={trade.plannedStopLoss}
+        />
+        <WorkspacePriceField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="plannedTarget"
+          label="Planned target"
+          initialValue={trade.plannedTarget}
+        />
+        <WorkspaceNoteField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="marketContext"
+          label="Market context"
+          initialValue={trade.marketContext}
+          placeholder="What was the higher-timeframe picture?"
+          className="sm:col-span-3"
+        />
+        <WorkspaceNoteField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="areasOfInterest"
+          label="Areas of interest"
+          initialValue={trade.areasOfInterest}
+          placeholder="Key levels / zones you were watching."
+          className="sm:col-span-3"
+        />
+        <WorkspaceNoteField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="reasonForTrade"
+          label="Reason for trade"
+          initialValue={trade.reasonForTrade}
+          placeholder="Why did you take this trade?"
+          className="sm:col-span-3"
+        />
       </div>
     </div>
   );

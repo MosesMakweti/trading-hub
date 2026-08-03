@@ -3,7 +3,11 @@ import { dateKeyToUtcDate } from "@/lib/date";
 import { dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import { effectiveRiskPercent, scalePnlByRisk, PERFORMANCE_ACCOUNT_RISK_PERCENT } from "@/domain/performance/allocation";
 import { scorePsychology, type PsychologyAnswer } from "@/domain/psychology/scoring";
-import type { RiskInputType, TradeInput } from "@/lib/validation/trades";
+import type {
+  RiskInputType,
+  TradeInput,
+  TradeWorkspaceSectionInput,
+} from "@/lib/validation/trades";
 import {
   getAccountBalance,
   getAccountTrackRecord,
@@ -207,6 +211,29 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
       },
       include: tradeInclude,
     });
+  });
+}
+
+/**
+ * Patches only the Trade Workspace case-file scalar columns (planned/actual
+ * prices, market context, reasons, review prompts). userId-scoped via an
+ * explicit ownership check first, then a keyed update — allocations,
+ * psychology, checklists and the /edit form's fields are never touched, so a
+ * section can autosave in isolation. Only the keys present in `patch` are
+ * written (an absent key leaves the column as-is; an explicit null clears it).
+ */
+export async function updateTradeSections(
+  userId: string,
+  tradeId: string,
+  patch: TradeWorkspaceSectionInput,
+) {
+  const existing = await prisma.trade.findFirst({ where: { id: tradeId, userId } });
+  if (!existing) throw new Error("Trade not found.");
+
+  return prisma.trade.update({
+    where: { id: tradeId },
+    data: patch,
+    include: tradeInclude,
   });
 }
 

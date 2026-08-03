@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
-import { tradeSchema } from "@/lib/validation/trades";
+import { tradeSchema, tradeWorkspaceSectionSchema } from "@/lib/validation/trades";
 import * as tradesService from "@/server/services/trades.service";
 
 type ActionResult = { success: true; tradeId: string } | { success: false; error: string };
@@ -37,6 +37,26 @@ export async function updateTrade(
   revalidatePath(`/journal/${dateKey}`);
   revalidatePath("/journal");
   return { success: true, tradeId: trade.id };
+}
+
+// Inline autosave for a single Trade Workspace section field (or a few).
+// Kept lightweight and separate from updateTrade so the workspace can save a
+// field without re-submitting the entire trade form.
+export async function updateTradeSection(
+  dateKey: string,
+  tradeId: string,
+  input: unknown,
+): Promise<SimpleResult> {
+  const user = await requireUser();
+  const parsed = tradeWorkspaceSectionSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  await tradesService.updateTradeSections(user.id, tradeId, parsed.data);
+  revalidatePath(`/journal/${dateKey}/trades/${tradeId}`);
+  revalidatePath(`/journal/${dateKey}`);
+  return { success: true };
 }
 
 export async function archiveTrade(dateKey: string, tradeId: string): Promise<SimpleResult> {

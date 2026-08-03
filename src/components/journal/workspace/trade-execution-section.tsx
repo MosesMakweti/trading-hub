@@ -2,11 +2,14 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { minutesToTimeString } from "@/lib/date";
 import {
-  ComingSoon,
   WorkspaceField,
   formatRR,
   formatSignedCurrency,
 } from "@/components/journal/workspace/workspace-ui";
+import {
+  WorkspaceNoteField,
+  WorkspacePriceField,
+} from "@/components/journal/workspace/workspace-fields";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
 const ACCOUNT_KIND_LABEL: Record<string, string> = {
@@ -118,15 +121,34 @@ export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
         </div>
       )}
 
-      {/* Actual entry/exit prices and execution notes are new fields for a later phase. */}
-      <div className="grid grid-cols-1 gap-3 rounded-xl border border-dashed border-border p-3 sm:grid-cols-2">
-        <div className="flex items-center gap-2 sm:col-span-2">
-          <span className="text-xs font-medium text-muted-foreground">Execution details</span>
-          <ComingSoon label="Phase 2+" />
+      {/* Execution details — editable inline (Phase 2). */}
+      <div className="grid grid-cols-1 gap-3 rounded-xl border border-border bg-background/30 p-3 sm:grid-cols-2">
+        <div className="text-xs font-medium text-muted-foreground sm:col-span-2">
+          Execution details
         </div>
-        <WorkspaceField label="Actual entry" placeholder="—" />
-        <WorkspaceField label="Actual exit" placeholder="—" />
-        <WorkspaceField label="Execution notes" placeholder="—" className="sm:col-span-2" />
+        <WorkspacePriceField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="actualEntry"
+          label="Actual entry"
+          initialValue={trade.actualEntry}
+        />
+        <WorkspacePriceField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="actualExit"
+          label="Actual exit"
+          initialValue={trade.actualExit}
+        />
+        <WorkspaceNoteField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="executionNotes"
+          label="Execution notes"
+          initialValue={trade.executionNotes}
+          placeholder="How did the entry and management actually go?"
+          className="sm:col-span-2"
+        />
       </div>
     </div>
   );
