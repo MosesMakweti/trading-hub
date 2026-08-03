@@ -283,6 +283,12 @@ model Trade {
   whatWentWrong            String?
   whatSurprisedMe          String?
   wouldTakeAgain           Boolean?
+  // Trade Timeline lifecycle stamps (Phase 3) — captured when the trade first
+  // transitions into each state (see domain/trades/lifecycle.ts). createdAt is
+  // "logged", the in-market "executed" moment is derived (tradeDate +
+  // executionMinutes), and updatedAt is the last edit.
+  closedAt                 DateTime?
+  reviewedAt               DateTime?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   deletedAt                DateTime?

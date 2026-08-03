@@ -110,8 +110,11 @@ export interface TradeWorkspaceDTO {
   images: TradeWorkspaceImageDTO[];
 
   status: TradeStatus;
-  createdAt: string; // ISO
-  updatedAt: string; // ISO
+  createdAt: string; // ISO — trade logged
+  updatedAt: string; // ISO — last edit
+  executedAt: string; // ISO — in-market execution (tradeDate + executionMinutes)
+  closedAt: string | null; // ISO — result first recorded
+  reviewedAt: string | null; // ISO — first reviewed
 }
 
 /** Strategy-adherence prompts. Displayed read-only in Phase 1; a scoring system

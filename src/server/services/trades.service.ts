@@ -3,6 +3,7 @@ import { dateKeyToUtcDate } from "@/lib/date";
 import { dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import { effectiveRiskPercent, scalePnlByRisk, PERFORMANCE_ACCOUNT_RISK_PERCENT } from "@/domain/performance/allocation";
 import { scorePsychology, type PsychologyAnswer } from "@/domain/psychology/scoring";
+import { nextClosedAt, nextReviewedAt } from "@/domain/trades/lifecycle";
 import type {
   RiskInputType,
   TradeInput,
@@ -57,6 +58,21 @@ function scorePsychologyAnswers(answers: TradeInput["psychologyAnswers"]) {
   }));
   const { rawScore, percent, grade } = scorePsychology(answerList);
   return { answers, rawScore, psychologyPercent: percent, grade };
+}
+
+// The free-text fields whose presence means "this trade has been reviewed":
+// the /edit form's psychology reflections plus the workspace review prompts.
+const REVIEW_TEXT_FIELDS = [
+  "psychPostTradeReflection",
+  "psychLessonsLearned",
+  "psychWhatToWorkOn",
+  "whatWentWell",
+  "whatWentWrong",
+  "whatSurprisedMe",
+] as const;
+
+function hasText(value: unknown): boolean {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 function tradeScalarData(data: TradeInput) {
@@ -170,11 +186,18 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   const allocations = await buildAllocations(userId, data);
 
+  const now = new Date();
+  const hasReview = hasText(data.psychPostTradeReflection) ||
+    hasText(data.psychLessonsLearned) ||
+    hasText(data.psychWhatToWorkOn);
+
   return prisma.trade.create({
     data: {
       userId,
       tradeDate: dateKeyToUtcDate(dateKey),
       ...tradeScalarData(data),
+      closedAt: nextClosedAt(null, data.actualRR != null, now),
+      reviewedAt: nextReviewedAt(null, hasReview, now),
       allocations: { create: allocations },
       checklistSelections: {
         create: data.checklistItemIds.map((checklistItemId) => ({ checklistItemId })),
@@ -198,10 +221,23 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
     await tx.tradeChecklistSelection.deleteMany({ where: { tradeId } });
     await tx.tradeEntryModel.deleteMany({ where: { tradeId } });
 
+    const now = new Date();
+    // The form owns the psychology reflections; the workspace review prompts
+    // (whatWent*) are only on the existing row, so merge both.
+    const hasReview =
+      hasText(data.psychPostTradeReflection) ||
+      hasText(data.psychLessonsLearned) ||
+      hasText(data.psychWhatToWorkOn) ||
+      hasText(existing.whatWentWell) ||
+      hasText(existing.whatWentWrong) ||
+      hasText(existing.whatSurprisedMe);
+
     return tx.trade.update({
       where: { id: tradeId },
       data: {
         ...tradeScalarData(data),
+        closedAt: nextClosedAt(existing.closedAt, data.actualRR != null, now),
+        reviewedAt: nextReviewedAt(existing.reviewedAt, hasReview, now),
         allocations: { create: allocations },
         checklistSelections: {
           create: data.checklistItemIds.map((checklistItemId) => ({ checklistItemId })),
@@ -230,9 +266,20 @@ export async function updateTradeSections(
   const existing = await prisma.trade.findFirst({ where: { id: tradeId, userId } });
   if (!existing) throw new Error("Trade not found.");
 
+  // Editing a review prompt inline can be the moment a trade first becomes
+  // "reviewed" — stamp reviewedAt from the merged (patch over existing) view.
+  const patchRecord = patch as Record<string, unknown>;
+  const existingRecord = existing as unknown as Record<string, unknown>;
+  const hasReview = REVIEW_TEXT_FIELDS.some((field) =>
+    hasText(field in patchRecord ? patchRecord[field] : existingRecord[field]),
+  );
+
   return prisma.trade.update({
     where: { id: tradeId },
-    data: patch,
+    data: {
+      ...patch,
+      reviewedAt: nextReviewedAt(existing.reviewedAt, hasReview, new Date()),
+    },
     include: tradeInclude,
   });
 }

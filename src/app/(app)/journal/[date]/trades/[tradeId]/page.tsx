@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/guards";
 import { getTrade, getTradeOrdinal } from "@/server/services/trades.service";
 import { isValidDateKey, utcDateToKey } from "@/lib/date";
+import { executedAtFromTrade } from "@/domain/trades/lifecycle";
 import { FadeIn } from "@/components/shared/motion";
 import { TradeWorkspace } from "@/components/journal/workspace/trade-workspace";
 import type { TradeStatus, TradeWorkspaceDTO } from "@/types/trades";
@@ -93,6 +94,9 @@ export default async function TradeWorkspacePage({
     status,
     createdAt: trade.createdAt.toISOString(),
     updatedAt: trade.updatedAt.toISOString(),
+    executedAt: executedAtFromTrade(trade.tradeDate, trade.executionMinutes).toISOString(),
+    closedAt: trade.closedAt?.toISOString() ?? null,
+    reviewedAt: trade.reviewedAt?.toISOString() ?? null,
   };
 
   return (
