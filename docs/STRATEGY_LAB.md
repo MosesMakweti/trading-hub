@@ -254,28 +254,36 @@ Entry Models, Trade Management) is now live.** The remaining work is the Journal
 
 ---
 
-## ▶️ Phase 7 — JOURNAL INTEGRATION (BUILD THIS NEXT — final phase)
+## ✅ Phase 7 — JOURNAL INTEGRATION (DONE — module feature-complete)
 
-Connect strategies to the Journal. This touches existing Journal code (the trade
-form / trade service) — the one place the "don't touch prior work" rule is expected
-to bend, but keep changes additive.
+Strategies are connected to the Journal. Delivered partly by the Trade Workspace
+refactor (`docs/TRADE_WORKSPACE.md`, Phase 4) and completed here.
 
-1. **Schema**: add `strategyId String?` + `strategy Strategy? @relation(...)` to
-   `Trade` (a **reference**, `onDelete: SetNull` — deleting a strategy must not delete
-   trades). Uncomment `Strategy.trades`. Migration.
-2. **Trade form**: add a Strategy selector (list the user's non-archived strategies).
-   On select, **auto-populate**: Applicable Assets, Entry Models, Framework steps, and
-   Trade-Management rules (as prefilled/reference context). Persist `trade.strategyId`.
-   ❗ **Do NOT auto-populate Arsenal / "Relevant Concepts"** — the Journal *references*
-   the strategy, it does not copy its knowledge base. (Explicit product requirement.)
-3. Surface the linked strategy on the trade card / day view (a chip linking to the
-   workspace).
-4. Duplicate is unaffected (trades aren't part of a strategy's own tree; the FK is a
-   reference). Do **not** copy `trades` in `duplicateStrategy`.
+1. **Schema** (done in Trade Workspace Phase 4): `Trade.strategyId` +
+   `strategy Strategy? @relation(onDelete: SetNull)`; `Strategy.trades` back-relation.
+   Migration `20260803134554_trade_strategy_reference`.
+2. **Trade form**: Strategy selector lists the user's **non-archived** strategies
+   (the edit page adds back a currently-linked archived/deleted strategy so it stays
+   visible). On select, a read-only **reference panel** surfaces the strategy's
+   **Applicable Assets, Entry Models, Framework steps, and Trade-Management** (max
+   risk / hold, custom rules, partial TPs) via `getStrategyReference` +
+   `loadStrategyReference`. ❗ **Arsenal is never surfaced** — verified by test.
+   `trade.strategyId` is persisted and its name/version snapshotted at save time.
+3. The linked strategy shows as a **chip** on each trade card (day view), linking to
+   the strategy workspace while it still exists.
+4. `duplicateStrategy` is unaffected — its `include` never reads `trades`, so a
+   duplicated strategy copies no journal links.
 
-Leave the app working, update this file, then stop. After this the module is
-feature-complete for the original brief; future work is the "Future integrations"
-list below.
+Extra correctness fix made here: the trade's strategy **snapshot is frozen** once
+linked (only recomputed when the selection changes), so editing a trade whose
+strategy was later renamed or deleted no longer wipes the historical snapshot.
+
+Files: `strategies.service.ts` (`getStrategyReference`), `trades.actions.ts`
+(`loadStrategyReference`), `strategy-reference-panel.tsx`, `trade-form.tsx`,
+`trade-card.tsx`, the journal day + edit pages, `types/{strategies,trades}.ts`.
+
+The module is now feature-complete for the original brief; future work is the
+"Future integrations" list below.
 
 ---
 

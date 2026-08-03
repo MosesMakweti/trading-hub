@@ -87,3 +87,21 @@ export interface TradeManagementDTO {
   partialTakeProfits: PartialTakeProfitDTO[];
   customRules: CustomRuleDTO[];
 }
+
+// A lightweight, read-only view of a strategy surfaced inside the Journal when a
+// trade references it (Phase 7). Deliberately excludes Arsenal — the Journal
+// references a strategy's process, it never copies its knowledge base.
+export interface StrategyReferenceDTO {
+  id: string;
+  name: string;
+  version: number;
+  applicableAssets: string[];
+  entryModels: string[]; // names, in order
+  frameworkSteps: string[]; // step titles, in order
+  tradeManagement: {
+    maxRiskPercent: number | null;
+    maxHoldingTime: string | null;
+    customRules: string[];
+    partialTakeProfits: { trigger: string | null; percentToClose: number | null }[];
+  } | null;
+}

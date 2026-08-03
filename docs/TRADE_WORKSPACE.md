@@ -217,11 +217,14 @@ identity so the record stays historically accurate forever.
   foreign strategyId dropped, rename+version-bump frozen, soft-delete keeps the
   snapshot and drops the live link. tsc + eslint clean; 122 tests pass.
 
-### Coordination note (Strategy Lab Phase 7)
-`Trade.strategyId` is now the shared column Strategy Lab's own Phase 7 Journal
-integration (`docs/STRATEGY_LAB.md`) was waiting on — that phase can build the
-strategy→journal views (auto-suggesting the strategy's assets / entry models /
-framework) on top of this reference. Still **no Arsenal auto-population**.
+### Coordination note (Strategy Lab Phase 7 — now DONE)
+Strategy Lab Phase 7 (`docs/STRATEGY_LAB.md`) built the strategy→journal views on
+top of `Trade.strategyId`: a reference panel in the trade form (assets / entry
+models / framework / trade-management — never Arsenal) and a strategy chip on the
+trade card. It also **froze the strategy snapshot** — `buildTradeSnapshots` now
+keeps the snapshot untouched while the selection is unchanged (only recomputing
+when the strategy is actually changed), fixing a bug where editing a trade whose
+strategy had been renamed/deleted would overwrite or wipe the historical snapshot.
 
 ## ✅ Phase 5 — Polish extras (DONE)
 

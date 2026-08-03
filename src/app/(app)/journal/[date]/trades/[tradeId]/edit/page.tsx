@@ -27,6 +27,20 @@ export default async function EditTradePage({
   const { accounts, assets, sessions, entryModels, confluenceItems, executionItems, strategies } =
     options;
 
+  // The options list is non-archived only; if this trade is still linked to a
+  // strategy that's since been archived (or soft-deleted), add it back so the
+  // selector shows the current link instead of appearing empty.
+  const formStrategies: { id: string; name: string; version: number; archived?: boolean }[] =
+    strategies.map((s) => ({ id: s.id, name: s.name, version: s.version }));
+  if (trade.strategy && !formStrategies.some((s) => s.id === trade.strategy!.id)) {
+    formStrategies.push({
+      id: trade.strategy.id,
+      name: trade.strategyNameSnapshot ?? trade.strategy.name,
+      version: trade.strategyVersionSnapshot ?? trade.strategy.version,
+      archived: true,
+    });
+  }
+
   const performanceAllocation = trade.allocations.find(
     (a) => a.tradingAccount.kind === "PERFORMANCE",
   );
@@ -91,7 +105,7 @@ export default async function EditTradePage({
         entryModels={entryModels.map((m) => ({ id: m.id, name: m.name }))}
         confluenceItems={confluenceItems.map((c) => ({ id: c.id, label: c.label }))}
         executionItems={executionItems.map((c) => ({ id: c.id, label: c.label }))}
-        strategies={strategies.map((s) => ({ id: s.id, name: s.name, version: s.version }))}
+        strategies={formStrategies}
         defaultValues={defaultValues}
       />
     </div>

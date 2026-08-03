@@ -27,6 +27,69 @@ export async function getStrategy(userId: string, id: string) {
   return prisma.strategy.findFirst({ where: { id, userId } });
 }
 
+/**
+ * A read-only reference view of a strategy for the Journal (Phase 7): its
+ * applicable assets, entry models, framework steps, and trade-management rules —
+ * so a trade that references the strategy can surface its process as context.
+ * **Never includes Arsenal** (the Journal references, it does not copy the
+ * knowledge base). Nested relations need explicit `deletedAt: null` because the
+ * soft-delete extension only guards top-level queries.
+ */
+export async function getStrategyReference(userId: string, id: string) {
+  const s = await prisma.strategy.findFirst({
+    where: { id, userId },
+    include: {
+      entryModels: {
+        where: { deletedAt: null },
+        orderBy: { sortOrder: "asc" },
+        select: { name: true },
+      },
+      frameworkSteps: {
+        where: { deletedAt: null },
+        orderBy: { sortOrder: "asc" },
+        select: { title: true },
+      },
+      tradeManagement: {
+        include: {
+          customRules: {
+            where: { deletedAt: null },
+            orderBy: { sortOrder: "asc" },
+            select: { text: true },
+          },
+          partialTakeProfits: {
+            where: { deletedAt: null },
+            orderBy: { sortOrder: "asc" },
+            select: { trigger: true, percentToClose: true },
+          },
+        },
+      },
+    },
+  });
+  if (!s) return null;
+
+  return {
+    id: s.id,
+    name: s.name,
+    version: s.version,
+    applicableAssets: s.applicableAssets,
+    entryModels: s.entryModels.map((e) => e.name),
+    frameworkSteps: s.frameworkSteps.map((f) => f.title),
+    tradeManagement: s.tradeManagement
+      ? {
+          maxRiskPercent: s.tradeManagement.maxRiskPercent
+            ? s.tradeManagement.maxRiskPercent.toNumber()
+            : null,
+          maxHoldingTime: s.tradeManagement.maxHoldingTime,
+          customRules: s.tradeManagement.customRules.map((r) => r.text),
+          partialTakeProfits: s.tradeManagement.partialTakeProfits.map((p) => ({
+            trigger: p.trigger,
+            percentToClose: p.percentToClose ? p.percentToClose.toNumber() : null,
+          })),
+        }
+      : null,
+  };
+}
+
 export async function createStrategy(userId: string, data: StrategyCreateInput) {
   const last = await prisma.strategy.findFirst({
     where: { userId },

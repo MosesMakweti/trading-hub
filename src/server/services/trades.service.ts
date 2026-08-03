@@ -38,7 +38,19 @@ export async function getTradeFormOptions(userId: string) {
       listStrategies(userId),
     ]);
 
-  return { accounts, assets, sessions, entryModels, confluenceItems, executionItems, strategies };
+  // Only offer non-archived strategies for a new selection; the edit page adds
+  // back a currently-linked archived strategy so it stays visible.
+  const selectableStrategies = strategies.filter((s) => s.status !== "ARCHIVED");
+
+  return {
+    accounts,
+    assets,
+    sessions,
+    entryModels,
+    confluenceItems,
+    executionItems,
+    strategies: selectableStrategies,
+  };
 }
 
 const tradeInclude = {
@@ -162,7 +174,19 @@ async function buildAllocations(userId: string, data: TradeInput, excludeTradeId
  * even if the strategy is later versioned, renamed, or deleted. A strategyId that
  * doesn't belong to the user is dropped (treated as no strategy).
  */
-async function buildTradeSnapshots(userId: string, data: TradeInput) {
+type StrategySnapshot = {
+  strategyId: string | null;
+  strategyNameSnapshot: string | null;
+  strategyVersionSnapshot: number | null;
+};
+
+async function buildTradeSnapshots(
+  userId: string,
+  data: TradeInput,
+  existing?: StrategySnapshot,
+) {
+  // Entry-model names always reflect the current selection (they're part of the
+  // trade, not the strategy).
   const entryModels = data.entryModelIds.length
     ? await prisma.entryModel.findMany({
         where: { userId, id: { in: data.entryModelIds } },
@@ -173,6 +197,15 @@ async function buildTradeSnapshots(userId: string, data: TradeInput) {
     .map((id) => nameById.get(id))
     .filter((name): name is string => Boolean(name));
   const entryModelNameSnapshot = orderedNames.length ? orderedNames.join(", ") : null;
+
+  // The strategy snapshot is FROZEN once linked: while the selection is unchanged
+  // it's kept exactly as-is — even if the strategy was since renamed, versioned,
+  // or deleted — so a completed trade never loses the strategy it was taken under
+  // (re-deriving here would wipe the snapshot the moment its strategy is gone).
+  // Recompute only when the selection actually changes (or on create).
+  if (existing && data.strategyId === existing.strategyId) {
+    return { ...existing, entryModelNameSnapshot };
+  }
 
   let strategyId: string | null = null;
   let strategyNameSnapshot: string | null = null;
@@ -279,11 +312,17 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
 export async function updateTrade(userId: string, tradeId: string, data: TradeInput) {
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   const allocations = await buildAllocations(userId, data, tradeId);
-  const snapshots = await buildTradeSnapshots(userId, data);
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.trade.findFirst({ where: { id: tradeId, userId } });
     if (!existing) throw new Error("Trade not found.");
+
+    // Pass the existing snapshot so an unchanged strategy selection stays frozen.
+    const snapshots = await buildTradeSnapshots(userId, data, {
+      strategyId: existing.strategyId,
+      strategyNameSnapshot: existing.strategyNameSnapshot,
+      strategyVersionSnapshot: existing.strategyVersionSnapshot,
+    });
 
     await tx.tradeAccountAllocation.deleteMany({ where: { tradeId } });
     await tx.tradeChecklistSelection.deleteMany({ where: { tradeId } });

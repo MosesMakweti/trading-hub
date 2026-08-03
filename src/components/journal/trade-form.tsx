@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Controller, useFieldArray, useForm } from "react-hook-form";
+import { useEffect, useState } from "react";
+import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -22,9 +22,11 @@ import {
 import { TradeAccountRow } from "@/components/journal/trade-account-row";
 import { TagToggleGroup } from "@/components/journal/tag-toggle-group";
 import { PsychologyQuestionnaire } from "@/components/journal/psychology-questionnaire";
+import { StrategyReferencePanel } from "@/components/journal/strategy-reference-panel";
 import { minutesToTimeString, timeStringToMinutes } from "@/lib/date";
 import { tradeSchema, type TradeFormValues, type TradeInput } from "@/lib/validation/trades";
-import { createTrade, updateTrade } from "@/actions/trades.actions";
+import { createTrade, updateTrade, loadStrategyReference } from "@/actions/trades.actions";
+import type { StrategyReferenceDTO } from "@/types/strategies";
 
 const NO_SESSION = "__none__";
 const NO_STRATEGY = "__none__";
@@ -65,7 +67,7 @@ interface TradeFormProps {
   entryModels: { id: string; name: string }[];
   confluenceItems: { id: string; label: string }[];
   executionItems: { id: string; label: string }[];
-  strategies: { id: string; name: string; version: number }[];
+  strategies: { id: string; name: string; version: number; archived?: boolean }[];
   defaultValues?: TradeFormValues;
 }
 
@@ -96,6 +98,33 @@ export function TradeForm({
   });
 
   const { fields, append, remove } = useFieldArray({ control, name: "allocations" });
+
+  // When a strategy is selected, surface its process (assets / entry models /
+  // framework / trade-management) as read-only reference context. NOT Arsenal.
+  const selectedStrategyId = useWatch({ control, name: "strategyId" });
+  const [strategyReference, setStrategyReference] = useState<StrategyReferenceDTO | null>(null);
+  const [referenceLoading, setReferenceLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    // All state updates happen inside this async callback, never synchronously in
+    // the effect body (keeps clear of the cascading-render lint).
+    void (async () => {
+      if (!selectedStrategyId) {
+        setStrategyReference(null);
+        setReferenceLoading(false);
+        return;
+      }
+      setReferenceLoading(true);
+      const reference = await loadStrategyReference(selectedStrategyId);
+      if (!active) return;
+      setStrategyReference(reference);
+      setReferenceLoading(false);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [selectedStrategyId]);
 
   function isAccountSelected(accountId: string) {
     return fields.some((f) => f.tradingAccountId === accountId);
@@ -273,7 +302,10 @@ export function TradeForm({
               <Select
                 items={[
                   { value: NO_STRATEGY, label: "None" },
-                  ...strategies.map((s) => ({ value: s.id, label: `${s.name} · v${s.version}` })),
+                  ...strategies.map((s) => ({
+                    value: s.id,
+                    label: `${s.name} · v${s.version}${s.archived ? " (archived)" : ""}`,
+                  })),
                 ]}
                 value={field.value ?? NO_STRATEGY}
                 onValueChange={(v) => field.onChange(v === NO_STRATEGY ? null : v)}
@@ -286,6 +318,7 @@ export function TradeForm({
                   {strategies.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
                       {s.name} · v{s.version}
+                      {s.archived ? " (archived)" : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -297,6 +330,10 @@ export function TradeForm({
             save time, so the record stays accurate even if the strategy changes later.
           </p>
         </div>
+
+        {(referenceLoading || strategyReference) && (
+          <StrategyReferencePanel reference={strategyReference} loading={referenceLoading} />
+        )}
       </section>
 
       <section className="glass space-y-3 rounded-2xl p-4">

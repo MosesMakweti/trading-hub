@@ -48,6 +48,8 @@ export default async function JournalDayPage({
       closingPnlNet: a.closingPnlNet.toNumber(),
     })),
     entryModelNames: t.entryModels.map((m) => m.entryModel.name),
+    strategyName: t.strategyNameSnapshot,
+    strategyId: t.strategy && !t.strategy.deletedAt ? t.strategy.id : null,
     confluenceLabels: t.checklistSelections
       .filter((c) => c.checklistItem.type === "CONFLUENCE")
       .map((c) => c.checklistItem.label),

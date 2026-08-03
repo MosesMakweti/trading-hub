@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { SquareArrowOutUpRight, Trash2 } from "lucide-react";
+import { SquareArrowOutUpRight, Target, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { minutesToTimeString } from "@/lib/date";
@@ -60,6 +60,21 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
             {trade.higherTimeframeBias === "BULLISH" ? "Bullish" : "Bearish"} bias ·{" "}
             {trade.biasConfidencePercent}% confidence
           </p>
+          {trade.strategyName &&
+            (trade.strategyId ? (
+              <Link
+                href={`/strategy-lab/${trade.strategyId}`}
+                className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
+              >
+                <Target className="size-3" />
+                {trade.strategyName}
+              </Link>
+            ) : (
+              <span className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Target className="size-3" />
+                {trade.strategyName}
+              </span>
+            ))}
         </div>
         <div className="text-right">
           <div className="text-xs text-muted-foreground">Expected / Actual RR</div>

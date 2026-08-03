@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/server/guards";
 import { tradeSchema, tradeWorkspaceSectionSchema } from "@/lib/validation/trades";
 import * as tradesService from "@/server/services/trades.service";
+import { getStrategyReference } from "@/server/services/strategies.service";
+import type { StrategyReferenceDTO } from "@/types/strategies";
 
 type ActionResult = { success: true; tradeId: string } | { success: false; error: string };
 type SimpleResult = { success: true } | { success: false; error: string };
@@ -57,6 +59,15 @@ export async function updateTradeSection(
   revalidatePath(`/journal/${dateKey}/trades/${tradeId}`);
   revalidatePath(`/journal/${dateKey}`);
   return { success: true };
+}
+
+// Loads a strategy's reference context for the trade form when a strategy is
+// selected. Returns null if the strategy no longer exists / isn't the user's.
+export async function loadStrategyReference(
+  strategyId: string,
+): Promise<StrategyReferenceDTO | null> {
+  const user = await requireUser();
+  return getStrategyReference(user.id, strategyId);
 }
 
 export async function archiveTrade(dateKey: string, tradeId: string): Promise<SimpleResult> {

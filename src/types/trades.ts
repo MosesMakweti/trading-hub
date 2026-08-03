@@ -21,6 +21,10 @@ export interface TradeListItemDTO {
   entryModelNames: string[];
   confluenceLabels: string[];
   executionLabels: string[];
+  // Strategy the trade was taken under (from the snapshot); strategyId links to
+  // the live strategy only while it still exists.
+  strategyName: string | null;
+  strategyId: string | null;
   psychology: {
     rawScore: number;
     percent: number;
