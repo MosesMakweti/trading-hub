@@ -1,14 +1,15 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { GitCommitVertical, History, Loader2 } from "lucide-react";
+import { Eye, GitCommitVertical, History, Loader2, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { publishStrategyVersion } from "@/actions/strategies.actions";
+import { publishStrategyVersion, restoreStrategyVersion } from "@/actions/strategies.actions";
 import { StrategyVersionCompare } from "@/components/strategy-lab/strategy-version-compare";
 import type { StrategyVersionDTO } from "@/types/strategies";
 
@@ -16,8 +17,29 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-function VersionCard({ version }: { version: StrategyVersionDTO }) {
+function VersionCard({
+  version,
+  strategyId,
+}: {
+  version: StrategyVersionDTO;
+  strategyId: string;
+}) {
+  const router = useRouter();
+  const [restoring, startRestore] = useTransition();
   const s = version.summary;
+
+  function restore() {
+    startRestore(async () => {
+      const result = await restoreStrategyVersion(strategyId, version.version);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`Restored version ${version.version} as a new strategy.`);
+      router.push(`/strategy-lab/${result.id}`);
+    });
+  }
+
   const chips = [
     `${s.arsenalCount} arsenal`,
     `${s.frameworkStepTitles.length} framework`,
@@ -70,6 +92,29 @@ function VersionCard({ version }: { version: StrategyVersionDTO }) {
           )}
         </div>
       )}
+
+      <div className="flex items-center justify-end gap-1.5 border-t border-border/60 pt-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5"
+          nativeButton={false}
+          render={<Link href={`/strategy-lab/${strategyId}/versions/${version.version}`} />}
+        >
+          <Eye className="size-3.5" />
+          View
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={restore}
+          disabled={restoring}
+        >
+          {restoring ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
+          Restore as new
+        </Button>
+      </div>
     </li>
   );
 }
@@ -155,7 +200,7 @@ export function StrategyVersionsSection({
           </div>
           <ul className="space-y-3">
             {initialVersions.map((v) => (
-              <VersionCard key={v.id} version={v} />
+              <VersionCard key={v.id} version={v} strategyId={strategyId} />
             ))}
           </ul>
         </div>

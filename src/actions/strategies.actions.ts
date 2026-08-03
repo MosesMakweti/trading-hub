@@ -131,6 +131,19 @@ export async function compareStrategyVersions(
   }
 }
 
+export async function restoreStrategyVersion(id: string, version: unknown): Promise<CreateResult> {
+  const user = await requireUser();
+  const v = toVersionRef(version);
+  if (!v || v === "current") return { success: false, error: "Invalid version." };
+  try {
+    const copy = await strategiesService.restoreStrategyVersionAsNewStrategy(user.id, id, v);
+    revalidatePath("/strategy-lab");
+    return { success: true, id: copy.id };
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to restore version.") };
+  }
+}
+
 export async function duplicateStrategy(id: string): Promise<CreateResult> {
   const user = await requireUser();
   try {

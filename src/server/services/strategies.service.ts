@@ -193,6 +193,162 @@ export async function getStrategyVersionComparison(
   return diffStrategyVersions(from, to);
 }
 
+/** One published version's full snapshot (for the read-only version view). */
+export async function getStrategyVersion(
+  userId: string,
+  strategyId: string,
+  version: number,
+): Promise<{ version: number; note: string | null; createdAt: string; snapshot: StrategyVersionSnapshot } | null> {
+  const owned = await prisma.strategy.findFirst({ where: { id: strategyId, userId }, select: { id: true } });
+  if (!owned) return null;
+  const row = await prisma.strategyVersion.findFirst({ where: { strategyId, version } });
+  if (!row) return null;
+  return {
+    version: row.version,
+    note: row.note,
+    createdAt: row.createdAt.toISOString(),
+    snapshot: row.snapshot as unknown as StrategyVersionSnapshot,
+  };
+}
+
+/**
+ * Restores a published version by rebuilding its snapshot into a **new** DRAFT
+ * strategy — never mutating the live one, so a restore can't clobber current
+ * work. Mirrors duplicateStrategy's deep-copy, but the source is the frozen JSON
+ * snapshot (order comes from array position). Rich-text fields are re-inserted
+ * via toJsonInput (a stored SQL NULL must be written as Prisma.DbNull).
+ */
+export async function restoreStrategyVersionAsNewStrategy(
+  userId: string,
+  strategyId: string,
+  version: number,
+) {
+  const owned = await prisma.strategy.findFirst({ where: { id: strategyId, userId }, select: { id: true } });
+  if (!owned) throw new Error("Strategy not found.");
+  const row = await prisma.strategyVersion.findFirst({ where: { strategyId, version } });
+  if (!row) throw new Error("Version not found.");
+  const snap = row.snapshot as unknown as StrategyVersionSnapshot;
+
+  const last = await prisma.strategy.findFirst({ where: { userId }, orderBy: { sortOrder: "desc" } });
+  const json = (value: unknown) => toJsonInput(value as Prisma.JsonValue | null);
+
+  return prisma.$transaction(async (tx) => {
+    const created = await tx.strategy.create({
+      data: {
+        userId,
+        name: `${snap.name} (v${version} restored)`,
+        description: snap.description,
+        applicableAssets: snap.applicableAssets ?? [],
+        status: "DRAFT",
+        sortOrder: (last?.sortOrder ?? -1) + 1,
+      },
+    });
+
+    if (snap.arsenalConcepts?.length) {
+      await tx.arsenalConcept.createMany({
+        data: snap.arsenalConcepts.map((c, i) => ({
+          strategyId: created.id,
+          name: c.name,
+          sortOrder: i,
+          definition: json(c.definition),
+          purpose: json(c.purpose),
+          howIIdentify: json(c.howIIdentify),
+          whyItMatters: json(c.whyItMatters),
+          whenIUse: json(c.whenIUse),
+          whenIIgnore: json(c.whenIIgnore),
+          examples: json(c.examples),
+          personalNotes: json(c.personalNotes),
+        })),
+      });
+    }
+
+    if (snap.frameworkSteps?.length) {
+      await tx.strategyFrameworkStep.createMany({
+        data: snap.frameworkSteps.map((s, i) => ({
+          strategyId: created.id,
+          title: s.title,
+          sortOrder: i,
+          description: json(s.description),
+          notes: json(s.notes),
+        })),
+      });
+    }
+
+    for (const [i, tf] of (snap.timeframes ?? []).entries()) {
+      const newTf = await tx.strategyTimeframe.create({
+        data: { strategyId: created.id, name: tf.name, sortOrder: i },
+      });
+      if (tf.checkpoints?.length) {
+        await tx.strategyCheckpoint.createMany({
+          data: tf.checkpoints.map((cp, j) => ({
+            timeframeId: newTf.id,
+            title: cp.title,
+            sortOrder: j,
+            description: json(cp.description),
+            notes: json(cp.notes),
+          })),
+        });
+      }
+    }
+
+    if (snap.entryModels?.length) {
+      await tx.strategyEntryModel.createMany({
+        data: snap.entryModels.map((m, i) => ({
+          strategyId: created.id,
+          name: m.name,
+          sortOrder: i,
+          description: json(m.description),
+          conditions: json(m.conditions),
+          confirmationChecklist: json(m.confirmationChecklist),
+          invalidation: json(m.invalidation),
+          stopPlacement: json(m.stopPlacement),
+          targetLogic: json(m.targetLogic),
+          notes: json(m.notes),
+        })),
+      });
+    }
+
+    const tm = snap.tradeManagement;
+    if (tm) {
+      const newTm = await tx.strategyTradeManagement.create({
+        data: {
+          strategyId: created.id,
+          takeProfitPhilosophy: json(tm.takeProfitPhilosophy),
+          initialStopPlacement: json(tm.initialStopPlacement),
+          breakEvenRules: json(tm.breakEvenRules),
+          trailingStopRules: json(tm.trailingStopRules),
+          scalingInRules: json(tm.scalingInRules),
+          scalingOutRules: json(tm.scalingOutRules),
+          maxHoldingTime: tm.maxHoldingTime,
+          maxRiskPercent: tm.maxRiskPercent,
+        },
+      });
+      if (tm.partialTakeProfits?.length) {
+        await tx.partialTakeProfit.createMany({
+          data: tm.partialTakeProfits.map((p, i) => ({
+            tradeManagementId: newTm.id,
+            trigger: p.trigger,
+            percentToClose: p.percentToClose,
+            reason: p.reason,
+            sortOrder: i,
+          })),
+        });
+      }
+      if (tm.customRules?.length) {
+        await tx.tradeManagementRule.createMany({
+          data: tm.customRules.map((r, i) => ({
+            tradeManagementId: newTm.id,
+            text: r.text,
+            sortOrder: i,
+          })),
+        });
+      }
+    }
+
+    return created;
+  });
+}
+
 /** Published versions of a strategy, newest first, each with a compact summary. */
 export async function listStrategyVersions(
   userId: string,

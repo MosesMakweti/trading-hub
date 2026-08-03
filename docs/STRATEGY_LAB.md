@@ -324,5 +324,12 @@ The module is now feature-complete for the original brief; future work is the
   trade-management scalar changes and rule/TP count deltas). Pure diff in
   `src/domain/strategies/version-diff.ts` (tested); `getStrategyVersionComparison`
   service (loads two snapshots — "current" is built on the fly) + `compareStrategyVersions`
-  action. A future "view full read-only snapshot" / "restore" view can build on the same
-  stored JSON.
+  action.
+- ✅ **View full snapshot + Restore** — DONE. Each version card has **View** (a read-only
+  page at `/strategy-lab/[strategyId]/versions/[version]` rendering the whole frozen tree —
+  overview, arsenal, framework, timeframes/checkpoints, entry models, trade management —
+  with rich text shown as plain text via `tiptapToPlainText`) and **Restore as new**, which
+  rebuilds the snapshot into a **new DRAFT strategy** (`restoreStrategyVersionAsNewStrategy`,
+  mirrors `duplicateStrategy` from the JSON). Restore is deliberately **non-destructive** —
+  it never mutates the live strategy, so it can't clobber current work; the user can delete
+  the new copy if unwanted. `getStrategyVersion` + `restoreStrategyVersion` action.
