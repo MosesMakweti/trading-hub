@@ -24,8 +24,8 @@ Rules for every phase:
 Phase 0  Architecture Review .................... ✅ DONE (this document)
 Phase 1  Dashboard Framework .................... ✅ DONE
 Phase 2  Today Workspace Framework  (+ TradingDay backbone) ... ✅ DONE
-Phase 3  Morning Preparation .................... ▶ NEXT
-Phase 4  Today's Trading Plan
+Phase 3  Morning Preparation .................... ✅ DONE
+Phase 4  Today's Trading Plan ................... ▶ NEXT
 Phase 5  Trade Workspace  (Idea → Execution → Review) + Daily Analytics
 Phase 6  Automatic Journal Archiving
 Phase 7  Journal Redesign
@@ -282,3 +282,35 @@ append a Progress Report, STOP.
   `TradingDay` (add the needed additive fields), and set `prepCompletedAt` when done so
   the workflow advances. Reuse `useDebouncedAutosave` / `RichTextEditor` / checklist
   patterns. One section only, then STOP.
+
+### Phase 3 — Morning Preparation ✅
+- **Completed**: replaced the Morning Prep placeholder with the real section, the first
+  real content in the Today workflow.
+  - **Pre-session routine checklist** — the user's `PRE_SESSION_ROUTINE` checklist items
+    (template from the Trading Plan) rendered as tickable checkboxes; per-day completion
+    (ticked item ids) saved on the `TradingDay`. Empty-state links to `/settings/plan`.
+  - **Market context** — a `RichTextEditor` (Tiptap) that autosaves to
+    `TradingDay.marketContext`.
+  - **Readiness** — a 1–5 self-rating saved on `TradingDay.readiness`.
+  - **Mark preparation complete** — toggles `TradingDay.prepCompletedAt`; on save it
+    `router.refresh()`es so the **workflow stepper advances** (Preparation → done, Plan →
+    current). Verified end-to-end in the browser.
+- **Components completed**: `today/morning-prep-section.tsx`; wired into
+  `today/today-workspace.tsx` (Morning Prep tab now renders the real section).
+- **Database changes**: `TradingDay` += `routineCompletion Json?`, `marketContext Json?`,
+  `readiness Int?` (additive). Migration `20260804001910_morning_prep`.
+- **Routes**: none (still `/today`).
+- **Files changed**: new `src/components/today/morning-prep-section.tsx`,
+  `src/actions/today.actions.ts`, `src/lib/validation/today.ts`; changed
+  `prisma/schema.prisma`, `src/server/services/trading-day.service.ts` (updateMorningPrep),
+  `src/types/today.ts` (MorningPrepDTO), `src/app/(app)/today/page.tsx`,
+  `src/components/today/today-workspace.tsx`.
+- **Verified**: `tsc` + `eslint` clean, 155 tests pass, and a browser run confirmed the
+  routine tick, readiness, market context, and mark-complete all persist across reload,
+  and marking complete advances the workflow stepper — zero console errors.
+- **Remaining work**: P4–P11.
+- **Next recommended phase**: **P4 — Today's Trading Plan** — replace the Today's Plan
+  placeholder with the real section (HTF bias & conviction, watchlist focus drawn from
+  the user's Assets, key levels, risk budget from the plan limits), persisted on
+  `TradingDay` (additive fields), setting `planCompletedAt` when done so the workflow
+  advances. Same section pattern as Morning Prep. One section only, then STOP.

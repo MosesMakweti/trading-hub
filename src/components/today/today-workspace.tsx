@@ -14,13 +14,14 @@ import { formatDateKeyLong } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SectionPlaceholder } from "@/components/shared/section-placeholder";
+import { MorningPrepSection } from "@/components/today/morning-prep-section";
 import {
   WorkflowProgress,
   WORKFLOW_STEP_META,
   type WorkflowStep,
 } from "@/components/dashboard/workflow-progress";
 import type { WorkflowStepKey, WorkflowStepStatus } from "@/domain/today/workflow";
-import type { TradingDayDTO } from "@/types/today";
+import type { MorningPrepDTO, TradingDayDTO } from "@/types/today";
 
 // The Today workflow sections. Placeholders in Phase 2; each section's real
 // component slots into the same TabsContent when its phase lands (P3–P5).
@@ -97,11 +98,13 @@ const SECTIONS: {
 export function TodayWorkspace({
   day,
   stepStatuses,
+  morningPrep,
 }: {
   day: TradingDayDTO;
   // Only serializable data crosses the server→client boundary; the icon-bearing
   // steps are rebuilt here from WORKFLOW_STEP_META (imported client-side).
   stepStatuses: { key: WorkflowStepKey; status: WorkflowStepStatus }[];
+  morningPrep: MorningPrepDTO;
 }) {
   const statusByKey = new Map(stepStatuses.map((s) => [s.key, s.status]));
   const steps: WorkflowStep[] = WORKFLOW_STEP_META.map((m) => ({
@@ -137,13 +140,17 @@ export function TodayWorkspace({
 
         {SECTIONS.map((s) => (
           <TabsContent key={s.value} value={s.value} className="mt-4">
-            <SectionPlaceholder
-              icon={s.icon}
-              title={s.label}
-              description={s.description}
-              phase={s.phase}
-              plannedFeatures={s.plannedFeatures}
-            />
+            {s.value === "morning-prep" ? (
+              <MorningPrepSection dateKey={day.dateKey} prep={morningPrep} />
+            ) : (
+              <SectionPlaceholder
+                icon={s.icon}
+                title={s.label}
+                description={s.description}
+                phase={s.phase}
+                plannedFeatures={s.plannedFeatures}
+              />
+            )}
           </TabsContent>
         ))}
       </Tabs>
