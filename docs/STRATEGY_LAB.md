@@ -288,7 +288,13 @@ The module is now feature-complete for the original brief; future work is the
 ---
 
 ## Future integrations the architecture already supports
-AI strategy assistant · backtesting · win-rate/RR/psychology **by strategy**
-(join on `Trade.strategyId`) · strategy version history (via `Strategy.version` +
-a future `StrategyVersion` snapshot) · playbooks · knowledge graph · video/PDF
-attachments · pattern library.
+- ✅ **Win-rate / RR / psychology / adherence by strategy** — DONE. A **Performance**
+  tab on the strategy workspace shows per-strategy win rate, avg/total return,
+  profit factor, expectancy, best/worst, streaks, avg psychology and avg adherence,
+  computed from the Performance Account contribution % (same source of truth as the
+  global analytics) over trades filtered by `Trade.strategyId`. Pure summariser in
+  `src/domain/performance/strategy-performance.ts` (tested); service
+  `getStrategyPerformance` in `analytics.service.ts`.
+- Still open (unscheduled): AI strategy assistant · backtesting · strategy version
+  history (via `Strategy.version` + a future `StrategyVersion` snapshot) · playbooks ·
+  knowledge graph · video/PDF attachments · pattern library.

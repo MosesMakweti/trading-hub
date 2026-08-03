@@ -7,6 +7,7 @@ import { listFrameworkSteps } from "@/server/services/framework.service";
 import { listTimeframes } from "@/server/services/timeframes.service";
 import { listEntryModels } from "@/server/services/strategy-entry-models.service";
 import { getOrCreateTradeManagement } from "@/server/services/strategy-trade-management.service";
+import { getStrategyPerformance } from "@/server/services/analytics.service";
 import { FadeIn } from "@/components/shared/motion";
 import { StrategyWorkspace } from "@/components/strategy-lab/strategy-workspace";
 import type {
@@ -28,13 +29,15 @@ export default async function StrategyWorkspacePage({
   const strategy = await getStrategy(user.id, strategyId);
   if (!strategy) notFound();
 
-  const [concepts, steps, timeframes, entryModels, tradeManagement] = await Promise.all([
-    listArsenalConcepts(user.id, strategyId),
-    listFrameworkSteps(user.id, strategyId),
-    listTimeframes(user.id, strategyId),
-    listEntryModels(user.id, strategyId),
-    getOrCreateTradeManagement(user.id, strategyId),
-  ]);
+  const [concepts, steps, timeframes, entryModels, tradeManagement, performance] =
+    await Promise.all([
+      listArsenalConcepts(user.id, strategyId),
+      listFrameworkSteps(user.id, strategyId),
+      listTimeframes(user.id, strategyId),
+      listEntryModels(user.id, strategyId),
+      getOrCreateTradeManagement(user.id, strategyId),
+      getStrategyPerformance(user.id, strategyId),
+    ]);
 
   const dto: StrategyDTO = {
     id: strategy.id,
@@ -118,6 +121,7 @@ export default async function StrategyWorkspacePage({
         timeframes={timeframeDtos}
         entryModels={entryModelDtos}
         tradeManagement={tradeManagementDto}
+        performance={performance}
       />
     </FadeIn>
   );

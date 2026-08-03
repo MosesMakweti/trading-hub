@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   Clock,
   Crosshair,
+  LineChart,
   ListOrdered,
   Settings2,
   SlidersHorizontal,
@@ -25,8 +26,10 @@ import { FrameworkSection } from "@/components/strategy-lab/framework-section";
 import { TimeframesSection } from "@/components/strategy-lab/timeframes-section";
 import { EntryModelsSection } from "@/components/strategy-lab/entry-models-section";
 import { TradeManagementSection } from "@/components/strategy-lab/trade-management-section";
+import { StrategyPerformanceSection } from "@/components/strategy-lab/strategy-performance-section";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { updateStrategySettings } from "@/actions/strategies.actions";
+import type { StrategyPerformanceSummary } from "@/domain/performance/strategy-performance";
 import type {
   ArsenalConceptDTO,
   EntryModelDTO,
@@ -109,6 +112,7 @@ export function StrategyWorkspace({
   timeframes,
   entryModels,
   tradeManagement,
+  performance,
 }: {
   strategy: StrategyDTO;
   arsenalConcepts: ArsenalConceptDTO[];
@@ -116,6 +120,7 @@ export function StrategyWorkspace({
   timeframes: TimeframeDTO[];
   entryModels: EntryModelDTO[];
   tradeManagement: TradeManagementDTO;
+  performance: StrategyPerformanceSummary;
 }) {
   const [settings, setSettings] = useState<StrategySettingsState>({
     name: strategy.name,
@@ -173,6 +178,10 @@ export function StrategyWorkspace({
               <Settings2 className="size-3.5" />
               Settings
             </TabsTrigger>
+            <TabsTrigger value="performance" className="gap-1.5">
+              <LineChart className="size-3.5" />
+              Performance
+            </TabsTrigger>
             {SECTIONS.map((s) => (
               <TabsTrigger key={s.value} value={s.value} className="gap-1.5">
                 <s.icon className="size-3.5" />
@@ -184,6 +193,11 @@ export function StrategyWorkspace({
 
         <TabsContent value="settings" className="mt-4">
           <StrategySettingsForm value={settings} onChange={setSettings} saveState={saveState} />
+        </TabsContent>
+
+        {/* Per-strategy performance (Future integration: analytics by strategy). */}
+        <TabsContent value="performance" className="mt-4">
+          <StrategyPerformanceSection performance={performance} />
         </TabsContent>
 
         {/* Section 1 — Arsenal is live (Phase 2). */}

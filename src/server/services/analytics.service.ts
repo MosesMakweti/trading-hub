@@ -3,6 +3,10 @@ import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { daysBetweenInclusive } from "@/lib/date-ranges";
 import { buildEquityCurve, dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import * as metrics from "@/domain/performance/metrics";
+import {
+  summarizeStrategyPerformance,
+  type StrategyTradePoint,
+} from "@/domain/performance/strategy-performance";
 import * as psychAnalytics from "@/domain/psychology/analytics";
 import type { PsychologyDataPoint } from "@/domain/psychology/analytics";
 import {
@@ -17,6 +21,53 @@ import {
  * separate, optional self-reported R-multiple); a trade's "contribution %"
  * is always `performancePnl / balanceBeforeThatTrade * 100`.
  */
+/**
+ * Performance for a single strategy (win-rate / RR / psychology / adherence by
+ * strategy). Uses the same Performance Account contribution % as the global
+ * analytics: it walks the full allocation history to get each trade's balance-
+ * before contribution, then keeps only the trades linked to this strategy. All
+ * numbers are therefore computed identically to the rest of the app.
+ */
+export async function getStrategyPerformance(userId: string, strategyId: string) {
+  const performanceAccount = await getOrCreatePerformanceAccount(userId);
+
+  const allocations = await prisma.tradeAccountAllocation.findMany({
+    where: { tradingAccountId: performanceAccount.id, trade: { deletedAt: null } },
+    include: {
+      trade: {
+        select: {
+          strategyId: true,
+          tradeDate: true,
+          adherencePercent: true,
+          asset: { select: { symbol: true } },
+          psychology: { select: { psychologyPercent: true } },
+        },
+      },
+    },
+    orderBy: [{ trade: { tradeDate: "asc" } }, { trade: { executionMinutes: "asc" } }],
+  });
+
+  let runningBalance = PERFORMANCE_ACCOUNT_STARTING_BALANCE;
+  const points: StrategyTradePoint[] = [];
+  for (const alloc of allocations) {
+    const t = alloc.trade;
+    const pnl = alloc.closingPnlNet.toNumber();
+    const contributionPercent = runningBalance !== 0 ? (pnl / runningBalance) * 100 : 0;
+    runningBalance += pnl;
+    if (t.strategyId === strategyId) {
+      points.push({
+        dateKey: utcDateToKey(t.tradeDate),
+        assetSymbol: t.asset.symbol,
+        actualRR: contributionPercent,
+        psychologyPercent: t.psychology?.psychologyPercent ?? null,
+        adherencePercent: t.adherencePercent,
+      });
+    }
+  }
+
+  return summarizeStrategyPerformance(points);
+}
+
 export async function getAnalyticsData(userId: string, from: string, to: string) {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
 
