@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { requireUser } from "@/server/guards";
-import { getStrategy } from "@/server/services/strategies.service";
+import { getStrategy, listStrategyVersions } from "@/server/services/strategies.service";
 import { listArsenalConcepts } from "@/server/services/arsenal.service";
 import { listFrameworkSteps } from "@/server/services/framework.service";
 import { listTimeframes } from "@/server/services/timeframes.service";
@@ -29,7 +29,7 @@ export default async function StrategyWorkspacePage({
   const strategy = await getStrategy(user.id, strategyId);
   if (!strategy) notFound();
 
-  const [concepts, steps, timeframes, entryModels, tradeManagement, performance] =
+  const [concepts, steps, timeframes, entryModels, tradeManagement, performance, versions] =
     await Promise.all([
       listArsenalConcepts(user.id, strategyId),
       listFrameworkSteps(user.id, strategyId),
@@ -37,6 +37,7 @@ export default async function StrategyWorkspacePage({
       listEntryModels(user.id, strategyId),
       getOrCreateTradeManagement(user.id, strategyId),
       getStrategyPerformance(user.id, strategyId),
+      listStrategyVersions(user.id, strategyId),
     ]);
 
   const dto: StrategyDTO = {
@@ -122,6 +123,7 @@ export default async function StrategyWorkspacePage({
         entryModels={entryModelDtos}
         tradeManagement={tradeManagementDto}
         performance={performance}
+        versions={versions}
       />
     </FadeIn>
   );

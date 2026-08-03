@@ -1,10 +1,105 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
+import { summarizeStrategyVersionSnapshot } from "@/domain/strategies/version-snapshot";
 import type {
   StrategyCreateInput,
   StrategySettingsInput,
 } from "@/lib/validation/strategies";
+import type {
+  StrategyVersionDTO,
+  StrategyVersionSnapshot,
+} from "@/types/strategies";
+
+// Full-tree include shared by publish (snapshot) and duplicate.
+const strategyTreeInclude = {
+  arsenalConcepts: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+  frameworkSteps: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+  timeframes: {
+    where: { deletedAt: null },
+    orderBy: { sortOrder: "asc" },
+    include: { checkpoints: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } } },
+  },
+  entryModels: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+  tradeManagement: {
+    include: {
+      partialTakeProfits: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+      customRules: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+    },
+  },
+} satisfies Prisma.StrategyInclude;
+
+type StrategyTree = Prisma.StrategyGetPayload<{ include: typeof strategyTreeInclude }>;
+
+function buildSnapshot(s: StrategyTree): StrategyVersionSnapshot {
+  return {
+    name: s.name,
+    description: s.description,
+    applicableAssets: s.applicableAssets,
+    status: s.status,
+    arsenalConcepts: s.arsenalConcepts.map((c) => ({
+      id: c.id,
+      name: c.name,
+      definition: c.definition,
+      purpose: c.purpose,
+      howIIdentify: c.howIIdentify,
+      whyItMatters: c.whyItMatters,
+      whenIUse: c.whenIUse,
+      whenIIgnore: c.whenIIgnore,
+      examples: c.examples,
+      personalNotes: c.personalNotes,
+    })),
+    frameworkSteps: s.frameworkSteps.map((f) => ({
+      id: f.id,
+      title: f.title,
+      description: f.description,
+      notes: f.notes,
+    })),
+    timeframes: s.timeframes.map((t) => ({
+      id: t.id,
+      name: t.name,
+      checkpoints: t.checkpoints.map((c) => ({
+        id: c.id,
+        title: c.title,
+        description: c.description,
+        notes: c.notes,
+      })),
+    })),
+    entryModels: s.entryModels.map((m) => ({
+      id: m.id,
+      name: m.name,
+      description: m.description,
+      conditions: m.conditions,
+      confirmationChecklist: m.confirmationChecklist,
+      invalidation: m.invalidation,
+      stopPlacement: m.stopPlacement,
+      targetLogic: m.targetLogic,
+      notes: m.notes,
+    })),
+    tradeManagement: s.tradeManagement
+      ? {
+          id: s.tradeManagement.id,
+          takeProfitPhilosophy: s.tradeManagement.takeProfitPhilosophy,
+          initialStopPlacement: s.tradeManagement.initialStopPlacement,
+          breakEvenRules: s.tradeManagement.breakEvenRules,
+          trailingStopRules: s.tradeManagement.trailingStopRules,
+          scalingInRules: s.tradeManagement.scalingInRules,
+          scalingOutRules: s.tradeManagement.scalingOutRules,
+          maxHoldingTime: s.tradeManagement.maxHoldingTime,
+          maxRiskPercent: s.tradeManagement.maxRiskPercent
+            ? s.tradeManagement.maxRiskPercent.toNumber()
+            : null,
+          partialTakeProfits: s.tradeManagement.partialTakeProfits.map((p) => ({
+            id: p.id,
+            trigger: p.trigger,
+            percentToClose: p.percentToClose ? p.percentToClose.toNumber() : null,
+            reason: p.reason,
+          })),
+          customRules: s.tradeManagement.customRules.map((r) => ({ id: r.id, text: r.text })),
+        }
+      : null,
+  };
+}
 
 // Everything here is scoped by `userId` (tenant isolation) and the soft-delete
 // extension in server/db.ts auto-filters `deletedAt: null` on find/list/count.
@@ -25,6 +120,66 @@ export async function listStrategies(userId: string) {
 export async function getStrategy(userId: string, id: string) {
   // findFirst so the soft-delete filter applies (findUnique bypasses it).
   return prisma.strategy.findFirst({ where: { id, userId } });
+}
+
+/**
+ * Publishes the current state of a strategy as an immutable version snapshot,
+ * then bumps `Strategy.version` so the live strategy becomes the next (editable,
+ * unpublished) version. Every published version is preserved verbatim as JSON, so
+ * a trade's `strategyVersionSnapshot` always has a concrete version to point at.
+ */
+export async function publishStrategyVersion(
+  userId: string,
+  strategyId: string,
+  note: string | null,
+) {
+  return prisma.$transaction(async (tx) => {
+    const strategy = await tx.strategy.findFirst({
+      where: { id: strategyId, userId },
+      include: strategyTreeInclude,
+    });
+    if (!strategy) throw new Error("Strategy not found.");
+
+    const snapshot = buildSnapshot(strategy);
+    const created = await tx.strategyVersion.create({
+      data: {
+        strategyId,
+        version: strategy.version,
+        note: note?.trim() ? note.trim() : null,
+        snapshot: snapshot as unknown as Prisma.InputJsonValue,
+      },
+    });
+    await tx.strategy.update({
+      where: { id: strategyId },
+      data: { version: strategy.version + 1 },
+    });
+    return created;
+  });
+}
+
+/** Published versions of a strategy, newest first, each with a compact summary. */
+export async function listStrategyVersions(
+  userId: string,
+  strategyId: string,
+): Promise<StrategyVersionDTO[]> {
+  const owned = await prisma.strategy.findFirst({
+    where: { id: strategyId, userId },
+    select: { id: true },
+  });
+  if (!owned) return [];
+
+  const versions = await prisma.strategyVersion.findMany({
+    where: { strategyId },
+    orderBy: { version: "desc" },
+  });
+
+  return versions.map((v) => ({
+    id: v.id,
+    version: v.version,
+    note: v.note,
+    createdAt: v.createdAt.toISOString(),
+    summary: summarizeStrategyVersionSnapshot(v.snapshot as unknown as StrategyVersionSnapshot),
+  }));
 }
 
 /**

@@ -105,3 +105,39 @@ export interface StrategyReferenceDTO {
     partialTakeProfits: { trigger: string | null; percentToClose: number | null }[];
   } | null;
 }
+
+// ── Strategy version history (Future integration) ────────────────────────────
+// A published, immutable snapshot of the full strategy tree at a point in time.
+// Stored as JSON on StrategyVersion.snapshot; reuses the section DTOs so it is a
+// faithful record (viewable/restorable later), not just names.
+export interface StrategyVersionSnapshot {
+  name: string;
+  description: string | null;
+  applicableAssets: string[];
+  status: StrategyStatusValue;
+  arsenalConcepts: ArsenalConceptDTO[];
+  frameworkSteps: FrameworkStepDTO[];
+  timeframes: TimeframeDTO[];
+  entryModels: EntryModelDTO[];
+  tradeManagement: TradeManagementDTO | null;
+}
+
+// Compact, at-a-glance description of a snapshot (what the history list shows).
+export interface StrategyVersionSummary {
+  applicableAssets: string[];
+  arsenalCount: number;
+  frameworkStepTitles: string[];
+  timeframeCount: number;
+  checkpointCount: number;
+  entryModelNames: string[];
+  customRuleCount: number;
+  partialTpCount: number;
+}
+
+export interface StrategyVersionDTO {
+  id: string;
+  version: number;
+  note: string | null;
+  createdAt: string; // ISO
+  summary: StrategyVersionSummary;
+}

@@ -500,8 +500,30 @@ model Strategy {
   // Journal link: a trade references a strategy (not a copy). onDelete: SetNull
   // on the Trade side keeps completed trades (with their snapshots) intact.
   trades          Trade[]
+  versions        StrategyVersion[] // published, immutable snapshots of the tree
 
   @@index([userId, deletedAt, sortOrder])
+}
+
+// An immutable, published snapshot of a strategy's full tree at a point in time.
+// Publishing snapshots the *current* version number then bumps Strategy.version,
+// so the live strategy is always the highest (editable, unpublished) version and
+// every past version is preserved. No soft delete — history is permanent. The
+// snapshot is denormalized JSON (self-contained; survives edits/deletes to the
+// live tree). `trade.strategyVersionSnapshot` ties a trade to the version it was
+// taken under.
+model StrategyVersion {
+  id         String   @id @default(cuid())
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  version   Int
+  note      String? // optional changelog note for this version
+  snapshot  Json // the full strategy tree at publish time
+  createdAt DateTime @default(now())
+
+  @@unique([strategyId, version])
+  @@index([strategyId, version])
 }
 
 // Strategy Lab · Section 1 — Arsenal. Each concept is an expandable card in the

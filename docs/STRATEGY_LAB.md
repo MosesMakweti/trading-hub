@@ -295,6 +295,17 @@ The module is now feature-complete for the original brief; future work is the
   global analytics) over trades filtered by `Trade.strategyId`. Pure summariser in
   `src/domain/performance/strategy-performance.ts` (tested); service
   `getStrategyPerformance` in `analytics.service.ts`.
-- Still open (unscheduled): AI strategy assistant · backtesting · strategy version
-  history (via `Strategy.version` + a future `StrategyVersion` snapshot) · playbooks ·
-  knowledge graph · video/PDF attachments · pattern library.
+- ✅ **Strategy version history** — DONE. A **Versions** tab on the strategy workspace
+  lets you *publish* the current strategy as an immutable snapshot (optional note),
+  which stores the full tree as JSON on the new `StrategyVersion` model and bumps
+  `Strategy.version` (the live strategy is always the highest, editable, unpublished
+  version). The history lists every published version newest-first with a compact
+  summary. Snapshots are frozen (survive later renames/edits/deletes) and are what
+  `Trade.strategyVersionSnapshot` points at. Pure summariser in
+  `src/domain/strategies/version-snapshot.ts` (tested); `publishStrategyVersion` /
+  `listStrategyVersions` in `strategies.service.ts`. `duplicateStrategy` does not copy
+  versions (fresh strategies start at v1 with no history). Migration
+  `20260803195748_strategy_versions`.
+- Still open (unscheduled): AI strategy assistant · backtesting · playbooks ·
+  knowledge graph · video/PDF attachments · pattern library. A future "view full
+  snapshot" / "restore" / "diff versions" view can build on the stored JSON snapshot.

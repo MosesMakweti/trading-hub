@@ -90,6 +90,19 @@ export async function deleteStrategy(id: string): Promise<ActionResult> {
   return { success: true };
 }
 
+export async function publishStrategyVersion(id: string, note: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  const trimmed = typeof note === "string" ? note.trim().slice(0, 500) : null;
+  try {
+    await strategiesService.publishStrategyVersion(user.id, id, trimmed || null);
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to publish version.") };
+  }
+  revalidatePath("/strategy-lab");
+  revalidatePath(`/strategy-lab/${id}`);
+  return { success: true };
+}
+
 export async function duplicateStrategy(id: string): Promise<CreateResult> {
   const user = await requireUser();
   try {

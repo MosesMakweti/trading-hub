@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   Clock,
   Crosshair,
+  GitCommitVertical,
   LineChart,
   ListOrdered,
   Settings2,
@@ -27,6 +28,7 @@ import { TimeframesSection } from "@/components/strategy-lab/timeframes-section"
 import { EntryModelsSection } from "@/components/strategy-lab/entry-models-section";
 import { TradeManagementSection } from "@/components/strategy-lab/trade-management-section";
 import { StrategyPerformanceSection } from "@/components/strategy-lab/strategy-performance-section";
+import { StrategyVersionsSection } from "@/components/strategy-lab/strategy-versions-section";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { updateStrategySettings } from "@/actions/strategies.actions";
 import type { StrategyPerformanceSummary } from "@/domain/performance/strategy-performance";
@@ -35,6 +37,7 @@ import type {
   EntryModelDTO,
   FrameworkStepDTO,
   StrategyDTO,
+  StrategyVersionDTO,
   TimeframeDTO,
   TradeManagementDTO,
 } from "@/types/strategies";
@@ -113,6 +116,7 @@ export function StrategyWorkspace({
   entryModels,
   tradeManagement,
   performance,
+  versions,
 }: {
   strategy: StrategyDTO;
   arsenalConcepts: ArsenalConceptDTO[];
@@ -121,6 +125,7 @@ export function StrategyWorkspace({
   entryModels: EntryModelDTO[];
   tradeManagement: TradeManagementDTO;
   performance: StrategyPerformanceSummary;
+  versions: StrategyVersionDTO[];
 }) {
   const [settings, setSettings] = useState<StrategySettingsState>({
     name: strategy.name,
@@ -182,6 +187,10 @@ export function StrategyWorkspace({
               <LineChart className="size-3.5" />
               Performance
             </TabsTrigger>
+            <TabsTrigger value="versions" className="gap-1.5">
+              <GitCommitVertical className="size-3.5" />
+              Versions
+            </TabsTrigger>
             {SECTIONS.map((s) => (
               <TabsTrigger key={s.value} value={s.value} className="gap-1.5">
                 <s.icon className="size-3.5" />
@@ -198,6 +207,15 @@ export function StrategyWorkspace({
         {/* Per-strategy performance (Future integration: analytics by strategy). */}
         <TabsContent value="performance" className="mt-4">
           <StrategyPerformanceSection performance={performance} />
+        </TabsContent>
+
+        {/* Version history (Future integration: strategy version snapshots). */}
+        <TabsContent value="versions" className="mt-4">
+          <StrategyVersionsSection
+            strategyId={strategy.id}
+            currentVersion={strategy.version}
+            initialVersions={versions}
+          />
         </TabsContent>
 
         {/* Section 1 — Arsenal is live (Phase 2). */}
