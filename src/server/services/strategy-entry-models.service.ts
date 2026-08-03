@@ -1,10 +1,12 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
+import { tiptapToPlainText } from "@/lib/tiptap-text";
 import {
   ENTRY_MODEL_RICH_FIELDS,
   type EntryModelUpdateInput,
 } from "@/lib/validation/strategy-entry-models";
+import type { PatternDTO } from "@/types/strategies";
 
 // Scoped to the user THROUGH the parent Strategy (entry models carry no userId).
 // updateMany / nested relation filters spell out `deletedAt: null` explicitly.
@@ -20,6 +22,30 @@ export async function listEntryModels(userId: string, strategyId: string) {
     where: { strategyId, strategy: { userId, deletedAt: null } },
     orderBy: { sortOrder: "asc" },
   });
+}
+
+/**
+ * The Pattern Library: every entry model across all of the user's (non-deleted)
+ * strategies, flattened into one catalog of setups with plain-text previews and
+ * a link back to the owning strategy. Scoped through the parent Strategy since
+ * entry models carry no userId.
+ */
+export async function listEntryModelPatterns(userId: string): Promise<PatternDTO[]> {
+  const models = await prisma.strategyEntryModel.findMany({
+    where: { strategy: { userId, deletedAt: null } },
+    orderBy: [{ strategy: { name: "asc" } }, { sortOrder: "asc" }],
+    include: { strategy: { select: { id: true, name: true, status: true } } },
+  });
+
+  return models.map((m) => ({
+    id: m.id,
+    name: m.name,
+    strategyId: m.strategy.id,
+    strategyName: m.strategy.name,
+    strategyStatus: m.strategy.status,
+    descriptionPreview: tiptapToPlainText(m.description),
+    conditionsPreview: tiptapToPlainText(m.conditions),
+  }));
 }
 
 export async function createEntryModel(userId: string, strategyId: string, name: string) {

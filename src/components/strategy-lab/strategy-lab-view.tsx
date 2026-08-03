@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { FlaskConical, Search } from "lucide-react";
+import Link from "next/link";
+import { FlaskConical, Library, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StaggerList, StaggerItem } from "@/components/shared/motion";
@@ -52,7 +54,18 @@ export function StrategyLabView({ strategies }: { strategies: StrategyDTO[] }) {
             Design, document, and refine your trading strategies — your personal methodology base.
           </p>
         </div>
-        <CreateStrategyDialog />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            nativeButton={false}
+            render={<Link href="/strategy-lab/patterns" />}
+          >
+            <Library className="size-4" />
+            Pattern library
+          </Button>
+          <CreateStrategyDialog />
+        </div>
       </div>
 
       {strategies.length === 0 ? (

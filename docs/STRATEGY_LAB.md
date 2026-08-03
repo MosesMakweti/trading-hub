@@ -306,6 +306,15 @@ The module is now feature-complete for the original brief; future work is the
   `listStrategyVersions` in `strategies.service.ts`. `duplicateStrategy` does not copy
   versions (fresh strategies start at v1 with no history). Migration
   `20260803195748_strategy_versions`.
+- ✅ **Pattern library** — DONE. A cross-strategy catalog at `/strategy-lab/patterns`
+  (linked from the Strategy Lab header) that flattens every entry model across all
+  non-deleted strategies into one searchable library of setups, each with a plain-text
+  preview (via `tiptapToPlainText`) and a link back to its strategy. Service
+  `listEntryModelPatterns` (strategy-entry-models.service.ts); pure search
+  `filterPatterns` in `src/domain/strategies/patterns.ts` (tested).
 - Still open (unscheduled): AI strategy assistant · backtesting · playbooks ·
-  knowledge graph · video/PDF attachments · pattern library. A future "view full
+  knowledge graph · video/PDF attachments. **Note:** AI assistant, backtesting, and
+  attachments each need external infrastructure not yet in this project (an
+  `ANTHROPIC_API_KEY`, a market-data feed, and UploadThing file hosting respectively),
+  so they can't be built end-to-end here without that setup. A future "view full
   snapshot" / "restore" / "diff versions" view can build on the stored JSON snapshot.

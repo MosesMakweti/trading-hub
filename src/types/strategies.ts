@@ -141,3 +141,16 @@ export interface StrategyVersionDTO {
   createdAt: string; // ISO
   summary: StrategyVersionSummary;
 }
+
+// ── Pattern Library (Future integration) ─────────────────────────────────────
+// A cross-strategy catalog entry: one entry model surfaced alongside the strategy
+// it belongs to, so a trader can browse/search their whole library of setups.
+export interface PatternDTO {
+  id: string;
+  name: string;
+  strategyId: string;
+  strategyName: string;
+  strategyStatus: StrategyStatusValue;
+  descriptionPreview: string;
+  conditionsPreview: string;
+}
