@@ -79,6 +79,20 @@ export async function updateTodaysPlan(
   return prisma.tradingDay.update({ where: { id: day.id }, data });
 }
 
+/** Marks the day as reviewed/analysed (toggles analyzedAt) — advances the
+ *  workflow's Analyze step. */
+export async function setDayAnalyzed(
+  userId: string,
+  dateKey: string,
+  analyzed: boolean,
+): Promise<TradingDay> {
+  const day = await getOrCreateTradingDay(userId, dateKey);
+  return prisma.tradingDay.update({
+    where: { id: day.id },
+    data: { analyzedAt: analyzed ? new Date() : null },
+  });
+}
+
 export function toTradingDayDTO(day: TradingDay): TradingDayDTO {
   return {
     id: day.id,

@@ -27,8 +27,8 @@ Phase 2  Today Workspace Framework  (+ TradingDay backbone) ... ✅ DONE
 Phase 3  Morning Preparation .................... ✅ DONE
 Phase 4  Today's Trading Plan ................... ✅ DONE
 Phase 5a Trades in the Today flow ............... ✅ DONE
-Phase 5b Daily Analytics ........................ ▶ NEXT
-Phase 6  Automatic Journal Archiving
+Phase 5b Daily Analytics ........................ ✅ DONE  (Phase 5 complete)
+Phase 6  Automatic Journal Archiving ........... ▶ NEXT
 Phase 7  Journal Redesign
 Phase 8  Trade Gallery
 Phase 9  Advanced Filters
@@ -387,3 +387,34 @@ append a Progress Report, STOP.
   today's trades), reusing `domain/performance/*` + the analytics service pattern; set
   `TradingDay.analyzedAt` (a "Mark day reviewed" action) so the workflow's Analyze step
   advances. One section, then STOP.
+
+### Phase 5b — Daily Analytics ✅ (Phase 5 complete)
+- **Completed**: replaced the last placeholder — the Daily Analytics section — so **all six
+  Today tabs are now live** and the workflow runs end to end (Prep → Plan → Trade → Review
+  → Analyze).
+  - **`getDailyAnalytics(userId, dateKey)`** (analytics.service) — day-scoped metrics via
+    the *same* Performance-Account contribution % walk, filtered to the day's trades and
+    summarised by the shared **`summarizeStrategyPerformance`**, plus the day's net PnL ($).
+  - **`DailyAnalyticsSection`** — reuses `KpiCard`: Trades (W/L), Win rate, Net PnL, Total
+    & Avg return, Profit factor, Avg psychology, Avg adherence; empty state when no trades.
+  - **Mark day reviewed** — `setDayAnalyzed` toggles `TradingDay.analyzedAt`; refreshes so
+    the workflow's **Analyze** step advances.
+  - Removed the now-dead `SectionPlaceholder` usage from the Today workspace (trimmed
+    `SECTIONS` to value/label/icon).
+- **Components completed**: `today/daily-analytics-section.tsx`; `getDailyAnalytics` +
+  `setDayAnalyzed` services + `setDayAnalyzed` action + `DailyAnalyticsDTO`.
+- **Database changes**: none (uses existing columns incl. `analyzedAt`).
+- **Routes**: none (still `/today`).
+- **Files changed**: new `daily-analytics-section.tsx`; changed `analytics.service.ts`,
+  `trading-day.service.ts` (setDayAnalyzed), `today.actions.ts`, `types/today.ts`,
+  `today/page.tsx`, `today-workspace.tsx`.
+- **Verified**: `tsc` + `eslint` clean, 155 tests pass, a service integration test proved
+  the day-scoping (2 today trades → 50% WR, netPnl 60, excludes other days; empty day → 0;
+  analyzed toggle), and a browser render confirmed the KPIs (1 trade, 100% WR, +$900 net,
+  +0.88%) + the Mark-day-reviewed button — zero page errors.
+- **Remaining work**: P6–P11.
+- **Next recommended phase**: **P6 — Automatic Journal Archiving** — finalize a day
+  (`TradingDay.status = ARCHIVED`, set `archivedAt`) so it becomes a read-only journal
+  entry. Add a manual **"End day"** action on `/today` (archive today) and auto-archive on
+  date rollover (a day older than today with any activity → archived on next visit). Then
+  P7 redesigns the Journal around archived `TradingDay`s. One phase, then STOP.

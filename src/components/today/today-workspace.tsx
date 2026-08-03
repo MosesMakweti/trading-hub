@@ -16,9 +16,9 @@ import { formatDateKeyLong } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/shared/empty-state";
-import { SectionPlaceholder } from "@/components/shared/section-placeholder";
 import { MorningPrepSection } from "@/components/today/morning-prep-section";
 import { TodaysPlanSection } from "@/components/today/todays-plan-section";
+import { DailyAnalyticsSection } from "@/components/today/daily-analytics-section";
 import { TodayTradeBar } from "@/components/today/today-trade-bar";
 import { TradeIdeaSection } from "@/components/journal/workspace/trade-idea-section";
 import { TradeExecutionSection } from "@/components/journal/workspace/trade-execution-section";
@@ -29,79 +29,18 @@ import {
   type WorkflowStep,
 } from "@/components/dashboard/workflow-progress";
 import type { WorkflowStepKey, WorkflowStepStatus } from "@/domain/today/workflow";
-import type { MorningPrepDTO, TodaysPlanDTO, TradingDayDTO } from "@/types/today";
+import type { DailyAnalyticsDTO, MorningPrepDTO, TodaysPlanDTO, TradingDayDTO } from "@/types/today";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
-// The Today workflow sections. Placeholders in Phase 2; each section's real
-// component slots into the same TabsContent when its phase lands (P3–P5).
-const SECTIONS: {
-  value: string;
-  label: string;
-  icon: LucideIcon;
-  phase: string;
-  description: string;
-  plannedFeatures: string[];
-}[] = [
-  {
-    value: "morning-prep",
-    label: "Morning Prep",
-    icon: Sunrise,
-    phase: "Phase 3",
-    description:
-      "Get ready before the session — run your pre-session routine, note market context, and confirm you're in the right headspace.",
-    plannedFeatures: [
-      "Pre-session routine as a tickable checklist for today",
-      "Market context & key-news notes",
-      "Readiness / mindset check",
-    ],
-  },
-  {
-    value: "todays-plan",
-    label: "Today's Plan",
-    icon: ClipboardList,
-    phase: "Phase 4",
-    description: "Set your intentions for the day — bias, watchlist focus, key levels, and risk budget.",
-    plannedFeatures: [
-      "Higher-timeframe bias & conviction",
-      "Watchlist focus drawn from your assets",
-      "Key levels & risk budget from your trading plan",
-    ],
-  },
-  {
-    value: "trade-idea",
-    label: "Trade Idea",
-    icon: Lightbulb,
-    phase: "Phase 5",
-    description: "Capture the plan for each trade before you take it.",
-    plannedFeatures: [
-      "Reuses the existing Trade Workspace idea section",
-      "Create / continue today's trades in-context",
-    ],
-  },
-  {
-    value: "trade-execution",
-    label: "Trade Execution",
-    icon: Zap,
-    phase: "Phase 5",
-    description: "Record what actually happened on each trade.",
-    plannedFeatures: ["Reuses the existing execution section", "Entries / exits, PnL, and result"],
-  },
-  {
-    value: "trade-review",
-    label: "Trade Review",
-    icon: BookOpenCheck,
-    phase: "Phase 5",
-    description: "Reflect and score adherence right after the trade.",
-    plannedFeatures: ["Reuses the review + strategy-adherence sections"],
-  },
-  {
-    value: "daily-analytics",
-    label: "Daily Analytics",
-    icon: BarChart3,
-    phase: "Phase 5",
-    description: "See how the day went — day-scoped metrics and psychology.",
-    plannedFeatures: ["Day-scoped win rate, R, and PnL", "Reuses the analytics domain"],
-  },
+// The Today workflow section tabs. All are live as of Phase 5 — each tab's real
+// component is rendered in its TabsContent below.
+const SECTIONS: { value: string; label: string; icon: LucideIcon }[] = [
+  { value: "morning-prep", label: "Morning Prep", icon: Sunrise },
+  { value: "todays-plan", label: "Today's Plan", icon: ClipboardList },
+  { value: "trade-idea", label: "Trade Idea", icon: Lightbulb },
+  { value: "trade-execution", label: "Trade Execution", icon: Zap },
+  { value: "trade-review", label: "Trade Review", icon: BookOpenCheck },
+  { value: "daily-analytics", label: "Daily Analytics", icon: BarChart3 },
 ];
 
 export function TodayWorkspace({
@@ -110,6 +49,7 @@ export function TodayWorkspace({
   morningPrep,
   todaysPlan,
   trades,
+  dailyAnalytics,
 }: {
   day: TradingDayDTO;
   // Only serializable data crosses the server→client boundary; the icon-bearing
@@ -118,6 +58,7 @@ export function TodayWorkspace({
   morningPrep: MorningPrepDTO;
   todaysPlan: TodaysPlanDTO;
   trades: TradeWorkspaceDTO[];
+  dailyAnalytics: DailyAnalyticsDTO;
 }) {
   const [focusedId, setFocusedId] = useState<string | null>(trades[0]?.id ?? null);
   const focusedTrade = trades.find((t) => t.id === focusedId) ?? null;
@@ -196,13 +137,7 @@ export function TodayWorkspace({
             ) : s.value === "trade-review" ? (
               tradeTab("review")
             ) : (
-              <SectionPlaceholder
-                icon={s.icon}
-                title={s.label}
-                description={s.description}
-                phase={s.phase}
-                plannedFeatures={s.plannedFeatures}
-              />
+              <DailyAnalyticsSection dateKey={day.dateKey} analytics={dailyAnalytics} />
             )}
           </TabsContent>
         ))}

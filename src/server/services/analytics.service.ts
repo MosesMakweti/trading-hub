@@ -28,6 +28,53 @@ import {
  * before contribution, then keeps only the trades linked to this strategy. All
  * numbers are therefore computed identically to the rest of the app.
  */
+/**
+ * Day-scoped analytics for the Today workspace's Daily Analytics section. Same
+ * Performance Account contribution % as everywhere else (walk the full allocation
+ * history for balance-before, keep only the day's trades), summarised by the
+ * shared `summarizeStrategyPerformance`, plus the day's net PnL in dollars.
+ */
+export async function getDailyAnalytics(userId: string, dateKey: string) {
+  const performanceAccount = await getOrCreatePerformanceAccount(userId);
+
+  const allocations = await prisma.tradeAccountAllocation.findMany({
+    where: { tradingAccountId: performanceAccount.id, trade: { deletedAt: null } },
+    include: {
+      trade: {
+        select: {
+          tradeDate: true,
+          adherencePercent: true,
+          asset: { select: { symbol: true } },
+          psychology: { select: { psychologyPercent: true } },
+        },
+      },
+    },
+    orderBy: [{ trade: { tradeDate: "asc" } }, { trade: { executionMinutes: "asc" } }],
+  });
+
+  let runningBalance = PERFORMANCE_ACCOUNT_STARTING_BALANCE;
+  const points: StrategyTradePoint[] = [];
+  let netPnl = 0;
+  for (const alloc of allocations) {
+    const t = alloc.trade;
+    const pnl = alloc.closingPnlNet.toNumber();
+    const contributionPercent = runningBalance !== 0 ? (pnl / runningBalance) * 100 : 0;
+    runningBalance += pnl;
+    if (utcDateToKey(t.tradeDate) === dateKey) {
+      points.push({
+        dateKey,
+        assetSymbol: t.asset.symbol,
+        actualRR: contributionPercent,
+        psychologyPercent: t.psychology?.psychologyPercent ?? null,
+        adherencePercent: t.adherencePercent,
+      });
+      netPnl += pnl;
+    }
+  }
+
+  return { ...summarizeStrategyPerformance(points), netPnl };
+}
+
 export async function getStrategyPerformance(userId: string, strategyId: string) {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
 

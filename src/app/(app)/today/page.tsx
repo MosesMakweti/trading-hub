@@ -5,23 +5,27 @@ import { toTradeWorkspaceDTO } from "@/server/services/trade-workspace.mapper";
 import { listChecklistItems } from "@/server/services/checklist-items.service";
 import { listAssets } from "@/server/services/assets.service";
 import { getTradingPlan } from "@/server/services/trading-plan.service";
+import { getDailyAnalytics } from "@/server/services/analytics.service";
 import { localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 import { FadeIn } from "@/components/shared/motion";
 import { TodayWorkspace } from "@/components/today/today-workspace";
-import type { MorningPrepDTO, TodaysPlanDTO } from "@/types/today";
+import type { DailyAnalyticsDTO, MorningPrepDTO, TodaysPlanDTO } from "@/types/today";
 
 export default async function TodayPage() {
   const user = await requireUser();
   const todayKey = localDateToKey(new Date());
 
-  const [day, trades, routineItems, assets, plan] = await Promise.all([
+  const [day, trades, routineItems, assets, plan, dailyPerf] = await Promise.all([
     getOrCreateTradingDay(user.id, todayKey),
     listTradesForDay(user.id, todayKey),
     listChecklistItems(user.id, "PRE_SESSION_ROUTINE"),
     listAssets(user.id),
     getTradingPlan(user.id),
+    getDailyAnalytics(user.id, todayKey),
   ]);
+
+  const dailyAnalytics: DailyAnalyticsDTO = { ...dailyPerf, analyzed: day.analyzedAt != null };
 
   const morningPrep: MorningPrepDTO = {
     routineItems: routineItems.map((i) => ({ id: i.id, label: i.label })),
@@ -61,6 +65,7 @@ export default async function TodayPage() {
         morningPrep={morningPrep}
         todaysPlan={todaysPlan}
         trades={trades.map(toTradeWorkspaceDTO)}
+        dailyAnalytics={dailyAnalytics}
       />
     </FadeIn>
   );

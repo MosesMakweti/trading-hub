@@ -1,4 +1,14 @@
+import type { StrategyPerformanceSummary } from "@/domain/performance/strategy-performance";
+
 export type TradingDayStatus = "ACTIVE" | "ARCHIVED";
+
+/** Day-scoped analytics for the Today workspace (P5b). Reuses the shared
+ *  performance summary + the day's net PnL in dollars; `analyzed` is the
+ *  workflow flag (day.analyzedAt != null). */
+export interface DailyAnalyticsDTO extends StrategyPerformanceSummary {
+  netPnl: number;
+  analyzed: boolean;
+}
 
 /** The Today workspace's day record (TradeOS V2 backbone). */
 export interface TradingDayDTO {

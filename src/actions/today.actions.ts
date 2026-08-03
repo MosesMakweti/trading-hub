@@ -31,3 +31,10 @@ export async function updateTodaysPlan(dateKey: string, input: unknown): Promise
   revalidatePath("/today");
   return { success: true };
 }
+
+export async function setDayAnalyzed(dateKey: string, analyzed: boolean): Promise<SimpleResult> {
+  const user = await requireUser();
+  await tradingDayService.setDayAnalyzed(user.id, dateKey, Boolean(analyzed));
+  revalidatePath("/today");
+  return { success: true };
+}
