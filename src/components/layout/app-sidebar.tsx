@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpenText, CandlestickChart, FlaskConical, LayoutDashboard, Wallet } from "lucide-react";
+import { BookOpenText, CandlestickChart, FlaskConical, LayoutDashboard, Sun, Wallet } from "lucide-react";
 
 import {
   Sidebar,
@@ -18,6 +18,7 @@ import {
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/today", label: "Today", icon: Sun },
   { href: "/journal", label: "Journal", icon: BookOpenText },
   { href: "/accounts", label: "My Accounts", icon: Wallet },
   { href: "/strategy-lab", label: "Strategy Lab", icon: FlaskConical },

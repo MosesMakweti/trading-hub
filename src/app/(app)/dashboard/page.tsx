@@ -5,6 +5,7 @@ import { requireUser } from "@/server/guards";
 import { getDashboardData } from "@/server/services/dashboard.service";
 import { formatDateKeyLong } from "@/lib/date";
 import { tiptapToPlainText } from "@/lib/tiptap-text";
+import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 import { SessionCountdown } from "@/components/dashboard/session-countdown";
 import { WorkflowProgress, WORKFLOW_STEP_META, type WorkflowStep } from "@/components/dashboard/workflow-progress";
 import { QuickActions } from "@/components/dashboard/quick-actions";
@@ -37,25 +38,22 @@ export default async function DashboardPage() {
   const planExcerpt =
     tiptapToPlainText(data.plan.strategyFramework) || tiptapToPlainText(data.plan.dailyRoutineMorning);
 
-  // Best-effort workflow state for today. Preparation & Plan become real once the
-  // Today workspace (Phase 2+) drives this from the TradingDay record; for now
-  // they link to where that work currently lives.
-  const tradedToday = data.todayTrades.length > 0;
-  const reviewedToday = data.todayTrades.some((t) => t.reviewedAt != null);
-  const stepState: Record<string, { status: WorkflowStep["status"]; href: string }> = {
-    prep: { status: "upcoming", href: "/settings/plan" },
-    plan: { status: "upcoming", href: "/settings/plan" },
-    trade: { status: tradedToday ? "done" : "current", href: `/journal/${today}/trades/new` },
-    review: {
-      status: reviewedToday ? "done" : tradedToday ? "current" : "upcoming",
-      href: `/journal/${today}`,
-    },
-    analyze: { status: reviewedToday ? "current" : "upcoming", href: "/journal" },
+  // Workflow state for today, from the same state machine the Today workspace
+  // uses: Prep/Plan/Analyze from the TradingDay (null until the day is started in
+  // /today), Trade/Review derived from the day's trades. Every step links into
+  // the Today workspace — the hub where the workflow happens.
+  const done: WorkflowDoneState = {
+    prep: data.tradingDay?.prepCompletedAt != null,
+    plan: data.tradingDay?.planCompletedAt != null,
+    trade: data.todayTrades.length > 0,
+    review: data.todayTrades.some((t) => t.reviewedAt != null),
+    analyze: data.tradingDay?.analyzedAt != null,
   };
+  const statusByKey = new Map(deriveWorkflowSteps(done).map((s) => [s.key, s.status]));
   const workflowSteps: WorkflowStep[] = WORKFLOW_STEP_META.map((m) => ({
     ...m,
-    status: stepState[m.key].status,
-    href: stepState[m.key].href,
+    status: statusByKey.get(m.key) ?? "upcoming",
+    href: "/today",
   }));
 
   return (
@@ -72,10 +70,7 @@ export default async function DashboardPage() {
         <p className="mt-1 text-sm text-muted-foreground">{formatDateKeyLong(today)}</p>
       </div>
 
-      <WorkflowProgress
-        steps={workflowSteps}
-        caption="Preparation & Plan tracking arrives with the Today workspace"
-      />
+      <WorkflowProgress steps={workflowSteps} caption="Continue in the Today workspace →" />
 
       <QuickActions todayKey={today} />
 

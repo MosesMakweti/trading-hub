@@ -9,7 +9,7 @@ import { BookOpenText, FlaskConical, NotebookPen, Plus, Sunrise, Wallet } from "
  */
 export function QuickActions({ todayKey }: { todayKey: string }) {
   const actions: { label: string; href: string; icon: LucideIcon; primary?: boolean }[] = [
-    { label: "Start today's session", href: `/journal/${todayKey}`, icon: Sunrise, primary: true },
+    { label: "Start today's session", href: "/today", icon: Sunrise, primary: true },
     { label: "Add trade", href: `/journal/${todayKey}/trades/new`, icon: Plus },
     { label: "Add note", href: `/journal/${todayKey}#notes`, icon: NotebookPen },
     { label: "Open journal", href: "/journal", icon: BookOpenText },

@@ -23,8 +23,8 @@ Rules for every phase:
 ```
 Phase 0  Architecture Review .................... ✅ DONE (this document)
 Phase 1  Dashboard Framework .................... ✅ DONE
-Phase 2  Today Workspace Framework  (+ TradingDay backbone) ... ▶ NEXT
-Phase 3  Morning Preparation
+Phase 2  Today Workspace Framework  (+ TradingDay backbone) ... ✅ DONE
+Phase 3  Morning Preparation .................... ▶ NEXT
 Phase 4  Today's Trading Plan
 Phase 5  Trade Workspace  (Idea → Execution → Review) + Daily Analytics
 Phase 6  Automatic Journal Archiving
@@ -232,9 +232,53 @@ append a Progress Report, STOP.
   the stepper (Trade/Review done, Analyze current), quick actions, performance snapshot,
   and all preserved widgets render with zero console errors.
 - **Remaining work**: P2–P11.
-- **Next recommended phase**: **P2 — Today Workspace Framework** — new `/today` route +
+- **Next recommended phase (superseded — P2 done below)**: **P2 — Today Workspace Framework** — new `/today` route +
   layout + workflow stepper (reuse `WorkflowProgress`) + shared state; **create the
   `TradingDay` model** (unique `userId+date`, migration) + get-or-create service/actions;
   **placeholder** sections for Morning Prep · Today's Plan · Trade Idea · Trade Execution ·
   Trade Review · Daily Analytics; add **Today** to the sidebar. Framework only — no
   section internals yet.
+
+### Phase 2 — Today Workspace Framework ✅
+- **Completed**: the day-centric backbone + the Today workspace shell.
+  - **`TradingDay` model** (unique `userId+date`, `status` ACTIVE/ARCHIVED, milestone
+    stamps `prepCompletedAt`/`planCompletedAt`/`analyzedAt`/`archivedAt`; no soft
+    delete). Migration `20260803233136_trading_day`.
+  - New **`/today` route** + **`Today`** sidebar item (Sun icon, between Dashboard and
+    Journal). The page get-or-creates today's `TradingDay` and lists today's trades.
+  - **Shared workflow state machine** — pure `deriveWorkflowSteps`
+    (`domain/today/workflow.ts`, 4 tests): Prep/Plan/Analyze from the TradingDay,
+    Trade/Review derived from the day's trades → the ordered stepper state. **Both** the
+    Today workspace and the Dashboard now drive their stepper from this one function.
+  - **`TodayWorkspace`** (client): header (date + status badge) + reused
+    `WorkflowProgress` stepper + a 6-tab shell (Morning Prep · Today's Plan · Trade Idea ·
+    Trade Execution · Trade Review · Daily Analytics), each a documented
+    `SectionPlaceholder`. Real section components slot into the same TabsContent in P3–P5.
+  - Moved `SectionPlaceholder` from strategy-lab to **`components/shared`** (now
+    cross-module); repointed the Dashboard's "Start today's session" + workflow steps to
+    `/today`.
+- **Components completed**: `today/today-workspace.tsx`, `shared/section-placeholder.tsx`
+  (moved), `trading-day.service.ts`, `domain/today/workflow.ts`, `types/today.ts`.
+- **Database changes**: `TradingDay` table + `TradingDayStatus` enum + `User.tradingDays`
+  relation (migration `20260803233136_trading_day`). Additive — nothing else touched.
+- **Routes**: `+ /today`.
+- **Files changed**: new `src/app/(app)/today/page.tsx`, `src/components/today/today-workspace.tsx`,
+  `src/components/shared/section-placeholder.tsx`, `src/server/services/trading-day.service.ts`,
+  `src/domain/today/workflow.ts` (+ test), `src/types/today.ts`; changed
+  `prisma/schema.prisma`, `src/components/layout/app-sidebar.tsx`,
+  `src/components/dashboard/{workflow-progress,quick-actions}.tsx`,
+  `src/app/(app)/dashboard/page.tsx`, `src/server/services/dashboard.service.ts`; removed
+  `src/components/strategy-lab/section-placeholder.tsx`.
+- **Verified**: `tsc` + `eslint` clean, 155 tests pass (+4 workflow), and a browser
+  screenshot confirmed `/today` renders — Active badge, the stepper (Preparation current
+  on a fresh day), all six tabs, and the Morning Prep placeholder — with zero console
+  errors. (Caught & fixed one real bug: icon *functions* can't cross the server→client
+  boundary, so the page now passes serializable step statuses and the client rebuilds the
+  icon-bearing steps.)
+- **Remaining work**: P3–P11.
+- **Next recommended phase**: **P3 — Morning Preparation** — replace the Morning Prep
+  placeholder with the real section: the pre-session routine (from `TradingPlan`) as a
+  per-day tickable checklist + market-context notes + readiness, persisted on
+  `TradingDay` (add the needed additive fields), and set `prepCompletedAt` when done so
+  the workflow advances. Reuse `useDebouncedAutosave` / `RichTextEditor` / checklist
+  patterns. One section only, then STOP.

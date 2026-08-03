@@ -32,6 +32,7 @@ model User {
   checklistItems  ChecklistItemDefinition[]
   tradingAccounts TradingAccount[]
   dailyNotes      DailyNote[]
+  tradingDays     TradingDay[]
   trades          Trade[]
   strategies      Strategy[]
 }
@@ -48,6 +49,39 @@ model DailyNote {
   deletedAt DateTime?
 
   @@unique([userId, date])
+}
+
+// TradeOS V2 — the day-centric backbone (one "session" record per trading day).
+// It orchestrates the Today workflow (prep → plan → trade → review → analyze)
+// without duplicating trade data: Trade Idea/Execution/Review live on Trade, and
+// this day's trades/notes are linked by date. `status` drives archiving to the
+// Journal (ARCHIVED = finalized). Fields for Morning Prep (P3) and Today's Plan
+// (P4) are added additively in their phases; P2 establishes the framework only.
+// No soft delete — a day is archived, never deleted.
+enum TradingDayStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model TradingDay {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date   DateTime @db.Date
+
+  status          TradingDayStatus @default(ACTIVE)
+  // Workflow milestone stamps owned by the day (trade/review steps are derived
+  // from the day's Trades). Null = not yet completed.
+  prepCompletedAt DateTime?
+  planCompletedAt DateTime?
+  analyzedAt      DateTime?
+  archivedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, status])
 }
 
 enum AccountKind {

@@ -7,6 +7,7 @@ import {
   listTradingAccounts,
 } from "@/server/services/accounts.service";
 import { listTradingSessions } from "@/server/services/trading-sessions.service";
+import { getTradingDay } from "@/server/services/trading-day.service";
 import { computeBrokerageMetrics, computePropFirmRoi } from "@/domain/accounts/derived";
 import { localDateToKey } from "@/lib/date";
 
@@ -23,14 +24,16 @@ export interface BestAccountSummary {
 export async function getDashboardData(userId: string) {
   const todayKey = localDateToKey(new Date());
 
-  const [plan, todayNote, todayTrades, recentTrades, sessions, otherAccounts] = await Promise.all([
-    getTradingPlan(userId),
-    getDailyNote(userId, todayKey),
-    listTradesForDay(userId, todayKey),
-    listRecentTrades(userId, 5),
-    listTradingSessions(userId),
-    listTradingAccounts(userId),
-  ]);
+  const [plan, todayNote, todayTrades, recentTrades, sessions, otherAccounts, tradingDay] =
+    await Promise.all([
+      getTradingPlan(userId),
+      getDailyNote(userId, todayKey),
+      listTradesForDay(userId, todayKey),
+      listRecentTrades(userId, 5),
+      listTradingSessions(userId),
+      listTradingAccounts(userId),
+      getTradingDay(userId, todayKey),
+    ]);
 
   const analytics = await getAnalyticsData(userId, EPOCH_DATE_KEY, todayKey);
 
@@ -74,5 +77,6 @@ export async function getDashboardData(userId: string) {
     winRate: analytics.trading.winRate,
     equityCurve: analytics.trading.equityCurve,
     totalTrades: analytics.trading.totalTrades,
+    tradingDay,
   };
 }

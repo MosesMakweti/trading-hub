@@ -1,10 +1,11 @@
 import type { LucideIcon } from "lucide-react";
 
 /**
- * Documented placeholder for a Strategy Lab workspace section that a later phase
- * will build. Keeps the workspace shell complete and navigable now, and marks
- * the exact insertion point for future work. Replace the placeholder with the
- * real section component when its phase lands — the tab wiring stays the same.
+ * Documented placeholder for a workspace section a later phase will build. Keeps
+ * a workspace shell complete and navigable now, and marks the exact insertion
+ * point for future work — replace it with the real section component when its
+ * phase lands; the surrounding wiring stays the same. Shared across modules
+ * (Strategy Lab, the Today workspace, …).
  */
 export function SectionPlaceholder({
   icon: Icon,
