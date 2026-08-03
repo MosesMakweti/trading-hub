@@ -316,5 +316,13 @@ The module is now feature-complete for the original brief; future work is the
   knowledge graph · video/PDF attachments. **Note:** AI assistant, backtesting, and
   attachments each need external infrastructure not yet in this project (an
   `ANTHROPIC_API_KEY`, a market-data feed, and UploadThing file hosting respectively),
-  so they can't be built end-to-end here without that setup. A future "view full
-  snapshot" / "restore" / "diff versions" view can build on the stored JSON snapshot.
+  so they can't be built end-to-end here without that setup.
+- ✅ **Version comparison (diff)** — DONE (extends version history). The Versions tab has
+  a "Compare versions" panel: pick any two points — a published version or the
+  **Current draft** — and see what changed (name/status/description; added/removed
+  assets · arsenal · framework (with a reorder flag) · timeframes · entry models; plus
+  trade-management scalar changes and rule/TP count deltas). Pure diff in
+  `src/domain/strategies/version-diff.ts` (tested); `getStrategyVersionComparison`
+  service (loads two snapshots — "current" is built on the fly) + `compareStrategyVersions`
+  action. A future "view full read-only snapshot" / "restore" view can build on the same
+  stored JSON.

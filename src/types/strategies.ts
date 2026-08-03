@@ -154,3 +154,30 @@ export interface PatternDTO {
   descriptionPreview: string;
   conditionsPreview: string;
 }
+
+// ── Strategy version comparison (diff) ───────────────────────────────────────
+export interface ListDiff {
+  added: string[];
+  removed: string[];
+}
+export interface ScalarChange<T> {
+  from: T;
+  to: T;
+}
+export interface StrategyVersionDiff {
+  nameChange: ScalarChange<string> | null;
+  statusChange: ScalarChange<StrategyStatusValue> | null;
+  descriptionChanged: boolean;
+  applicableAssets: ListDiff;
+  arsenalConcepts: ListDiff;
+  frameworkSteps: ListDiff & { reordered: boolean };
+  timeframes: ListDiff;
+  entryModels: ListDiff;
+  tradeManagement: {
+    maxRiskPercent: ScalarChange<number | null> | null;
+    maxHoldingTime: ScalarChange<string | null> | null;
+    customRuleCountDelta: number;
+    partialTpCountDelta: number;
+  };
+  hasChanges: boolean;
+}

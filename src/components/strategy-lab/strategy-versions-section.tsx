@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { publishStrategyVersion } from "@/actions/strategies.actions";
+import { StrategyVersionCompare } from "@/components/strategy-lab/strategy-version-compare";
 import type { StrategyVersionDTO } from "@/types/strategies";
 
 function formatDate(iso: string) {
@@ -127,6 +128,15 @@ export function StrategyVersionsSection({
           </Button>
         </div>
       </div>
+
+      {/* Compare (only meaningful once something is published) */}
+      {initialVersions.length > 0 && (
+        <StrategyVersionCompare
+          strategyId={strategyId}
+          currentVersion={currentVersion}
+          versions={initialVersions}
+        />
+      )}
 
       {/* History */}
       {initialVersions.length === 0 ? (

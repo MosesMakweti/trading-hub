@@ -2,14 +2,18 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import { summarizeStrategyVersionSnapshot } from "@/domain/strategies/version-snapshot";
+import { diffStrategyVersions } from "@/domain/strategies/version-diff";
 import type {
   StrategyCreateInput,
   StrategySettingsInput,
 } from "@/lib/validation/strategies";
 import type {
+  StrategyVersionDiff,
   StrategyVersionDTO,
   StrategyVersionSnapshot,
 } from "@/types/strategies";
+
+export type VersionRef = number | "current";
 
 // Full-tree include shared by publish (snapshot) and duplicate.
 const strategyTreeInclude = {
@@ -155,6 +159,38 @@ export async function publishStrategyVersion(
     });
     return created;
   });
+}
+
+/**
+ * Diffs two points in a strategy's history. Each ref is a published version
+ * number or `"current"` (the live, unpublished draft, snapshotted on the fly).
+ * Returns null if the strategy isn't the user's or a referenced version is
+ * missing. Pure diff lives in domain/strategies/version-diff.
+ */
+export async function getStrategyVersionComparison(
+  userId: string,
+  strategyId: string,
+  base: VersionRef,
+  target: VersionRef,
+): Promise<StrategyVersionDiff | null> {
+  const strategy = await prisma.strategy.findFirst({
+    where: { id: strategyId, userId },
+    include: strategyTreeInclude,
+  });
+  if (!strategy) return null;
+  const current = buildSnapshot(strategy);
+
+  const load = async (ref: VersionRef): Promise<StrategyVersionSnapshot | null> => {
+    if (ref === "current") return current;
+    const row = await prisma.strategyVersion.findFirst({
+      where: { strategyId, version: ref },
+    });
+    return row ? (row.snapshot as unknown as StrategyVersionSnapshot) : null;
+  };
+
+  const [from, to] = await Promise.all([load(base), load(target)]);
+  if (!from || !to) return null;
+  return diffStrategyVersions(from, to);
 }
 
 /** Published versions of a strategy, newest first, each with a compact summary. */

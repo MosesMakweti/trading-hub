@@ -10,9 +10,20 @@ import {
   strategyStatusSchema,
 } from "@/lib/validation/strategies";
 import * as strategiesService from "@/server/services/strategies.service";
+import type { VersionRef } from "@/server/services/strategies.service";
+import type { StrategyVersionDiff } from "@/types/strategies";
 
 type ActionResult = { success: true } | { success: false; error: string };
 type CreateResult = { success: true; id: string } | { success: false; error: string };
+type CompareResult =
+  | { success: true; diff: StrategyVersionDiff | null }
+  | { success: false; error: string };
+
+function toVersionRef(value: unknown): VersionRef | null {
+  if (value === "current") return "current";
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -101,6 +112,23 @@ export async function publishStrategyVersion(id: string, note: unknown): Promise
   revalidatePath("/strategy-lab");
   revalidatePath(`/strategy-lab/${id}`);
   return { success: true };
+}
+
+export async function compareStrategyVersions(
+  id: string,
+  base: unknown,
+  target: unknown,
+): Promise<CompareResult> {
+  const user = await requireUser();
+  const b = toVersionRef(base);
+  const t = toVersionRef(target);
+  if (!b || !t) return { success: false, error: "Invalid version selection." };
+  try {
+    const diff = await strategiesService.getStrategyVersionComparison(user.id, id, b, t);
+    return { success: true, diff };
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to compare versions.") };
+  }
 }
 
 export async function duplicateStrategy(id: string): Promise<CreateResult> {
