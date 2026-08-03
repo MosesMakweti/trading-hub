@@ -20,11 +20,11 @@ import {
   StrategySettingsForm,
   type StrategySettingsState,
 } from "@/components/strategy-lab/strategy-settings-form";
-import { SectionPlaceholder } from "@/components/strategy-lab/section-placeholder";
 import { ArsenalSection } from "@/components/strategy-lab/arsenal-section";
 import { FrameworkSection } from "@/components/strategy-lab/framework-section";
 import { TimeframesSection } from "@/components/strategy-lab/timeframes-section";
 import { EntryModelsSection } from "@/components/strategy-lab/entry-models-section";
+import { TradeManagementSection } from "@/components/strategy-lab/trade-management-section";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { updateStrategySettings } from "@/actions/strategies.actions";
 import type {
@@ -33,6 +33,7 @@ import type {
   FrameworkStepDTO,
   StrategyDTO,
   TimeframeDTO,
+  TradeManagementDTO,
 } from "@/types/strategies";
 
 // Section tabs. Settings is live in Phase 1; the rest are documented placeholders
@@ -107,12 +108,14 @@ export function StrategyWorkspace({
   frameworkSteps,
   timeframes,
   entryModels,
+  tradeManagement,
 }: {
   strategy: StrategyDTO;
   arsenalConcepts: ArsenalConceptDTO[];
   frameworkSteps: FrameworkStepDTO[];
   timeframes: TimeframeDTO[];
   entryModels: EntryModelDTO[];
+  tradeManagement: TradeManagementDTO;
 }) {
   const [settings, setSettings] = useState<StrategySettingsState>({
     name: strategy.name,
@@ -203,24 +206,10 @@ export function StrategyWorkspace({
           <EntryModelsSection strategyId={strategy.id} initialModels={entryModels} />
         </TabsContent>
 
-        {/* The remaining sections are documented placeholders until their phase. */}
-        {SECTIONS.filter(
-          (s) =>
-            s.value !== "arsenal" &&
-            s.value !== "framework" &&
-            s.value !== "timeframes" &&
-            s.value !== "entry-models",
-        ).map((s) => (
-          <TabsContent key={s.value} value={s.value} className="mt-4">
-            <SectionPlaceholder
-              icon={s.icon}
-              title={s.label}
-              description={s.description}
-              phase={s.phase}
-              plannedFeatures={[...s.plannedFeatures]}
-            />
-          </TabsContent>
-        ))}
+        {/* Section 5 — Trade Management is live (Phase 6). All sections now live. */}
+        <TabsContent value="trade-management" className="mt-4">
+          <TradeManagementSection strategyId={strategy.id} tradeManagement={tradeManagement} />
+        </TabsContent>
       </Tabs>
     </div>
   );

@@ -6,6 +6,7 @@ import { listArsenalConcepts } from "@/server/services/arsenal.service";
 import { listFrameworkSteps } from "@/server/services/framework.service";
 import { listTimeframes } from "@/server/services/timeframes.service";
 import { listEntryModels } from "@/server/services/strategy-entry-models.service";
+import { getOrCreateTradeManagement } from "@/server/services/strategy-trade-management.service";
 import { FadeIn } from "@/components/shared/motion";
 import { StrategyWorkspace } from "@/components/strategy-lab/strategy-workspace";
 import type {
@@ -14,6 +15,7 @@ import type {
   FrameworkStepDTO,
   StrategyDTO,
   TimeframeDTO,
+  TradeManagementDTO,
 } from "@/types/strategies";
 
 export default async function StrategyWorkspacePage({
@@ -26,11 +28,12 @@ export default async function StrategyWorkspacePage({
   const strategy = await getStrategy(user.id, strategyId);
   if (!strategy) notFound();
 
-  const [concepts, steps, timeframes, entryModels] = await Promise.all([
+  const [concepts, steps, timeframes, entryModels, tradeManagement] = await Promise.all([
     listArsenalConcepts(user.id, strategyId),
     listFrameworkSteps(user.id, strategyId),
     listTimeframes(user.id, strategyId),
     listEntryModels(user.id, strategyId),
+    getOrCreateTradeManagement(user.id, strategyId),
   ]);
 
   const dto: StrategyDTO = {
@@ -87,6 +90,25 @@ export default async function StrategyWorkspacePage({
     notes: m.notes,
   }));
 
+  const tradeManagementDto: TradeManagementDTO = {
+    id: tradeManagement.id,
+    takeProfitPhilosophy: tradeManagement.takeProfitPhilosophy,
+    initialStopPlacement: tradeManagement.initialStopPlacement,
+    breakEvenRules: tradeManagement.breakEvenRules,
+    trailingStopRules: tradeManagement.trailingStopRules,
+    scalingInRules: tradeManagement.scalingInRules,
+    scalingOutRules: tradeManagement.scalingOutRules,
+    maxHoldingTime: tradeManagement.maxHoldingTime,
+    maxRiskPercent: tradeManagement.maxRiskPercent ? tradeManagement.maxRiskPercent.toNumber() : null,
+    partialTakeProfits: tradeManagement.partialTakeProfits.map((p) => ({
+      id: p.id,
+      trigger: p.trigger,
+      percentToClose: p.percentToClose ? p.percentToClose.toNumber() : null,
+      reason: p.reason,
+    })),
+    customRules: tradeManagement.customRules.map((r) => ({ id: r.id, text: r.text })),
+  };
+
   return (
     <FadeIn>
       <StrategyWorkspace
@@ -95,6 +117,7 @@ export default async function StrategyWorkspacePage({
         frameworkSteps={frameworkSteps}
         timeframes={timeframeDtos}
         entryModels={entryModelDtos}
+        tradeManagement={tradeManagementDto}
       />
     </FadeIn>
   );

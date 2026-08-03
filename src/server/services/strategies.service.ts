@@ -115,6 +115,12 @@ export async function duplicateStrategy(userId: string, id: string) {
         include: { checkpoints: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } } },
       },
       entryModels: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+      tradeManagement: {
+        include: {
+          partialTakeProfits: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+          customRules: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+        },
+      },
     },
   });
   if (!source) throw new Error("Strategy not found.");
@@ -205,6 +211,45 @@ export async function duplicateStrategy(userId: string, id: string) {
           notes: toJsonInput(m.notes),
         })),
       });
+    }
+
+    // Section 5 — Trade Management (1:1 + two child lists): create the record,
+    // then its partial TPs and custom rules under the new record id.
+    const tm = source.tradeManagement;
+    if (tm) {
+      const newTm = await tx.strategyTradeManagement.create({
+        data: {
+          strategyId: copy.id,
+          takeProfitPhilosophy: toJsonInput(tm.takeProfitPhilosophy),
+          initialStopPlacement: toJsonInput(tm.initialStopPlacement),
+          breakEvenRules: toJsonInput(tm.breakEvenRules),
+          trailingStopRules: toJsonInput(tm.trailingStopRules),
+          scalingInRules: toJsonInput(tm.scalingInRules),
+          scalingOutRules: toJsonInput(tm.scalingOutRules),
+          maxHoldingTime: tm.maxHoldingTime,
+          maxRiskPercent: tm.maxRiskPercent,
+        },
+      });
+      if (tm.partialTakeProfits.length > 0) {
+        await tx.partialTakeProfit.createMany({
+          data: tm.partialTakeProfits.map((p) => ({
+            tradeManagementId: newTm.id,
+            trigger: p.trigger,
+            percentToClose: p.percentToClose,
+            reason: p.reason,
+            sortOrder: p.sortOrder,
+          })),
+        });
+      }
+      if (tm.customRules.length > 0) {
+        await tx.tradeManagementRule.createMany({
+          data: tm.customRules.map((r) => ({
+            tradeManagementId: newTm.id,
+            text: r.text,
+            sortOrder: r.sortOrder,
+          })),
+        });
+      }
     }
 
     return copy;

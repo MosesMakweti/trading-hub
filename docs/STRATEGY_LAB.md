@@ -218,87 +218,66 @@ a real checkable list if desired.
 
 ---
 
-## ▶️ Phase 6 — Section 5: TRADE MANAGEMENT (BUILD THIS NEXT — LAST SECTION)
+## ✅ Phase 6 — Section 5: TRADE MANAGEMENT (DONE — ALL SECTIONS COMPLETE)
 
-How a trade is managed after entry. This is the **last workspace section**; it's a
-1:1 record plus two child lists, not a card list. Don't touch Phases 1–5.
+How a trade is managed after entry. Live in the Trade Management tab. **This was the
+last workspace section — all five are now built.**
 
-**Data model** — add and uncomment `Strategy.tradeManagement` (1:1) + two children:
+- **Schema**: `StrategyTradeManagement` (1:1, `@unique strategyId`) with 6 rich-text
+  Json fields (takeProfitPhilosophy, initialStopPlacement, breakEvenRules,
+  trailingStopRules, scalingInRules, scalingOutRules) + `maxHoldingTime String?` +
+  `maxRiskPercent Decimal?`. Two children: `PartialTakeProfit` (trigger,
+  percentToClose Decimal, reason) and `TradeManagementRule` (text). All soft-delete,
+  cascade down. Migration `20260802233506_add_trade_management`; all three registered
+  in `SOFT_DELETE_MODELS`.
+- **Service** (`strategy-trade-management.service.ts`): `getOrCreateTradeManagement`
+  lazily upserts the singleton (P2002-safe, `findFirstOrThrow` for a non-null return)
+  and returns it with its ordered child lists. Record scoped via `strategy.userId`;
+  children via `tradeManagement.strategy.userId`. Actions/validation prefixed
+  `strategy-trade-management.*`.
+- **UI**: `TradeManagementSection` — a glass card with the 6 rich editors (autosaved)
+  + max-hold/max-risk inputs (autosaved via `useDebouncedAutosave`, number validated
+  0–100); a Partial-TP card (`PartialTpList` → `PartialTpRow`: trigger + % + reason,
+  autosaved per row, dnd reorder, add creates a blank row, delete-confirm); and a
+  Custom-rules card that **reuses the plan `SimpleListSection`** via bound-closure
+  actions. Loaded in the workspace page's `Promise.all`; replaced the last placeholder
+  (the `SectionPlaceholder` component is now unused but kept as a reusable pattern).
+- **Duplicate**: `duplicateStrategy` now copies the 1:1 record then its partial TPs +
+  custom rules in the transaction. Verified.
 
-```prisma
-model StrategyTradeManagement {
-  id         String   @id @default(cuid())
-  strategyId String   @unique
-  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  // rich-text (Tiptap JSON) fields:
-  takeProfitPhilosophy Json?
-  initialStopPlacement Json?
-  breakEvenRules       Json?
-  trailingStopRules    Json?
-  scalingInRules       Json?
-  scalingOutRules      Json?
-  // structured limits:
-  maxHoldingTime   String?   // free text (e.g. "2 hours", "1 session")
-  maxRiskPercent   Decimal?  @db.Decimal(6, 2)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime?
-  partialTakeProfits PartialTakeProfit[]
-  customRules        TradeManagementRule[]
-}
+Verified end-to-end (rich field autosave, max hold/risk, add+fill a partial TP level,
+add a custom rule, all persist on reload, duplicate deep-copies the whole record +
+both child lists) with zero console errors; `tsc`, lint, 103 tests pass.
 
-model PartialTakeProfit {
-  id                 String @id @default(cuid())
-  tradeManagementId  String
-  tradeManagement    StrategyTradeManagement @relation(fields: [tradeManagementId], references: [id], onDelete: Cascade)
-  trigger         String?   // e.g. "at 2R", "prior day high"
-  percentToClose  Decimal?  @db.Decimal(5, 2)
-  reason          String?
-  sortOrder Int       @default(0)
-  deletedAt DateTime?
-  @@index([tradeManagementId, deletedAt, sortOrder])
-}
-
-model TradeManagementRule {
-  id                 String @id @default(cuid())
-  tradeManagementId  String
-  tradeManagement    StrategyTradeManagement @relation(fields: [tradeManagementId], references: [id], onDelete: Cascade)
-  text      String
-  sortOrder Int       @default(0)
-  deletedAt DateTime?
-  @@index([tradeManagementId, deletedAt, sortOrder])
-}
-```
-
-Register all three in `SOFT_DELETE_MODELS`. Approach:
-1. `getOrCreateTradeManagement(userId, strategyId)` (lazy singleton, like the
-   trading-plan upsert) so the section always has a row to edit.
-2. Service/actions/validation prefixed `strategy-trade-management.*`. Top-level
-   fields autosave (reuse `useDebouncedAutosave` for the rich fields via
-   `RichTextEditor`, and a small form for maxHoldingTime / maxRiskPercent). Partial
-   TPs and custom rules are add/edit/reorder/delete lists (custom rules can reuse
-   the `SimpleListSection`-style pattern; partial TPs need trigger+percent+reason).
-3. UI: replace the Trade Management `SectionPlaceholder` with `TradeManagementSection`.
-4. Extend `duplicateStrategy`: copy the 1:1 record (create it, then its partial TPs +
-   custom rules) in the transaction.
-
-After this, **all five workspace sections are done** → next is **Phase 7: Journal
-integration** (see below). Leave the app working, update this file, then stop.
+**🎉 Every Strategy Lab workspace section (Settings, Arsenal, Framework, Timeframes,
+Entry Models, Trade Management) is now live.** The remaining work is the Journal link.
 
 ---
 
-## Later phases (design already accommodates them — no refactor needed)
+## ▶️ Phase 7 — JOURNAL INTEGRATION (BUILD THIS NEXT — final phase)
 
-- **Phase 6 — Trade Management**: see the spec above (this is the next build).
-- **Phase 7 — Journal integration**: add `strategyId String?` to `Trade` →
-  `Strategy` (reference, not copy). Add a Strategy selector to the trade form; on
-  select, auto-populate Applicable Assets, Entry Models, Framework, and Trade
-  Management rules. **Do NOT auto-populate Arsenal / "Relevant Concepts"** — the
-  Journal references the strategy, it does not duplicate its knowledge base.
+Connect strategies to the Journal. This touches existing Journal code (the trade
+form / trade service) — the one place the "don't touch prior work" rule is expected
+to bend, but keep changes additive.
 
-Each of the above: add model(s) → register soft-delete → service → actions →
-replace the tab's placeholder with the real section → extend `duplicateStrategy`
-to deep-copy the new rows in the same transaction → verify → update this doc.
+1. **Schema**: add `strategyId String?` + `strategy Strategy? @relation(...)` to
+   `Trade` (a **reference**, `onDelete: SetNull` — deleting a strategy must not delete
+   trades). Uncomment `Strategy.trades`. Migration.
+2. **Trade form**: add a Strategy selector (list the user's non-archived strategies).
+   On select, **auto-populate**: Applicable Assets, Entry Models, Framework steps, and
+   Trade-Management rules (as prefilled/reference context). Persist `trade.strategyId`.
+   ❗ **Do NOT auto-populate Arsenal / "Relevant Concepts"** — the Journal *references*
+   the strategy, it does not copy its knowledge base. (Explicit product requirement.)
+3. Surface the linked strategy on the trade card / day view (a chip linking to the
+   workspace).
+4. Duplicate is unaffected (trades aren't part of a strategy's own tree; the FK is a
+   reference). Do **not** copy `trades` in `duplicateStrategy`.
+
+Leave the app working, update this file, then stop. After this the module is
+feature-complete for the original brief; future work is the "Future integrations"
+list below.
+
+---
 
 ## Future integrations the architecture already supports
 AI strategy assistant · backtesting · win-rate/RR/psychology **by strategy**

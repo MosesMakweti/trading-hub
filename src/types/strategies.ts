@@ -60,3 +60,30 @@ export interface EntryModelDTO {
   targetLogic: unknown;
   notes: unknown;
 }
+
+/** Section 5 — Trade Management. A 1:1 record plus two child lists. */
+export interface PartialTakeProfitDTO {
+  id: string;
+  trigger: string | null;
+  percentToClose: number | null;
+  reason: string | null;
+}
+
+export interface CustomRuleDTO {
+  id: string;
+  text: string;
+}
+
+export interface TradeManagementDTO {
+  id: string;
+  takeProfitPhilosophy: unknown;
+  initialStopPlacement: unknown;
+  breakEvenRules: unknown;
+  trailingStopRules: unknown;
+  scalingInRules: unknown;
+  scalingOutRules: unknown;
+  maxHoldingTime: string | null;
+  maxRiskPercent: number | null;
+  partialTakeProfits: PartialTakeProfitDTO[];
+  customRules: CustomRuleDTO[];
+}

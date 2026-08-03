@@ -441,12 +441,12 @@ model Strategy {
   deletedAt DateTime? // soft delete (registered in server/db.ts); Archive is a status, Delete sets this
 
   // ── Workspace sections ─────────────────────────────────────────────────────
-  arsenalConcepts ArsenalConcept[]        // Section 1 — Arsenal (expandable concept cards)
-  frameworkSteps  StrategyFrameworkStep[] // Section 2 — Framework (ordered decision steps)
-  timeframes      StrategyTimeframe[]     // Section 3 — Timeframe workspace (each has checkpoints)
-  entryModels     StrategyEntryModel[]    // Section 4 — Entry Models
-  // ── Phase 6+ extension points (add the models, then uncomment) ─────────────
-  // tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (+ partial TPs, custom rules)
+  arsenalConcepts ArsenalConcept[]         // Section 1 — Arsenal (expandable concept cards)
+  frameworkSteps  StrategyFrameworkStep[]  // Section 2 — Framework (ordered decision steps)
+  timeframes      StrategyTimeframe[]      // Section 3 — Timeframe workspace (each has checkpoints)
+  entryModels     StrategyEntryModel[]     // Section 4 — Entry Models
+  tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (1:1 + partial TPs, custom rules)
+  // ── Phase 7 extension point (add the model, then uncomment) ────────────────
   // trades          Trade[]                  // Journal link: Trade.strategyId -> Strategy (reference, not copy)
 
   @@index([userId, deletedAt, sortOrder])
@@ -564,4 +564,64 @@ model StrategyEntryModel {
   deletedAt DateTime?
 
   @@index([strategyId, deletedAt, sortOrder])
+}
+
+// Strategy Lab · Section 5 — Trade Management. One record per strategy (1:1),
+// plus two child lists. Rule fields are Tiptap rich-text JSON; max-hold/risk are
+// structured. Scoped to a user via the parent Strategy.
+model StrategyTradeManagement {
+  id         String   @id @default(cuid())
+  strategyId String   @unique
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  takeProfitPhilosophy Json?
+  initialStopPlacement Json?
+  breakEvenRules       Json?
+  trailingStopRules    Json?
+  scalingInRules       Json?
+  scalingOutRules      Json?
+
+  maxHoldingTime String? // free text, e.g. "2 hours", "1 session"
+  maxRiskPercent Decimal? @db.Decimal(6, 2)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  partialTakeProfits PartialTakeProfit[]
+  customRules        TradeManagementRule[]
+}
+
+// A partial take-profit level (unlimited per trade-management record).
+model PartialTakeProfit {
+  id                String                  @id @default(cuid())
+  tradeManagementId String
+  tradeManagement   StrategyTradeManagement @relation(fields: [tradeManagementId], references: [id], onDelete: Cascade)
+
+  trigger        String? // e.g. "at 2R", "prior day high"
+  percentToClose Decimal? @db.Decimal(5, 2)
+  reason         String?
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([tradeManagementId, deletedAt, sortOrder])
+}
+
+// A free-form custom management rule (unlimited).
+model TradeManagementRule {
+  id                String                  @id @default(cuid())
+  tradeManagementId String
+  tradeManagement   StrategyTradeManagement @relation(fields: [tradeManagementId], references: [id], onDelete: Cascade)
+
+  text String
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([tradeManagementId, deletedAt, sortOrder])
 }
