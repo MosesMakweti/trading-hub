@@ -22,8 +22,8 @@ Rules for every phase:
 
 ```
 Phase 0  Architecture Review .................... ✅ DONE (this document)
-Phase 1  Dashboard Framework .................... ▶ NEXT
-Phase 2  Today Workspace Framework  (+ TradingDay backbone)
+Phase 1  Dashboard Framework .................... ✅ DONE
+Phase 2  Today Workspace Framework  (+ TradingDay backbone) ... ▶ NEXT
 Phase 3  Morning Preparation
 Phase 4  Today's Trading Plan
 Phase 5  Trade Workspace  (Idea → Execution → Review) + Daily Analytics
@@ -207,3 +207,34 @@ append a Progress Report, STOP.
 - **Next recommended phase**: **P1 — Dashboard Framework** (refactor `/dashboard` into a
   card framework with Workflow Progress + Quick Actions + Performance Snapshot; reuse
   existing widgets; no new models).
+
+### Confirmed decisions (locked with the user)
+- **TradingDay backbone** — yes, add the one additive per-day model in Phase 2.
+- **Today workspace** — new `/today` sidebar item; Dashboard and Journal both stay.
+
+### Phase 1 — Dashboard Framework ✅
+- **Completed**: refactored `/dashboard` into a composable framework — a **Workflow
+  Progress** stepper (Preparation → Plan → Trade → Review → Analyze, best-effort derived
+  from today's data; Prep/Plan marked upcoming until the Today workspace drives them), a
+  **Quick Actions** launchpad, and a **Performance Snapshot** (KPIs + equity curve). All
+  existing widgets (session countdown, plan excerpt, today's-journal card, daily notes,
+  recent trades, recent psychology notes) are preserved. The three new components are
+  presentational and reusable — `WorkflowProgress` is written to be driven by real
+  TradingDay state in Phase 2.
+- **Components completed**: `components/dashboard/workflow-progress.tsx`
+  (`WorkflowProgress` + `WORKFLOW_STEP_META` + `WorkflowStep` type),
+  `components/dashboard/quick-actions.tsx`, `components/dashboard/performance-snapshot.tsx`.
+- **Files changed**: the three new components above; `src/app/(app)/dashboard/page.tsx`
+  (rebuilt to compose them; workflow state derived from `todayTrades`).
+- **Database changes**: none.
+- **Routes**: none (still `/dashboard`).
+- **Verified**: `tsc` + `eslint` clean, 151 tests pass, and a browser screenshot confirmed
+  the stepper (Trade/Review done, Analyze current), quick actions, performance snapshot,
+  and all preserved widgets render with zero console errors.
+- **Remaining work**: P2–P11.
+- **Next recommended phase**: **P2 — Today Workspace Framework** — new `/today` route +
+  layout + workflow stepper (reuse `WorkflowProgress`) + shared state; **create the
+  `TradingDay` model** (unique `userId+date`, migration) + get-or-create service/actions;
+  **placeholder** sections for Morning Prep · Today's Plan · Trade Idea · Trade Execution ·
+  Trade Review · Daily Analytics; add **Today** to the sidebar. Framework only — no
+  section internals yet.
