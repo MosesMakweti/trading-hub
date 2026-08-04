@@ -16,11 +16,13 @@ import { hasActiveFilters, type TradeFilters } from "@/domain/trades/filter";
 function FilterSelect({
   value,
   allLabel,
+  label,
   options,
   onSelect,
 }: {
   value: string | null;
   allLabel: string;
+  label: string;
   options: { value: string; label: string }[];
   onSelect: (v: string | null) => void;
 }) {
@@ -31,7 +33,7 @@ function FilterSelect({
       value={value ?? "all"}
       onValueChange={(v) => onSelect(v && v !== "all" ? v : null)}
     >
-      <SelectTrigger className="h-9 w-auto min-w-32">
+      <SelectTrigger className="h-9 w-auto min-w-32" aria-label={`Filter by ${label}`}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -83,6 +85,7 @@ export function TradeFilterBar({
         <FilterSelect
           value={filters.direction}
           allLabel="Any direction"
+          label="direction"
           options={[
             { value: "LONG", label: "Long" },
             { value: "SHORT", label: "Short" },
@@ -92,6 +95,7 @@ export function TradeFilterBar({
         <FilterSelect
           value={filters.result}
           allLabel="All results"
+          label="result"
           options={[
             { value: "WIN", label: "Winners" },
             { value: "LOSS", label: "Losers" },
@@ -102,6 +106,7 @@ export function TradeFilterBar({
         <FilterSelect
           value={filters.status}
           allLabel="Any status"
+          label="status"
           options={[
             { value: "OPEN", label: "Open" },
             { value: "CLOSED", label: "Closed" },
@@ -112,6 +117,7 @@ export function TradeFilterBar({
         <FilterSelect
           value={filters.grade}
           allLabel="Any grade"
+          label="psychology grade"
           options={["A", "B", "C", "D", "F"].map((g) => ({ value: g, label: `Grade ${g}` }))}
           onSelect={(v) => onChange({ grade: v as TradeFilters["grade"] })}
         />
@@ -119,6 +125,7 @@ export function TradeFilterBar({
           <FilterSelect
             value={filters.asset}
             allLabel="All assets"
+            label="asset"
             options={assets.map((a) => ({ value: a, label: a }))}
             onSelect={(v) => onChange({ asset: v })}
           />
@@ -127,6 +134,7 @@ export function TradeFilterBar({
           <FilterSelect
             value={filters.strategy}
             allLabel="All strategies"
+            label="strategy"
             options={strategies.map((s) => ({ value: s, label: s }))}
             onSelect={(v) => onChange({ strategy: v })}
           />

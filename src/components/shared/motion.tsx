@@ -1,7 +1,11 @@
 "use client";
 
-import { motion, type Variants } from "motion/react";
+import { motion, useReducedMotion, type Variants } from "motion/react";
 
+/**
+ * Shared entrance animations. All respect `prefers-reduced-motion`: when the
+ * viewer opts out, content renders at its final state with no transform/stagger.
+ */
 export function FadeIn({
   children,
   className,
@@ -9,27 +13,18 @@ export function FadeIn({
   children: React.ReactNode;
   className?: string;
 }) {
+  const reduce = useReducedMotion();
   return (
     <motion.div
       className={className}
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={reduce ? false : { opacity: 0, y: 8 }}
+      animate={reduce ? undefined : { opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
     >
       {children}
     </motion.div>
   );
 }
-
-const listVariants: Variants = {
-  hidden: {},
-  show: { transition: { staggerChildren: 0.05 } },
-};
-
-const itemVariants: Variants = {
-  hidden: { opacity: 0, y: 8 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.2, ease: "easeOut" } },
-};
 
 export function StaggerList({
   children,
@@ -38,8 +33,18 @@ export function StaggerList({
   children: React.ReactNode;
   className?: string;
 }) {
+  const reduce = useReducedMotion();
+  const listVariants: Variants = {
+    hidden: {},
+    show: { transition: { staggerChildren: reduce ? 0 : 0.05 } },
+  };
   return (
-    <motion.div className={className} initial="hidden" animate="show" variants={listVariants}>
+    <motion.div
+      className={className}
+      initial={reduce ? false : "hidden"}
+      animate="show"
+      variants={listVariants}
+    >
       {children}
     </motion.div>
   );
@@ -52,6 +57,11 @@ export function StaggerItem({
   children: React.ReactNode;
   className?: string;
 }) {
+  const reduce = useReducedMotion();
+  const itemVariants: Variants = {
+    hidden: reduce ? { opacity: 1 } : { opacity: 0, y: 8 },
+    show: { opacity: 1, y: 0, transition: { duration: reduce ? 0 : 0.2, ease: "easeOut" } },
+  };
   return (
     <motion.div className={className} variants={itemVariants}>
       {children}

@@ -41,7 +41,10 @@ function StepNode({ step, isLast }: { step: WorkflowStep; isLast: boolean }) {
   );
 
   return (
-    <li className="flex flex-1 flex-col items-center gap-1.5">
+    <li
+      className="flex flex-1 flex-col items-center gap-1.5"
+      aria-current={step.status === "current" ? "step" : undefined}
+    >
       <div className="flex w-full items-center">
         <span className="h-px flex-1 bg-transparent" />
         {step.href ? (
