@@ -31,8 +31,8 @@ Phase 5b Daily Analytics ........................ ✅ DONE  (Phase 5 complete)
 Phase 6  Automatic Journal Archiving ........... ✅ DONE
 Phase 7  Journal Redesign ...................... ✅ DONE
 Phase 8  Trade Gallery ......................... ✅ DONE
-Phase 9  Advanced Filters ...................... ▶ NEXT
-Phase 10 Edge Workspace — Weekly Review
+Phase 9  Advanced Filters ...................... ✅ DONE
+Phase 10 Edge Workspace — Weekly Review ........ ▶ NEXT
 Phase 11 Polish
 ```
 
@@ -509,3 +509,31 @@ append a Progress Report, STOP.
   sign/threshold), driving the Trade Gallery (and reusable by the Journal). Likely a client
   filter bar + a pure `filterTrades` domain function (unit-tested) over the mapped
   `TradeWorkspaceDTO[]`, with URL-param persistence. One phase, then STOP.
+
+### Phase 9 — Advanced Filters ✅
+- **Completed**: a reusable trade-filter system driving the Trade Gallery live.
+  - **Pure `filterTrades`** (`domain/trades/filter.ts`, 7 tests) over a minimal
+    `FilterableTrade` shape (which `TradeWorkspaceDTO` satisfies): search (asset +
+    strategy, AND terms), direction, status, **result by R sign** (WIN/LOSS/OPEN), grade,
+    asset, strategy — all optional, ANDed. Plus `EMPTY_TRADE_FILTERS` / `hasActiveFilters`.
+  - **`TradeFilterBar`** — search input + a row of Select dropdowns (asset/strategy selects
+    hidden when there are none) + a Clear button that appears only when filters are active.
+  - **`TradeGallery`** is now a client component: derives the distinct assets/strategies,
+    holds the filter state, filters via the pure function, and shows an "N of M" count + a
+    "no matches" state. (Filters are client-side state; URL-param persistence is a
+    straightforward follow-on if wanted.)
+- **Components completed**: `journal/trade-filter-bar.tsx`; `domain/trades/filter.ts`
+  (+ test); `trade-gallery.tsx` made client + filterable.
+- **Database changes / Routes**: none.
+- **Files changed**: new `domain/trades/filter.ts` (+ test), `trade-filter-bar.tsx`;
+  changed `trade-gallery.tsx`.
+- **Verified**: `tsc` + `eslint` clean, 162 tests pass (+7 filter), and a browser run
+  confirmed live filtering — selecting **Losers** on an all-winners set updated the count to
+  "0 of 2" and showed "No trades match these filters" — with zero console errors.
+- **Remaining work**: P10–P11.
+- **Next recommended phase**: **P10 — Edge Workspace (Weekly Review)** — a weekly review
+  module: aggregate a week's trades (reuse `summarizeStrategyPerformance` / the analytics
+  domain) into a week recap (P&L, win rate, R, best/worst, psychology, per-strategy via
+  `getStrategyPerformance`) + a guided weekly reflection. A new route (e.g. `/edge` or
+  `/journal/weekly`) with a week picker. Consider a `WeeklyReview` model only if persisting
+  the reflection; otherwise derive read-only. One phase, then STOP.
