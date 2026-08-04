@@ -2,6 +2,7 @@ import { Prisma, type TradingDay } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
+import { isDayEditable } from "@/domain/today/archive";
 import type { MorningPrepInput, TodaysPlanInput } from "@/lib/validation/today";
 import type { TradingDayDTO } from "@/types/today";
 
@@ -23,6 +24,26 @@ export async function getOrCreateTradingDay(userId: string, dateKey: string): Pr
  *  state without starting it (e.g. the Dashboard). Null if the day hasn't begun. */
 export async function getTradingDay(userId: string, dateKey: string): Promise<TradingDay | null> {
   return prisma.tradingDay.findFirst({ where: { userId, date: dateKeyToUtcDate(dateKey) } });
+}
+
+/** Thrown by {@link assertDayEditable} when a mutation targets an archived day. */
+export class DayArchivedError extends Error {
+  constructor() {
+    super("This day is archived — reopen it to make changes.");
+    this.name = "DayArchivedError";
+  }
+}
+
+/**
+ * Read-only enforcement: rejects a mutation to a date whose TradingDay has been
+ * archived. Called at the top of every dated mutation so an archived day is
+ * immutable regardless of which surface the write comes from (defense in depth,
+ * mirroring the userId scoping elsewhere). Days with no TradingDay row are
+ * editable. Reopen (reopenDay) lifts the lock.
+ */
+export async function assertDayEditable(userId: string, dateKey: string): Promise<void> {
+  const day = await getTradingDay(userId, dateKey);
+  if (!isDayEditable(day)) throw new DayArchivedError();
 }
 
 /**

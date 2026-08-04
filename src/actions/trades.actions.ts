@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
+import { dayEditableGuard } from "@/actions/day-guard";
 import { tradeSchema, tradeWorkspaceSectionSchema } from "@/lib/validation/trades";
 import * as tradesService from "@/server/services/trades.service";
 import { getStrategyReference } from "@/server/services/strategies.service";
@@ -13,6 +14,9 @@ type SimpleResult = { success: true } | { success: false; error: string };
 
 export async function createTrade(dateKey: string, input: unknown): Promise<ActionResult> {
   const user = await requireUser();
+  const blocked = await dayEditableGuard(user.id, dateKey);
+  if (blocked) return blocked;
+
   const parsed = tradeSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -30,6 +34,9 @@ export async function updateTrade(
   input: unknown,
 ): Promise<ActionResult> {
   const user = await requireUser();
+  const blocked = await dayEditableGuard(user.id, dateKey);
+  if (blocked) return blocked;
+
   const parsed = tradeSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -50,6 +57,9 @@ export async function updateTradeSection(
   input: unknown,
 ): Promise<SimpleResult> {
   const user = await requireUser();
+  const blocked = await dayEditableGuard(user.id, dateKey);
+  if (blocked) return blocked;
+
   const parsed = tradeWorkspaceSectionSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -72,6 +82,9 @@ export async function loadStrategyReference(
 
 export async function archiveTrade(dateKey: string, tradeId: string): Promise<SimpleResult> {
   const user = await requireUser();
+  const blocked = await dayEditableGuard(user.id, dateKey);
+  if (blocked) return blocked;
+
   await tradesService.archiveTrade(user.id, tradeId);
   revalidatePath(`/journal/${dateKey}`);
   revalidatePath("/journal");

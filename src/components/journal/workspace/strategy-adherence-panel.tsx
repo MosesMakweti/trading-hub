@@ -6,6 +6,7 @@ import { Check, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
 import { updateTradeSection } from "@/actions/trades.actions";
 import { ADHERENCE_QUESTIONS, scoreAdherence } from "@/domain/trades/adherence";
 import type { SaveState } from "@/hooks/use-debounced-autosave";
@@ -25,6 +26,7 @@ export function StrategyAdherencePanel({
   tradeId: string;
   initialAnswers: Record<string, boolean>;
 }) {
+  const editable = useWorkspaceEditable();
   const [answers, setAnswers] = useState<Record<string, boolean>>(initialAnswers);
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
@@ -77,6 +79,7 @@ export function StrategyAdherencePanel({
                   variant={answer === true ? "default" : "outline"}
                   aria-pressed={answer === true}
                   onClick={() => set(q.key, true)}
+                  disabled={!editable}
                 >
                   Yes
                 </Button>
@@ -86,6 +89,7 @@ export function StrategyAdherencePanel({
                   variant={answer === false ? "destructive" : "outline"}
                   aria-pressed={answer === false}
                   onClick={() => set(q.key, false)}
+                  disabled={!editable}
                 >
                   No
                 </Button>

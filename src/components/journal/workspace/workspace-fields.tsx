@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useDebouncedAutosave, type SaveState } from "@/hooks/use-debounced-autosave";
+import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
 import { updateTradeSection } from "@/actions/trades.actions";
 import type { TradeWorkspaceSectionInput } from "@/lib/validation/trades";
 
@@ -71,6 +72,7 @@ export function WorkspacePriceField({
   initialValue: number | null;
   className?: string;
 }) {
+  const editable = useWorkspaceEditable();
   const [value, setValue] = useState(initialValue == null ? "" : String(initialValue));
   const state = useFieldSave(dateKey, tradeId, field, value);
 
@@ -78,7 +80,7 @@ export function WorkspacePriceField({
     <div className={cn("space-y-1", className)}>
       <div className="flex items-center gap-1.5">
         <label className="text-xs text-muted-foreground">{label}</label>
-        <SaveIndicator state={state} />
+        {editable && <SaveIndicator state={state} />}
       </div>
       <Input
         inputMode="decimal"
@@ -86,6 +88,7 @@ export function WorkspacePriceField({
         onChange={(e) => setValue(e.target.value)}
         placeholder="—"
         aria-label={label}
+        disabled={!editable}
         className="h-9 tabular-nums"
       />
     </div>
@@ -112,6 +115,7 @@ export function WorkspaceNoteField({
   rows?: number;
   className?: string;
 }) {
+  const editable = useWorkspaceEditable();
   const [value, setValue] = useState(initialValue ?? "");
   const state = useFieldSave(dateKey, tradeId, field, value);
 
@@ -119,14 +123,15 @@ export function WorkspaceNoteField({
     <div className={cn("space-y-1", className)}>
       <div className="flex items-center gap-1.5">
         <label className="text-xs text-muted-foreground">{label}</label>
-        <SaveIndicator state={state} />
+        {editable && <SaveIndicator state={state} />}
       </div>
       <Textarea
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder={placeholder ?? "Not captured yet."}
+        placeholder={editable ? (placeholder ?? "Not captured yet.") : "Not captured."}
         aria-label={label}
         rows={rows}
+        disabled={!editable}
         className="resize-y"
       />
     </div>
@@ -147,6 +152,7 @@ export function WorkspaceDecisionField({
   initialValue: boolean | null;
   className?: string;
 }) {
+  const editable = useWorkspaceEditable();
   const [value, setValue] = useState<boolean | null>(initialValue);
   const [saving, setSaving] = useState<SaveState>("idle");
 
@@ -173,7 +179,7 @@ export function WorkspaceDecisionField({
     <div className={cn("space-y-1", className)}>
       <div className="flex items-center gap-1.5">
         <label className="text-xs text-muted-foreground">{label}</label>
-        <SaveIndicator state={saving} />
+        {editable && <SaveIndicator state={saving} />}
       </div>
       <div className="flex gap-1.5">
         {options.map((o) => (
@@ -184,6 +190,7 @@ export function WorkspaceDecisionField({
             variant={o.value === value ? o.selected : "outline"}
             onClick={() => choose(o.value)}
             aria-pressed={o.value === value}
+            disabled={!editable}
           >
             {o.label}
           </Button>

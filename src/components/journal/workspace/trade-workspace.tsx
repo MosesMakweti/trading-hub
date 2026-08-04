@@ -20,9 +20,17 @@ import { TradeTimeline } from "@/components/journal/workspace/trade-timeline";
 import { TradeAttachmentsSection } from "@/components/journal/workspace/trade-attachments-section";
 import { TradeSummary } from "@/components/journal/workspace/trade-summary";
 import { WorkspaceSection } from "@/components/journal/workspace/workspace-ui";
+import { WorkspaceEditableProvider } from "@/components/journal/workspace/editable-context";
+import { ReadOnlyDayBanner } from "@/components/journal/read-only-day-banner";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
-export function TradeWorkspace({ trade }: { trade: TradeWorkspaceDTO }) {
+export function TradeWorkspace({
+  trade,
+  editable = true,
+}: {
+  trade: TradeWorkspaceDTO;
+  editable?: boolean;
+}) {
   const dateKey = trade.dateKey;
 
   return (
@@ -43,18 +51,23 @@ export function TradeWorkspace({ trade }: { trade: TradeWorkspaceDTO }) {
             <p className="text-sm font-medium">{formatDateKeyLong(dateKey)}</p>
           </div>
         </div>
-        <Button
-          className="gap-1.5"
-          nativeButton={false}
-          render={<Link href={`/journal/${dateKey}/trades/${trade.id}/edit`} />}
-        >
-          <Pencil className="size-3.5" />
-          Edit trade
-        </Button>
+        {editable && (
+          <Button
+            className="gap-1.5"
+            nativeButton={false}
+            render={<Link href={`/journal/${dateKey}/trades/${trade.id}/edit`} />}
+          >
+            <Pencil className="size-3.5" />
+            Edit trade
+          </Button>
+        )}
       </div>
+
+      {!editable && <ReadOnlyDayBanner dateKey={dateKey} />}
 
       <TradeHeader trade={trade} />
 
+      <WorkspaceEditableProvider editable={editable}>
       <div>
         <WorkspaceSection
           icon={Lightbulb}
@@ -92,6 +105,7 @@ export function TradeWorkspace({ trade }: { trade: TradeWorkspaceDTO }) {
           <TradeSummary trade={trade} />
         </WorkspaceSection>
       </div>
+      </WorkspaceEditableProvider>
     </div>
   );
 }

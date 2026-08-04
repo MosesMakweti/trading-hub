@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
+import { dayEditableGuard } from "@/actions/day-guard";
 import { morningPrepSchema, todaysPlanSchema } from "@/lib/validation/today";
 import * as tradingDayService from "@/server/services/trading-day.service";
 
@@ -10,6 +11,9 @@ type SimpleResult = { success: true } | { success: false; error: string };
 
 export async function updateMorningPrep(dateKey: string, input: unknown): Promise<SimpleResult> {
   const user = await requireUser();
+  const blocked = await dayEditableGuard(user.id, dateKey);
+  if (blocked) return blocked;
+
   const parsed = morningPrepSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -22,6 +26,9 @@ export async function updateMorningPrep(dateKey: string, input: unknown): Promis
 
 export async function updateTodaysPlan(dateKey: string, input: unknown): Promise<SimpleResult> {
   const user = await requireUser();
+  const blocked = await dayEditableGuard(user.id, dateKey);
+  if (blocked) return blocked;
+
   const parsed = todaysPlanSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -34,6 +41,9 @@ export async function updateTodaysPlan(dateKey: string, input: unknown): Promise
 
 export async function setDayAnalyzed(dateKey: string, analyzed: boolean): Promise<SimpleResult> {
   const user = await requireUser();
+  const blocked = await dayEditableGuard(user.id, dateKey);
+  if (blocked) return blocked;
+
   await tradingDayService.setDayAnalyzed(user.id, dateKey, Boolean(analyzed));
   revalidatePath("/today");
   return { success: true };

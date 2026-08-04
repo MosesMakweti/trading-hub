@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
 import { useUploadThing } from "@/lib/uploadthing";
 import { deleteTradeImageAction } from "@/actions/trade-images.actions";
 import type { TradeWorkspaceDTO, TradeWorkspaceImageDTO } from "@/types/trades";
@@ -32,7 +33,11 @@ export function TradeAttachments({
   trade: TradeWorkspaceDTO;
   uploadsEnabled: boolean;
 }) {
+  const editable = useWorkspaceEditable();
   const [zoomed, setZoomed] = useState<TradeWorkspaceImageDTO | null>(null);
+  // Managing (upload/delete) needs both hosting configured AND an editable day;
+  // the "not configured" note below stays keyed to hosting alone.
+  const canManage = uploadsEnabled && editable;
 
   return (
     <div className="space-y-3">
@@ -45,7 +50,7 @@ export function TradeAttachments({
             dateKey={trade.dateKey}
             tradeId={trade.id}
             images={trade.images.filter((i) => i.category === cat.key)}
-            uploadsEnabled={uploadsEnabled}
+            uploadsEnabled={canManage}
             onZoom={setZoomed}
           />
         ))}

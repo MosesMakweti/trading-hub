@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
+import { dayEditableGuard } from "@/actions/day-guard";
 import { dailyNoteSchema, dateKeySchema } from "@/lib/validation/journal";
 import * as journalService from "@/server/services/journal.service";
 
@@ -13,6 +14,9 @@ export async function updateDailyNote(dateKey: string, input: unknown): Promise<
 
   const parsedDate = dateKeySchema.safeParse(dateKey);
   if (!parsedDate.success) return { success: false, error: "Invalid date." };
+
+  const blocked = await dayEditableGuard(user.id, parsedDate.data);
+  if (blocked) return blocked;
 
   const parsed = dailyNoteSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: "Invalid input." };

@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
 import { JournalDayRecap } from "@/components/journal/journal-day-recap";
+import { ReadOnlyDayBanner } from "@/components/journal/read-only-day-banner";
 import { TradeCard } from "@/components/journal/trade-card";
 import { WORKFLOW_STEP_META, type WorkflowStep } from "@/components/dashboard/workflow-progress";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -87,6 +88,8 @@ export default async function JournalDayPage({
   const isToday = dateKey === localDateToKey(new Date());
   const prevKey = addDaysToKey(dateKey, -1);
   const nextKey = addDaysToKey(dateKey, 1);
+  // Archived days are read-only until reopened (null recap = never opened = editable).
+  const editable = recap?.status !== "ARCHIVED";
 
   return (
     <FadeIn className="mx-auto max-w-4xl space-y-6">
@@ -129,25 +132,33 @@ export default async function JournalDayPage({
         </Button>
       </div>
 
+      {!editable && <ReadOnlyDayBanner dateKey={dateKey} />}
+
       {recap && <JournalDayRecap recap={recap} steps={recapSteps} />}
 
       <section className="glass space-y-3 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Daily Notes</h2>
-        <DailyNoteEditor dateKey={dateKey} initialContent={note?.content ?? null} />
+        <DailyNoteEditor
+          dateKey={dateKey}
+          initialContent={note?.content ?? null}
+          editable={editable}
+        />
       </section>
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium text-muted-foreground">Trades</h2>
-          <Button
-            size="sm"
-            className="gap-1.5"
-            nativeButton={false}
-            render={<Link href={`/journal/${dateKey}/trades/new`} />}
-          >
-            <Plus className="size-3.5" />
-            Add Trade
-          </Button>
+          {editable && (
+            <Button
+              size="sm"
+              className="gap-1.5"
+              nativeButton={false}
+              render={<Link href={`/journal/${dateKey}/trades/new`} />}
+            >
+              <Plus className="size-3.5" />
+              Add Trade
+            </Button>
+          )}
         </div>
         {tradeDtos.length === 0 ? (
           <EmptyState

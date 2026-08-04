@@ -614,5 +614,15 @@ throughout; 166 tests green.
   app runs normally — existing images still render. Uploads live in the workspace (a
   trade must exist first); the create form points there.
 
-Still open (not in the original brief): URL-param persistence for gallery filters,
-per-strategy weekly breakdown, and read-only enforcement on archived days.
+- **Per-strategy weekly breakdown — ✅ DONE.** "By strategy" section in the Edge weekly review
+  (pure `metrics.statsByStrategy`; unlinked trades bucket under "No strategy"; 3 unit tests).
+- **Read-only enforcement on archived days — ✅ DONE.** An archived `TradingDay` is immutable
+  until reopened. Pure `isDayEditable` (`domain/today/archive.ts`) + `assertDayEditable` /
+  `DayArchivedError` service guard, enforced at every dated mutation (trade create/update/
+  section/archive, daily note, morning-prep / today's-plan / analyze, image delete) via the
+  `dayEditableGuard` action helper, plus the upload FileRouter middleware. UI: a
+  `ReadOnlyDayBanner` with a Reopen action on the Journal day + Trade Workspace; workspace
+  inputs go read-only via a `WorkspaceEditableProvider` context (one switch for every inline
+  field); daily notes (Tiptap `editable={false}`), "Add Trade" and "Edit trade" hidden.
+
+Still open (not in the original brief): URL-param persistence for gallery filters.

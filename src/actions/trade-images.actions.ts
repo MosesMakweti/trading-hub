@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
+import { dayEditableGuard } from "@/actions/day-guard";
 import { deleteTradeImage } from "@/server/services/trade-images.service";
 
 type SimpleResult = { success: true } | { success: false; error: string };
@@ -14,6 +15,9 @@ type SimpleResult = { success: true } | { success: false; error: string };
  */
 export async function deleteTradeImageAction(dateKey: string, imageId: string): Promise<SimpleResult> {
   const user = await requireUser();
+  const blocked = await dayEditableGuard(user.id, dateKey);
+  if (blocked) return blocked;
+
   let tradeId: string;
   try {
     ({ tradeId } = await deleteTradeImage(user.id, imageId));

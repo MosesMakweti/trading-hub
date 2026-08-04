@@ -3,7 +3,9 @@ import { UploadThingError } from "uploadthing/server";
 import { z } from "zod";
 
 import { auth } from "@/server/auth";
+import { utcDateToKey } from "@/lib/date";
 import { getTrade } from "@/server/services/trades.service";
+import { assertDayEditable, DayArchivedError } from "@/server/services/trading-day.service";
 import { attachTradeImage, MAX_IMAGES_PER_CATEGORY } from "@/server/services/trade-images.service";
 
 const f = createUploadthing();
@@ -30,6 +32,14 @@ export const ourFileRouter = {
 
       const trade = await getTrade(session.user.id, input.tradeId);
       if (!trade) throw new UploadThingError("Trade not found.");
+
+      // An archived day is read-only — block new uploads to it too.
+      try {
+        await assertDayEditable(session.user.id, utcDateToKey(trade.tradeDate));
+      } catch (e) {
+        if (e instanceof DayArchivedError) throw new UploadThingError(e.message);
+        throw e;
+      }
 
       return { userId: session.user.id, tradeId: input.tradeId, category: input.category };
     })

@@ -16,16 +16,19 @@ export function RichTextEditor({
   placeholder,
   onSave,
   className,
+  editable = true,
 }: {
   initialContent: unknown;
   placeholder?: string;
   onSave: (content: object) => Promise<SaveResult>;
   className?: string;
+  editable?: boolean;
 }) {
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const editor = useEditor({
+    editable,
     extensions: [
       StarterKit,
       Placeholder.configure({ placeholder: placeholder ?? "Start writing..." }),
