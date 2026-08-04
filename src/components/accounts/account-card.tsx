@@ -223,7 +223,7 @@ function Metric({
       <div className="text-xs text-muted-foreground">{label}</div>
       <div
         className={cn(
-          "font-medium",
+          "font-medium tabular-nums",
           tone === "success" && "text-success",
           tone === "danger" && "text-danger",
         )}

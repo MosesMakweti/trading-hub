@@ -31,9 +31,9 @@ export function TrackRecordTable({
             <th className="py-1.5 pr-3 font-normal">Date</th>
             <th className="py-1.5 pr-3 font-normal">Asset</th>
             <th className="py-1.5 pr-3 font-normal">Dir</th>
-            <th className="py-1.5 pr-3 font-normal">Risk</th>
-            <th className="py-1.5 pr-3 font-normal">PnL</th>
-            <th className="py-1.5 font-normal">Balance</th>
+            <th className="py-1.5 pr-3 text-right font-normal">Risk</th>
+            <th className="py-1.5 pr-3 text-right font-normal">PnL</th>
+            <th className="py-1.5 text-right font-normal">Balance</th>
           </tr>
         </thead>
         <tbody>
@@ -46,15 +46,22 @@ export function TrackRecordTable({
               <td className="py-1.5 pr-3 text-muted-foreground">
                 {e.direction === "LONG" ? "Long" : "Short"}
               </td>
-              <td className="py-1.5 pr-3 text-muted-foreground">
+              <td className="py-1.5 pr-3 text-right text-muted-foreground tabular-nums">
                 {e.riskValue}
                 {e.riskInputType === "PERCENT" ? "%" : "$"}
               </td>
-              <td className={cn("py-1.5 pr-3", e.pnl >= 0 ? "text-success" : "text-danger")}>
+              <td
+                className={cn(
+                  "py-1.5 pr-3 text-right tabular-nums",
+                  e.pnl >= 0 ? "text-success" : "text-danger",
+                )}
+              >
                 {e.pnl >= 0 ? "+" : ""}
                 {currency(e.pnl)}
               </td>
-              <td className="py-1.5 font-medium">{currency(e.runningBalance)}</td>
+              <td className="py-1.5 text-right font-medium tabular-nums">
+                {currency(e.runningBalance)}
+              </td>
             </tr>
           ))}
         </tbody>
