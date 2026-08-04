@@ -1,5 +1,9 @@
 import { requireUser } from "@/server/guards";
-import { getOrCreateTradingDay, toTradingDayDTO } from "@/server/services/trading-day.service";
+import {
+  archivePastActiveDays,
+  getOrCreateTradingDay,
+  toTradingDayDTO,
+} from "@/server/services/trading-day.service";
 import { listTradesForDay } from "@/server/services/trades.service";
 import { toTradeWorkspaceDTO } from "@/server/services/trade-workspace.mapper";
 import { listChecklistItems } from "@/server/services/checklist-items.service";
@@ -15,6 +19,10 @@ import type { DailyAnalyticsDTO, MorningPrepDTO, TodaysPlanDTO } from "@/types/t
 export default async function TodayPage() {
   const user = await requireUser();
   const todayKey = localDateToKey(new Date());
+
+  // Auto-archive on date rollover: finalize any still-active past day before
+  // opening today (so it lands in the Journal).
+  await archivePastActiveDays(user.id, todayKey);
 
   const [day, trades, routineItems, assets, plan, dailyPerf] = await Promise.all([
     getOrCreateTradingDay(user.id, todayKey),

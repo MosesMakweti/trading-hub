@@ -93,6 +93,38 @@ export async function setDayAnalyzed(
   });
 }
 
+/** Finalize a day → it becomes a read-only journal entry (Phase 6). */
+export async function endDay(userId: string, dateKey: string): Promise<TradingDay> {
+  const day = await getOrCreateTradingDay(userId, dateKey);
+  return prisma.tradingDay.update({
+    where: { id: day.id },
+    data: { status: "ARCHIVED", archivedAt: new Date() },
+  });
+}
+
+/** Reopen an archived day for more edits (un-archive). */
+export async function reopenDay(userId: string, dateKey: string): Promise<TradingDay> {
+  const day = await getOrCreateTradingDay(userId, dateKey);
+  return prisma.tradingDay.update({
+    where: { id: day.id },
+    data: { status: "ACTIVE", archivedAt: null },
+  });
+}
+
+/**
+ * Auto-archive on date rollover: any still-ACTIVE day older than today is
+ * finalized the next time the user opens the Today workspace. TradingDays only
+ * exist for days the user actually opened, so this only touches real past days.
+ * Returns how many were archived.
+ */
+export async function archivePastActiveDays(userId: string, todayKey: string): Promise<number> {
+  const { count } = await prisma.tradingDay.updateMany({
+    where: { userId, status: "ACTIVE", date: { lt: dateKeyToUtcDate(todayKey) } },
+    data: { status: "ARCHIVED", archivedAt: new Date() },
+  });
+  return count;
+}
+
 export function toTradingDayDTO(day: TradingDay): TradingDayDTO {
   return {
     id: day.id,

@@ -38,3 +38,19 @@ export async function setDayAnalyzed(dateKey: string, analyzed: boolean): Promis
   revalidatePath("/today");
   return { success: true };
 }
+
+export async function endDay(dateKey: string): Promise<SimpleResult> {
+  const user = await requireUser();
+  await tradingDayService.endDay(user.id, dateKey);
+  revalidatePath("/today");
+  revalidatePath("/journal");
+  return { success: true };
+}
+
+export async function reopenDay(dateKey: string): Promise<SimpleResult> {
+  const user = await requireUser();
+  await tradingDayService.reopenDay(user.id, dateKey);
+  revalidatePath("/today");
+  revalidatePath("/journal");
+  return { success: true };
+}

@@ -28,8 +28,8 @@ Phase 3  Morning Preparation .................... ✅ DONE
 Phase 4  Today's Trading Plan ................... ✅ DONE
 Phase 5a Trades in the Today flow ............... ✅ DONE
 Phase 5b Daily Analytics ........................ ✅ DONE  (Phase 5 complete)
-Phase 6  Automatic Journal Archiving ........... ▶ NEXT
-Phase 7  Journal Redesign
+Phase 6  Automatic Journal Archiving ........... ✅ DONE
+Phase 7  Journal Redesign ...................... ▶ NEXT
 Phase 8  Trade Gallery
 Phase 9  Advanced Filters
 Phase 10 Edge Workspace — Weekly Review
@@ -418,3 +418,33 @@ append a Progress Report, STOP.
   entry. Add a manual **"End day"** action on `/today` (archive today) and auto-archive on
   date rollover (a day older than today with any activity → archived on next visit). Then
   P7 redesigns the Journal around archived `TradingDay`s. One phase, then STOP.
+
+### Phase 6 — Automatic Journal Archiving ✅
+- **Completed**: a day can now be *finalized* → it becomes an archived (read-only-intent)
+  journal entry, both manually and automatically on date rollover.
+  - **`endDay` / `reopenDay`** (trading-day.service + actions): set/clear
+    `TradingDay.status = ARCHIVED` + `archivedAt`. Surfaced as an **End day** button in the
+    Today workspace header (↔ **Reopen day** when archived), beside the status badge.
+  - **`archivePastActiveDays(userId, todayKey)`** — a single `updateMany` that finalizes
+    every still-ACTIVE day older than today. Called at the top of the `/today` page load,
+    so opening today auto-archives yesterday (and any earlier open day). Idempotent;
+    scoped by `userId`; never touches today or already-archived days.
+- **Components completed**: `endDay`/`reopenDay`/`archivePastActiveDays` services +
+  `endDay`/`reopenDay` actions; the End day / Reopen control in `today-workspace.tsx`.
+- **Database changes**: none (uses the existing `status` + `archivedAt` columns from P2).
+- **Routes**: none (still `/today`; archived days will get their read-only Journal view in
+  P7).
+- **Files changed**: `trading-day.service.ts`, `actions/today.actions.ts`, `today/page.tsx`
+  (auto-archive at load), `today-workspace.tsx` (End day / Reopen button).
+- **Verified**: `tsc` + `eslint` clean, 155 tests pass, and a service integration test
+  proved end/reopen toggling and that `archivePastActiveDays` archives exactly the past
+  ACTIVE days (2), leaves today and other users' days untouched, and is idempotent
+  (second run archives 0). *(Browser screenshot skipped — dev server was down and this is
+  archive logic + one button reusing the already-verified transition/refresh pattern.)*
+- **Remaining work**: P7–P11.
+- **Next recommended phase**: **P7 — Journal Redesign** — reshape the Journal around
+  finalized `TradingDay`s: the calendar/day view becomes an archive of ended days (day
+  recap: workflow state, prep/plan summary, trades, daily analytics), reusing the analytics
+  domain + the Trade Workspace read view. Consider a `getArchivedDay(userId, dateKey)`
+  aggregate and rendering archived-day content read-only. Keep the existing journal routes
+  working throughout. One phase, then STOP.

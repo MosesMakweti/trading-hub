@@ -1,19 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
   BookOpenCheck,
   CandlestickChart,
   ClipboardList,
+  FlagOff,
   Lightbulb,
+  Loader2,
+  Lock,
   Sunrise,
   Zap,
 } from "lucide-react";
 
 import { formatDateKeyLong } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { endDay, reopenDay } from "@/actions/today.actions";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/shared/empty-state";
 import { MorningPrepSection } from "@/components/today/morning-prep-section";
@@ -60,8 +67,23 @@ export function TodayWorkspace({
   trades: TradeWorkspaceDTO[];
   dailyAnalytics: DailyAnalyticsDTO;
 }) {
+  const router = useRouter();
   const [focusedId, setFocusedId] = useState<string | null>(trades[0]?.id ?? null);
   const focusedTrade = trades.find((t) => t.id === focusedId) ?? null;
+
+  const isArchived = day.status === "ARCHIVED";
+  const [archiving, startArchive] = useTransition();
+  function toggleArchive() {
+    startArchive(async () => {
+      const result = isArchived ? await reopenDay(day.dateKey) : await endDay(day.dateKey);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(isArchived ? "Day reopened." : "Day ended — archived to your journal.");
+      router.refresh();
+    });
+  }
 
   // The three trade tabs share one focused trade and render the *existing* Trade
   // Workspace sections for it — create/continue today's trades in-context.
@@ -105,9 +127,28 @@ export function TodayWorkspace({
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Today</h1>
           <p className="mt-1 text-sm text-muted-foreground">{formatDateKeyLong(day.dateKey)}</p>
         </div>
-        <Badge variant={day.status === "ARCHIVED" ? "secondary" : "success"}>
-          {day.status === "ARCHIVED" ? "Archived" : "Active"}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={isArchived ? "secondary" : "success"}>
+            {isArchived ? "Archived" : "Active"}
+          </Badge>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={toggleArchive}
+            disabled={archiving}
+          >
+            {archiving ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : isArchived ? (
+              <FlagOff className="size-3.5" />
+            ) : (
+              <Lock className="size-3.5" />
+            )}
+            {isArchived ? "Reopen day" : "End day"}
+          </Button>
+        </div>
       </div>
 
       <WorkflowProgress steps={steps} title="Workflow" />
