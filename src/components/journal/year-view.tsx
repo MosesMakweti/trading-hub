@@ -71,7 +71,7 @@ export function YearView({
               {percentByMonth[i] !== 0 && (
                 <span
                   className={cn(
-                    "text-xs font-semibold",
+                    "text-xs font-semibold tabular-nums",
                     percentByMonth[i] > 0 ? "text-success" : "text-danger",
                   )}
                 >

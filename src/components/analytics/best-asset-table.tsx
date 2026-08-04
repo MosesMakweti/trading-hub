@@ -12,26 +12,26 @@ export function BestAssetTable({ stats }: { stats: AssetStats[] }) {
         <thead>
           <tr className="border-b border-border text-left text-xs text-muted-foreground">
             <th className="py-2 pr-4 font-normal">Asset</th>
-            <th className="py-2 pr-4 font-normal">Trades</th>
-            <th className="py-2 pr-4 font-normal">Win Rate</th>
-            <th className="py-2 pr-4 font-normal">Avg RR</th>
-            <th className="py-2 font-normal">Total Return</th>
+            <th className="py-2 pr-4 text-right font-normal">Trades</th>
+            <th className="py-2 pr-4 text-right font-normal">Win Rate</th>
+            <th className="py-2 pr-4 text-right font-normal">Avg RR</th>
+            <th className="py-2 text-right font-normal">Total Return</th>
           </tr>
         </thead>
         <tbody>
           {stats.map((s) => (
             <tr key={s.assetSymbol} className="border-b border-border/50 last:border-0">
               <td className="py-2 pr-4 font-medium">{s.assetSymbol}</td>
-              <td className="py-2 pr-4 text-muted-foreground">{s.totalTrades}</td>
-              <td className="py-2 pr-4 text-muted-foreground">
+              <td className="py-2 pr-4 text-right text-muted-foreground tabular-nums">{s.totalTrades}</td>
+              <td className="py-2 pr-4 text-right text-muted-foreground tabular-nums">
                 {s.winRate == null ? "—" : `${s.winRate.toFixed(1)}%`}
               </td>
-              <td className="py-2 pr-4 text-muted-foreground">
+              <td className="py-2 pr-4 text-right text-muted-foreground tabular-nums">
                 {s.averageRR == null ? "—" : `${s.averageRR.toFixed(2)}R`}
               </td>
               <td
                 className={cn(
-                  "py-2 font-medium",
+                  "py-2 text-right font-medium tabular-nums",
                   s.totalReturnPercent > 0 && "text-success",
                   s.totalReturnPercent < 0 && "text-danger",
                 )}

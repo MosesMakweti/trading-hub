@@ -50,12 +50,12 @@ export function JournalDayButton({
       onClick={() => router.push(`/journal/${dateKey}`)}
       {...props}
     >
-      <span className="text-sm">{day.date.getDate()}</span>
+      <span className="text-sm tabular-nums">{day.date.getDate()}</span>
       {pnl && pnl.tradeCount > 0 && (
         <>
           <span
             className={cn(
-              "text-[10px] font-semibold leading-none",
+              "text-[10px] font-semibold leading-none tabular-nums",
               color === "green" && "text-success",
               color === "red" && "text-danger",
               color === "gray" && "text-muted-foreground",

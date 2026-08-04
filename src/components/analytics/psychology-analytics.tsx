@@ -82,9 +82,11 @@ export function PsychologyAnalytics({ data }: { data: PsychologyData }) {
 
 function CorrelationStat({ label, value }: { label: string; value: number | null }) {
   return (
-    <div className="rounded-lg border border-border bg-background/40 p-3 text-center">
+    <div className="rounded-xl border border-border bg-background/40 p-3 text-center">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{value == null ? "—" : value.toFixed(2)}</div>
+      <div className="mt-1 text-lg font-semibold tabular-nums">
+        {value == null ? "—" : value.toFixed(2)}
+      </div>
     </div>
   );
 }

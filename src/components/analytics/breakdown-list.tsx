@@ -13,12 +13,12 @@ export function BreakdownList({ title, points }: { title: string; points: TrendP
             <div key={p.key} className="flex items-center justify-between gap-3 text-sm">
               <span className="truncate">{p.key}</span>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-muted-foreground tabular-nums">
                   {p.count} trade{p.count === 1 ? "" : "s"}
                 </span>
                 <span
                   className={cn(
-                    "w-14 text-right font-medium",
+                    "w-14 text-right font-medium tabular-nums",
                     p.averagePercent >= 80 && "text-success",
                     p.averagePercent >= 60 && p.averagePercent < 80 && "text-warning",
                     p.averagePercent < 60 && "text-danger",
