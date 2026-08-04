@@ -46,6 +46,14 @@ export function formatDateKeyLong(key: string): string {
   }).format(dateKeyToUtcDate(key));
 }
 
+/** The Monday (week start) of the week containing `key`, as a date key. */
+export function weekStartKey(key: string): string {
+  const d = dateKeyToUtcDate(key);
+  const offset = (d.getUTCDay() + 6) % 7; // days since Monday (Sun=6 … Sat=5)
+  d.setUTCDate(d.getUTCDate() - offset);
+  return utcDateToKey(d);
+}
+
 /** Compact date label (e.g. "Aug 4, 2026") from a date key, in UTC. */
 export function formatDateKeyShort(key: string): string {
   return new Intl.DateTimeFormat("en-US", {

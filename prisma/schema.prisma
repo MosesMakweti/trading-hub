@@ -33,6 +33,7 @@ model User {
   tradingAccounts TradingAccount[]
   dailyNotes      DailyNote[]
   tradingDays     TradingDay[]
+  weeklyReviews   WeeklyReview[]
   trades          Trade[]
   strategies      Strategy[]
 }
@@ -61,6 +62,27 @@ model DailyNote {
 enum TradingDayStatus {
   ACTIVE
   ARCHIVED
+}
+
+// TradeOS V2 · Edge Workspace (P10) — a guided weekly review. One record per
+// user per ISO-ish week (keyed by the week's Monday, stored date-only). The
+// week's metrics are derived read-only from analytics; only the reflection
+// (Tiptap rich text) is persisted here. Additive; no soft delete.
+model WeeklyReview {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  weekStart DateTime @db.Date
+
+  wentWell      Json?
+  toImprove     Json?
+  focusNextWeek Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, weekStart])
 }
 
 model TradingDay {

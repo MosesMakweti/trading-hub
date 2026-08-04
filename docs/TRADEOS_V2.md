@@ -32,8 +32,8 @@ Phase 6  Automatic Journal Archiving ........... ✅ DONE
 Phase 7  Journal Redesign ...................... ✅ DONE
 Phase 8  Trade Gallery ......................... ✅ DONE
 Phase 9  Advanced Filters ...................... ✅ DONE
-Phase 10 Edge Workspace — Weekly Review ........ ▶ NEXT
-Phase 11 Polish
+Phase 10 Edge Workspace — Weekly Review ........ ✅ DONE
+Phase 11 Polish ................................ ▶ NEXT (final)
 ```
 
 Target workflow the product should guide the trader through:
@@ -537,3 +537,34 @@ append a Progress Report, STOP.
   `getStrategyPerformance`) + a guided weekly reflection. A new route (e.g. `/edge` or
   `/journal/weekly`) with a week picker. Consider a `WeeklyReview` model only if persisting
   the reflection; otherwise derive read-only. One phase, then STOP.
+
+### Phase 10 — Edge Workspace (Weekly Review) ✅ — final feature phase
+- **Completed**: a weekly review module at **`/edge`** (sidebar item **Edge Review**),
+  closing the workflow's *Improvement* loop.
+  - Week is keyed by its Monday via the new pure **`weekStartKey`** (`lib/date`, 4 tests);
+    `?week=` param + prev/next/this-week navigation.
+  - **Weekly metrics reuse `getAnalyticsData(userId, weekStart, weekEnd)`** (a week is just
+    a range): KPI grid (trades W/L, win rate, avg return/trade, profit factor, expectancy,
+    avg psychology, rule adherence, best asset) + the week's `EquityCurveChart` + a
+    per-asset breakdown (`statsByAsset`). No new analytics code.
+  - **Guided reflection persisted** in a new **`WeeklyReview`** model (unique
+    `userId+weekStart`; `wentWell`/`toImprove`/`focusNextWeek` Tiptap JSON). `WeeklyReflection`
+    is 3 autosaving `RichTextEditor`s → `updateWeeklyReview` → `upsertWeeklyReview`
+    (get-or-create then patch, mirroring the Today sections).
+- **Components completed**: `edge/weekly-reflection.tsx`, `edge.service.ts`,
+  `actions/edge.actions.ts`, `lib/validation/edge.ts`, `/edge` route; `weekStartKey` helper.
+- **Database changes**: `WeeklyReview` table (migration `20260804100819_weekly_review`) +
+  `User.weeklyReviews`. Additive.
+- **Routes**: `+ /edge`. Sidebar `+ Edge Review`.
+- **Files changed**: new edge service/action/validation/component/route + `WeeklyReview`
+  schema; changed `lib/date.ts` (weekStartKey + test), `app-sidebar.tsx`.
+- **Verified**: `tsc` + `eslint` clean, 166 tests pass (+4 week), and a browser run
+  confirmed the page renders (KPIs 2 trades / 100% WR / +3.28% best asset, equity curve,
+  by-asset) **and** the reflection autosaved and persisted across reload — zero console
+  errors.
+- **Remaining work**: P11 (Polish) only.
+- **Next recommended phase**: **P11 — Polish** (final): a consistency/quality pass across
+  the new TradeOS V2 surface — loading skeletons for `/today` `/edge` and the gallery,
+  empty/edge states, `prefers-reduced-motion` + a11y (labels/contrast/focus) on the new
+  components, responsive checks (stepper/tabs/gallery on mobile), and any small
+  design-consistency cleanups. No new features. Then the roadmap is complete.
