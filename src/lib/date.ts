@@ -46,6 +46,16 @@ export function formatDateKeyLong(key: string): string {
   }).format(dateKeyToUtcDate(key));
 }
 
+/** Compact date label (e.g. "Aug 4, 2026") from a date key, in UTC. */
+export function formatDateKeyShort(key: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(dateKeyToUtcDate(key));
+}
+
 /**
  * "What day is it right now, on the browser's local calendar?" Deliberately
  * uses local getters instead of `toISOString` — converting a local `Date`

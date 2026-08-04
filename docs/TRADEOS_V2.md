@@ -30,8 +30,8 @@ Phase 5a Trades in the Today flow ............... ✅ DONE
 Phase 5b Daily Analytics ........................ ✅ DONE  (Phase 5 complete)
 Phase 6  Automatic Journal Archiving ........... ✅ DONE
 Phase 7  Journal Redesign ...................... ✅ DONE
-Phase 8  Trade Gallery ......................... ▶ NEXT
-Phase 9  Advanced Filters
+Phase 8  Trade Gallery ......................... ✅ DONE
+Phase 9  Advanced Filters ...................... ▶ NEXT
 Phase 10 Edge Workspace — Weekly Review
 Phase 11 Polish
 ```
@@ -481,3 +481,31 @@ append a Progress Report, STOP.
   status), as a new route (e.g. `/journal/gallery` or a Journal tab), linking each card to
   its Trade Workspace. Reuse the trade list DTO/mapper. Sets up P9 (Advanced Filters). One
   phase, then STOP.
+
+### Phase 8 — Trade Gallery ✅
+- **Completed**: a gallery of every trade at `/journal/gallery`, linked from a **Trade
+  gallery** button on the Journal calendar page.
+  - **`listAllTrades(userId)`** (trades.service) — all trades, newest first, with the
+    workspace include; mapped to `TradeWorkspaceDTO` via the **shared `toTradeWorkspaceDTO`**
+    mapper (full reuse).
+  - **`TradeGalleryCard`** — an analysis-image thumbnail when present, otherwise a compact
+    stat card (`#N`, asset, direction, short date, actual R, PnL, psychology grade, status
+    badge), reusing `TradeStatusBadge` / `GRADE_VARIANT` / `formatRR` /
+    `formatSignedCurrency`. The whole card links to the trade's workspace.
+  - **`TradeGallery`** — responsive grid (1→4 cols) with count + empty state.
+  - Added a reusable `formatDateKeyShort` to `lib/date`.
+- **Components completed**: `journal/trade-gallery.tsx`, `journal/trade-gallery-card.tsx`;
+  `listAllTrades` service; `formatDateKeyShort` helper.
+- **Database changes**: none.
+- **Routes**: `+ /journal/gallery`.
+- **Files changed**: new gallery components + route page; changed `trades.service.ts`
+  (listAllTrades), `lib/date.ts` (formatDateKeyShort), `journal/page.tsx` (gallery link).
+- **Verified**: `tsc` + `eslint` clean, 155 tests pass, and a browser screenshot confirmed
+  the gallery renders every trade as a card (2 stat cards — no images since uploads are
+  stubbed app-wide) linking to the workspace, with zero console errors.
+- **Remaining work**: P9–P11.
+- **Next recommended phase**: **P9 — Advanced Filters** — a reusable filter system over
+  trades (asset, strategy, status, direction, psychology grade, adherence, date range, R
+  sign/threshold), driving the Trade Gallery (and reusable by the Journal). Likely a client
+  filter bar + a pure `filterTrades` domain function (unit-tested) over the mapped
+  `TradeWorkspaceDTO[]`, with URL-param persistence. One phase, then STOP.

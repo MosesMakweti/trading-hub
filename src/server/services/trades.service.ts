@@ -240,6 +240,15 @@ export async function listTradesForDay(userId: string, dateKey: string) {
   });
 }
 
+/** Every trade across all days, newest first — backs the Trade Gallery (P8). */
+export async function listAllTrades(userId: string) {
+  return prisma.trade.findMany({
+    where: { userId },
+    include: tradeInclude,
+    orderBy: [{ tradeDate: "desc" }, { executionMinutes: "desc" }],
+  });
+}
+
 /** Most recent trades across all days — backs the dashboard's recent-trades list. */
 export async function listRecentTrades(userId: string, limit: number) {
   return prisma.trade.findMany({
