@@ -100,15 +100,20 @@ function Field({
   onChange: (v: string) => void;
   onBlurSave: () => void;
 }) {
+  const id = `risk-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
   return (
     <div className="space-y-1">
-      <Label className="text-xs">{label}</Label>
+      <Label htmlFor={id} className="text-xs">
+        {label}
+      </Label>
       <Input
+        id={id}
         type="number"
+        inputMode="decimal"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlurSave}
-        className="h-8"
+        className="h-8 tabular-nums"
       />
     </div>
   );
