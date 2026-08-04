@@ -41,9 +41,9 @@ function ScalarRow({ label, from, to }: { label: string; from: string; to: strin
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-danger line-through">{from || "—"}</span>
+      <span className="text-danger line-through tabular-nums">{from || "—"}</span>
       <ArrowRight className="size-3 text-muted-foreground" />
-      <span className="text-success">{to || "—"}</span>
+      <span className="text-success tabular-nums">{to || "—"}</span>
     </div>
   );
 }
