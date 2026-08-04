@@ -599,6 +599,20 @@ The full workflow cycle is live end to end:
 **Dashboard → Today (Prep → Plan → Trade → Review → Analyze) → auto-archive → Journal day
 recap → Trade Gallery + Filters → Edge Weekly Review.** Built framework-first over the
 `TradingDay` backbone, reusing the existing Trade Workspace / Strategy Lab / analytics
-throughout; 166 tests green. Possible future work (not in the original brief): trade image
-uploads (UploadThing is stubbed app-wide), URL-param persistence for gallery filters,
+throughout; 166 tests green.
+
+### Post-roadmap integrations
+
+- **Trade image uploads — ✅ DONE.** Real UploadThing wiring (was stubbed app-wide).
+  Screenshots attach per category (Analysis / Before / After, max 6 each) from the
+  Trade Workspace → Attachments section, with delete + full-size lightbox. Auth and
+  trade-ownership are enforced in the FileRouter middleware (`src/server/uploadthing.ts`)
+  before any presigned URL is issued; `onUploadComplete` persists the `TradeImage` row;
+  deletes remove both the hosted file (UTApi) and the row, scoped through the parent
+  trade. **Setup:** create an app at uploadthing.com and set `UPLOADTHING_TOKEN` in
+  `.env` (see `.env.example`). When the token is unset the upload UI is hidden and the
+  app runs normally — existing images still render. Uploads live in the workspace (a
+  trade must exist first); the create form points there.
+
+Still open (not in the original brief): URL-param persistence for gallery filters,
 per-strategy weekly breakdown, and read-only enforcement on archived days.

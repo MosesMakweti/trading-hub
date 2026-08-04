@@ -477,10 +477,10 @@ export function TradeForm({
         <h2 className="text-sm font-medium text-muted-foreground">Images</h2>
         <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-8 text-center opacity-60">
           <ImageIcon className="size-8 text-muted-foreground" />
-          <p className="text-sm font-medium">Image uploads coming soon</p>
+          <p className="text-sm font-medium">Screenshots are added in the trade workspace</p>
           <p className="max-w-xs text-xs text-muted-foreground">
-            Analysis, before-trade, and after-trade screenshots will be uploadable here once
-            image hosting is connected.
+            Save the trade first, then open its workspace to attach analysis, before-trade, and
+            after-trade screenshots.
           </p>
         </div>
       </section>
