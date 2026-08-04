@@ -12,6 +12,7 @@ import { QuickActions } from "@/components/dashboard/quick-actions";
 import { PerformanceSnapshot } from "@/components/dashboard/performance-snapshot";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
 import { RecentTradesList, type RecentTradeSummary } from "@/components/dashboard/recent-trades-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { FadeIn } from "@/components/shared/motion";
 
 export default async function DashboardPage() {
@@ -74,28 +75,45 @@ export default async function DashboardPage() {
 
       <QuickActions todayKey={today} />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <SessionCountdown sessions={data.sessions} />
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Today at a glance</h2>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <SessionCountdown sessions={data.sessions} />
 
-        <div className="glass rounded-2xl p-4">
-          <h3 className="text-xs text-muted-foreground">Today&apos;s Trading Plan</h3>
-          <p className="mt-1 line-clamp-3 text-sm">{planExcerpt || "No strategy notes yet."}</p>
-          <Link href="/settings/plan" className="mt-2 inline-block text-xs text-primary hover:underline">
-            View full plan →
-          </Link>
-        </div>
+          <div className="glass flex flex-col rounded-2xl p-4">
+            <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              Today&apos;s Plan
+            </h3>
+            <p className="mt-1.5 line-clamp-3 flex-1 text-sm">
+              {planExcerpt || "No strategy notes yet."}
+            </p>
+            <Link
+              href="/settings/plan"
+              className="mt-2 inline-block text-xs font-medium text-primary hover:underline"
+            >
+              View full plan →
+            </Link>
+          </div>
 
-        <div className="glass rounded-2xl p-4">
-          <h3 className="text-xs text-muted-foreground">Today&apos;s Journal</h3>
-          <p className="mt-1 text-sm">
-            <span className="text-lg font-semibold">{data.todayTrades.length}</span> trade
-            {data.todayTrades.length === 1 ? "" : "s"} logged today
-          </p>
-          <Link href={`/journal/${today}`} className="mt-2 inline-block text-xs text-primary hover:underline">
-            Open today&apos;s journal →
-          </Link>
+          <div className="glass flex flex-col rounded-2xl p-4">
+            <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              Today&apos;s Journal
+            </h3>
+            <p className="mt-1.5 flex-1">
+              <span className="text-2xl font-semibold tabular-nums">{data.todayTrades.length}</span>
+              <span className="ml-1.5 text-sm text-muted-foreground">
+                trade{data.todayTrades.length === 1 ? "" : "s"} logged today
+              </span>
+            </p>
+            <Link
+              href={`/journal/${today}`}
+              className="mt-2 inline-block text-xs font-medium text-primary hover:underline"
+            >
+              Open today&apos;s journal →
+            </Link>
+          </div>
         </div>
-      </div>
+      </section>
 
       <PerformanceSnapshot
         winRate={data.winRate}
@@ -106,7 +124,7 @@ export default async function DashboardPage() {
       />
 
       <section id="notes" className="glass space-y-3 rounded-2xl p-4 scroll-mt-20">
-        <h3 className="text-sm font-medium text-muted-foreground">Today&apos;s Notes</h3>
+        <h2 className="text-sm font-medium text-muted-foreground">Today&apos;s Notes</h2>
         <DailyNoteEditor dateKey={today} initialContent={data.todayNote?.content ?? null} />
       </section>
 
@@ -125,20 +143,22 @@ export default async function DashboardPage() {
             Recent Psychology Notes
           </h2>
           {recentReflections.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Reflections you write after trades will show up here.
-            </p>
+            <EmptyState
+              icon={Sparkles}
+              title="No reflections yet"
+              description="Reflections you write after trades will show up here."
+            />
           ) : (
             <div className="space-y-2">
               {recentReflections.map((t) => (
                 <Link
                   key={t.id}
                   href={`/journal/${t.tradeDate.toISOString().slice(0, 10)}`}
-                  className="block rounded-lg border border-border bg-background/40 p-3 text-sm transition-colors hover:bg-accent"
+                  className="glass block rounded-xl p-3 text-sm transition-all hover:-translate-y-0.5 hover:shadow-elevated"
                 >
                   <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{t.asset.symbol}</span>
-                    <span>{t.tradeDate.toISOString().slice(0, 10)}</span>
+                    <span className="font-medium text-foreground">{t.asset.symbol}</span>
+                    <span className="tabular-nums">{t.tradeDate.toISOString().slice(0, 10)}</span>
                   </div>
                   <p className="line-clamp-2">{t.psychPostTradeReflection || t.psychLessonsLearned}</p>
                 </Link>
