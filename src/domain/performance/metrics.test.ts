@@ -12,6 +12,8 @@ import {
   mostTradedAsset,
   profitFactor,
   statsByAsset,
+  statsByStrategy,
+  NO_STRATEGY_LABEL,
   winRate,
   type TradeMetricInput,
 } from "./metrics";
@@ -125,6 +127,44 @@ describe("statsByAsset", () => {
     expect(stats[1].totalReturnPercent).toBeCloseTo(1);
     expect(stats[0].totalTrades).toBe(3);
     expect(stats[1].totalTrades).toBe(2);
+  });
+});
+
+describe("statsByStrategy", () => {
+  const S = (
+    dateKey: string,
+    actualRR: number | null,
+    strategyLabel: string | null,
+  ): TradeMetricInput => ({ dateKey, assetSymbol: "XAUUSD", actualRR, strategyLabel });
+
+  it("groups by strategy label and sorts by total return descending", () => {
+    const stats = statsByStrategy([
+      S("2026-01-01", 2, "Breaker"),
+      S("2026-01-02", -1, "Breaker"), // Breaker net +1
+      S("2026-01-03", 3, "FVG"),
+      S("2026-01-04", -0.5, "FVG"), // FVG net +2.5
+    ]);
+    expect(stats.map((s) => s.strategyLabel)).toEqual(["FVG", "Breaker"]);
+    expect(stats[0].totalReturnPercent).toBeCloseTo(2.5);
+    expect(stats[1].totalReturnPercent).toBeCloseTo(1);
+    expect(stats[0].totalTrades).toBe(2);
+  });
+
+  it("buckets trades with no strategy under NO_STRATEGY_LABEL and excludes open trades from win rate", () => {
+    const stats = statsByStrategy([
+      S("2026-01-01", 1, null),
+      S("2026-01-02", -1, undefined as unknown as null),
+      S("2026-01-03", null, null), // still open — excluded from return + win rate
+    ]);
+    expect(stats).toHaveLength(1);
+    expect(stats[0].strategyLabel).toBe(NO_STRATEGY_LABEL);
+    expect(stats[0].totalTrades).toBe(3);
+    expect(stats[0].totalReturnPercent).toBeCloseTo(0); // 1 - 1, open excluded
+    expect(stats[0].winRate).toBeCloseTo(50); // 1 win of 2 closed
+  });
+
+  it("returns an empty array for no trades", () => {
+    expect(statsByStrategy([])).toEqual([]);
   });
 });
 

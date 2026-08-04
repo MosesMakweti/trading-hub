@@ -139,6 +139,32 @@ export default async function EdgePage({
               ))}
             </div>
           </section>
+
+          <section className="space-y-2">
+            <h2 className="text-sm font-medium text-muted-foreground">By strategy</h2>
+            <div className="glass divide-y divide-border/60 rounded-2xl">
+              {t.statsByStrategy.map((s) => (
+                <div
+                  key={s.strategyLabel}
+                  className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm"
+                >
+                  <span className="truncate font-medium">{s.strategyLabel}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {s.totalTrades} trade{s.totalTrades === 1 ? "" : "s"} ·{" "}
+                    {s.winRate == null ? "—" : `${s.winRate.toFixed(0)}% WR`}
+                  </span>
+                  <span
+                    className={cn(
+                      "shrink-0 font-medium tabular-nums",
+                      s.totalReturnPercent >= 0 ? "text-success" : "text-danger",
+                    )}
+                  >
+                    {pct(s.totalReturnPercent)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
         </>
       ) : (
         <p className="glass rounded-2xl p-6 text-center text-sm text-muted-foreground">

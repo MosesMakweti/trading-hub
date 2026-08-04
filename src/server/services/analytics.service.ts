@@ -176,7 +176,17 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
     const contributionPercent = runningBalance !== 0 ? (pnl / runningBalance) * 100 : 0;
     runningBalance += pnl;
 
-    tradeInputs.push({ dateKey, assetSymbol: t.asset.symbol, actualRR: contributionPercent });
+    const strategyLabel = t.strategyNameSnapshot
+      ? t.strategyVersionSnapshot != null
+        ? `${t.strategyNameSnapshot} · v${t.strategyVersionSnapshot}`
+        : t.strategyNameSnapshot
+      : null;
+    tradeInputs.push({
+      dateKey,
+      assetSymbol: t.asset.symbol,
+      actualRR: contributionPercent,
+      strategyLabel,
+    });
     dailyPnlMap.set(dateKey, (dailyPnlMap.get(dateKey) ?? 0) + pnl);
 
     if (t.psychology) {
@@ -229,6 +239,7 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       averageTradesPerDay: metrics.averageTradesPerDay(tradeInputs, rangeDays),
       ruleAdherenceAverage,
       statsByAsset: metrics.statsByAsset(tradeInputs),
+      statsByStrategy: metrics.statsByStrategy(tradeInputs),
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
       dailyPercents,

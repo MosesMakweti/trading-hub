@@ -2,6 +2,9 @@ export interface TradeMetricInput {
   dateKey: string;
   assetSymbol: string;
   actualRR: number | null;
+  // Optional so existing callers (asset/streak/etc. stats) are unaffected; only
+  // the per-strategy breakdown reads it. Null/undefined means "no strategy linked."
+  strategyLabel?: string | null;
 }
 
 function average(values: number[]): number | null {
@@ -118,6 +121,42 @@ export function statsByAsset(trades: TradeMetricInput[]): AssetStats[] {
       winRate: winRate(assetTrades),
       averageRR: averageRR(assetTrades),
       totalReturnPercent: closedTrades(assetTrades).reduce((sum, t) => sum + t.actualRR, 0),
+    }))
+    .sort((a, b) => b.totalReturnPercent - a.totalReturnPercent);
+}
+
+export interface StrategyStats {
+  strategyLabel: string;
+  totalTrades: number;
+  winRate: number | null;
+  averageRR: number | null;
+  totalReturnPercent: number;
+}
+
+/** Sentinel bucket for trades with no linked strategy. */
+export const NO_STRATEGY_LABEL = "No strategy";
+
+/**
+ * Per-strategy breakdown, sorted by total return descending — the mirror of
+ * `statsByAsset` for strategies. Trades without a `strategyLabel` are grouped
+ * under `NO_STRATEGY_LABEL` so the unstructured portion of a period is still visible.
+ */
+export function statsByStrategy(trades: TradeMetricInput[]): StrategyStats[] {
+  const byStrategy = new Map<string, TradeMetricInput[]>();
+  for (const t of trades) {
+    const label = t.strategyLabel ?? NO_STRATEGY_LABEL;
+    const list = byStrategy.get(label) ?? [];
+    list.push(t);
+    byStrategy.set(label, list);
+  }
+
+  return [...byStrategy.entries()]
+    .map(([strategyLabel, strategyTrades]) => ({
+      strategyLabel,
+      totalTrades: strategyTrades.length,
+      winRate: winRate(strategyTrades),
+      averageRR: averageRR(strategyTrades),
+      totalReturnPercent: closedTrades(strategyTrades).reduce((sum, t) => sum + t.actualRR, 0),
     }))
     .sort((a, b) => b.totalReturnPercent - a.totalReturnPercent);
 }
