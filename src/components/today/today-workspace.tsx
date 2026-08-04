@@ -13,6 +13,7 @@ import {
   Lightbulb,
   Loader2,
   Lock,
+  Sun,
   Sunrise,
   Zap,
 } from "lucide-react";
@@ -123,9 +124,14 @@ export function TodayWorkspace({
   return (
     <div className="mx-auto max-w-5xl space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Today</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{formatDateKeyLong(day.dateKey)}</p>
+        <div className="flex items-center gap-2.5">
+          <span className="bg-brand-gradient inline-flex size-8 items-center justify-center rounded-lg text-white shadow-glow">
+            <Sun className="size-4" />
+          </span>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Today</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{formatDateKeyLong(day.dateKey)}</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={isArchived ? "secondary" : "success"}>
