@@ -184,8 +184,9 @@ dashboards* but demands ≥4.5:1 contrast and selective use): frosted surfaces s
 above that." Most of the app is **opaque**; glass marks the layers that lift.
 
 **The `.glass` primitive:** `background: var(--glass)` + `1px solid var(--glass-border)` +
-`backdrop-filter: blur(18px) saturate(1.4)`. Dark glass is a low-opacity light film
-(`oklch(0.7 0.03 265 / 8%)`) over the app's brand-washed canvas.
+`backdrop-filter: blur(18px) saturate(1.4)` + a **lit top edge** (`box-shadow: inset 0 1px 0
+oklch(1 0 0 / 6%)`) so the surface reads as real frosted glass caught by an overhead light. Dark
+glass is a low-opacity light film (`oklch(0.7 0.03 265 / 8%)`) over the app's brand-washed canvas.
 
 ### Depth hierarchy (bottom → top)
 
@@ -218,8 +219,10 @@ Motion **communicates state change**, never decorates. Subtle, fast, purposeful.
 
 **Tokens / rules:**
 - **Duration:** 150–250ms for micro-interactions and entrances; ≤ 300ms for anything UI.
-  Never > 400ms.
-- **Easing:** `ease-out` for entrances/hover (fast-in, settle); avoid linear for UI.
+  Never > 400ms. (Exception: **entry surfaces**, below, may run longer, decorative motion.)
+- **Easing:** `ease-out` for entrances/hover (fast-in, settle); avoid linear for UI. The
+  premium settle easing is **`--ease-out-expo`** = `cubic-bezier(0.16, 1, 0.3, 1)` (Expo.out) —
+  use it for staged entrances and the entry-surface choreography.
 - **Animate only `transform` + `opacity`** (GPU-cheap, no layout thrash). Never animate
   `width`/`height`/`top`/`left`.
 - **`prefers-reduced-motion`:** always respected. The shared `FadeIn` / `StaggerList` /
@@ -234,6 +237,16 @@ Motion **communicates state change**, never decorates. Subtle, fast, purposeful.
   `Skeleton` (`animate-pulse`) for route loads.
 - **Workflow stepper:** state is expressed by node style (gradient=done, ring=current, dashed=
   upcoming), not by an animation — motion is reserved for the transition, not the resting state.
+
+**Entry surfaces vs work surfaces (the cinematic rule).** *Work surfaces* (dashboard, Today,
+journal, workspaces — anything a trader stares at all day) stay calm: micro-motion only, per the
+tokens above. *Entry surfaces* (login, register, and any future landing/marketing page) are the
+first impression and may be genuinely **cinematic** — drifting aurora, an animated equity-curve
+motif, longer staged reveals on `--ease-out-expo`. Reusable primitives (in `globals.css`,
+all `prefers-reduced-motion`-gated): `.aurora-orb` (drifting blurred glow), `.grid-fade` (masked
+blueprint grid), `.animate-gradient-pan` (hero gradient sweep), `.animate-pulse-glow` (breathing
+node). The flagship implementation is `components/auth/auth-brand-panel.tsx`. Never bring this
+level of motion onto a work surface.
 
 ---
 

@@ -8,7 +8,16 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
     <div className="grid min-h-screen w-full lg:grid-cols-2">
       <AuthBrandPanel />
 
-      <div className="relative flex flex-col items-center justify-center p-6 sm:p-10">
+      <div className="relative flex flex-col items-center justify-center overflow-hidden p-6 sm:p-10">
+        {/* Ambient depth so the form panel reads as a lit surface, not a void. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-1/4 left-1/2 -z-10 h-[60rem] w-[60rem] -translate-x-1/2 rounded-full opacity-60"
+          style={{
+            background:
+              "radial-gradient(circle, color-mix(in oklch, var(--brand) 16%, transparent), transparent 60%)",
+          }}
+        />
         <div className="absolute top-5 right-5">
           <ThemeToggle />
         </div>

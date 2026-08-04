@@ -13,6 +13,7 @@ import { registerUser } from "@/actions/auth.actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { StaggerList, StaggerItem } from "@/components/shared/motion";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -52,24 +53,24 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-2">
+    <StaggerList className="space-y-8">
+      <StaggerItem className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Create your desk</h1>
         <p className="text-muted-foreground">Set up your private Trading Hub account.</p>
-      </div>
+      </StaggerItem>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        <div className="space-y-2">
+        <StaggerItem className="space-y-2">
           <Label htmlFor="name">Name</Label>
           <Input id="name" autoComplete="name" placeholder="Jane Trader" {...register("name")} />
           {errors.name && <p className="text-sm text-danger">{errors.name.message}</p>}
-        </div>
-        <div className="space-y-2">
+        </StaggerItem>
+        <StaggerItem className="space-y-2">
           <Label htmlFor="email">Email</Label>
           <Input id="email" type="email" autoComplete="email" placeholder="you@desk.com" {...register("email")} />
           {errors.email && <p className="text-sm text-danger">{errors.email.message}</p>}
-        </div>
-        <div className="space-y-2">
+        </StaggerItem>
+        <StaggerItem className="space-y-2">
           <Label htmlFor="password">Password</Label>
           <Input
             id="password"
@@ -81,18 +82,22 @@ export default function RegisterPage() {
           {errors.password && (
             <p className="text-sm text-danger">{errors.password.message}</p>
           )}
-        </div>
-        <Button type="submit" size="lg" className="h-11 w-full text-sm" disabled={isSubmitting}>
-          {isSubmitting ? "Creating account..." : "Create account"}
-        </Button>
+        </StaggerItem>
+        <StaggerItem>
+          <Button type="submit" size="lg" className="h-11 w-full text-sm" disabled={isSubmitting}>
+            {isSubmitting ? "Creating account..." : "Create account"}
+          </Button>
+        </StaggerItem>
       </form>
 
-      <p className="text-center text-sm text-muted-foreground">
-        Already have an account?{" "}
-        <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
-          Log in
-        </Link>
-      </p>
-    </div>
+      <StaggerItem>
+        <p className="text-center text-sm text-muted-foreground">
+          Already have an account?{" "}
+          <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
+            Log in
+          </Link>
+        </p>
+      </StaggerItem>
+    </StaggerList>
   );
 }

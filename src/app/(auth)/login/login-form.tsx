@@ -12,6 +12,7 @@ import { loginSchema, type LoginInput } from "@/lib/validation/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { StaggerList, StaggerItem } from "@/components/shared/motion";
 
 export function LoginForm() {
   const router = useRouter();
@@ -39,19 +40,19 @@ export function LoginForm() {
   };
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-2">
+    <StaggerList className="space-y-8">
+      <StaggerItem className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Welcome back</h1>
         <p className="text-muted-foreground">Log in to your Trading Hub desk.</p>
-      </div>
+      </StaggerItem>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        <div className="space-y-2">
+        <StaggerItem className="space-y-2">
           <Label htmlFor="email">Email</Label>
           <Input id="email" type="email" autoComplete="email" placeholder="you@desk.com" {...register("email")} />
           {errors.email && <p className="text-sm text-danger">{errors.email.message}</p>}
-        </div>
-        <div className="space-y-2">
+        </StaggerItem>
+        <StaggerItem className="space-y-2">
           <Label htmlFor="password">Password</Label>
           <Input
             id="password"
@@ -63,18 +64,22 @@ export function LoginForm() {
           {errors.password && (
             <p className="text-sm text-danger">{errors.password.message}</p>
           )}
-        </div>
-        <Button type="submit" size="lg" className="h-11 w-full text-sm" disabled={isSubmitting}>
-          {isSubmitting ? "Logging in..." : "Log in"}
-        </Button>
+        </StaggerItem>
+        <StaggerItem>
+          <Button type="submit" size="lg" className="h-11 w-full text-sm" disabled={isSubmitting}>
+            {isSubmitting ? "Logging in..." : "Log in"}
+          </Button>
+        </StaggerItem>
       </form>
 
-      <p className="text-center text-sm text-muted-foreground">
-        Don&apos;t have an account?{" "}
-        <Link href="/register" className="font-medium text-primary underline-offset-4 hover:underline">
-          Create one
-        </Link>
-      </p>
-    </div>
+      <StaggerItem>
+        <p className="text-center text-sm text-muted-foreground">
+          Don&apos;t have an account?{" "}
+          <Link href="/register" className="font-medium text-primary underline-offset-4 hover:underline">
+            Create one
+          </Link>
+        </p>
+      </StaggerItem>
+    </StaggerList>
   );
 }

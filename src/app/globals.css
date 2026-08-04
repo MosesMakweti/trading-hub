@@ -8,9 +8,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-heading: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -64,6 +64,9 @@
  * LIGHT THEME (default :root) — clean, cool-white, premium SaaS look. *
  * ------------------------------------------------------------------ */
 :root {
+  /* Premium entrance easing (Expo.out) — fast in, long elegant settle. */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
   --background: oklch(0.985 0.003 265);
   --foreground: oklch(0.21 0.02 265);
   --card: oklch(1 0 0);
@@ -205,6 +208,8 @@
     border: 1px solid var(--glass-border);
     backdrop-filter: blur(18px) saturate(1.4);
     -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    /* Lit top edge — real frosted-glass depth (light source from above). */
+    box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 6%);
   }
 
   /* Brand gradient fill for CTAs and accents */
@@ -264,5 +269,83 @@
     -webkit-mask-composite: xor;
     mask-composite: exclude;
     pointer-events: none;
+  }
+
+  /* -------------------------------------------------------------- *
+   * Cinematic surfaces (entry pages: auth, landing).                *
+   * Work surfaces stay calm; these belong to first-impression UI.   *
+   * -------------------------------------------------------------- */
+
+  /* A single drifting aurora orb — position/size/color set inline. */
+  .aurora-orb {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(64px);
+    will-change: transform;
+    animation: aurora-drift 22s var(--ease-out-expo) infinite alternate;
+  }
+
+  /* Fading blueprint grid — a trader's-desk texture, masked to a soft vignette. */
+  .grid-fade {
+    background-image:
+      linear-gradient(to right, currentColor 1px, transparent 1px),
+      linear-gradient(to bottom, currentColor 1px, transparent 1px);
+    background-size: 44px 44px;
+    -webkit-mask-image: radial-gradient(ellipse 75% 75% at 50% 0%, #000, transparent 78%);
+    mask-image: radial-gradient(ellipse 75% 75% at 50% 0%, #000, transparent 78%);
+  }
+
+  /* Animated gradient sweep for hero text / borders. */
+  .animate-gradient-pan {
+    background-size: 200% 200%;
+    animation: gradient-pan 8s ease infinite;
+  }
+
+  /* Soft breathing glow (e.g., the live node on the equity motif). */
+  .animate-pulse-glow {
+    animation: pulse-glow 2.4s ease-in-out infinite;
+  }
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(5%, -4%, 0) scale(1.12);
+  }
+  100% {
+    transform: translate3d(-4%, 5%, 0) scale(0.96);
+  }
+}
+
+@keyframes gradient-pan {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 3px currentColor);
+  }
+  50% {
+    opacity: 0.55;
+    filter: drop-shadow(0 0 9px currentColor);
+  }
+}
+
+/* Cinematic motion is decorative — kill it entirely for reduced-motion users. */
+@media (prefers-reduced-motion: reduce) {
+  .aurora-orb,
+  .animate-gradient-pan,
+  .animate-pulse-glow {
+    animation: none !important;
   }
 }
