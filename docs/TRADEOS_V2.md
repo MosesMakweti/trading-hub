@@ -29,8 +29,8 @@ Phase 4  Today's Trading Plan ................... ✅ DONE
 Phase 5a Trades in the Today flow ............... ✅ DONE
 Phase 5b Daily Analytics ........................ ✅ DONE  (Phase 5 complete)
 Phase 6  Automatic Journal Archiving ........... ✅ DONE
-Phase 7  Journal Redesign ...................... ▶ NEXT
-Phase 8  Trade Gallery
+Phase 7  Journal Redesign ...................... ✅ DONE
+Phase 8  Trade Gallery ......................... ▶ NEXT
 Phase 9  Advanced Filters
 Phase 10 Edge Workspace — Weekly Review
 Phase 11 Polish
@@ -448,3 +448,36 @@ append a Progress Report, STOP.
   domain + the Trade Workspace read view. Consider a `getArchivedDay(userId, dateKey)`
   aggregate and rendering archived-day content read-only. Keep the existing journal routes
   working throughout. One phase, then STOP.
+
+### Phase 7 — Journal Redesign ✅
+- **Completed**: the Journal day page (`/journal/[date]`) is now a **day recap** of the
+  whole workflow, on top of the existing notes + trades (both preserved).
+  - **`getJournalDayRecap(userId, dateKey)`** (journal.service) — a read-only aggregate:
+    returns **null** when no `TradingDay` exists for the day (journal then behaves exactly
+    as before), otherwise the day status, the workflow completion flags, compact **Morning
+    Prep** (routine done/total, market context, readiness) and **Today's Plan** (bias +
+    conviction, watchlist symbols, key levels, risk budget) summaries, and the day-scoped
+    analytics (reuses `getDailyAnalytics`, the routine template, and the Assets watchlist).
+  - **`JournalDayRecap`** (read-only, server) — renders the reused `WorkflowProgress`
+    stepper + `WorkspaceField`/`NoteBlock`/`KpiCard`/`tiptapToPlainText`. No new editing
+    surface (archived days are read-only).
+  - The day page shows the **status badge** (Active/Archived) and the recap above Daily
+    Notes + Trades; the workflow steps are derived by the shared `deriveWorkflowSteps`
+    (prep/plan/analyze from the day, trade/review from the day's trades).
+- **Components completed**: `journal/journal-day-recap.tsx`; `getJournalDayRecap` service +
+  `JournalDayRecapDTO`.
+- **Database changes**: none.
+- **Routes**: none (still `/journal/[date]`; all sub-routes unchanged).
+- **Files changed**: new `journal-day-recap.tsx`; changed `journal.service.ts`
+  (getJournalDayRecap), `types/today.ts` (JournalDayRecapDTO), `journal/[date]/page.tsx`.
+- **Verified**: `tsc` + `eslint` clean (no import cycle across journal/analytics/
+  trading-day services), 155 tests pass, a service integration test proved the null case +
+  a populated recap (prep/plan/analytics, watchlist symbols, netPnl), and a browser
+  screenshot confirmed the recap renders (workflow stepper, prep/plan cards, analytics KPIs)
+  with Daily Notes + Trades preserved — zero console errors.
+- **Remaining work**: P8–P11.
+- **Next recommended phase**: **P8 — Trade Gallery** — a grid/gallery view of trades (image
+  thumbnails when present, else a compact stat card: asset, direction, R, PnL, psychology,
+  status), as a new route (e.g. `/journal/gallery` or a Journal tab), linking each card to
+  its Trade Workspace. Reuse the trade list DTO/mapper. Sets up P9 (Advanced Filters). One
+  phase, then STOP.

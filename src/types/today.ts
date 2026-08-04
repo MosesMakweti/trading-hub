@@ -10,6 +10,29 @@ export interface DailyAnalyticsDTO extends StrategyPerformanceSummary {
   analyzed: boolean;
 }
 
+/** Read-only recap of a finalized trading day, shown on the Journal day page
+ *  (P7). Null when the day was never opened in the Today workspace. */
+export interface JournalDayRecapDTO {
+  status: TradingDayStatus;
+  prepDone: boolean;
+  planDone: boolean;
+  analyzeDone: boolean;
+  prep: {
+    routineTotal: number;
+    routineDone: number;
+    marketContext: unknown; // Tiptap JSON or null
+    readiness: number | null;
+  };
+  plan: {
+    bias: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
+    conviction: number | null;
+    watchlistSymbols: string[];
+    keyLevels: unknown; // Tiptap JSON or null
+    riskBudgetPercent: number | null;
+  };
+  analytics: StrategyPerformanceSummary & { netPnl: number };
+}
+
 /** The Today workspace's day record (TradeOS V2 backbone). */
 export interface TradingDayDTO {
   id: string;

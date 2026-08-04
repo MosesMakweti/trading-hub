@@ -3,12 +3,16 @@ import { notFound } from "next/navigation";
 import { ChevronLeft, ChevronRight, ListChecks, Plus } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
-import { getDailyNote } from "@/server/services/journal.service";
+import { getDailyNote, getJournalDayRecap } from "@/server/services/journal.service";
 import { listTradesForDay } from "@/server/services/trades.service";
 import { addDaysToKey, formatDateKeyLong, isValidDateKey, localDateToKey } from "@/lib/date";
+import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
+import { JournalDayRecap } from "@/components/journal/journal-day-recap";
 import { TradeCard } from "@/components/journal/trade-card";
+import { WORKFLOW_STEP_META, type WorkflowStep } from "@/components/dashboard/workflow-progress";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FadeIn, StaggerList, StaggerItem } from "@/components/shared/motion";
 import type { TradeListItemDTO } from "@/types/trades";
@@ -22,10 +26,25 @@ export default async function JournalDayPage({
   if (!isValidDateKey(dateKey)) notFound();
 
   const user = await requireUser();
-  const [note, trades] = await Promise.all([
+  const [note, trades, recap] = await Promise.all([
     getDailyNote(user.id, dateKey),
     listTradesForDay(user.id, dateKey),
+    getJournalDayRecap(user.id, dateKey),
   ]);
+
+  // Workflow recap (only for days that were opened in the Today workspace).
+  let recapSteps: WorkflowStep[] = [];
+  if (recap) {
+    const done: WorkflowDoneState = {
+      prep: recap.prepDone,
+      plan: recap.planDone,
+      trade: trades.length > 0,
+      review: trades.some((t) => t.reviewedAt != null),
+      analyze: recap.analyzeDone,
+    };
+    const byKey = new Map(deriveWorkflowSteps(done).map((s) => [s.key, s.status]));
+    recapSteps = WORKFLOW_STEP_META.map((m) => ({ ...m, status: byKey.get(m.key) ?? "upcoming" }));
+  }
 
   const tradeDtos: TradeListItemDTO[] = trades.map((t) => ({
     id: t.id,
@@ -83,9 +102,16 @@ export default async function JournalDayPage({
             <ChevronLeft />
           </Button>
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">
-              {formatDateKeyLong(dateKey)}
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-semibold tracking-tight">
+                {formatDateKeyLong(dateKey)}
+              </h1>
+              {recap && (
+                <Badge variant={recap.status === "ARCHIVED" ? "secondary" : "success"}>
+                  {recap.status === "ARCHIVED" ? "Archived" : "Active"}
+                </Badge>
+              )}
+            </div>
             {isToday && <p className="text-xs text-primary">Today</p>}
           </div>
           <Button
@@ -102,6 +128,8 @@ export default async function JournalDayPage({
           Back to calendar
         </Button>
       </div>
+
+      {recap && <JournalDayRecap recap={recap} steps={recapSteps} />}
 
       <section className="glass space-y-3 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Daily Notes</h2>
