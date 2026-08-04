@@ -36,6 +36,8 @@ model User {
   weeklyReviews   WeeklyReview[]
   trades          Trade[]
   strategies      Strategy[]
+  routineSections RoutineSection[]
+  routineItems    RoutineItem[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -103,9 +105,18 @@ model TradingDay {
   // are ticked today, free-form market-context notes (Tiptap JSON), and a 1–5
   // readiness self-rating. The routine *template* lives on ChecklistItemDefinition
   // (type PRE_SESSION_ROUTINE); only per-day completion is stored here.
+  // NOTE: superseded by routineSnapshot/routineReadyAt below (Pre-Session Routine
+  // refactor). Retired in a later phase; kept for now so P1 is purely additive.
   routineCompletion Json?
   marketContext     Json?
   readiness         Int?
+
+  // Pre-Session Routine (refactor). An immutable per-day snapshot of the routine:
+  // the frozen sections+items structure AND the trader's responses, written when
+  // the day's routine is first started so template edits never alter history.
+  // routineReadyAt is set by the "I am ready to trade" gate and drives prepCompletedAt.
+  routineSnapshot Json?
+  routineReadyAt  DateTime?
 
   // Today's Trading Plan (P4). Day intentions: higher-timeframe bias
   // (BULLISH/BEARISH/NEUTRAL) + 1–5 conviction, today's watchlist focus (Asset
@@ -190,6 +201,50 @@ enum ChecklistType {
   CONFLUENCE
   EXECUTION_CONFIRMATION
   PRE_SESSION_ROUTINE
+}
+
+// Pre-Session Routine item type. Extensible: adding a future type (RATING,
+// DROPDOWN, NUMBER, TIMER…) is a new enum value + a renderer + optional `config`
+// on RoutineItem — no schema redesign, and per-day responses stay in the snapshot.
+enum RoutineItemType {
+  CHECKBOX
+  SHORT_TEXT
+  LONG_TEXT
+}
+
+// A titled group of routine items (e.g. "Personal Readiness"). The editable
+// template; the trader adds/renames/reorders/collapses sections in Settings.
+model RoutineSection {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  sortOrder Int           @default(0)
+  collapsed Boolean       @default(false)
+  createdAt DateTime      @default(now())
+  deletedAt DateTime?
+
+  items RoutineItem[]
+
+  @@index([userId, sortOrder])
+}
+
+// A single routine item within a section. `type` picks the renderer; `config`
+// holds per-type settings for future types (rating scale, dropdown options…).
+model RoutineItem {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sectionId String
+  section   RoutineSection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  type      RoutineItemType @default(CHECKBOX)
+  label     String
+  config    Json?
+  sortOrder Int             @default(0)
+  createdAt DateTime        @default(now())
+  deletedAt DateTime?
+
+  @@index([userId, sectionId, sortOrder])
 }
 
 // Singleton per user. Rich-text fields store Tiptap JSON documents.
