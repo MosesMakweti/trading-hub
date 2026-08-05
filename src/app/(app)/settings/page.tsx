@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { ArrowRight, Database, ListChecks, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { ChevronRight, Database, ListChecks, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
-import { FadeIn, StaggerList, StaggerItem } from "@/components/shared/motion";
+import { FadeIn } from "@/components/shared/motion";
 
 const AREAS: { href: string; icon: LucideIcon; title: string; description: string }[] = [
   {
@@ -27,7 +27,7 @@ const AREAS: { href: string; icon: LucideIcon; title: string; description: strin
 
 export default function PreferencesPage() {
   return (
-    <FadeIn className="mx-auto max-w-3xl space-y-6">
+    <FadeIn className="mx-auto max-w-2xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Trading Preferences</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -35,25 +35,24 @@ export default function PreferencesPage() {
         </p>
       </div>
 
-      <StaggerList className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="glass divide-y divide-border overflow-hidden rounded-2xl">
         {AREAS.map((area) => (
-          <StaggerItem key={area.href}>
-            <Link
-              href={area.href}
-              className="glass group flex h-full flex-col rounded-2xl p-5 transition-all hover:-translate-y-0.5 hover:shadow-elevated"
-            >
-              <span className="bg-brand-gradient mb-3 inline-flex size-10 items-center justify-center rounded-xl text-white shadow-glow">
-                <area.icon className="size-5" />
-              </span>
-              <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-                {area.title}
-                <ArrowRight className="size-3.5 -translate-x-1 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">{area.description}</p>
-            </Link>
-          </StaggerItem>
+          <Link
+            key={area.href}
+            href={area.href}
+            className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-accent/60"
+          >
+            <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background/40 text-muted-foreground transition-colors group-hover:text-foreground">
+              <area.icon className="size-4.5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium">{area.title}</div>
+              <div className="mt-0.5 text-sm text-muted-foreground">{area.description}</div>
+            </div>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+          </Link>
         ))}
-      </StaggerList>
+      </div>
     </FadeIn>
   );
 }
