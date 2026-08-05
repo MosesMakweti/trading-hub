@@ -1,0 +1,16 @@
+import { chromium } from "playwright";
+const OUT = process.argv[2] || ".";
+const b = await chromium.launch();
+const p = await (await b.newContext({ viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 2 })).newPage();
+const email = `verify+${Date.now()}@desk.local`;
+await p.goto("http://localhost:3000/register", { waitUntil: "networkidle", timeout: 180000 });
+await p.fill("#name", "Verify Bot");
+await p.fill("#email", email);
+await p.fill("#password", "password1234");
+await p.click('button[type="submit"]');
+await p.waitForURL(/dashboard|today/, { timeout: 120000 }).catch(() => {});
+await p.goto("http://localhost:3000/dashboard", { waitUntil: "networkidle", timeout: 180000 });
+await p.waitForTimeout(2200);
+await p.screenshot({ path: `${OUT}/p2-dashboard.png` });
+console.log("shot p2-dashboard, url:", p.url());
+await b.close();

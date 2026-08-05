@@ -65,7 +65,7 @@ export default async function DashboardPage() {
 
       <WorkflowProgress steps={workflowSteps} caption="Continue in the Today workspace →" />
 
-      <QuickActions todayKey={today} />
+      <QuickActions />
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">Today at a glance</h2>
