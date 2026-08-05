@@ -154,3 +154,24 @@ and existing trades FK + snapshot the former.
 Verified: tsc + eslint clean, 172 tests green; `/today` rendered 200 with the new code; all routes
 compile, no dev-log errors. **Note:** dropping the tables discards any Trading Plan methodology
 content (intended — it's Strategy Lab's now). Next: P2b or P3.
+
+### P3 — Pre-Session Routine Settings editor ✅
+Dedicated Settings area at **`/settings/routine`** (topbar dropdown link, ListChecks icon). Full
+template editor:
+- **Domain** `domain/today/default-routine.ts` — pure `DEFAULT_ROUTINE` (the brief's 4 sections /
+  17 checkbox items) + `RoutineItemTypeValue` union + `ROUTINE_ITEM_TYPES`.
+- **Service** `routine.service.ts` — `getOrCreateDefaultRoutine` (lazy-seeds the default on first
+  load, like the Performance Account), `listRoutine` (nested `items` include spells out
+  `deletedAt:null` since the soft-delete extension doesn't filter nested reads), section CRUD +
+  reorder + `setSectionCollapsed`, item CRUD + reorder. Section delete soft-deletes its items too.
+- **Validation** `lib/validation/routine.ts`; **Actions** `routine.actions.ts` (revalidate
+  `/settings/routine`).
+- **UI** `components/routine/routine-editor.tsx` — reuses `SortableList` for **both** section- and
+  item-level drag-reorder; inline title/label editing; persisted collapse (optimistic); item
+  **type picker** (Checkbox / Short note / Long note via `ROUTINE_TYPE_META`); `ConfirmDialog` on
+  deletes; "Add item" / "Add section". `loading.tsx` skeleton.
+
+Verified: tsc + eslint clean, 172 tests green. **Screenshotted for real** — registered a throwaway
+user (`verify+<ts>@desk.local`, "Verify Bot") which confirmed the register flow survived P2 AND the
+default routine seeds + the editor renders correctly. Next: P4 (Today routine step + snapshot +
+readiness gate) — the editor's item types feed the Today renderers.

@@ -2,7 +2,7 @@
 
 import { signOut } from "next-auth/react";
 import Link from "next/link";
-import { Database, LogOut, Search, Settings } from "lucide-react";
+import { Database, ListChecks, LogOut, Search, Settings } from "lucide-react";
 
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
@@ -67,6 +67,10 @@ export function Topbar({
             <DropdownMenuLabel className="truncate">{user.email}</DropdownMenuLabel>
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
+          <DropdownMenuItem render={<Link href="/settings/routine" />}>
+            <ListChecks />
+            Pre-Session Routine
+          </DropdownMenuItem>
           <DropdownMenuItem render={<Link href="/settings/plan" />}>
             <Settings />
             Trade Setup
