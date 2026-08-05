@@ -99,16 +99,6 @@ model TradingDay {
   analyzedAt      DateTime?
   archivedAt      DateTime?
 
-  // Morning Preparation (P3). Which pre-session routine items (ChecklistItem ids)
-  // are ticked today, free-form market-context notes (Tiptap JSON), and a 1–5
-  // readiness self-rating. The routine *template* lives on ChecklistItemDefinition
-  // (type PRE_SESSION_ROUTINE); only per-day completion is stored here.
-  // NOTE: superseded by routineSnapshot/routineReadyAt below (Pre-Session Routine
-  // refactor). Retired in a later phase; kept for now so P1 is purely additive.
-  routineCompletion Json?
-  marketContext     Json?
-  readiness         Int?
-
   // Pre-Session Routine (refactor). An immutable per-day snapshot of the routine:
   // the frozen sections+items structure AND the trader's responses, written when
   // the day's routine is first started so template edits never alter history.

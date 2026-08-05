@@ -232,3 +232,18 @@ relocate the Entry Models *editor* from Settings to **Strategy Lab**.
   points to Strategy Lab. **Non-destructive, no migration**, global `EntryModel`/`TradeEntryModel`
   untouched. tsc + eslint + 176 tests green; verified live (Strategy Lab header + Entry Models page
   + trimmed Trade Setup). **Only P6 remains.**
+
+### P6 — Cleanup, polish, full verify ✅ 🎉 REFACTOR COMPLETE
+- **Dropped the dead columns** `TradingDay.routineCompletion / marketContext / readiness` (superseded
+  by `routineSnapshot`/`routineReadyAt`), migration `20260805030000_drop_morning_prep_columns`; client
+  regenerated. (NB: `Trade.marketContext` is a *different*, live field — untouched.)
+- **Fixed a broken link:** Entry Model search results pointed at `/settings/plan` → now
+  `/strategy-lab/entry-models`.
+- **Stale copy:** app metadata description + the journal-recap JSDoc updated.
+- **Full verify:** tsc clean, **full-`src` eslint clean**, **176 tests green**, and an end-to-end
+  click-through (register → Today: complete items + ready gate → Journal recap) with **zero HTTP 5xx**.
+
+**The refactor is done.** Trading Plan removed; Pre-Session Routine live across Settings → Today
+(customizable template, per-day snapshot, "I am ready to trade" gate + tab-lock) → Journal (frozen,
+immutable); workflow relabeled; Entry Models under Strategy Lab. Env note: `.env` `DATABASE_URL` host
+is now `127.0.0.1` (was `localhost`, which resolved to a broken IPv6 forward).

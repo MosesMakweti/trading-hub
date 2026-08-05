@@ -58,7 +58,7 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
     results.push({ category: "Asset", label: a.symbol, sublabel: a.label ?? undefined, href: "/settings/plan" });
   }
   for (const m of entryModels) {
-    results.push({ category: "Entry Model", label: m.name, href: "/settings/plan" });
+    results.push({ category: "Entry Model", label: m.name, href: "/strategy-lab/entry-models" });
   }
 
   return results;

@@ -32,7 +32,7 @@ function Card({ icon: Icon, title, children }: { icon: typeof ListChecks; title:
 
 /**
  * Read-only recap of a day's whole workflow (P7) — the workflow stepper plus
- * compact Morning Prep / Today's Plan / Daily Analytics summaries. Presentational
+ * the frozen Pre-Session Routine / Plan / Daily Analytics summaries. Presentational
  * (server component); it renders the same reusable pieces the Today workspace
  * uses. Shown only when a TradingDay exists for the day.
  */

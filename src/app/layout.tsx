@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Trading Hub",
-  description: "A private trading plan, journal, and analytics desk.",
+  description: "A private trading journal, strategy lab, and analytics desk.",
 };
 
 export default function RootLayout({
