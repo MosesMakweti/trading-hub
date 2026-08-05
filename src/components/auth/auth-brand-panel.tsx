@@ -44,34 +44,29 @@ export function AuthBrandPanel() {
 
   return (
     <div className="relative hidden overflow-hidden lg:flex lg:flex-col lg:justify-between lg:p-12 xl:p-16">
-      {/* Deep brand base */}
-      <div className="bg-brand-gradient absolute inset-0 -z-30 opacity-95" />
-      <div className="absolute inset-0 -z-30 bg-gradient-to-t from-black/45 via-transparent to-black/25" />
-
-      {/* Drifting aurora orbs */}
+      {/* Deep monochrome base — the brand panel stays dark in both themes */}
       <div
         aria-hidden
-        className="aurora-orb -top-28 -right-24 size-[26rem] opacity-45"
-        style={{ background: "radial-gradient(circle, #ffffff, transparent 70%)" }}
+        className="absolute inset-0 -z-30"
+        style={{ background: "oklch(0.145 0.006 255)" }}
       />
+
+      {/* A single, barely-there blue breath — the only color on the panel */}
       <div
         aria-hidden
-        className="aurora-orb -bottom-32 -left-20 size-[24rem] opacity-30"
-        style={{
-          background: "radial-gradient(circle, var(--brand-to), transparent 70%)",
-          animationDelay: "-8s",
-        }}
+        className="aurora-orb -top-28 -right-24 size-[26rem] opacity-25"
+        style={{ background: "radial-gradient(circle, var(--primary), transparent 70%)" }}
       />
 
       {/* Blueprint grid */}
-      <div aria-hidden className="grid-fade absolute inset-0 -z-20 text-white/15" />
+      <div aria-hidden className="grid-fade absolute inset-0 -z-20 text-white/8" />
 
       {/* Animated equity-curve motif, anchored low */}
       <svg
         aria-hidden
         viewBox="0 0 420 120"
         preserveAspectRatio="none"
-        className="absolute inset-x-0 bottom-0 -z-10 h-2/5 w-full text-white"
+        className="absolute inset-x-0 bottom-0 -z-10 h-2/5 w-full text-primary"
       >
         <defs>
           <linearGradient id="auth-eq-area" x1="0" y1="0" x2="0" y2="1">
@@ -102,7 +97,7 @@ export function AuthBrandPanel() {
           cx={420}
           cy={10}
           r={4}
-          className="animate-pulse-glow fill-white"
+          className="animate-pulse-glow fill-current"
           initial={reduce ? false : { scale: 0, opacity: 0 }}
           animate={reduce ? undefined : { scale: 1, opacity: 1 }}
           transition={{ duration: 0.4, delay: 2.2 }}
@@ -120,7 +115,9 @@ export function AuthBrandPanel() {
           <div className="flex size-9 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur">
             <CandlestickChart className="size-5" />
           </div>
-          <span className="text-lg font-semibold tracking-tight">Trading Hub</span>
+          <span className="text-lg font-semibold tracking-tight">
+            trade<span className="font-mono font-medium text-primary">OS</span>
+          </span>
         </motion.div>
 
         <div className="max-w-md text-white">

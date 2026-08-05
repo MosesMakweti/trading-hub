@@ -115,7 +115,7 @@ export function CommandCenter() {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Keyboard shortcuts</DialogTitle>
-            <DialogDescription>Quick reference for navigating Trading Hub.</DialogDescription>
+            <DialogDescription>Quick reference for navigating tradeOS.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             {SHORTCUTS.map((s) => (

@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Trading Hub",
+  title: "tradeOS",
   description: "A private trading journal, strategy lab, and analytics desk.",
 };
 

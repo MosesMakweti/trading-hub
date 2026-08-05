@@ -43,7 +43,7 @@ export function LoginForm() {
     <StaggerList className="space-y-8">
       <StaggerItem className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Welcome back</h1>
-        <p className="text-muted-foreground">Log in to your Trading Hub desk.</p>
+        <p className="text-muted-foreground">Log in to your tradeOS desk.</p>
       </StaggerItem>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">

@@ -48,7 +48,9 @@ export function AppSidebar() {
           <span className="bg-brand-gradient flex size-8 shrink-0 items-center justify-center rounded-lg text-white shadow-glow">
             <CandlestickChart className="size-4.5" />
           </span>
-          <span className="group-data-[collapsible=icon]:hidden">Trading Hub</span>
+          <span className="group-data-[collapsible=icon]:hidden">
+            trade<span className="font-mono font-medium text-primary">OS</span>
+          </span>
         </Link>
       </SidebarHeader>
       <SidebarContent>

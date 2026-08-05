@@ -27,7 +27,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <div className="bg-brand-gradient flex size-9 items-center justify-center rounded-xl text-white shadow-glow">
             <CandlestickChart className="size-5" />
           </div>
-          <span className="text-lg font-semibold tracking-tight">Trading Hub</span>
+          <span className="text-lg font-semibold tracking-tight">
+            trade<span className="font-mono font-medium text-primary">OS</span>
+          </span>
         </div>
 
         <div className="w-full max-w-sm">{children}</div>
