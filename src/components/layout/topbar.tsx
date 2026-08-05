@@ -69,7 +69,7 @@ export function Topbar({
           <DropdownMenuSeparator />
           <DropdownMenuItem render={<Link href="/settings/plan" />}>
             <Settings />
-            Trading Plan settings
+            Trade Setup
           </DropdownMenuItem>
           <DropdownMenuItem render={<Link href="/settings/data" />}>
             <Database />

@@ -1,4 +1,3 @@
-import { getTradingPlan } from "@/server/services/trading-plan.service";
 import { getDailyNote } from "@/server/services/journal.service";
 import { listRecentTrades, listTradesForDay } from "@/server/services/trades.service";
 import { getAnalyticsData } from "@/server/services/analytics.service";
@@ -24,9 +23,8 @@ export interface BestAccountSummary {
 export async function getDashboardData(userId: string) {
   const todayKey = localDateToKey(new Date());
 
-  const [plan, todayNote, todayTrades, recentTrades, sessions, otherAccounts, tradingDay] =
+  const [todayNote, todayTrades, recentTrades, sessions, otherAccounts, tradingDay] =
     await Promise.all([
-      getTradingPlan(userId),
       getDailyNote(userId, todayKey),
       listTradesForDay(userId, todayKey),
       listRecentTrades(userId, 5),
@@ -67,7 +65,6 @@ export async function getDashboardData(userId: string) {
 
   return {
     todayKey,
-    plan,
     todayNote,
     todayTrades,
     recentTrades,

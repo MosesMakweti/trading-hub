@@ -1,27 +1,9 @@
 import { z } from "zod";
 
-// Tiptap documents are arbitrary JSON; structural validation happens in the editor itself.
-const richText = z.unknown().nullable();
-
-export const strategyFrameworkSchema = z.object({
-  strategyFramework: richText,
-});
-
-export const profitTakingSchema = z.object({
-  profitTakingRules: richText,
-});
-
-export const stopLossSchema = z.object({
-  stopLossPlacement: richText,
-});
-
-export const riskManagementSchema = z.object({
-  maxDailyRiskPercent: z.coerce.number().min(0).max(100).nullable(),
-  maxWeeklyRiskPercent: z.coerce.number().min(0).max(100).nullable(),
-  maxOpenPositions: z.coerce.number().int().min(0).nullable(),
-  maxRiskPerTradePercent: z.coerce.number().min(0).max(100).nullable(),
-  riskManagementRules: richText,
-});
+// NOTE: this module now holds only the operational "Trade Setup" list schemas
+// (assets, entry models, sessions, checklists). The Trading Plan methodology
+// schemas (framework / profit-taking / stop-loss / risk-management) were removed
+// — that content is owned by Strategy Lab. See docs/PRE_SESSION_ROUTINE.md.
 
 export const assetSchema = z.object({
   symbol: z
@@ -56,10 +38,6 @@ export const tradingSessionSchema = z.object({
   maxTradesPerDay: z.coerce.number().int().min(0).nullable().optional(),
 });
 
-export const psychAnchorSchema = z.object({
-  text: z.string().trim().min(1, "Text is required.").max(280),
-});
-
 export const checklistTypeSchema = z.enum([
   "CONFLUENCE",
   "EXECUTION_CONFIRMATION",
@@ -75,13 +53,8 @@ export const reorderSchema = z.object({
   orderedIds: z.array(z.string()).min(1),
 });
 
-export type StrategyFrameworkInput = z.infer<typeof strategyFrameworkSchema>;
-export type ProfitTakingInput = z.infer<typeof profitTakingSchema>;
-export type StopLossInput = z.infer<typeof stopLossSchema>;
-export type RiskManagementInput = z.infer<typeof riskManagementSchema>;
 export type AssetInput = z.infer<typeof assetSchema>;
 export type EntryModelInput = z.infer<typeof entryModelSchema>;
 export type TradingSessionInput = z.infer<typeof tradingSessionSchema>;
-export type PsychAnchorInput = z.infer<typeof psychAnchorSchema>;
 export type ChecklistItemInput = z.infer<typeof checklistItemSchema>;
 export type ReorderInput = z.infer<typeof reorderSchema>;

@@ -8,7 +8,6 @@ import { listTradesForDay } from "@/server/services/trades.service";
 import { toTradeWorkspaceDTO } from "@/server/services/trade-workspace.mapper";
 import { listChecklistItems } from "@/server/services/checklist-items.service";
 import { listAssets } from "@/server/services/assets.service";
-import { getTradingPlan } from "@/server/services/trading-plan.service";
 import { getDailyAnalytics } from "@/server/services/analytics.service";
 import { localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
@@ -24,12 +23,11 @@ export default async function TodayPage() {
   // opening today (so it lands in the Journal).
   await archivePastActiveDays(user.id, todayKey);
 
-  const [day, trades, routineItems, assets, plan, dailyPerf] = await Promise.all([
+  const [day, trades, routineItems, assets, dailyPerf] = await Promise.all([
     getOrCreateTradingDay(user.id, todayKey),
     listTradesForDay(user.id, todayKey),
     listChecklistItems(user.id, "PRE_SESSION_ROUTINE"),
     listAssets(user.id),
-    getTradingPlan(user.id),
     getDailyAnalytics(user.id, todayKey),
   ]);
 
@@ -50,7 +48,9 @@ export default async function TodayPage() {
     watchlistFocus: (day.watchlistFocus as string[] | null) ?? [],
     keyLevels: day.keyLevels,
     riskBudgetPercent: day.riskBudgetPercent ? day.riskBudgetPercent.toNumber() : null,
-    planRiskLimit: plan.maxDailyRiskPercent ? plan.maxDailyRiskPercent.toNumber() : null,
+    // Risk limits used to come from the Trading Plan; that's gone (Strategy Lab
+    // owns trade management now). No reference limit until a later phase wires one.
+    planRiskLimit: null,
     planComplete: day.planCompletedAt != null,
   };
 

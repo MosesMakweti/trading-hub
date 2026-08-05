@@ -1,75 +1,46 @@
 import Link from "next/link";
-import {
-  Brain,
-  CheckSquare,
-  ClipboardCheck,
-  Clock,
-  Layers,
-  LineChart,
-  ListChecks,
-  ShieldAlert,
-  ShieldOff,
-  Sparkles,
-  Target,
-} from "lucide-react";
+import { CheckSquare, ClipboardCheck, Clock, Layers, LineChart } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
-import { getTradingPlan } from "@/server/services/trading-plan.service";
 import { listAssets } from "@/server/services/assets.service";
 import { listEntryModels } from "@/server/services/entry-models.service";
 import { listTradingSessions } from "@/server/services/trading-sessions.service";
-import { listPsychAnchors } from "@/server/services/psych-anchors.service";
 import { listChecklistItems } from "@/server/services/checklist-items.service";
 
 import { Accordion } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { PlanSectionCard } from "@/components/plan/plan-section-card";
-import { PreSessionRoutineSection } from "@/components/plan/sections/pre-session-routine-section";
 import { AssetsSection } from "@/components/plan/sections/assets-section";
 import { TradingSessionsSection } from "@/components/plan/sections/trading-sessions-section";
-import { StrategyFrameworkSection } from "@/components/plan/sections/strategy-framework-section";
-import { RiskManagementSection } from "@/components/plan/sections/risk-management-section";
 import { EntryModelsSection } from "@/components/plan/sections/entry-models-section";
-import { ProfitTakingSection } from "@/components/plan/sections/profit-taking-section";
-import { StopLossSection } from "@/components/plan/sections/stop-loss-section";
-import { PsychAnchorsSection } from "@/components/plan/sections/psych-anchors-section";
 import { ChecklistSection } from "@/components/plan/sections/checklist-section";
 import { FadeIn } from "@/components/shared/motion";
 
-export default async function TradingPlanPage() {
+// Trade Setup — the operational lists the trade form draws from. The trading
+// *methodology* (framework, profit-taking, stop-loss, risk, psychology) now lives
+// in Strategy Lab; the daily prep ritual lives in Today's Pre-Session Routine.
+export default async function TradeSetupPage() {
   const user = await requireUser();
 
-  const [plan, assets, entryModels, sessions, anchors, routineItems, confluences, executionItems] =
-    await Promise.all([
-      getTradingPlan(user.id),
-      listAssets(user.id),
-      listEntryModels(user.id),
-      listTradingSessions(user.id),
-      listPsychAnchors(user.id),
-      listChecklistItems(user.id, "PRE_SESSION_ROUTINE"),
-      listChecklistItems(user.id, "CONFLUENCE"),
-      listChecklistItems(user.id, "EXECUTION_CONFIRMATION"),
-    ]);
+  const [assets, entryModels, sessions, confluences, executionItems] = await Promise.all([
+    listAssets(user.id),
+    listEntryModels(user.id),
+    listTradingSessions(user.id),
+    listChecklistItems(user.id, "CONFLUENCE"),
+    listChecklistItems(user.id, "EXECUTION_CONFIRMATION"),
+  ]);
 
   return (
     <FadeIn className="mx-auto max-w-3xl space-y-6 pb-16">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Trading Plan</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Trade Setup</h1>
         <p className="text-sm text-muted-foreground">
-          Your rules, watchlist, and reminders — everything the journal draws from.
+          The lists every trade draws from — your watchlist, sessions, entry models, and
+          checklists. Your strategy and methodology live in Strategy Lab.
         </p>
       </div>
 
       <Accordion multiple className="space-y-0">
-        <PlanSectionCard
-          value="pre-session-routine"
-          icon={ListChecks}
-          title="Pre-Session Routine"
-          description="Your checklist to run through before every session."
-        >
-          <PreSessionRoutineSection initialItems={routineItems} />
-        </PlanSectionCard>
-
         <PlanSectionCard
           value="assets"
           icon={LineChart}
@@ -83,14 +54,6 @@ export default async function TradingPlanPage() {
           <TradingSessionsSection initialItems={sessions} />
         </PlanSectionCard>
 
-        <PlanSectionCard value="strategy-framework" icon={Target} title="Strategy Framework">
-          <StrategyFrameworkSection strategyFramework={plan.strategyFramework} />
-        </PlanSectionCard>
-
-        <PlanSectionCard value="risk-management" icon={ShieldAlert} title="Risk Management">
-          <RiskManagementSection plan={plan} />
-        </PlanSectionCard>
-
         <PlanSectionCard
           value="entry-models"
           icon={Layers}
@@ -98,23 +61,6 @@ export default async function TradingPlanPage() {
           description="e.g. Liquidity Sweep, SMT, Breaker, Order Block, FVG."
         >
           <EntryModelsSection initialItems={entryModels} />
-        </PlanSectionCard>
-
-        <PlanSectionCard value="profit-taking" icon={Sparkles} title="Profit Taking Rules">
-          <ProfitTakingSection profitTakingRules={plan.profitTakingRules} />
-        </PlanSectionCard>
-
-        <PlanSectionCard value="stop-loss" icon={ShieldOff} title="Stop Loss Placement">
-          <StopLossSection stopLossPlacement={plan.stopLossPlacement} />
-        </PlanSectionCard>
-
-        <PlanSectionCard
-          value="psych-anchors"
-          icon={Brain}
-          title="Psychological Anchors"
-          description="Reminders shown to keep you disciplined."
-        >
-          <PsychAnchorsSection initialItems={anchors} />
         </PlanSectionCard>
 
         <PlanSectionCard

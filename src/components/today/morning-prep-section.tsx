@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -94,11 +93,7 @@ export function MorningPrepSection({
       >
         {routineCount === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No routine steps yet.{" "}
-            <Link href="/settings/plan" className="text-primary hover:underline">
-              Add them in your trading plan
-            </Link>{" "}
-            and they&apos;ll appear here each morning.
+            No routine steps yet. Your customizable Pre-Session Routine is coming to this section.
           </p>
         ) : (
           <ul className="space-y-1">

@@ -133,3 +133,24 @@ soft-delete, sortOrder; item has `type` + `config Json?` for future types), and
 client regenerated. Old `routineCompletion/readiness/marketContext` left in place (retired in P2).
 Verified: tsc + eslint clean, 172 tests green, `/today` + `/login` serve 200. **No seeding or UI
 yet** — that's P3/P4. Next: P2 remove the Trading Plan.
+
+### P2 — Remove the Trading Plan ✅
+Dropped `TradingPlan` + `PsychologicalAnchor` (migration `20260805020000_remove_trading_plan`).
+Deleted `trading-plan.service`/`actions`, `psych-anchors.service`/`actions`, and the 5 methodology
+plan sections (framework, profit-taking, stop-loss, risk-management, psych-anchors) + the old flat
+`pre-session-routine-section`. Trimmed `lib/validation/trading-plan` to the operational schemas.
+Settings/plan page rebuilt as **"Trade Setup"** (assets, sessions, entry models, confluence +
+execution checklists only) — route path `/settings/plan` kept to avoid churning ~15 revalidatePath
+calls (cosmetic rename deferrable). Rewired `today/page` + `dashboard.service` off `getTradingPlan`
+(Today's `planRiskLimit` → null; Dashboard "Today's Plan" card → a Strategy Lab access card).
+Topbar link relabeled "Trade Setup". Fixed `server/db.ts` soft-delete set (removed dangling
+`PsychologicalAnchor`; **added `RoutineSection`/`RoutineItem`**). Updated stale "Settings > Trading
+Plan" copy in the trade form + Today sections.
+
+**Entry Models kept working** (global `EntryModel` list still in Trade Setup) — the Strategy-Lab
+migration is its own phase (P2b) because `EntryModel` and `StrategyEntryModel` are separate models
+and existing trades FK + snapshot the former.
+
+Verified: tsc + eslint clean, 172 tests green; `/today` rendered 200 with the new code; all routes
+compile, no dev-log errors. **Note:** dropping the tables discards any Trading Plan methodology
+content (intended — it's Strategy Lab's now). Next: P2b or P3.

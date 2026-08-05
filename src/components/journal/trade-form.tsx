@@ -423,7 +423,7 @@ export function TradeForm({
           control={control}
           name="entryModelIds"
           items={entryModels.map((m) => ({ id: m.id, label: m.name }))}
-          emptyLabel="No entry models configured yet — add them in Settings > Trading Plan."
+          emptyLabel="No entry models configured yet — add them in Settings > Trade Setup."
         />
       </section>
 
@@ -433,7 +433,7 @@ export function TradeForm({
           control={control}
           name="checklistItemIds"
           items={confluenceItems}
-          emptyLabel="No confluences configured yet — add them in Settings > Trading Plan."
+          emptyLabel="No confluences configured yet — add them in Settings > Trade Setup."
         />
       </section>
 
@@ -443,7 +443,7 @@ export function TradeForm({
           control={control}
           name="checklistItemIds"
           items={executionItems}
-          emptyLabel="No execution-confirmation items configured yet — add them in Settings > Trading Plan."
+          emptyLabel="No execution-confirmation items configured yet — add them in Settings > Trade Setup."
         />
       </section>
 

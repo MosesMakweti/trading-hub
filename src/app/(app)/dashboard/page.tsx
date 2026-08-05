@@ -4,7 +4,6 @@ import { Sparkles, Trophy } from "lucide-react";
 import { requireUser } from "@/server/guards";
 import { getDashboardData } from "@/server/services/dashboard.service";
 import { formatDateKeyLong } from "@/lib/date";
-import { tiptapToPlainText } from "@/lib/tiptap-text";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 import { SessionCountdown } from "@/components/dashboard/session-countdown";
 import { WorkflowProgress, WORKFLOW_STEP_META, type WorkflowStep } from "@/components/dashboard/workflow-progress";
@@ -35,9 +34,6 @@ export default async function DashboardPage() {
   const recentReflections = data.recentTrades
     .filter((t) => t.psychPostTradeReflection || t.psychLessonsLearned)
     .slice(0, 3);
-
-  const planExcerpt =
-    tiptapToPlainText(data.plan.strategyFramework) || tiptapToPlainText(data.plan.dailyRoutineMorning);
 
   // Workflow state for today, from the same state machine the Today workspace
   // uses: Prep/Plan/Analyze from the TradingDay (null until the day is started in
@@ -82,16 +78,16 @@ export default async function DashboardPage() {
 
           <div className="glass flex flex-col rounded-2xl p-4">
             <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              Today&apos;s Plan
+              Strategy Lab
             </h3>
-            <p className="mt-1.5 line-clamp-3 flex-1 text-sm">
-              {planExcerpt || "No strategy notes yet."}
+            <p className="mt-1.5 line-clamp-3 flex-1 text-sm text-muted-foreground">
+              Your strategies, entry models, and methodology — the playbook every trade follows.
             </p>
             <Link
-              href="/settings/plan"
+              href="/strategy-lab"
               className="mt-2 inline-block text-xs font-medium text-primary hover:underline"
             >
-              View full plan →
+              Open Strategy Lab →
             </Link>
           </div>
 

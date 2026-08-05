@@ -24,11 +24,9 @@ model User {
   accounts Account[]
   sessions Session[]
 
-  tradingPlan     TradingPlan?
   assets          Asset[]
   entryModels     EntryModel[]
   tradingSessions TradingSession[]
-  psychAnchors    PsychologicalAnchor[]
   checklistItems  ChecklistItemDefinition[]
   tradingAccounts TradingAccount[]
   dailyNotes      DailyNote[]
@@ -247,28 +245,6 @@ model RoutineItem {
   @@index([userId, sectionId, sortOrder])
 }
 
-// Singleton per user. Rich-text fields store Tiptap JSON documents.
-model TradingPlan {
-  id     String @id @default(cuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  dailyRoutineMorning     Json?
-  dailyRoutinePreMarket   Json?
-  dailyRoutinePostSession Json?
-  strategyFramework       Json?
-  profitTakingRules       Json?
-  stopLossPlacement       Json?
-  riskManagementRules     Json?
-
-  maxDailyRiskPercent    Decimal? @db.Decimal(6, 2)
-  maxWeeklyRiskPercent   Decimal? @db.Decimal(6, 2)
-  maxOpenPositions       Int?
-  maxRiskPerTradePercent Decimal? @db.Decimal(6, 2)
-
-  updatedAt DateTime @updatedAt
-}
-
 // Watchlist entry. Populates the asset dropdown in the journal (later phase).
 model Asset {
   id        String    @id @default(cuid())
@@ -318,18 +294,6 @@ model TradingSession {
   deletedAt              DateTime?
 
   trades Trade[]
-
-  @@index([userId, sortOrder])
-}
-
-model PsychologicalAnchor {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  text      String
-  sortOrder Int       @default(0)
-  createdAt DateTime  @default(now())
-  deletedAt DateTime?
 
   @@index([userId, sortOrder])
 }

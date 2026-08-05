@@ -161,7 +161,7 @@ export function TodaysPlanSection({ dateKey, plan }: { dateKey: string; plan: To
           <p className="text-sm text-muted-foreground">
             No assets on your watchlist yet.{" "}
             <Link href="/settings/plan" className="text-primary hover:underline">
-              Add them in your trading plan
+              Add them in Settings → Trade Setup
             </Link>
             .
           </p>
