@@ -1,9 +1,10 @@
-import { ClipboardList, LineChart, Sunrise } from "lucide-react";
+import { CircleCheck, ClipboardList, LineChart, ListChecks } from "lucide-react";
 
 import { tiptapToPlainText } from "@/lib/tiptap-text";
 import { KpiCard } from "@/components/analytics/kpi-card";
 import { NoteBlock, WorkspaceField, formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
 import { WorkflowProgress, type WorkflowStep } from "@/components/dashboard/workflow-progress";
+import { RoutineSnapshotView } from "@/components/routine/routine-snapshot-view";
 import type { JournalDayRecapDTO } from "@/types/today";
 
 const BIAS_LABEL: Record<string, string> = {
@@ -17,7 +18,7 @@ const pct = (n: number | null, signed = false) =>
 const tone = (n: number | null): "success" | "danger" | undefined =>
   n == null ? undefined : n >= 0 ? "success" : "danger";
 
-function Card({ icon: Icon, title, children }: { icon: typeof Sunrise; title: string; children: React.ReactNode }) {
+function Card({ icon: Icon, title, children }: { icon: typeof ListChecks; title: string; children: React.ReactNode }) {
   return (
     <div className="glass space-y-3 rounded-2xl p-4">
       <h3 className="flex items-center gap-1.5 text-sm font-medium">
@@ -42,7 +43,7 @@ export function JournalDayRecap({
   recap: JournalDayRecapDTO;
   steps: WorkflowStep[];
 }) {
-  const { prep, plan, analytics: a } = recap;
+  const { routine, plan, analytics: a } = recap;
   const biasValue =
     plan.bias == null
       ? undefined
@@ -52,18 +53,24 @@ export function JournalDayRecap({
     <section className="space-y-3">
       <WorkflowProgress steps={steps} title="Day workflow" />
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Card icon={Sunrise} title="Morning prep">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-            <WorkspaceField label="Routine" value={`${prep.routineDone}/${prep.routineTotal} done`} />
-            <WorkspaceField
-              label="Readiness"
-              value={prep.readiness == null ? undefined : `${prep.readiness}/5`}
-            />
+      {routine.snapshot && routine.snapshot.sections.length > 0 && (
+        <Card icon={ListChecks} title="Pre-Session Routine">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            <span className="text-muted-foreground tabular-nums">
+              {routine.progress.completed}/{routine.progress.total} complete · {routine.progress.percent}%
+            </span>
+            {routine.readyAt && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-success">
+                <CircleCheck className="size-3.5" />
+                Confirmed ready to trade
+              </span>
+            )}
           </div>
-          <NoteBlock label="Market context" text={tiptapToPlainText(prep.marketContext, 400)} />
+          <RoutineSnapshotView snapshot={routine.snapshot} />
         </Card>
+      )}
 
+      <div className="grid grid-cols-1 gap-3">
         <Card icon={ClipboardList} title="Plan">
           <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             <WorkspaceField label="Bias" value={biasValue} />

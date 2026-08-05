@@ -4,8 +4,8 @@ import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { getTradingDay } from "@/server/services/trading-day.service";
 import { getDailyAnalytics } from "@/server/services/analytics.service";
-import { listChecklistItems } from "@/server/services/checklist-items.service";
 import { listAssets } from "@/server/services/assets.service";
+import { routineProgress, type RoutineSnapshot } from "@/domain/today/routine-snapshot";
 import type { DailyNoteInput } from "@/lib/validation/journal";
 import type { JournalDayRecapDTO } from "@/types/today";
 
@@ -39,25 +39,25 @@ export async function getJournalDayRecap(
   const day = await getTradingDay(userId, dateKey);
   if (!day) return null;
 
-  const [routineItems, assets, analytics] = await Promise.all([
-    listChecklistItems(userId, "PRE_SESSION_ROUTINE"),
+  const [assets, analytics] = await Promise.all([
     listAssets(userId),
     getDailyAnalytics(userId, dateKey),
   ]);
 
-  const completedIds = new Set((day.routineCompletion as string[] | null) ?? []);
   const watchlistIds = new Set((day.watchlistFocus as string[] | null) ?? []);
+  const snapshot = (day.routineSnapshot as unknown as RoutineSnapshot | null) ?? null;
 
   return {
     status: day.status,
     prepDone: day.prepCompletedAt != null,
     planDone: day.planCompletedAt != null,
     analyzeDone: day.analyzedAt != null,
-    prep: {
-      routineTotal: routineItems.length,
-      routineDone: routineItems.filter((i) => completedIds.has(i.id)).length,
-      marketContext: day.marketContext,
-      readiness: day.readiness,
+    routine: {
+      snapshot,
+      readyAt: day.routineReadyAt?.toISOString() ?? null,
+      progress: snapshot
+        ? routineProgress(snapshot)
+        : { completed: 0, total: 0, percent: 0 },
     },
     plan: {
       bias: (day.bias as JournalDayRecapDTO["plan"]["bias"]) ?? null,

@@ -200,3 +200,20 @@ Verified: tsc + eslint clean, 176 tests green; **screenshotted end-to-end** via 
 routine seeds, tabs lock, the gate unlocks them + advances the stepper (Preparation done → Plan
 current). Next: P5 (journal snapshot + workflow relabel) — the `prep` step still shows
 "Preparation"; relabel to "Pre-Session Routine".
+
+### P5 — Journal frozen snapshot + workflow relabel ✅
+- **Journal recap** now shows the day's **frozen routine** read-only. `getJournalDayRecap` reads
+  `day.routineSnapshot` (dropped the old `routineCompletion`/checklist read), computing progress via
+  the pure `routineProgress`. Recap DTO `prep` → `routine { snapshot, readyAt, progress }`. New
+  read-only `components/routine/routine-snapshot-view.tsx` renders each section's items with their
+  completion (checkbox ✓/–, text notes) — the *exact* routine run that day, immutable by design.
+  The recap's old "Morning prep" card is now a "Pre-Session Routine" card (progress + "Confirmed
+  ready" badge + the full view); the Plan card went full-width.
+- **Workflow relabel:** `WORKFLOW_STEP_META` `prep` "Preparation" → **"Routine"** (short label fits
+  the compact stepper node; the full name is the tab/section), icon `Sunrise` → `ListChecks`.
+  Propagates to Dashboard / Today / Journal steppers.
+
+Verified: tsc + eslint clean, 176 tests green. **Live screenshot NOT captured** — local Postgres
+went unreachable mid-verification (`P1001`/`ConnectionClosed`, the [[trading-hub-low-memory-dev]]
+OOM instability; container "Up" but frozen, a `docker restart` didn't recover it). Code is untouched
+by that (infra only) and is type-checked + unit-tested. Next: P2b, then P6.

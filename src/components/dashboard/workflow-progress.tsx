@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
-import { BarChart3, BookOpenCheck, CandlestickChart, ClipboardList, Sunrise } from "lucide-react";
+import { BarChart3, BookOpenCheck, CandlestickChart, ClipboardList, ListChecks } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { WorkflowStepKey } from "@/domain/today/workflow";
@@ -18,7 +18,7 @@ export interface WorkflowStep {
 /** The canonical ordered workflow. Reused by the Dashboard now and the Today
  *  workspace later (Phase 2+), which will feed it real TradingDay state. */
 export const WORKFLOW_STEP_META: { key: WorkflowStepKey; label: string; icon: LucideIcon }[] = [
-  { key: "prep", label: "Preparation", icon: Sunrise },
+  { key: "prep", label: "Routine", icon: ListChecks },
   { key: "plan", label: "Plan", icon: ClipboardList },
   { key: "trade", label: "Trade", icon: CandlestickChart },
   { key: "review", label: "Review", icon: BookOpenCheck },

@@ -1,4 +1,5 @@
 import type { StrategyPerformanceSummary } from "@/domain/performance/strategy-performance";
+import type { RoutineProgress, RoutineSnapshot } from "@/domain/today/routine-snapshot";
 
 export type TradingDayStatus = "ACTIVE" | "ARCHIVED";
 
@@ -17,11 +18,10 @@ export interface JournalDayRecapDTO {
   prepDone: boolean;
   planDone: boolean;
   analyzeDone: boolean;
-  prep: {
-    routineTotal: number;
-    routineDone: number;
-    marketContext: unknown; // Tiptap JSON or null
-    readiness: number | null;
+  routine: {
+    snapshot: RoutineSnapshot | null; // the frozen routine for that day
+    readyAt: string | null; // ISO — when "I am ready to trade" was confirmed
+    progress: RoutineProgress;
   };
   plan: {
     bias: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
