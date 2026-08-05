@@ -58,10 +58,7 @@ export function AuthBrandPanel() {
         style={{ background: "radial-gradient(circle, var(--primary), transparent 70%)" }}
       />
 
-      {/* Blueprint grid */}
-      <div aria-hidden className="grid-fade absolute inset-0 -z-20 text-white/8" />
-
-      {/* Animated equity-curve motif, anchored low */}
+      {/* Animated equity-curve motif, anchored low — the panel's single authored moment */}
       <svg
         aria-hidden
         viewBox="0 0 420 120"

@@ -58,11 +58,7 @@ export default async function DashboardPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
           Welcome back
-          {user.name ? (
-            <>
-              , <span className="text-gradient">{user.name}</span>
-            </>
-          ) : null}
+          {user.name ? <>, {user.name}</> : null}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">{formatDateKeyLong(today)}</p>
       </div>

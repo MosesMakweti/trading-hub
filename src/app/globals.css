@@ -195,9 +195,37 @@
       transparent 72%
     );
     background-attachment: fixed;
+    /* The caret belongs to the palette, not the browser. */
+    caret-color: var(--primary);
   }
   html {
     @apply font-sans;
+  }
+
+  /* Browser surfaces carry the design too — theme them from the palette. */
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 22%, transparent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 20%, transparent) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--foreground) 18%, transparent);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--foreground) 32%, transparent);
+    background-clip: padding-box;
   }
   /* Smoothly cross-fade theme swaps on color surfaces */
   body,
@@ -227,17 +255,6 @@
     );
   }
 
-  /* Gradient-clipped text for hero headings */
-  .text-gradient {
-    background-image: linear-gradient(
-      120deg,
-      var(--brand-from) 0%,
-      var(--brand-to) 100%
-    );
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
 
   /* Soft elevated shadow that adapts to theme via --shadow-color */
   .shadow-elevated {
@@ -289,16 +306,6 @@
     filter: blur(64px);
     will-change: transform;
     animation: aurora-drift 22s var(--ease-out-expo) infinite alternate;
-  }
-
-  /* Fading blueprint grid — a trader's-desk texture, masked to a soft vignette. */
-  .grid-fade {
-    background-image:
-      linear-gradient(to right, currentColor 1px, transparent 1px),
-      linear-gradient(to bottom, currentColor 1px, transparent 1px);
-    background-size: 44px 44px;
-    -webkit-mask-image: radial-gradient(ellipse 75% 75% at 50% 0%, #000, transparent 78%);
-    mask-image: radial-gradient(ellipse 75% 75% at 50% 0%, #000, transparent 78%);
   }
 
   /* Animated gradient sweep for hero text / borders. */

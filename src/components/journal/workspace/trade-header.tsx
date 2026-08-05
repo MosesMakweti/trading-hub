@@ -19,7 +19,7 @@ export function TradeHeader({ trade }: { trade: TradeWorkspaceDTO }) {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-              Trade <span className="text-gradient">#{trade.tradeNumber}</span>
+              Trade <span className="font-mono tabular-nums text-primary">#{trade.tradeNumber}</span>
             </h1>
             <TradeStatusBadge status={trade.status} />
           </div>
