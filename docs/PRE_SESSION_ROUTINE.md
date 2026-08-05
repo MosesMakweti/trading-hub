@@ -217,3 +217,18 @@ Verified: tsc + eslint clean, 176 tests green. **Live screenshot NOT captured** 
 went unreachable mid-verification (`P1001`/`ConnectionClosed`, the [[trading-hub-low-memory-dev]]
 OOM instability; container "Up" but frozen, a `docker restart` didn't recover it). Code is untouched
 by that (infra only) and is type-checked + unit-tested. Next: P2b, then P6.
+
+### P2b — Entry Models → Strategy Lab ✅ (lightweight path)
+On deeper exploration the global `EntryModel` turned out to be entangled with the trade form,
+CSV/JSON **import** (resolves entry-model names → global `EntryModel`), **export**, and display —
+and `StrategyEntryModel`s are per-strategy methodology docs while a trade's `strategyId` is
+optional. A full rewire (entry-model options sourced from the selected strategy, names-only import)
+would be ~12 files touching import/export and would force entry-model tagging to require a strategy.
+**User chose the lightweight path:** keep the trade form + import/export exactly as-is, and just
+relocate the Entry Models *editor* from Settings to **Strategy Lab**.
+- New page `/strategy-lab/entry-models` (reuses `EntryModelsSection`); an "Entry models" button in
+  the Strategy Lab header (next to Pattern library). `entry-models.actions` revalidate path
+  re-pointed. Removed the Entry Models card from Settings/Trade Setup; trade-form empty hint now
+  points to Strategy Lab. **Non-destructive, no migration**, global `EntryModel`/`TradeEntryModel`
+  untouched. tsc + eslint + 176 tests green; verified live (Strategy Lab header + Entry Models page
+  + trimmed Trade Setup). **Only P6 remains.**

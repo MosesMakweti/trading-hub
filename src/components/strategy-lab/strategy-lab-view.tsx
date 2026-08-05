@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { FlaskConical, Library, Search } from "lucide-react";
+import { FlaskConical, Layers, Library, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,15 @@ export function StrategyLabView({ strategies }: { strategies: StrategyDTO[] }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            nativeButton={false}
+            render={<Link href="/strategy-lab/entry-models" />}
+          >
+            <Layers className="size-4" />
+            Entry models
+          </Button>
           <Button
             variant="outline"
             className="gap-1.5"

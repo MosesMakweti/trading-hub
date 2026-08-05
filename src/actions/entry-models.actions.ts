@@ -16,7 +16,7 @@ export async function createEntryModel(input: unknown): Promise<ActionResult> {
   }
 
   await entryModelsService.createEntryModel(user.id, parsed.data);
-  revalidatePath("/settings/plan");
+  revalidatePath("/strategy-lab/entry-models");
   return { success: true };
 }
 
@@ -28,14 +28,14 @@ export async function updateEntryModel(id: string, input: unknown): Promise<Acti
   }
 
   await entryModelsService.updateEntryModel(user.id, id, parsed.data);
-  revalidatePath("/settings/plan");
+  revalidatePath("/strategy-lab/entry-models");
   return { success: true };
 }
 
 export async function archiveEntryModel(id: string): Promise<ActionResult> {
   const user = await requireUser();
   await entryModelsService.archiveEntryModel(user.id, id);
-  revalidatePath("/settings/plan");
+  revalidatePath("/strategy-lab/entry-models");
   return { success: true };
 }
 
@@ -45,6 +45,6 @@ export async function reorderEntryModels(input: unknown): Promise<ActionResult> 
   if (!parsed.success) return { success: false, error: "Invalid input." };
 
   await entryModelsService.reorderEntryModels(user.id, parsed.data.orderedIds);
-  revalidatePath("/settings/plan");
+  revalidatePath("/strategy-lab/entry-models");
   return { success: true };
 }

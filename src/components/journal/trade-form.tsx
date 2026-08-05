@@ -423,7 +423,7 @@ export function TradeForm({
           control={control}
           name="entryModelIds"
           items={entryModels.map((m) => ({ id: m.id, label: m.name }))}
-          emptyLabel="No entry models configured yet — add them in Settings > Trade Setup."
+          emptyLabel="No entry models configured yet — add them in Strategy Lab > Entry models."
         />
       </section>
 

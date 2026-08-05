@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { CheckSquare, ClipboardCheck, Clock, Layers, LineChart } from "lucide-react";
+import { CheckSquare, ClipboardCheck, Clock, LineChart } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
 import { listAssets } from "@/server/services/assets.service";
-import { listEntryModels } from "@/server/services/entry-models.service";
 import { listTradingSessions } from "@/server/services/trading-sessions.service";
 import { listChecklistItems } from "@/server/services/checklist-items.service";
 
@@ -12,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { PlanSectionCard } from "@/components/plan/plan-section-card";
 import { AssetsSection } from "@/components/plan/sections/assets-section";
 import { TradingSessionsSection } from "@/components/plan/sections/trading-sessions-section";
-import { EntryModelsSection } from "@/components/plan/sections/entry-models-section";
 import { ChecklistSection } from "@/components/plan/sections/checklist-section";
 import { FadeIn } from "@/components/shared/motion";
 
@@ -22,9 +20,8 @@ import { FadeIn } from "@/components/shared/motion";
 export default async function TradeSetupPage() {
   const user = await requireUser();
 
-  const [assets, entryModels, sessions, confluences, executionItems] = await Promise.all([
+  const [assets, sessions, confluences, executionItems] = await Promise.all([
     listAssets(user.id),
-    listEntryModels(user.id),
     listTradingSessions(user.id),
     listChecklistItems(user.id, "CONFLUENCE"),
     listChecklistItems(user.id, "EXECUTION_CONFIRMATION"),
@@ -35,8 +32,8 @@ export default async function TradeSetupPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Trade Setup</h1>
         <p className="text-sm text-muted-foreground">
-          The lists every trade draws from — your watchlist, sessions, entry models, and
-          checklists. Your strategy and methodology live in Strategy Lab.
+          The lists every trade draws from — your watchlist, sessions, and checklists. Your
+          strategy, methodology, and entry models live in Strategy Lab.
         </p>
       </div>
 
@@ -52,15 +49,6 @@ export default async function TradeSetupPage() {
 
         <PlanSectionCard value="trading-session" icon={Clock} title="Trading Session">
           <TradingSessionsSection initialItems={sessions} />
-        </PlanSectionCard>
-
-        <PlanSectionCard
-          value="entry-models"
-          icon={Layers}
-          title="Entry Models"
-          description="e.g. Liquidity Sweep, SMT, Breaker, Order Block, FVG."
-        >
-          <EntryModelsSection initialItems={entryModels} />
         </PlanSectionCard>
 
         <PlanSectionCard
