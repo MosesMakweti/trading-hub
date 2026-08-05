@@ -7,6 +7,7 @@ import {
   CandlestickChart,
   FlaskConical,
   LayoutDashboard,
+  Settings,
   Sun,
   TrendingUp,
   Wallet,
@@ -15,6 +16,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -70,6 +72,20 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              render={<Link href="/settings" />}
+              isActive={pathname.startsWith("/settings")}
+              tooltip="Preferences"
+            >
+              <Settings />
+              <span>Preferences</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
     </Sidebar>
   );
 }

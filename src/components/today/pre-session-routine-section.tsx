@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CircleCheck, Lock, RotateCcw, Sparkles } from "lucide-react";
+import { CircleCheck, Lock, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -75,11 +76,23 @@ export function PreSessionRoutineSection({
     <div className="space-y-4">
       {/* Progress */}
       <div className="glass space-y-2 rounded-2xl p-4">
-        <div className="flex items-center justify-between text-sm">
+        <div className="flex items-center justify-between gap-2 text-sm">
           <span className="font-medium">Preparation progress</span>
-          <span className="text-muted-foreground tabular-nums">
-            {progress.completed} / {progress.total} · {progress.percent}%
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-muted-foreground tabular-nums">
+              {progress.completed} / {progress.total} · {progress.percent}%
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-muted-foreground"
+              nativeButton={false}
+              render={<Link href="/settings/routine" />}
+            >
+              <SlidersHorizontal className="size-3.5" />
+              Edit routine
+            </Button>
+          </div>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-muted">
           <div
