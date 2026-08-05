@@ -175,3 +175,28 @@ Verified: tsc + eslint clean, 172 tests green. **Screenshotted for real** — re
 user (`verify+<ts>@desk.local`, "Verify Bot") which confirmed the register flow survived P2 AND the
 default routine seeds + the editor renders correctly. Next: P4 (Today routine step + snapshot +
 readiness gate) — the editor's item types feed the Today renderers.
+
+### P4 — Today Pre-Session Routine step ✅
+The routine is now the first Today tab and gates the day.
+- **Domain** `routine-snapshot.ts` — `RoutineSnapshot` type + pure `isItemComplete` / `routineProgress`
+  (4 unit tests; total 172 → **176**).
+- **Service** `today-routine.service.ts` — `getOrCreateDayRoutine(userId, day)` freezes a snapshot
+  `{ sections, responses }` of the current template on first open (seeds default if empty), then
+  always returns that frozen copy; `setRoutineResponse` merges one item's response (structure
+  untouched); `setRoutineReady` sets `routineReadyAt` + `prepCompletedAt` (advances the workflow).
+- **Actions** `today-routine.actions.ts` (guarded by `dayEditableGuard`, revalidate `/today`).
+- **UI** `pre-session-routine-section.tsx` — progress bar, sections rendered by item type
+  (checkbox / short / long text, autosave on toggle/blur), and the big "I am ready to trade" gate
+  ↔ "You're ready" banner + Reopen. `today-workspace.tsx`: routine is the first tab (ListChecks);
+  the other 5 tabs are **locked** (disabled + Lock icon) until ready. Today page seeds/loads it.
+- **Removed** the old flat Morning Prep: `morning-prep-section`, `updateMorningPrep` action+service,
+  `morningPrepSchema`, `MorningPrepDTO`. (Unused columns `routineCompletion/marketContext/readiness`
+  left on TradingDay — drop in P6.)
+- **Bug caught + fixed by screenshot:** the Today page upserted the TradingDay twice in parallel
+  (page + routine service) → Prisma unique-constraint race on `(userId,date)`. Fixed by creating the
+  day once and passing it into `getOrCreateDayRoutine`.
+
+Verified: tsc + eslint clean, 176 tests green; **screenshotted end-to-end** via a throwaway user —
+routine seeds, tabs lock, the gate unlocks them + advances the stepper (Preparation done → Plan
+current). Next: P5 (journal snapshot + workflow relabel) — the `prep` step still shows
+"Preparation"; relabel to "Pre-Session Routine".

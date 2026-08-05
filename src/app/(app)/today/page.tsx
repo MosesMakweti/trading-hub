@@ -6,14 +6,14 @@ import {
 } from "@/server/services/trading-day.service";
 import { listTradesForDay } from "@/server/services/trades.service";
 import { toTradeWorkspaceDTO } from "@/server/services/trade-workspace.mapper";
-import { listChecklistItems } from "@/server/services/checklist-items.service";
+import { getOrCreateDayRoutine } from "@/server/services/today-routine.service";
 import { listAssets } from "@/server/services/assets.service";
 import { getDailyAnalytics } from "@/server/services/analytics.service";
 import { localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 import { FadeIn } from "@/components/shared/motion";
 import { TodayWorkspace } from "@/components/today/today-workspace";
-import type { DailyAnalyticsDTO, MorningPrepDTO, TodaysPlanDTO } from "@/types/today";
+import type { DailyAnalyticsDTO, TodaysPlanDTO } from "@/types/today";
 
 export default async function TodayPage() {
   const user = await requireUser();
@@ -23,23 +23,17 @@ export default async function TodayPage() {
   // opening today (so it lands in the Journal).
   await archivePastActiveDays(user.id, todayKey);
 
-  const [day, trades, routineItems, assets, dailyPerf] = await Promise.all([
-    getOrCreateTradingDay(user.id, todayKey),
+  // Create the day once, THEN load everything else — passing the day into the
+  // routine service avoids a second concurrent upsert racing the (userId, date) unique.
+  const day = await getOrCreateTradingDay(user.id, todayKey);
+  const [trades, routine, assets, dailyPerf] = await Promise.all([
     listTradesForDay(user.id, todayKey),
-    listChecklistItems(user.id, "PRE_SESSION_ROUTINE"),
+    getOrCreateDayRoutine(user.id, day),
     listAssets(user.id),
     getDailyAnalytics(user.id, todayKey),
   ]);
 
   const dailyAnalytics: DailyAnalyticsDTO = { ...dailyPerf, analyzed: day.analyzedAt != null };
-
-  const morningPrep: MorningPrepDTO = {
-    routineItems: routineItems.map((i) => ({ id: i.id, label: i.label })),
-    completedIds: (day.routineCompletion as string[] | null) ?? [],
-    marketContext: day.marketContext,
-    readiness: day.readiness,
-    prepComplete: day.prepCompletedAt != null,
-  };
 
   const todaysPlan: TodaysPlanDTO = {
     assets: assets.map((a) => ({ id: a.id, symbol: a.symbol, label: a.label })),
@@ -70,7 +64,7 @@ export default async function TodayPage() {
       <TodayWorkspace
         day={toTradingDayDTO(day)}
         stepStatuses={stepStatuses}
-        morningPrep={morningPrep}
+        routine={routine}
         todaysPlan={todaysPlan}
         trades={trades.map(toTradeWorkspaceDTO)}
         dailyAnalytics={dailyAnalytics}

@@ -11,10 +11,10 @@ import {
   ClipboardList,
   FlagOff,
   Lightbulb,
+  ListChecks,
   Loader2,
   Lock,
   Sun,
-  Sunrise,
   Zap,
 } from "lucide-react";
 
@@ -24,7 +24,10 @@ import { Button } from "@/components/ui/button";
 import { endDay, reopenDay } from "@/actions/today.actions";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/shared/empty-state";
-import { MorningPrepSection } from "@/components/today/morning-prep-section";
+import {
+  PreSessionRoutineSection,
+  type DayRoutineDTO,
+} from "@/components/today/pre-session-routine-section";
 import { TodaysPlanSection } from "@/components/today/todays-plan-section";
 import { DailyAnalyticsSection } from "@/components/today/daily-analytics-section";
 import { TodayTradeBar } from "@/components/today/today-trade-bar";
@@ -37,13 +40,14 @@ import {
   type WorkflowStep,
 } from "@/components/dashboard/workflow-progress";
 import type { WorkflowStepKey, WorkflowStepStatus } from "@/domain/today/workflow";
-import type { DailyAnalyticsDTO, MorningPrepDTO, TodaysPlanDTO, TradingDayDTO } from "@/types/today";
+import type { DailyAnalyticsDTO, TodaysPlanDTO, TradingDayDTO } from "@/types/today";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
-// The Today workflow section tabs. All are live as of Phase 5 — each tab's real
-// component is rendered in its TabsContent below.
+// The Today workflow section tabs. The Pre-Session Routine is first; the rest stay
+// locked until the "I am ready to trade" gate is confirmed.
+const ROUTINE_TAB = "pre-session-routine";
 const SECTIONS: { value: string; label: string; icon: LucideIcon }[] = [
-  { value: "morning-prep", label: "Morning Prep", icon: Sunrise },
+  { value: ROUTINE_TAB, label: "Pre-Session Routine", icon: ListChecks },
   { value: "todays-plan", label: "Today's Plan", icon: ClipboardList },
   { value: "trade-idea", label: "Trade Idea", icon: Lightbulb },
   { value: "trade-execution", label: "Trade Execution", icon: Zap },
@@ -54,7 +58,7 @@ const SECTIONS: { value: string; label: string; icon: LucideIcon }[] = [
 export function TodayWorkspace({
   day,
   stepStatuses,
-  morningPrep,
+  routine,
   todaysPlan,
   trades,
   dailyAnalytics,
@@ -63,12 +67,14 @@ export function TodayWorkspace({
   // Only serializable data crosses the server→client boundary; the icon-bearing
   // steps are rebuilt here from WORKFLOW_STEP_META (imported client-side).
   stepStatuses: { key: WorkflowStepKey; status: WorkflowStepStatus }[];
-  morningPrep: MorningPrepDTO;
+  routine: DayRoutineDTO;
   todaysPlan: TodaysPlanDTO;
   trades: TradeWorkspaceDTO[];
   dailyAnalytics: DailyAnalyticsDTO;
 }) {
   const router = useRouter();
+  // The Pre-Session Routine gates the rest of the day.
+  const routineReady = routine.readyAt != null;
   const [focusedId, setFocusedId] = useState<string | null>(trades[0]?.id ?? null);
   const focusedTrade = trades.find((t) => t.id === focusedId) ?? null;
 
@@ -159,22 +165,31 @@ export function TodayWorkspace({
 
       <WorkflowProgress steps={steps} title="Workflow" />
 
-      <Tabs defaultValue={SECTIONS[0].value}>
+      <Tabs defaultValue={ROUTINE_TAB}>
         <div className="overflow-x-auto">
           <TabsList className="w-max">
-            {SECTIONS.map((s) => (
-              <TabsTrigger key={s.value} value={s.value} className="gap-1.5">
-                <s.icon className="size-3.5" />
-                {s.label}
-              </TabsTrigger>
-            ))}
+            {SECTIONS.map((s) => {
+              const locked = !routineReady && s.value !== ROUTINE_TAB;
+              return (
+                <TabsTrigger
+                  key={s.value}
+                  value={s.value}
+                  disabled={locked}
+                  className="gap-1.5"
+                  title={locked ? "Complete your Pre-Session Routine to unlock" : undefined}
+                >
+                  {locked ? <Lock className="size-3.5" /> : <s.icon className="size-3.5" />}
+                  {s.label}
+                </TabsTrigger>
+              );
+            })}
           </TabsList>
         </div>
 
         {SECTIONS.map((s) => (
           <TabsContent key={s.value} value={s.value} className="mt-4">
-            {s.value === "morning-prep" ? (
-              <MorningPrepSection dateKey={day.dateKey} prep={morningPrep} />
+            {s.value === ROUTINE_TAB ? (
+              <PreSessionRoutineSection dateKey={day.dateKey} routine={routine} />
             ) : s.value === "todays-plan" ? (
               <TodaysPlanSection dateKey={day.dateKey} plan={todaysPlan} />
             ) : s.value === "trade-idea" ? (

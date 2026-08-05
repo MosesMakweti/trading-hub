@@ -44,18 +44,8 @@ export interface TradingDayDTO {
   archivedAt: string | null;
 }
 
-/** Morning Preparation section data (P3). The routine template comes from the
- *  user's PRE_SESSION_ROUTINE checklist; per-day state lives on TradingDay. */
-export interface MorningPrepDTO {
-  routineItems: { id: string; label: string }[];
-  completedIds: string[];
-  marketContext: unknown; // Tiptap JSON or null
-  readiness: number | null; // 1–5
-  prepComplete: boolean;
-}
-
-/** Today's Trading Plan section data (P4). The watchlist template comes from the
- *  user's Assets; the risk-limit hint from the Trading Plan; state on TradingDay. */
+/** Today's Trading Plan section data. The watchlist template comes from the
+ *  user's Assets; state on TradingDay. */
 export interface TodaysPlanDTO {
   assets: { id: string; symbol: string; label: string | null }[];
   bias: "BULLISH" | "BEARISH" | "NEUTRAL" | null;

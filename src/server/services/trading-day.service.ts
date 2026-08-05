@@ -3,7 +3,7 @@ import { Prisma, type TradingDay } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { isDayEditable } from "@/domain/today/archive";
-import type { MorningPrepInput, TodaysPlanInput } from "@/lib/validation/today";
+import type { TodaysPlanInput } from "@/lib/validation/today";
 import type { TradingDayDTO } from "@/types/today";
 
 /**
@@ -47,34 +47,7 @@ export async function assertDayEditable(userId: string, dateKey: string): Promis
 }
 
 /**
- * Applies a Morning Preparation patch to the user's day (P3). Ensures the day
- * exists first, then writes only the provided keys. `prepComplete` toggles the
- * day's prepCompletedAt so the workflow advances. userId-scoped via the
- * get-or-create.
- */
-export async function updateMorningPrep(
-  userId: string,
-  dateKey: string,
-  input: MorningPrepInput,
-): Promise<TradingDay> {
-  const day = await getOrCreateTradingDay(userId, dateKey);
-
-  const data: Prisma.TradingDayUpdateInput = {};
-  if ("routineCompletion" in input) {
-    data.routineCompletion = (input.routineCompletion ?? []) as Prisma.InputJsonValue;
-  }
-  if ("marketContext" in input) {
-    data.marketContext =
-      input.marketContext == null ? Prisma.DbNull : (input.marketContext as Prisma.InputJsonValue);
-  }
-  if ("readiness" in input) data.readiness = input.readiness ?? null;
-  if ("prepComplete" in input) data.prepCompletedAt = input.prepComplete ? new Date() : null;
-
-  return prisma.tradingDay.update({ where: { id: day.id }, data });
-}
-
-/**
- * Applies a Today's Trading Plan patch (P4) — mirrors updateMorningPrep.
+ * Applies a Today's Trading Plan patch.
  * `planComplete` toggles the day's planCompletedAt so the workflow advances.
  */
 export async function updateTodaysPlan(
