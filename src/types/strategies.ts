@@ -1,4 +1,18 @@
+import type { TagColor } from "@prisma/client";
+
 import type { StrategyStatusValue } from "@/lib/validation/strategies";
+
+/** A colored checklist tag (confluence / execution confirmation) as the trade form sees it. */
+export interface StrategyChecklistRef {
+  name: string;
+  color: TagColor;
+  category: string | null;
+  weight: number | null;
+}
+export interface StrategyTagRef {
+  name: string;
+  color: TagColor;
+}
 
 /** Serializable strategy shape passed from server components to client components. */
 export interface StrategyDTO {
@@ -98,6 +112,11 @@ export interface StrategyReferenceDTO {
   applicableAssets: string[];
   entryModels: string[]; // names, in order
   frameworkSteps: string[]; // step titles, in order
+  // SOT: the strategy's enabled sessions / confluences / execution confirmations —
+  // what the trade form offers to multi-select, and the "expected" set for adherence.
+  sessions: StrategyTagRef[];
+  confluences: StrategyChecklistRef[];
+  execution: StrategyChecklistRef[];
   tradeManagement: {
     maxRiskPercent: number | null;
     maxHoldingTime: string | null;

@@ -396,6 +396,16 @@ export async function getStrategyReference(userId: string, id: string) {
         orderBy: { sortOrder: "asc" },
         select: { title: true },
       },
+      sessions: {
+        where: { deletedAt: null, enabled: true },
+        orderBy: { sortOrder: "asc" },
+        select: { name: true, color: true },
+      },
+      checklistItems: {
+        where: { deletedAt: null, enabled: true },
+        orderBy: { sortOrder: "asc" },
+        select: { name: true, color: true, category: true, weight: true, kind: true },
+      },
       tradeManagement: {
         include: {
           customRules: {
@@ -421,6 +431,13 @@ export async function getStrategyReference(userId: string, id: string) {
     applicableAssets: s.applicableAssets,
     entryModels: s.entryModels.map((e) => e.name),
     frameworkSteps: s.frameworkSteps.map((f) => f.title),
+    sessions: s.sessions.map((x) => ({ name: x.name, color: x.color })),
+    confluences: s.checklistItems
+      .filter((c) => c.kind === "CONFLUENCE")
+      .map((c) => ({ name: c.name, color: c.color, category: c.category, weight: c.weight })),
+    execution: s.checklistItems
+      .filter((c) => c.kind === "EXECUTION")
+      .map((c) => ({ name: c.name, color: c.color, category: c.category, weight: c.weight })),
     tradeManagement: s.tradeManagement
       ? {
           maxRiskPercent: s.tradeManagement.maxRiskPercent

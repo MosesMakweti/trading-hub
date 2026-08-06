@@ -97,6 +97,11 @@ time) be computed without another migration. The old `TradeChecklistSelection` /
 ## Roadmap
 
 ```
+NOTE — re-sequenced: **P4 (trade form) must precede P3 (remove Trade Setup)**. Removing the global
+Trade Setup editors before the trade form stops reading the globals would leave new users with
+empty asset/session/confluence/execution dropdowns (broken trade creation). So the order is now
+P4 → P3.
+
 P0  Tracker + design (this doc) ......................... ▶ in progress
 P1  Additive data model + migration (new models, Trade
     fields; nothing removed) ............................ ⭘ next
@@ -149,5 +154,18 @@ workspace as three new tabs (Sessions / Confluences / Execution) + loaded in `[s
 Verified: tsc + eslint + impeccable detector clean; 176 tests (no domain logic touched). **Live
 screenshot not captured** — the register→create-strategy→workspace authed flow exceeds the box's
 time budget; verified statically. **Deferred:** including sessions/checklist in the
-`StrategyVersion` snapshot (versions are a future integration — do it before P9). Next: P3 remove
-Trade Setup.
+`StrategyVersion` snapshot (versions are a future integration — do it before P9).
+
+### P4a — Strategy reference carries sessions/confluences/execution ✅
+Re-sequenced P4 ahead of P3 (see NOTE above). Foundation for the trade-form rewire: extended
+`getStrategyReference` + `StrategyReferenceDTO` to include the strategy's **enabled** `sessions`
+(name+color), `confluences`, and `execution` (name+color+category+weight) — the exact data the
+trade form will multi-select and snapshot as the "expected" set. Additive & safe (nothing consumes
+it yet). tsc + eslint clean.
+
+### P4b — Trade form rewire (NEXT, the crux)
+Rewire Add Trade: pick strategy → multi-select its sessions/confluences/execution (colored tags) →
+store `selected*` + `strategyExecutionSnapshot` (expected set) + `assetSymbol` (from the strategy's
+markets), while bridging the old `assetId` FK via find-or-create so analytics-by-asset keep working
+until P9. This touches the core trade-creation flow + display; do it carefully (hard to visually
+verify on this box). Then P3 (remove Trade Setup) becomes safe.
