@@ -36,6 +36,8 @@ model User {
   strategies      Strategy[]
   routineSections RoutineSection[]
   routineItems    RoutineItem[]
+  strategySessions      StrategySession[]
+  strategyChecklistItems StrategyChecklistItem[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -392,6 +394,22 @@ model Trade {
   status                   TradeStatus @default(OPEN)
   adherenceAnswers         Json?
   adherencePercent         Float?
+
+  // Strategy = single source of truth (SOT refactor). assetSymbol denormalizes the
+  // market (backfilled from asset.symbol; becomes the source once the Asset FK drops
+  // in P9). strategyExecutionSnapshot freezes the strategy's EXPECTED sessions/
+  // confluences/execution that day; selected* record what was actually present.
+  // *Percent are denormalized adherence scores (selected/expected) for analytics —
+  // NOT market predictions. All nullable/additive; old FKs stay until P9.
+  assetSymbol               String?
+  strategyExecutionSnapshot Json?
+  selectedSession           String?
+  selectedConfluences       Json?
+  selectedExecution         Json?
+  confluencePercent         Float?
+  executionPercent          Float?
+  tradeQualityPercent       Float?
+
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   deletedAt                DateTime?
@@ -550,6 +568,25 @@ enum StrategyStatus {
   ARCHIVED
 }
 
+// Shared tag palette (Notion-style) for colored chips across the app — confluences,
+// execution confirmations, sessions, and future tag-based properties. Rendered by
+// one Tag component so a color reads consistently everywhere.
+enum TagColor {
+  GRAY
+  BLUE
+  GREEN
+  AMBER
+  RED
+  PURPLE
+  YELLOW
+  TEAL
+}
+
+enum StrategyChecklistKind {
+  CONFLUENCE
+  EXECUTION
+}
+
 model Strategy {
   id     String @id @default(cuid())
   userId String
@@ -580,6 +617,8 @@ model Strategy {
   timeframes      StrategyTimeframe[]      // Section 3 — Timeframe workspace (each has checkpoints)
   entryModels     StrategyEntryModel[]     // Section 4 — Entry Models
   tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (1:1 + partial TPs, custom rules)
+  sessions        StrategySession[]        // Section — Trading Sessions (SOT refactor)
+  checklistItems  StrategyChecklistItem[]  // Sections — Confluences + Execution Confirmations (SOT)
   // Journal link: a trade references a strategy (not a copy). onDelete: SetNull
   // on the Trade side keeps completed trades (with their snapshots) intact.
   trades          Trade[]
@@ -747,6 +786,57 @@ model StrategyTradeManagement {
 
   partialTakeProfits PartialTakeProfit[]
   customRules        TradeManagementRule[]
+}
+
+// Strategy Lab — Confluences + Execution Confirmations (unified, kind-discriminated).
+// Rich, colored tag objects owned by a strategy: a trade taken under the strategy
+// picks from these, and adherence is scored against the enabled set. Replaces the
+// global ChecklistItemDefinition(CONFLUENCE|EXECUTION) — dropped in P9.
+model StrategyChecklistItem {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  kind        StrategyChecklistKind
+  name        String
+  color       TagColor @default(GRAY)
+  icon        String? // optional lucide icon name
+  category    String?
+  description String?
+  weight      Int? // optional probability weight (future scoring)
+  enabled     Boolean  @default(true)
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId, strategyId, kind, sortOrder])
+}
+
+// Strategy Lab — Trading Sessions owned by a strategy (colored). Replaces the global
+// TradingSession — dropped in P9.
+model StrategySession {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  name         String
+  color        TagColor @default(GRAY)
+  startMinutes Int? // minutes-since-midnight, optional
+  endMinutes   Int?
+  enabled      Boolean  @default(true)
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId, strategyId, sortOrder])
 }
 
 // A partial take-profit level (unlimited per trade-management record).
