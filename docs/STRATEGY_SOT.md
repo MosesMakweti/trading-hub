@@ -107,9 +107,9 @@ P1  Additive data model + migration (new models, Trade
     fields; nothing removed) ............................ ⭘ next
 P2  Strategy Lab: Sessions / Confluences / Execution
     editors (rich, colored) + snapshot .................. ⭘
-P3  Remove Trade Setup page + global editors; nav ....... ⭘
-P4  Trade form: strategy-driven, multi-select ........... ⭘
-P5  Adherence & trade-quality scoring (pure, tested) .... ⭘
+P4  Trade form: strategy-driven, multi-select ........... ✅ (P4a + P4b)
+P5  Adherence & trade-quality scoring (pure, tested) .... ✅ (scorer built + 5 tests)
+P3  Remove Trade Setup page + global editors; nav ....... ⭘ next
 P6  Display scores across the app ....................... ⭘
 P7  Colored Tag system everywhere + broader accents ..... ⭘
 P8  Analytics foundations ............................... ⭘
@@ -163,9 +163,34 @@ Re-sequenced P4 ahead of P3 (see NOTE above). Foundation for the trade-form rewi
 trade form will multi-select and snapshot as the "expected" set. Additive & safe (nothing consumes
 it yet). tsc + eslint clean.
 
-### P4b — Trade form rewire (NEXT, the crux)
-Rewire Add Trade: pick strategy → multi-select its sessions/confluences/execution (colored tags) →
-store `selected*` + `strategyExecutionSnapshot` (expected set) + `assetSymbol` (from the strategy's
-markets), while bridging the old `assetId` FK via find-or-create so analytics-by-asset keep working
-until P9. This touches the core trade-creation flow + display; do it carefully (hard to visually
-verify on this box). Then P3 (remove Trade Setup) becomes safe.
+### P4b — Trade form rewire ✅
+Add Trade is now strategy-driven. Picking a strategy loads its **enabled** confluences + execution
+confirmations as **colored, multi-select** tag groups (new `StrategyTagSelect`, sourced from the
+`strategyReference` already fetched for the form); the two old global `TagToggleGroup`s (which both
+wrote the single `checklistItemIds` field) are gone. The form stores `selectedConfluences` /
+`selectedExecution` as **name arrays**. `tradeSchema` swapped `checklistItemIds` → those two fields.
+
+Save layer (`trades.service.ts` → `buildStrategyExecution`): freezes the strategy's expected set into
+`strategyExecutionSnapshot` (kept across an edit while the strategy selection is unchanged, re-fetched
+otherwise), stores the selected names, and scores adherence via the pure
+`scoreStrategyAdherence` (P5 scorer, already tested) into `confluencePercent` / `executionPercent` /
+`tradeQualityPercent`. Colors are **not** duplicated onto the selections — they're resolved at render
+time from the snapshot's expected set (single source, compact record).
+
+Wiring: `new` + `edit` pages drop the confluence/execution props; edit defaults read the new name
+arrays (old trades start empty — re-picked from the strategy on edit). Display/export
+(`trade-workspace.mapper.ts`, `export.service.ts`) read `selected*` with a **fallback to the legacy
+`checklistSelections` join** for pre-SOT trades. Import passes CSV labels straight through as names
+(dropped the global-checklist resolvers). `TagToggleGroup` now types `name: "entryModelIds"` only.
+
+Verified: **tsc + eslint clean; 181 tests green** (5 new scorer tests). App compiles + runs.
+
+**Deferred out of P4b (by design):**
+- `assetSymbol` write-time denormalization → **folded into P9**, which backfills `assetSymbol` from
+  `asset.symbol` for all trades wholesale. New trades keep the working global `assetId` FK meanwhile.
+- Analytics' old process-adherence metric (`analytics.service.ts`, built from the global
+  execution-confirmation join + `executionItemCount`) still reads the legacy join, so it reads 0 for
+  new SOT trades. **Migrating it onto the new `executionPercent` column is P8.** The separate
+  8-question `adherencePercent` is unaffected.
+- Colored rendering of the selected tags + the adherence scores across the app is **P6** (the mapper
+  currently returns plain `string[]` labels; colors come from the snapshot there).

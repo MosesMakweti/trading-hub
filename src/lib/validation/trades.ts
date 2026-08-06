@@ -41,7 +41,10 @@ export const tradeSchema = z
     // Additional participating accounts beyond the Performance Account —
     // may be empty (a trade can affect only the Performance Account).
     allocations: z.array(tradeAllocationSchema).default([]),
-    checklistItemIds: z.array(z.string()).default([]),
+    // SOT: confluences + execution confirmations selected from the chosen strategy,
+    // by name. The save layer freezes the strategy's expected set and scores adherence.
+    selectedConfluences: z.array(z.string()).default([]),
+    selectedExecution: z.array(z.string()).default([]),
     entryModelIds: z.array(z.string()).default([]),
     psychologyAnswers: psychologyAnswersSchema,
   })

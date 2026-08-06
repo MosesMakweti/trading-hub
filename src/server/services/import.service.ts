@@ -80,31 +80,9 @@ export async function importTrades(
       return prisma.entryModel.create({ data: { userId, name, sortOrder: (last?.sortOrder ?? -1) + 1 } });
     },
   );
-  const resolveConfluence = makeResolver(
-    (label) => prisma.checklistItemDefinition.findFirst({ where: { userId, label, type: "CONFLUENCE" } }),
-    async (label) => {
-      const last = await prisma.checklistItemDefinition.findFirst({
-        where: { userId, type: "CONFLUENCE" },
-        orderBy: { sortOrder: "desc" },
-      });
-      return prisma.checklistItemDefinition.create({
-        data: { userId, label, type: "CONFLUENCE", sortOrder: (last?.sortOrder ?? -1) + 1 },
-      });
-    },
-  );
-  const resolveExecutionItem = makeResolver(
-    (label) =>
-      prisma.checklistItemDefinition.findFirst({ where: { userId, label, type: "EXECUTION_CONFIRMATION" } }),
-    async (label) => {
-      const last = await prisma.checklistItemDefinition.findFirst({
-        where: { userId, type: "EXECUTION_CONFIRMATION" },
-        orderBy: { sortOrder: "desc" },
-      });
-      return prisma.checklistItemDefinition.create({
-        data: { userId, label, type: "EXECUTION_CONFIRMATION", sortOrder: (last?.sortOrder ?? -1) + 1 },
-      });
-    },
-  );
+  // SOT: confluences / execution confirmations are now stored on the trade by
+  // name (frozen from the strategy), so imports pass the CSV labels straight
+  // through instead of resolving them into the (legacy) global checklist tables.
 
   const rows: ImportRowResult[] = [];
 
@@ -118,11 +96,9 @@ export async function importTrades(
     }
 
     try {
-      const [asset, entryModels, confluenceItems, executionItems] = await Promise.all([
+      const [asset, entryModels] = await Promise.all([
         resolveAsset(record.assetSymbol),
         Promise.all(record.entryModelNames.map(resolveEntryModel)),
-        Promise.all(record.confluenceLabels.map(resolveConfluence)),
-        Promise.all(record.executionLabels.map(resolveExecutionItem)),
       ]);
 
       const session = record.sessionName
@@ -161,7 +137,8 @@ export async function importTrades(
           riskInputType: a.riskInputType,
           riskValue: a.riskValue,
         })),
-        checklistItemIds: [...confluenceItems, ...executionItems].map((c) => c.id),
+        selectedConfluences: record.confluenceLabels,
+        selectedExecution: record.executionLabels,
         entryModelIds: entryModels.map((m) => m.id),
         psychologyAnswers: record.psychologyAnswers,
       };

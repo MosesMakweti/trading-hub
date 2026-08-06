@@ -24,8 +24,7 @@ export default async function EditTradePage({
   ]);
   if (!trade) notFound();
 
-  const { accounts, assets, sessions, entryModels, confluenceItems, executionItems, strategies } =
-    options;
+  const { accounts, assets, sessions, entryModels, strategies } = options;
 
   // The options list is non-archived only; if this trade is still linked to a
   // strategy that's since been archived (or soft-deleted), add it back so the
@@ -73,7 +72,11 @@ export default async function EditTradePage({
       riskInputType: a.riskInputType,
       riskValue: a.riskValue.toNumber(),
     })),
-    checklistItemIds: trade.checklistSelections.map((c) => c.checklistItemId),
+    // SOT: selections are stored by name (from the chosen strategy). Old trades
+    // predating the strategy-scoped model have no names yet — start empty; the
+    // trader re-picks from the strategy's live confluences/execution on edit.
+    selectedConfluences: (trade.selectedConfluences as string[] | null) ?? [],
+    selectedExecution: (trade.selectedExecution as string[] | null) ?? [],
     entryModelIds: trade.entryModels.map((m) => m.entryModelId),
     psychologyAnswers: (trade.psychology?.answers as Record<string, string | number>) ?? {},
   };
@@ -103,8 +106,6 @@ export default async function EditTradePage({
         assets={assets.map((a) => ({ id: a.id, symbol: a.symbol, label: a.label }))}
         sessions={sessions.map((s) => ({ id: s.id, name: s.name }))}
         entryModels={entryModels.map((m) => ({ id: m.id, name: m.name }))}
-        confluenceItems={confluenceItems.map((c) => ({ id: c.id, label: c.label }))}
-        executionItems={executionItems.map((c) => ({ id: c.id, label: c.label }))}
         strategies={formStrategies}
         defaultValues={defaultValues}
       />

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { TradeAccountRow } from "@/components/journal/trade-account-row";
 import { TagToggleGroup } from "@/components/journal/tag-toggle-group";
+import { StrategyTagSelect } from "@/components/journal/strategy-tag-select";
 import { PsychologyQuestionnaire } from "@/components/journal/psychology-questionnaire";
 import { StrategyReferencePanel } from "@/components/journal/strategy-reference-panel";
 import { minutesToTimeString, timeStringToMinutes } from "@/lib/date";
@@ -52,7 +53,8 @@ const emptyDefaults: TradeFormValues = {
   psychLessonsLearned: null,
   psychWhatToWorkOn: null,
   allocations: [],
-  checklistItemIds: [],
+  selectedConfluences: [],
+  selectedExecution: [],
   entryModelIds: [],
   psychologyAnswers: {},
 };
@@ -65,8 +67,6 @@ interface TradeFormProps {
   assets: { id: string; symbol: string; label: string | null }[];
   sessions: { id: string; name: string }[];
   entryModels: { id: string; name: string }[];
-  confluenceItems: { id: string; label: string }[];
-  executionItems: { id: string; label: string }[];
   strategies: { id: string; name: string; version: number; archived?: boolean }[];
   defaultValues?: TradeFormValues;
 }
@@ -79,8 +79,6 @@ export function TradeForm({
   assets,
   sessions,
   entryModels,
-  confluenceItems,
-  executionItems,
   strategies,
   defaultValues,
 }: TradeFormProps) {
@@ -429,21 +427,29 @@ export function TradeForm({
 
       <section className="glass space-y-2 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Confluences</h2>
-        <TagToggleGroup
+        <StrategyTagSelect
           control={control}
-          name="checklistItemIds"
-          items={confluenceItems}
-          emptyLabel="No confluences configured yet — add them in Settings > Trade Setup."
+          name="selectedConfluences"
+          options={strategyReference?.confluences ?? []}
+          emptyLabel={
+            selectedStrategyId
+              ? "This strategy has no confluences yet — add them in Strategy Lab > Confluences."
+              : "Select a strategy to load its confluences."
+          }
         />
       </section>
 
       <section className="glass space-y-2 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Execution Confirmation</h2>
-        <TagToggleGroup
+        <StrategyTagSelect
           control={control}
-          name="checklistItemIds"
-          items={executionItems}
-          emptyLabel="No execution-confirmation items configured yet — add them in Settings > Trade Setup."
+          name="selectedExecution"
+          options={strategyReference?.execution ?? []}
+          emptyLabel={
+            selectedStrategyId
+              ? "This strategy has no execution confirmations yet — add them in Strategy Lab > Execution."
+              : "Select a strategy to load its execution confirmations."
+          }
         />
       </section>
 

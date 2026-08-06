@@ -56,12 +56,18 @@ export async function listTradeExportRecords(
         riskInputType: a.riskInputType,
         riskValue: a.riskValue.toNumber(),
       })),
-      confluenceLabels: t.checklistSelections
-        .filter((c) => c.checklistItem.type === "CONFLUENCE")
-        .map((c) => c.checklistItem.label),
-      executionLabels: t.checklistSelections
-        .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
-        .map((c) => c.checklistItem.label),
+      // SOT: prefer the by-name selections frozen on the trade; fall back to the
+      // legacy global-checklist join for trades created before the strategy model.
+      confluenceLabels:
+        (t.selectedConfluences as string[] | null) ??
+        t.checklistSelections
+          .filter((c) => c.checklistItem.type === "CONFLUENCE")
+          .map((c) => c.checklistItem.label),
+      executionLabels:
+        (t.selectedExecution as string[] | null) ??
+        t.checklistSelections
+          .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
+          .map((c) => c.checklistItem.label),
       entryModelNames: t.entryModels.map((m) => m.entryModel.name),
     };
 

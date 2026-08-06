@@ -12,7 +12,7 @@ export function TagToggleGroup({
   emptyLabel,
 }: {
   control: Control<TradeFormValues>;
-  name: "checklistItemIds" | "entryModelIds";
+  name: "entryModelIds";
   items: { id: string; label: string }[];
   emptyLabel: string;
 }) {
