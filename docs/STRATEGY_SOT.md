@@ -135,4 +135,19 @@ relations. Trade gained `assetSymbol`, `strategyExecutionSnapshot`, `selectedSes
 `tradeQualityPercent` (all nullable). Migration `20260805040000_strategy_sot_additive` (create
 enums/tables/columns + **backfill `assetSymbol` from `asset.symbol`**); client regenerated.
 Verified: tsc + eslint clean, 176 tests green. No UI/logic uses the new fields yet (P2+). Old
-global Asset/Session/Checklist + Trade FKs untouched (dropped in P9). Next: P2 Strategy Lab editors.
+global Asset/Session/Checklist + Trade FKs untouched (dropped in P9).
+
+### P2 — Strategy Lab editors ✅
+The new strategy-scoped models get their UI. Reusable **`Tag`** primitive + `TAG_STYLES` palette
+(`components/ui/tag.tsx`) — full static Tailwind color classes, theme-aware; the backbone for P7.
+`ColorPicker` (Base UI Select of swatches). Service `strategy-sot.service.ts` + actions
+`strategy-sot.actions.ts` + validation `strategy-sot.ts` (CRUD + reorder, userId + strategy-scoped,
+explicit `deletedAt` filters). Editors: **`StrategyChecklistSection`** (kind-parameterized — reused
+for Confluences + Execution; rich form: name, color, category, weight, description, enable/disable)
+and **`StrategySessionsSection`** (name, color, time range, enable/disable). Wired into the strategy
+workspace as three new tabs (Sessions / Confluences / Execution) + loaded in `[strategyId]/page.tsx`.
+Verified: tsc + eslint + impeccable detector clean; 176 tests (no domain logic touched). **Live
+screenshot not captured** — the register→create-strategy→workspace authed flow exceeds the box's
+time budget; verified statically. **Deferred:** including sessions/checklist in the
+`StrategyVersion` snapshot (versions are a future integration — do it before P9). Next: P3 remove
+Trade Setup.

@@ -8,8 +8,11 @@ import { listTimeframes } from "@/server/services/timeframes.service";
 import { listEntryModels } from "@/server/services/strategy-entry-models.service";
 import { getOrCreateTradeManagement } from "@/server/services/strategy-trade-management.service";
 import { getStrategyPerformance } from "@/server/services/analytics.service";
+import { listStrategyChecklist, listStrategySessions } from "@/server/services/strategy-sot.service";
 import { FadeIn } from "@/components/shared/motion";
 import { StrategyWorkspace } from "@/components/strategy-lab/strategy-workspace";
+import type { StrategyChecklistItemDTO } from "@/components/strategy-lab/sot/strategy-checklist-section";
+import type { StrategySessionDTO } from "@/components/strategy-lab/sot/strategy-sessions-section";
 import type {
   ArsenalConceptDTO,
   EntryModelDTO,
@@ -29,16 +32,49 @@ export default async function StrategyWorkspacePage({
   const strategy = await getStrategy(user.id, strategyId);
   if (!strategy) notFound();
 
-  const [concepts, steps, timeframes, entryModels, tradeManagement, performance, versions] =
-    await Promise.all([
-      listArsenalConcepts(user.id, strategyId),
-      listFrameworkSteps(user.id, strategyId),
-      listTimeframes(user.id, strategyId),
-      listEntryModels(user.id, strategyId),
-      getOrCreateTradeManagement(user.id, strategyId),
-      getStrategyPerformance(user.id, strategyId),
-      listStrategyVersions(user.id, strategyId),
-    ]);
+  const [
+    concepts,
+    steps,
+    timeframes,
+    entryModels,
+    tradeManagement,
+    performance,
+    versions,
+    sessionRows,
+    confluenceRows,
+    executionRows,
+  ] = await Promise.all([
+    listArsenalConcepts(user.id, strategyId),
+    listFrameworkSteps(user.id, strategyId),
+    listTimeframes(user.id, strategyId),
+    listEntryModels(user.id, strategyId),
+    getOrCreateTradeManagement(user.id, strategyId),
+    getStrategyPerformance(user.id, strategyId),
+    listStrategyVersions(user.id, strategyId),
+    listStrategySessions(user.id, strategyId),
+    listStrategyChecklist(user.id, strategyId, "CONFLUENCE"),
+    listStrategyChecklist(user.id, strategyId, "EXECUTION"),
+  ]);
+
+  const sessions: StrategySessionDTO[] = sessionRows.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+    startMinutes: s.startMinutes,
+    endMinutes: s.endMinutes,
+    enabled: s.enabled,
+  }));
+  const toChecklistDto = (r: (typeof confluenceRows)[number]): StrategyChecklistItemDTO => ({
+    id: r.id,
+    name: r.name,
+    color: r.color,
+    category: r.category,
+    description: r.description,
+    weight: r.weight,
+    enabled: r.enabled,
+  });
+  const confluences = confluenceRows.map(toChecklistDto);
+  const execution = executionRows.map(toChecklistDto);
 
   const dto: StrategyDTO = {
     id: strategy.id,
@@ -124,6 +160,9 @@ export default async function StrategyWorkspacePage({
         tradeManagement={tradeManagementDto}
         performance={performance}
         versions={versions}
+        sessions={sessions}
+        confluences={confluences}
+        execution={execution}
       />
     </FadeIn>
   );

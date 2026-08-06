@@ -5,13 +5,16 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   Boxes,
+  CalendarClock,
   ChevronLeft,
+  ClipboardCheck,
   Clock,
   Crosshair,
   GitCommitVertical,
   LineChart,
   ListOrdered,
   Settings2,
+  Sparkles,
   SlidersHorizontal,
 } from "lucide-react";
 
@@ -29,6 +32,14 @@ import { EntryModelsSection } from "@/components/strategy-lab/entry-models-secti
 import { TradeManagementSection } from "@/components/strategy-lab/trade-management-section";
 import { StrategyPerformanceSection } from "@/components/strategy-lab/strategy-performance-section";
 import { StrategyVersionsSection } from "@/components/strategy-lab/strategy-versions-section";
+import {
+  StrategyChecklistSection,
+  type StrategyChecklistItemDTO,
+} from "@/components/strategy-lab/sot/strategy-checklist-section";
+import {
+  StrategySessionsSection,
+  type StrategySessionDTO,
+} from "@/components/strategy-lab/sot/strategy-sessions-section";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { updateStrategySettings } from "@/actions/strategies.actions";
 import type { StrategyPerformanceSummary } from "@/domain/performance/strategy-performance";
@@ -95,6 +106,30 @@ const SECTIONS = [
     ],
   },
   {
+    value: "sessions",
+    label: "Sessions",
+    icon: CalendarClock,
+    phase: "SOT",
+    description: "The market sessions you trade this strategy in.",
+    plannedFeatures: [],
+  },
+  {
+    value: "confluences",
+    label: "Confluences",
+    icon: Sparkles,
+    phase: "SOT",
+    description: "The confluences this strategy looks for — colored, weighted, reusable.",
+    plannedFeatures: [],
+  },
+  {
+    value: "execution",
+    label: "Execution",
+    icon: ClipboardCheck,
+    phase: "SOT",
+    description: "The execution confirmations required before entry.",
+    plannedFeatures: [],
+  },
+  {
     value: "trade-management",
     label: "Trade Management",
     icon: SlidersHorizontal,
@@ -117,6 +152,9 @@ export function StrategyWorkspace({
   tradeManagement,
   performance,
   versions,
+  sessions,
+  confluences,
+  execution,
 }: {
   strategy: StrategyDTO;
   arsenalConcepts: ArsenalConceptDTO[];
@@ -126,6 +164,9 @@ export function StrategyWorkspace({
   tradeManagement: TradeManagementDTO;
   performance: StrategyPerformanceSummary;
   versions: StrategyVersionDTO[];
+  sessions: StrategySessionDTO[];
+  confluences: StrategyChecklistItemDTO[];
+  execution: StrategyChecklistItemDTO[];
 }) {
   const [settings, setSettings] = useState<StrategySettingsState>({
     name: strategy.name,
@@ -238,9 +279,20 @@ export function StrategyWorkspace({
           <EntryModelsSection strategyId={strategy.id} initialModels={entryModels} />
         </TabsContent>
 
-        {/* Section 5 — Trade Management is live (Phase 6). All sections now live. */}
+        {/* Section 5 — Trade Management is live (Phase 6). */}
         <TabsContent value="trade-management" className="mt-4">
           <TradeManagementSection strategyId={strategy.id} tradeManagement={tradeManagement} />
+        </TabsContent>
+
+        {/* SOT refactor — sessions / confluences / execution now live inside the strategy. */}
+        <TabsContent value="sessions" className="mt-4">
+          <StrategySessionsSection strategyId={strategy.id} initialSessions={sessions} />
+        </TabsContent>
+        <TabsContent value="confluences" className="mt-4">
+          <StrategyChecklistSection strategyId={strategy.id} kind="CONFLUENCE" initialItems={confluences} />
+        </TabsContent>
+        <TabsContent value="execution" className="mt-4">
+          <StrategyChecklistSection strategyId={strategy.id} kind="EXECUTION" initialItems={execution} />
         </TabsContent>
       </Tabs>
     </div>
