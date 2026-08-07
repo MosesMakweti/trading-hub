@@ -9,7 +9,7 @@ import { SquareArrowOutUpRight, Target, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { minutesToTimeString } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
-import { Tag } from "@/components/ui/tag";
+import { Tag, colorForName } from "@/components/ui/tag";
 import { TradeQualityBadge } from "@/components/journal/adherence-score";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -134,9 +134,9 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
             </Badge>
           ))}
           {trade.entryModelNames.map((label) => (
-            <Badge key={label} variant="outline">
+            <Tag key={`m-${label}`} color={colorForName(label)}>
               {label}
-            </Badge>
+            </Tag>
           ))}
           {trade.confluenceLabels.map((tag) => (
             <Tag key={`c-${tag.name}`} color={tag.color}>

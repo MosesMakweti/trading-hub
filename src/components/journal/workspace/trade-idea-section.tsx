@@ -1,4 +1,4 @@
-import { Tag } from "@/components/ui/tag";
+import { Tag, colorForName } from "@/components/ui/tag";
 import { AdherenceMeter } from "@/components/journal/adherence-score";
 import {
   NoteBlock,
@@ -36,10 +36,30 @@ export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
         />
         <WorkspaceField
           label="Entry model"
-          value={trade.entryModelNames.length ? trade.entryModelNames.join(", ") : undefined}
+          value={
+            trade.entryModelNames.length ? (
+              <div className="flex flex-wrap gap-1">
+                {trade.entryModelNames.map((name) => (
+                  <Tag key={name} color={colorForName(name)}>
+                    {name}
+                  </Tag>
+                ))}
+              </div>
+            ) : undefined
+          }
           placeholder="None"
         />
-        <WorkspaceField label="Session" value={trade.sessionName} placeholder="No session" />
+        <WorkspaceField
+          label="Session"
+          value={
+            trade.sessionName ? (
+              <Tag color={trade.sessionColor ?? colorForName(trade.sessionName)}>
+                {trade.sessionName}
+              </Tag>
+            ) : undefined
+          }
+          placeholder="No session"
+        />
         <WorkspaceField
           label="Higher-timeframe bias"
           value={`${trade.higherTimeframeBias === "BULLISH" ? "Bullish" : "Bearish"} · ${trade.biasConfidencePercent}%`}

@@ -18,6 +18,18 @@ export const TAG_STYLES: Record<TagColor, { chip: string; dot: string; label: st
 
 export const TAG_COLORS = Object.keys(TAG_STYLES) as TagColor[];
 
+// Vivid subset (GRAY reserved for "neutral / none") used to give a stable color
+// to tag-like properties that carry no explicitly-assigned color — assets,
+// timeframes, concepts, entry models, etc. The same name always maps to the same
+// hue, so a symbol like "NQ" looks identical everywhere it appears.
+const VIVID_COLORS: TagColor[] = ["BLUE", "GREEN", "AMBER", "RED", "PURPLE", "YELLOW", "TEAL"];
+
+export function colorForName(name: string): TagColor {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return VIVID_COLORS[hash % VIVID_COLORS.length];
+}
+
 /** A colored pill: a dot + label. `muted` dims a disabled tag. */
 export function Tag({
   color,

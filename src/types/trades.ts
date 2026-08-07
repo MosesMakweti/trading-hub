@@ -85,6 +85,7 @@ export interface TradeWorkspaceDTO {
   direction: "LONG" | "SHORT";
   executionMinutes: number;
   sessionName: string | null;
+  sessionColor: TagColor | null; // the session's assigned color (from the strategy snapshot)
   higherTimeframeBias: "BULLISH" | "BEARISH";
   biasConfidencePercent: number;
 

@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Tag, colorForName } from "@/components/ui/tag";
 import type { StrategyReferenceDTO } from "@/types/strategies";
 
 function ChipRow({ label, items }: { label: string; items: string[] }) {
@@ -10,9 +11,9 @@ function ChipRow({ label, items }: { label: string; items: string[] }) {
       {items.length ? (
         <div className="flex flex-wrap gap-1.5">
           {items.map((item) => (
-            <Badge key={item} variant="outline">
+            <Tag key={item} color={colorForName(item)}>
               {item}
-            </Badge>
+            </Tag>
           ))}
         </div>
       ) : (

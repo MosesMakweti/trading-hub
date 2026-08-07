@@ -112,8 +112,8 @@ P4c Strategy-source asset+session; delete Trade Setup .... ✅ (require strategy
 P5  Adherence & trade-quality scoring (pure, tested) .... ✅ (scorer built + 5 tests)
 P6  Display scores + colored selected tags .............. ✅
 P3  Remove global confluence/execution editors .......... ✅ (asset/session editors now gone too)
-P7  Colored Tag system everywhere + broader accents ..... ⭘ next
-P8  Analytics foundations ............................... ⭘
+P7  Colored Tag system everywhere + broader accents ..... ✅
+P8  Analytics foundations ............................... ⭘ next
 P9  Full migration: backfill assetSymbol; drop Asset/
     TradingSession/ChecklistItemDefinition + assetId/
     sessionId/watchlistFocus; delete dead read services ... ⭘
@@ -274,3 +274,20 @@ also rode the global Asset list) is **dropped**.
   still read live tables → removed **with the tables in P9**.
 
 Verified: **tsc + eslint clean; 181 tests green**. Static verification (authed screenshots time out).
+
+### P7 — Colored Tag system everywhere ✅
+No more plain monochrome badges for tag-like properties. Added `colorForName(name)` to
+`components/ui/tag.tsx` — a deterministic hash into the 7 vivid palette colors (GRAY reserved for
+neutral/none), so a value like `NQ` gets the same hue everywhere. Confluences / execution / sessions
+keep their **explicitly assigned** colors; free-text properties (assets, entry models, timeframes,
+concepts) derive a stable color from the name.
+
+Applied colored `Tag`s to: the Add-Trade **Strategy reference panel** (applicable assets + entry
+models), the **trade card** (entry models — confluences/execution/quality already colored in P6), the
+workspace **Idea** section (entry models + session, session using its assigned color) and **Header**
+(asset + session), the Strategy Lab **asset-tag-input** (Settings `applicableAssets` chips) and
+**strategy card** asset chips. `TradeWorkspaceDTO` gained `sessionColor` (resolved from the frozen
+snapshot's sessions) so the session tag shows its real strategy color, falling back to `colorForName`.
+
+Verified: **tsc + eslint clean; 181 tests green**. Remaining minor surfaces (timeframe / arsenal-concept
+editor cards are structured editors, not badges) are left as **P10** polish.

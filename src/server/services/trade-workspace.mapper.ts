@@ -15,6 +15,12 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
   // SOT: selections are stored by name on the trade and colored from the frozen
   // strategy snapshot; pre-SOT trades fall back to the legacy global-checklist join.
   const snapshot = executionSnapshot(trade.strategyExecutionSnapshot);
+  const sessionName = trade.selectedSession ?? trade.session?.name ?? null;
+  const sessionColor =
+    (sessionName &&
+      (snapshot.sessions?.find((s) => s.name.toLowerCase() === sessionName.toLowerCase())
+        ?.color as TradeWorkspaceDTO["sessionColor"])) ||
+    null;
 
   return {
     id: trade.id,
@@ -26,7 +32,8 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     assetLabel: trade.asset.label,
     direction: trade.direction,
     executionMinutes: trade.executionMinutes,
-    sessionName: trade.selectedSession ?? trade.session?.name ?? null,
+    sessionName,
+    sessionColor,
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
     expectedRR: trade.expectedRR.toNumber(),
