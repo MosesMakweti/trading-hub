@@ -21,7 +21,13 @@ export function TradingAnalytics({ data }: { data: TradingData }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <KpiCard label="Win Rate" value={fmtPercent(data.winRate)} spark={data.winRateSeries} sparkTone="brand" />
+        <KpiCard
+          label="Win Rate"
+          value={fmtPercent(data.winRate)}
+          count={data.winRate == null ? undefined : { value: data.winRate, decimals: 1, suffix: "%" }}
+          spark={data.winRateSeries}
+          sparkTone="brand"
+        />
         <KpiCard label="Average RR" value={fmtRR(data.averageRR)} />
         <KpiCard label="Rule Adherence" value={fmtPercent(data.ruleAdherenceAverage)} />
         <KpiCard

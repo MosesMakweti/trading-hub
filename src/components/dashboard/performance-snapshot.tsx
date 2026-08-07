@@ -52,11 +52,17 @@ export function PerformanceSnapshot({
         <KpiCard
           label="Win rate"
           value={winRate == null ? "—" : `${winRate.toFixed(1)}%`}
+          count={winRate == null ? undefined : { value: winRate, decimals: 1, suffix: "%" }}
           icon={Activity}
           spark={winRateSeries}
           sparkTone="brand"
         />
-        <KpiCard label="Total trades" value={String(totalTrades)} icon={Hash} />
+        <KpiCard
+          label="Total trades"
+          value={String(totalTrades)}
+          count={{ value: totalTrades, grouping: true }}
+          icon={Hash}
+        />
         <KpiCard
           label="Best account"
           value={bestAccount?.name ?? "—"}

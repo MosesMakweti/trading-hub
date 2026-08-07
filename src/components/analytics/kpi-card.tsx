@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DeltaChip } from "@/components/analytics/delta-chip";
 import { Sparkline } from "@/components/analytics/sparkline";
+import { CountUp, type CountUpConfig } from "@/components/analytics/count-up";
 
 /**
  * KpiCard — a metric-with-context tile: headline number plus optional
@@ -13,6 +14,7 @@ import { Sparkline } from "@/components/analytics/sparkline";
 export function KpiCard({
   label,
   value,
+  count,
   sublabel,
   tone = "neutral",
   delta,
@@ -22,7 +24,10 @@ export function KpiCard({
   className,
 }: {
   label: string;
+  /** The metric text. Also the SSR / reduced-motion value when `count` animates. */
   value: string;
+  /** Opt-in: animate the value from 0 on mount. Serializable so a server component can pass it. */
+  count?: CountUpConfig;
   sublabel?: string;
   tone?: "neutral" | "success" | "danger";
   delta?: { value: string; direction: "up" | "down" | "flat" };
@@ -56,7 +61,7 @@ export function KpiCard({
             tone === "danger" && "text-danger",
           )}
         >
-          {value}
+          {count ? <CountUp {...count} /> : value}
         </div>
         {delta && <DeltaChip value={delta.value} direction={delta.direction} size="xs" />}
       </div>
