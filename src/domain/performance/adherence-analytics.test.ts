@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  confluenceCombinations,
   confluenceLeaderboard,
   summarizeAdherence,
   type AdherenceTradePoint,
@@ -42,6 +43,29 @@ describe("summarizeAdherence", () => {
     expect(s.avgConfluenceAdherence).toBeNull();
     expect(s.avgConfluencesOnWinners).toBeNull();
     expect(s.confluenceLeaderboard).toEqual([]);
+    expect(s.confluenceCombinations).toEqual([]);
+  });
+});
+
+describe("confluenceCombinations", () => {
+  it("groups by the exact confluence set and ranks by win rate (min 2 trades)", () => {
+    const board = confluenceCombinations([
+      point({ win: true, confluences: ["Liquidity Sweep", "MSS", "FVG"] }),
+      point({ win: true, confluences: ["FVG", "MSS", "Liquidity Sweep"] }), // same combo, reordered
+      point({ win: false, confluences: ["Liquidity Sweep", "MSS"] }),
+      point({ win: true, confluences: ["Liquidity Sweep", "MSS"] }),
+    ]);
+    const triple = board.find((b) => b.confluences.length === 3)!;
+    const double = board.find((b) => b.confluences.length === 2)!;
+    expect(triple).toMatchObject({ trades: 2, wins: 2, winRate: 100 });
+    expect(triple.confluences).toEqual(["FVG", "Liquidity Sweep", "MSS"]); // sorted
+    expect(double).toMatchObject({ trades: 2, wins: 1, losses: 1, winRate: 50 });
+    expect(board[0]).toBe(triple); // higher win rate first
+  });
+
+  it("excludes combinations seen on fewer than minTrades", () => {
+    const board = confluenceCombinations([point({ win: true, confluences: ["A", "B"] })]);
+    expect(board).toEqual([]);
   });
 });
 

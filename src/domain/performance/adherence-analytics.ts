@@ -22,6 +22,14 @@ export interface ConfluenceStat {
   winRate: number | null; // wins / (wins + losses), 0–100; null if no decided trades
 }
 
+export interface ConfluenceCombinationStat {
+  confluences: string[]; // the exact set present on the trade, sorted
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number | null;
+}
+
 export interface AdherenceSummary {
   avgConfluenceAdherence: number | null;
   avgExecutionAdherence: number | null;
@@ -29,6 +37,7 @@ export interface AdherenceSummary {
   avgConfluencesOnWinners: number | null;
   avgConfluencesOnLosers: number | null;
   confluenceLeaderboard: ConfluenceStat[];
+  confluenceCombinations: ConfluenceCombinationStat[];
 }
 
 function round1(n: number): number {
@@ -82,6 +91,45 @@ export function confluenceLeaderboard(points: AdherenceTradePoint[]): Confluence
     .sort((a, b) => (b.winRate ?? -1) - (a.winRate ?? -1) || b.trades - a.trades || a.name.localeCompare(b.name));
 }
 
+/**
+ * Win rate per exact confluence combination — "which confluence combos produce the
+ * highest win rate?" A trade's combination is its full set of present confluences
+ * (deduped + sorted). Only combos seen on at least `minTrades` trades are returned,
+ * ranked by win rate then volume.
+ */
+export function confluenceCombinations(
+  points: AdherenceTradePoint[],
+  minTrades = 2,
+): ConfluenceCombinationStat[] {
+  const byKey = new Map<string, { names: string[]; trades: number; wins: number; losses: number }>();
+  for (const p of points) {
+    const names = [...new Set(p.confluences.map((c) => c.trim()).filter((c) => c !== ""))].sort(
+      (a, b) => a.toLowerCase().localeCompare(b.toLowerCase()),
+    );
+    if (names.length === 0) continue;
+    const key = names.map((n) => n.toLowerCase()).join(" + ");
+    const entry = byKey.get(key) ?? { names, trades: 0, wins: 0, losses: 0 };
+    entry.trades += 1;
+    if (p.win === true) entry.wins += 1;
+    else if (p.win === false) entry.losses += 1;
+    byKey.set(key, entry);
+  }
+
+  return [...byKey.values()]
+    .filter((e) => e.trades >= minTrades)
+    .map((e) => {
+      const decided = e.wins + e.losses;
+      return {
+        confluences: e.names,
+        trades: e.trades,
+        wins: e.wins,
+        losses: e.losses,
+        winRate: decided > 0 ? round1((e.wins / decided) * 100) : null,
+      };
+    })
+    .sort((a, b) => (b.winRate ?? -1) - (a.winRate ?? -1) || b.trades - a.trades);
+}
+
 export function summarizeAdherence(points: AdherenceTradePoint[]): AdherenceSummary {
   const winners = points.filter((p) => p.win === true);
   const losers = points.filter((p) => p.win === false);
@@ -93,5 +141,6 @@ export function summarizeAdherence(points: AdherenceTradePoint[]): AdherenceSumm
     avgConfluencesOnWinners: average(winners.map((p) => p.confluences.length)),
     avgConfluencesOnLosers: average(losers.map((p) => p.confluences.length)),
     confluenceLeaderboard: confluenceLeaderboard(points),
+    confluenceCombinations: confluenceCombinations(points),
   };
 }

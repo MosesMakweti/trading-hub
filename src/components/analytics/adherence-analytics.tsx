@@ -32,6 +32,48 @@ export function AdherenceAnalytics({ data }: { data: AdherenceSummary }) {
         <Stat label="Avg confluences · losers" value={fmtCount(data.avgConfluencesOnLosers)} tone="danger" />
       </div>
 
+      {data.confluenceCombinations.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">
+            Best confluence combinations
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground">
+                  <th className="pb-1.5 font-medium">Combination</th>
+                  <th className="pb-1.5 text-right font-medium">Trades</th>
+                  <th className="pb-1.5 text-right font-medium">W / L</th>
+                  <th className="pb-1.5 text-right font-medium">Win rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.confluenceCombinations.slice(0, 8).map((combo) => (
+                  <tr key={combo.confluences.join("+")} className="border-t border-border/60">
+                    <td className="py-1.5">
+                      <div className="flex flex-wrap gap-1">
+                        {combo.confluences.map((name) => (
+                          <Tag key={name} color={colorForName(name)}>
+                            {name}
+                          </Tag>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">{combo.trades}</td>
+                    <td className="py-1.5 text-right tabular-nums text-muted-foreground">
+                      {combo.wins} / {combo.losses}
+                    </td>
+                    <td className="py-1.5 text-right font-medium tabular-nums">
+                      {combo.winRate == null ? "—" : `${combo.winRate.toFixed(1)}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {board.length > 0 && (
         <div className="space-y-2">
           <div className="text-xs font-medium text-muted-foreground">Confluence win rates</div>
