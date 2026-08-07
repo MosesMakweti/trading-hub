@@ -5,6 +5,31 @@ import type {
   StrategySessionInput,
 } from "@/lib/validation/strategy-sot";
 
+/**
+ * The user's session windows for the dashboard countdown — sourced from all of
+ * their strategies' enabled sessions that have a start+end time, deduped by name
+ * (the same session, e.g. "NY AM", can appear across strategies). Sessions live
+ * inside strategies now (SOT); there is no global session list.
+ */
+export async function listStrategySessionWindows(userId: string) {
+  const rows = await prisma.strategySession.findMany({
+    where: { userId, enabled: true, startMinutes: { not: null }, endMinutes: { not: null } },
+    orderBy: { startMinutes: "asc" },
+    select: { id: true, name: true, startMinutes: true, endMinutes: true },
+  });
+
+  const seen = new Set<string>();
+  const windows: { id: string; name: string; startMinutes: number; endMinutes: number }[] = [];
+  for (const r of rows) {
+    if (r.startMinutes == null || r.endMinutes == null) continue;
+    const key = r.name.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    windows.push({ id: r.id, name: r.name, startMinutes: r.startMinutes, endMinutes: r.endMinutes });
+  }
+  return windows;
+}
+
 async function assertOwnsStrategy(userId: string, strategyId: string) {
   const strategy = await prisma.strategy.findFirst({
     where: { id: strategyId, userId },

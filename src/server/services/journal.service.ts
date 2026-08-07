@@ -4,7 +4,6 @@ import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { getTradingDay } from "@/server/services/trading-day.service";
 import { getDailyAnalytics } from "@/server/services/analytics.service";
-import { listAssets } from "@/server/services/assets.service";
 import { routineProgress, type RoutineSnapshot } from "@/domain/today/routine-snapshot";
 import type { DailyNoteInput } from "@/lib/validation/journal";
 import type { JournalDayRecapDTO } from "@/types/today";
@@ -39,12 +38,8 @@ export async function getJournalDayRecap(
   const day = await getTradingDay(userId, dateKey);
   if (!day) return null;
 
-  const [assets, analytics] = await Promise.all([
-    listAssets(userId),
-    getDailyAnalytics(userId, dateKey),
-  ]);
+  const analytics = await getDailyAnalytics(userId, dateKey);
 
-  const watchlistIds = new Set((day.watchlistFocus as string[] | null) ?? []);
   const snapshot = (day.routineSnapshot as unknown as RoutineSnapshot | null) ?? null;
 
   return {
@@ -62,7 +57,6 @@ export async function getJournalDayRecap(
     plan: {
       bias: (day.bias as JournalDayRecapDTO["plan"]["bias"]) ?? null,
       conviction: day.conviction,
-      watchlistSymbols: assets.filter((a) => watchlistIds.has(a.id)).map((a) => a.symbol),
       keyLevels: day.keyLevels,
       riskBudgetPercent: day.riskBudgetPercent ? day.riskBudgetPercent.toNumber() : null,
     },

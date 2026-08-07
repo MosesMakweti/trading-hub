@@ -17,13 +17,16 @@ export const tradeAllocationSchema = z.object({
 
 export const tradeSchema = z
   .object({
-    assetId: z.string().min(1, "Select an asset."),
+    // SOT: a trade is taken under a strategy, and its market + session come from
+    // that strategy (never a global list). assetSymbol is the chosen market symbol
+    // (the save layer bridges the legacy Asset FK from it until P9).
+    strategyId: z.string().min(1, "Select a strategy."),
+    assetSymbol: z.string().min(1, "Select an asset."),
     executionMinutes: z.coerce.number().int().min(0).max(1439),
     direction: directionSchema,
     higherTimeframeBias: biasSchema,
     biasConfidencePercent: z.coerce.number().int().min(0).max(100),
-    sessionId: z.string().nullable().default(null),
-    strategyId: z.string().nullable().default(null),
+    selectedSession: z.string().nullable().default(null),
     expectedRR: z.coerce.number(),
     actualRR: z.coerce.number().nullable().default(null),
     // The one Closing PnL the trader manually enters — always the

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, Database, ListChecks, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { ChevronRight, Database, ListChecks, type LucideIcon } from "lucide-react";
 
 import { FadeIn } from "@/components/shared/motion";
 
@@ -10,13 +10,6 @@ const AREAS: { href: string; icon: LucideIcon; title: string; description: strin
     title: "Pre-Session Routine",
     description:
       "Build your pre-market ritual — sections and checklist items you run through in Today before you trade.",
-  },
-  {
-    href: "/settings/plan",
-    icon: SlidersHorizontal,
-    title: "Trade Setup",
-    description:
-      "Your shared watchlist and trading sessions. Confluences and execution now live in each strategy.",
   },
   {
     href: "/settings/data",

@@ -50,7 +50,7 @@ export default async function JournalDayPage({
 
   const tradeDtos: TradeListItemDTO[] = trades.map((t) => ({
     id: t.id,
-    assetSymbol: t.asset.symbol,
+    assetSymbol: t.assetSymbol ?? t.asset.symbol,
     executionMinutes: t.executionMinutes,
     direction: t.direction,
     higherTimeframeBias: t.higherTimeframeBias,

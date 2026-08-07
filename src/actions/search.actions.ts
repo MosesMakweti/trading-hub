@@ -5,7 +5,7 @@ import { requireUser } from "@/server/guards";
 import { utcDateToKey } from "@/lib/date";
 
 export interface SearchResult {
-  category: "Trade" | "Account" | "Asset" | "Entry Model";
+  category: "Trade" | "Account" | "Entry Model";
   label: string;
   sublabel?: string;
   href: string;
@@ -16,7 +16,7 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
   const q = query.trim();
   if (q.length === 0) return [];
 
-  const [trades, accounts, assets, entryModels] = await Promise.all([
+  const [trades, accounts, entryModels] = await Promise.all([
     prisma.trade.findMany({
       where: { userId: user.id, asset: { symbol: { contains: q, mode: "insensitive" } } },
       include: { asset: true },
@@ -29,10 +29,6 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
         kind: { in: ["PROP_FIRM", "PERSONAL_BROKERAGE"] },
         name: { contains: q, mode: "insensitive" },
       },
-      take: 5,
-    }),
-    prisma.asset.findMany({
-      where: { userId: user.id, symbol: { contains: q, mode: "insensitive" } },
       take: 5,
     }),
     prisma.entryModel.findMany({
@@ -53,9 +49,6 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
   }
   for (const a of accounts) {
     results.push({ category: "Account", label: a.name, href: "/accounts" });
-  }
-  for (const a of assets) {
-    results.push({ category: "Asset", label: a.symbol, sublabel: a.label ?? undefined, href: "/settings/plan" });
   }
   for (const m of entryModels) {
     results.push({ category: "Entry Model", label: m.name, href: "/strategy-lab/entry-models" });

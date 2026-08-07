@@ -5,7 +5,7 @@ import {
   getAccountBalance,
   listTradingAccounts,
 } from "@/server/services/accounts.service";
-import { listTradingSessions } from "@/server/services/trading-sessions.service";
+import { listStrategySessionWindows } from "@/server/services/strategy-sot.service";
 import { getTradingDay } from "@/server/services/trading-day.service";
 import { computeBrokerageMetrics, computePropFirmRoi } from "@/domain/accounts/derived";
 import { localDateToKey } from "@/lib/date";
@@ -28,7 +28,7 @@ export async function getDashboardData(userId: string) {
       getDailyNote(userId, todayKey),
       listTradesForDay(userId, todayKey),
       listRecentTrades(userId, 5),
-      listTradingSessions(userId),
+      listStrategySessionWindows(userId),
       listTradingAccounts(userId),
       getTradingDay(userId, todayKey),
     ]);

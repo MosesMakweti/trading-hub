@@ -26,7 +26,6 @@ export interface JournalDayRecapDTO {
   plan: {
     bias: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
     conviction: number | null;
-    watchlistSymbols: string[];
     keyLevels: unknown; // Tiptap JSON or null
     riskBudgetPercent: number | null;
   };
@@ -44,13 +43,10 @@ export interface TradingDayDTO {
   archivedAt: string | null;
 }
 
-/** Today's Trading Plan section data. The watchlist template comes from the
- *  user's Assets; state on TradingDay. */
+/** Today's Trading Plan section data. State on TradingDay. */
 export interface TodaysPlanDTO {
-  assets: { id: string; symbol: string; label: string | null }[];
   bias: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
   conviction: number | null; // 1–5
-  watchlistFocus: string[]; // Asset ids
   keyLevels: unknown; // Tiptap JSON or null
   riskBudgetPercent: number | null;
   planRiskLimit: number | null; // plan's maxDailyRiskPercent (display hint)

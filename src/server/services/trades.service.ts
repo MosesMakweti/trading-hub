@@ -19,8 +19,6 @@ import {
   listTradingAccounts,
   PERFORMANCE_ACCOUNT_STARTING_BALANCE,
 } from "@/server/services/accounts.service";
-import { listAssets } from "@/server/services/assets.service";
-import { listTradingSessions } from "@/server/services/trading-sessions.service";
 import { listEntryModels } from "@/server/services/entry-models.service";
 import { getStrategyReference, listStrategies } from "@/server/services/strategies.service";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
@@ -29,13 +27,11 @@ import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 // sessions/entry-models/checklists), reusing each feature's own service
 // rather than re-querying Prisma directly.
 export async function getTradeFormOptions(userId: string) {
-  // Confluences / execution confirmations are no longer global — they come from
-  // the selected strategy (SOT). Assets + sessions stay global for now (still the
-  // trade form's source until the asset/session FK migration in P9).
-  const [accounts, assets, sessions, entryModels, strategies] = await Promise.all([
+  // SOT: a trade's strategy is the gateway — its markets, sessions, confluences &
+  // execution are loaded client-side from the selected strategy's reference. The
+  // form only needs the account list, entry models, and the strategy picker.
+  const [accounts, entryModels, strategies] = await Promise.all([
     listTradingAccounts(userId),
-    listAssets(userId),
-    listTradingSessions(userId),
     listEntryModels(userId),
     listStrategies(userId),
   ]);
@@ -46,8 +42,6 @@ export async function getTradeFormOptions(userId: string) {
 
   return {
     accounts,
-    assets,
-    sessions,
     entryModels,
     strategies: selectableStrategies,
   };
@@ -101,12 +95,10 @@ function hasText(value: unknown): boolean {
 
 function tradeScalarData(data: TradeInput) {
   return {
-    assetId: data.assetId,
     executionMinutes: data.executionMinutes,
     direction: data.direction,
     higherTimeframeBias: data.higherTimeframeBias,
     biasConfidencePercent: data.biasConfidencePercent,
-    sessionId: data.sessionId,
     expectedRR: data.expectedRR,
     actualRR: data.actualRR,
     hitTP1: data.hitTP1,
@@ -117,6 +109,32 @@ function tradeScalarData(data: TradeInput) {
     psychPostTradeReflection: data.psychPostTradeReflection,
     psychLessonsLearned: data.psychLessonsLearned,
     psychWhatToWorkOn: data.psychWhatToWorkOn,
+  };
+}
+
+// SOT bridge: the market now comes from the strategy as a symbol, but the legacy
+// Asset FK is still NOT NULL and still backs analytics-by-asset until P9. Find (or
+// create) the user's Asset row for that symbol so `assetId` stays populated while
+// `assetSymbol` becomes the source of truth.
+async function resolveAssetId(userId: string, symbol: string): Promise<string> {
+  const existing = await prisma.asset.findFirst({ where: { userId, symbol } });
+  if (existing) return existing.id;
+  const last = await prisma.asset.findFirst({ where: { userId }, orderBy: { sortOrder: "desc" } });
+  const created = await prisma.asset.create({
+    data: { userId, symbol, sortOrder: (last?.sortOrder ?? -1) + 1 },
+  });
+  return created.id;
+}
+
+// The market + session columns written on every trade. `assetSymbol` / `selectedSession`
+// are the SOT source of truth; the legacy `assetId` FK is bridged, and `sessionId` is
+// left null (sessions are strategy-scoped names now; the FK is dropped in P9).
+async function resolveAssetLink(userId: string, data: TradeInput) {
+  return {
+    assetId: await resolveAssetId(userId, data.assetSymbol),
+    assetSymbol: data.assetSymbol,
+    sessionId: null as string | null,
+    selectedSession: data.selectedSession,
   };
 }
 
@@ -333,6 +351,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
   const allocations = await buildAllocations(userId, data);
   const snapshots = await buildTradeSnapshots(userId, data);
   const strategyExec = await buildStrategyExecution(userId, data);
+  const assetLink = await resolveAssetLink(userId, data);
   const tradeNumber = await nextTradeNumber(userId);
 
   const now = new Date();
@@ -347,6 +366,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
       userId,
       tradeDate: dateKeyToUtcDate(dateKey),
       ...tradeScalarData(data),
+      ...assetLink,
       ...snapshots,
       tradeNumber,
       closedAt,
@@ -364,6 +384,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
 export async function updateTrade(userId: string, tradeId: string, data: TradeInput) {
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   const allocations = await buildAllocations(userId, data, tradeId);
+  const assetLink = await resolveAssetLink(userId, data);
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.trade.findFirst({ where: { id: tradeId, userId } });
@@ -403,6 +424,7 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
       where: { id: tradeId },
       data: {
         ...tradeScalarData(data),
+        ...assetLink,
         ...snapshots,
         closedAt,
         reviewedAt,

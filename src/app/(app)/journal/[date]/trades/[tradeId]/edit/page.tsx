@@ -24,7 +24,7 @@ export default async function EditTradePage({
   ]);
   if (!trade) notFound();
 
-  const { accounts, assets, sessions, entryModels, strategies } = options;
+  const { accounts, entryModels, strategies } = options;
 
   // The options list is non-archived only; if this trade is still linked to a
   // strategy that's since been archived (or soft-deleted), add it back so the
@@ -48,13 +48,15 @@ export default async function EditTradePage({
   );
 
   const defaultValues: TradeFormValues = {
-    assetId: trade.assetId,
+    // SOT: market + session come from the strategy; prefer the frozen values on the
+    // trade, falling back to the legacy Asset/Session FKs for pre-SOT trades.
+    strategyId: trade.strategyId ?? "",
+    assetSymbol: trade.assetSymbol ?? trade.asset.symbol,
     executionMinutes: trade.executionMinutes,
     direction: trade.direction,
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
-    sessionId: trade.sessionId,
-    strategyId: trade.strategyId,
+    selectedSession: trade.selectedSession ?? trade.session?.name ?? null,
     expectedRR: trade.expectedRR.toNumber(),
     actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
     performanceClosingPnlGross: performanceAllocation?.closingPnlGross.toNumber() ?? 0,
@@ -103,8 +105,6 @@ export default async function EditTradePage({
         mode="edit"
         tradeId={tradeId}
         accounts={accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind }))}
-        assets={assets.map((a) => ({ id: a.id, symbol: a.symbol, label: a.label }))}
-        sessions={sessions.map((s) => ({ id: s.id, name: s.name }))}
         entryModels={entryModels.map((m) => ({ id: m.id, name: m.name }))}
         strategies={formStrategies}
         defaultValues={defaultValues}

@@ -78,11 +78,6 @@ export function JournalDayRecap({
               label="Risk budget"
               value={plan.riskBudgetPercent == null ? undefined : `${plan.riskBudgetPercent}%`}
             />
-            <WorkspaceField
-              label="Watchlist"
-              value={plan.watchlistSymbols.length ? plan.watchlistSymbols.join(", ") : undefined}
-              className="col-span-2"
-            />
           </div>
           <NoteBlock label="Key levels" text={tiptapToPlainText(plan.keyLevels, 400)} />
         </Card>

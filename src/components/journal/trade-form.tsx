@@ -32,16 +32,22 @@ import { createTrade, updateTrade, loadStrategyReference } from "@/actions/trade
 import type { StrategyReferenceDTO } from "@/types/strategies";
 
 const NO_SESSION = "__none__";
-const NO_STRATEGY = "__none__";
+
+// Keep a currently-selected value visible even if the strategy's list changed
+// since the trade was saved (e.g. an asset later removed from the strategy).
+function withSelected(list: string[] | undefined, current: string | null | undefined): string[] {
+  const base = list ?? [];
+  return current && !base.includes(current) ? [current, ...base] : base;
+}
 
 const emptyDefaults: TradeFormValues = {
-  assetId: "",
+  strategyId: "",
+  assetSymbol: "",
   executionMinutes: 570,
   direction: "LONG",
   higherTimeframeBias: "BULLISH",
   biasConfidencePercent: 50,
-  sessionId: null,
-  strategyId: null,
+  selectedSession: null,
   expectedRR: 2,
   actualRR: null,
   performanceClosingPnlGross: 0,
@@ -66,8 +72,6 @@ interface TradeFormProps {
   mode: "create" | "edit";
   tradeId?: string;
   accounts: { id: string; name: string; kind: string }[];
-  assets: { id: string; symbol: string; label: string | null }[];
-  sessions: { id: string; name: string }[];
   entryModels: { id: string; name: string }[];
   strategies: { id: string; name: string; version: number; archived?: boolean }[];
   defaultValues?: TradeFormValues;
@@ -78,8 +82,6 @@ export function TradeForm({
   mode,
   tradeId,
   accounts,
-  assets,
-  sessions,
   entryModels,
   strategies,
   defaultValues,
@@ -179,32 +181,72 @@ export function TradeForm({
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
       <section className="glass space-y-4 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Trade Basics</h2>
+
+        {/* Strategy is the gateway: its markets, sessions, confluences & execution
+            load the fields below. A trade is always taken under a strategy (SOT). */}
+        <div className="space-y-1.5">
+          <Label className="text-xs">Strategy</Label>
+          <Controller
+            control={control}
+            name="strategyId"
+            render={({ field }) => (
+              <Select
+                items={strategies.map((s) => ({ value: s.id, label: s.name }))}
+                value={field.value}
+                onValueChange={field.onChange}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a strategy" />
+                </SelectTrigger>
+                <SelectContent>
+                  {strategies.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name} · v{s.version}
+                      {s.archived ? " (archived)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+          {errors.strategyId && <p className="text-xs text-danger">{errors.strategyId.message}</p>}
+          <p className="text-xs text-muted-foreground">
+            Its markets, sessions, confluences &amp; execution load below — and its name &amp;
+            version are snapshotted at save time so the record stays accurate later.
+          </p>
+        </div>
+
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="col-span-2 space-y-1.5 sm:col-span-1">
             <Label className="text-xs">Asset</Label>
             <Controller
               control={control}
-              name="assetId"
-              render={({ field }) => (
-                <Select
-                  items={assets.map((a) => ({ value: a.id, label: a.symbol }))}
-                  value={field.value}
-                  onValueChange={field.onChange}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select asset" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assets.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.symbol}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
+              name="assetSymbol"
+              render={({ field }) => {
+                const opts = withSelected(strategyReference?.applicableAssets, field.value);
+                return (
+                  <Select
+                    items={opts.map((s) => ({ value: s, label: s }))}
+                    value={field.value}
+                    onValueChange={field.onChange}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue
+                        placeholder={selectedStrategyId ? "Select asset" : "Select a strategy first"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {opts.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                );
+              }}
             />
-            {errors.assetId && <p className="text-xs text-danger">{errors.assetId.message}</p>}
+            {errors.assetSymbol && <p className="text-xs text-danger">{errors.assetSymbol.message}</p>}
           </div>
 
           <div className="space-y-1.5">
@@ -250,29 +292,35 @@ export function TradeForm({
             <Label className="text-xs">Session</Label>
             <Controller
               control={control}
-              name="sessionId"
-              render={({ field }) => (
-                <Select
-                  items={[
-                    { value: NO_SESSION, label: "None" },
-                    ...sessions.map((s) => ({ value: s.id, label: s.name })),
-                  ]}
-                  value={field.value ?? NO_SESSION}
-                  onValueChange={(v) => field.onChange(v === NO_SESSION ? null : v)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_SESSION}>None</SelectItem>
-                    {sessions.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
+              name="selectedSession"
+              render={({ field }) => {
+                const names = withSelected(
+                  strategyReference?.sessions.map((s) => s.name),
+                  field.value,
+                );
+                return (
+                  <Select
+                    items={[
+                      { value: NO_SESSION, label: "None" },
+                      ...names.map((n) => ({ value: n, label: n })),
+                    ]}
+                    value={field.value ?? NO_SESSION}
+                    onValueChange={(v) => field.onChange(v === NO_SESSION ? null : v)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_SESSION}>None</SelectItem>
+                      {names.map((n) => (
+                        <SelectItem key={n} value={n}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                );
+              }}
             />
           </div>
 
@@ -303,44 +351,6 @@ export function TradeForm({
             <Label className="text-xs">Bias confidence %</Label>
             <Input type="number" min={0} max={100} {...register("biasConfidencePercent")} />
           </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">Strategy</Label>
-          <Controller
-            control={control}
-            name="strategyId"
-            render={({ field }) => (
-              <Select
-                items={[
-                  { value: NO_STRATEGY, label: "None" },
-                  ...strategies.map((s) => ({
-                    value: s.id,
-                    label: `${s.name} · v${s.version}${s.archived ? " (archived)" : ""}`,
-                  })),
-                ]}
-                value={field.value ?? NO_STRATEGY}
-                onValueChange={(v) => field.onChange(v === NO_STRATEGY ? null : v)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="No strategy" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_STRATEGY}>None</SelectItem>
-                  {strategies.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name} · v{s.version}
-                      {s.archived ? " (archived)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          />
-          <p className="text-xs text-muted-foreground">
-            Links this trade to a Strategy Lab strategy and snapshots its name &amp; version at
-            save time, so the record stays accurate even if the strategy changes later.
-          </p>
         </div>
 
         {(referenceLoading || strategyReference) && (

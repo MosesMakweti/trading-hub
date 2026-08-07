@@ -59,20 +59,12 @@ export async function importTrades(
     ),
   );
 
-  const [accounts, sessions] = await Promise.all([
-    prisma.tradingAccount.findMany({ where: { userId } }),
-    prisma.tradingSession.findMany({ where: { userId } }),
-  ]);
+  const accounts = await prisma.tradingAccount.findMany({ where: { userId } });
   const accountByName = new Map(accounts.map((a) => [a.name.trim().toUpperCase(), a]));
-  const sessionByName = new Map(sessions.map((s) => [s.name.trim().toUpperCase(), s]));
 
-  const resolveAsset = makeResolver(
-    (symbol) => prisma.asset.findFirst({ where: { userId, symbol } }),
-    async (symbol) => {
-      const last = await prisma.asset.findFirst({ where: { userId }, orderBy: { sortOrder: "desc" } });
-      return prisma.asset.create({ data: { userId, symbol, sortOrder: (last?.sortOrder ?? -1) + 1 } });
-    },
-  );
+  // SOT: asset + session are no longer resolved into global rows here — assetSymbol
+  // and the session name are stored on the trade directly (the save layer bridges
+  // the legacy Asset FK by symbol).
   const resolveEntryModel = makeResolver(
     (name) => prisma.entryModel.findFirst({ where: { userId, name } }),
     async (name) => {
@@ -96,14 +88,7 @@ export async function importTrades(
     }
 
     try {
-      const [asset, entryModels] = await Promise.all([
-        resolveAsset(record.assetSymbol),
-        Promise.all(record.entryModelNames.map(resolveEntryModel)),
-      ]);
-
-      const session = record.sessionName
-        ? sessionByName.get(record.sessionName.trim().toUpperCase())
-        : undefined;
+      const entryModels = await Promise.all(record.entryModelNames.map(resolveEntryModel));
 
       const knownAllocations = record.allocations.filter((a) =>
         accountByName.has(a.accountName.trim().toUpperCase()),
@@ -113,13 +98,16 @@ export async function importTrades(
       );
 
       const tradeInput: TradeInput = {
-        assetId: asset.id,
+        // SOT: the service bridges the legacy Asset FK from assetSymbol. Imported
+        // (historical) trades predate strategies, so they carry no strategy — the
+        // save layer treats an empty strategyId as "no strategy" (no adherence).
+        strategyId: "",
+        assetSymbol: record.assetSymbol,
         executionMinutes: record.executionMinutes,
         direction: record.direction,
         higherTimeframeBias: record.higherTimeframeBias,
         biasConfidencePercent: record.biasConfidencePercent,
-        sessionId: session?.id ?? null,
-        strategyId: null,
+        selectedSession: record.sessionName ?? null,
         expectedRR: record.expectedRR,
         actualRR: record.actualRR,
         performanceClosingPnlGross: record.performanceClosingPnlGross,

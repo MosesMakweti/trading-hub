@@ -60,9 +60,6 @@ export async function updateTodaysPlan(
   const data: Prisma.TradingDayUpdateInput = {};
   if ("bias" in input) data.bias = input.bias ?? null;
   if ("conviction" in input) data.conviction = input.conviction ?? null;
-  if ("watchlistFocus" in input) {
-    data.watchlistFocus = (input.watchlistFocus ?? []) as Prisma.InputJsonValue;
-  }
   if ("keyLevels" in input) {
     data.keyLevels =
       input.keyLevels == null ? Prisma.DbNull : (input.keyLevels as Prisma.InputJsonValue);

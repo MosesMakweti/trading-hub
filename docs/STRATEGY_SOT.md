@@ -108,12 +108,15 @@ P1  Additive data model + migration (new models, Trade
 P2  Strategy Lab: Sessions / Confluences / Execution
     editors (rich, colored) + snapshot .................. ⭘
 P4  Trade form: strategy-driven, multi-select ........... ✅ (P4a + P4b)
+P4c Strategy-source asset+session; delete Trade Setup .... ✅ (require strategy; watchlist dropped)
 P5  Adherence & trade-quality scoring (pure, tested) .... ✅ (scorer built + 5 tests)
 P6  Display scores + colored selected tags .............. ✅
-P3  Remove global confluence/execution editors .......... ✅ (asset/session editors stay → P9)
+P3  Remove global confluence/execution editors .......... ✅ (asset/session editors now gone too)
 P7  Colored Tag system everywhere + broader accents ..... ⭘ next
 P8  Analytics foundations ............................... ⭘
-P9  Full migration: backfill + drop globals + cleanup ... ⭘
+P9  Full migration: backfill assetSymbol; drop Asset/
+    TradingSession/ChecklistItemDefinition + assetId/
+    sessionId/watchlistFocus; delete dead read services ... ⭘
 P10 Polish, tests, full verify .......................... ⭘
 ```
 
@@ -236,3 +239,38 @@ reads the live `ChecklistItemDefinition` table (old-trade fallback), so it's rem
 in P9**, not here.
 
 Verified: **tsc + eslint clean; 181 tests green**.
+
+### P4c — Strategy-source asset + session; delete Trade Setup ✅
+**User directive (post-P3):** in Add Trade the market **and** session must come from the selected
+strategy, making the global Trade Setup lists redundant → delete them. Two product decisions taken:
+**(1)** every trade now **requires a strategy**; **(2)** the Today **Watchlist-focus** feature (which
+also rode the global Asset list) is **dropped**.
+
+- **Schema** (`tradeSchema`): `assetId`→`assetSymbol` (required), `sessionId`→`selectedSession`
+  (nullable), `strategyId` now **required** (`min(1)`). The service/import still accept an empty
+  strategyId as "no strategy" (historical CSV imports), which `buildTradeSnapshots` already treats
+  as none.
+- **Form:** Strategy moved to the top as the gateway (required, no "None"). Asset is a dropdown of the
+  strategy's `applicableAssets`; Session a dropdown of the strategy's sessions — both hint "select a
+  strategy first" when empty, and keep a currently-selected value visible if the strategy's list later
+  changed (`withSelected`). Dropped the global `assets`/`sessions` props from the form + new/edit pages.
+- **Save path:** `resolveAssetLink` bridges the still-NOT-NULL `assetId` FK by find-or-creating the
+  user's Asset row from `assetSymbol` (keeps analytics-by-asset working until P9); writes
+  `assetSymbol` + `selectedSession`; leaves the legacy `sessionId` null. Display (workspace mapper +
+  journal list) now reads `assetSymbol`/`selectedSession` with a fallback to the legacy FKs.
+- **Import:** passes `assetSymbol` + session name straight through (no more global-row resolution);
+  imported trades carry no strategy.
+- **Watchlist dropped:** removed Today's Watchlist-focus UI + `TodaysPlanDTO.assets`/`watchlistFocus`,
+  `JournalDayRecapDTO.plan.watchlistSymbols`, the `watchlistFocus` write path + validation, and the
+  recap field. The `TradingDay.watchlistFocus` column is left dormant (dropped in P9).
+- **Dashboard SessionCountdown** used the global session list — repointed to a new
+  `listStrategySessionWindows` (union of the user's strategies' enabled, timed sessions, deduped by
+  name), so it survives with no global list.
+- **Deleted:** the Trade Setup page (`settings/plan`), `AssetsSection`, `TradingSessionsSection`,
+  `assets.actions`, `trading-sessions.actions`; removed the Trade Setup nav (settings hub + topbar) and
+  the global-search **Asset** category (linked to the deleted page). `getTradeFormOptions` slimmed to
+  accounts + entry models + strategies.
+- Now-dead read services `assets.service` / `trading-sessions.service` (+ `checklist-items.service`)
+  still read live tables → removed **with the tables in P9**.
+
+Verified: **tsc + eslint clean; 181 tests green**. Static verification (authed screenshots time out).

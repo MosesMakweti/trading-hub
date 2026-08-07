@@ -20,11 +20,13 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     id: trade.id,
     dateKey: utcDateToKey(trade.tradeDate),
     tradeNumber: trade.tradeNumber ?? 0,
-    assetSymbol: trade.asset.symbol,
+    // SOT: prefer the market symbol / session name frozen on the trade; fall back
+    // to the legacy Asset/Session FKs for pre-SOT trades.
+    assetSymbol: trade.assetSymbol ?? trade.asset.symbol,
     assetLabel: trade.asset.label,
     direction: trade.direction,
     executionMinutes: trade.executionMinutes,
-    sessionName: trade.session?.name ?? null,
+    sessionName: trade.selectedSession ?? trade.session?.name ?? null,
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
     expectedRR: trade.expectedRR.toNumber(),
