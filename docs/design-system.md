@@ -64,16 +64,21 @@ gradients on content · large distracting animation · emoji as icons · raw hex
 
 ### 3.1 Semantic tokens (each has a `-foreground` pair where text sits on it)
 
+**Identity: matte graphite + Signal Blue (interaction/data only).** The dark ground is layered
+*neutral* graphite (`#0B0B0D` → `#1C1E24`, chroma ≈ 0 — not blue-black); blue appears only on
+interaction states, the primary CTA, and `chart-1`/links. Light mode is neutral (no blue tint).
+
 | Token | Role | Dark value (primary) |
 |---|---|---|
-| `background` | app canvas | `oklch(0.16 0.014 265)` |
-| `foreground` | primary ink | `oklch(0.97 0.005 265)` |
-| `card` / `card-foreground` | opaque raised surface | `oklch(0.205 0.017 265)` |
-| `muted` / `muted-foreground` | secondary surface / secondary ink | `oklch(0.25 …)` / `oklch(0.7 …)` |
-| `accent` / `accent-foreground` | hover/active tint | `oklch(0.30 0.045 266)` |
-| `primary` / `primary-foreground` | brand action | `oklch(0.65 0.18 266)` (indigo) |
-| `border` | hairlines | `oklch(1 0 0 / 10%)` |
-| `ring` | focus ring | `oklch(0.65 0.18 266 / 55%)` |
+| `background` | app canvas (matte) | `oklch(0.15 0.003 265)` ≈ `#111114` |
+| `foreground` | primary ink | `oklch(0.965 0.003 265)` |
+| `card` / `card-foreground` | opaque raised surface | `oklch(0.196 0.004 265)` ≈ `#16181D` |
+| `muted` / `muted-foreground` | secondary surface / secondary ink | `oklch(0.225 …)` / `oklch(0.705 …)` |
+| `accent` / `accent-foreground` | hover/active tint | `oklch(0.265 0.006 265)` |
+| `primary` / `primary-foreground` | Signal Blue action | `oklch(0.62 0.16 262)` |
+| `sidebar` | deepest surface | `oklch(0.125 0.003 265)` ≈ `#0B0B0D` |
+| `border` | hairlines | `oklch(1 0 0 / 8%)` |
+| `ring` | focus ring | `oklch(0.62 0.16 262 / 55%)` |
 | `success` | **profit / good** | `oklch(0.75 0.17 158)` (green) |
 | `danger` | **loss / destructive** | `oklch(0.66 0.21 25)` (red) |
 | `warning` | caution | `oklch(0.80 0.16 85)` (amber) |
@@ -162,18 +167,19 @@ An 8px-based scale (Tailwind step = 4px). Use it for **all** padding, gaps, and 
 
 ## 6. Border radius
 
-One scale from `--radius: 0.75rem`. Consistency here is a big part of the premium read.
+Sharp, institutional scale from `--radius: 0.625rem` (10px). Reduced roundness is a core part of
+the trading-desk read — surfaces feel precise, not soft. Consistency here is a big premium signal.
 
 | Utility | ~value | Use |
 |---|---|---|
-| `rounded-md` | ~0.6rem | inputs, small buttons, select triggers |
-| `rounded-lg` | 0.75rem | buttons, menu items, small tiles |
-| `rounded-xl` | ~1.05rem | inner tiles inside a card |
-| `rounded-2xl` | ~1.35rem | **cards, panels, sections** (the default surface radius) |
+| `rounded-md` | ~8px | **inputs**, select triggers |
+| `rounded-lg` | 10px | **buttons**, menu items, small tiles |
+| `rounded-xl` | ~11px | inner tiles inside a card |
+| `rounded-2xl` | ~13px | **cards, panels, sections** (the default surface radius) |
 | `rounded-full` | — | badges, pills, avatars, icon dots, toggles |
 
-Cards/panels = `rounded-2xl`. Badges/status pills = `rounded-full`. Never mix radii within one
-component family.
+Cards/panels = `rounded-2xl` (~13px). Badges/status pills = `rounded-full`. Avoid pill shapes on
+non-status surfaces. Never mix radii within one component family.
 
 ---
 
