@@ -15,7 +15,8 @@ const AREAS: { href: string; icon: LucideIcon; title: string; description: strin
     href: "/settings/plan",
     icon: SlidersHorizontal,
     title: "Trade Setup",
-    description: "The lists every trade draws from — your watchlist, sessions, and checklists.",
+    description:
+      "Your shared watchlist and trading sessions. Confluences and execution now live in each strategy.",
   },
   {
     href: "/settings/data",

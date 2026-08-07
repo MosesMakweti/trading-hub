@@ -22,7 +22,6 @@ import {
 import { listAssets } from "@/server/services/assets.service";
 import { listTradingSessions } from "@/server/services/trading-sessions.service";
 import { listEntryModels } from "@/server/services/entry-models.service";
-import { listChecklistItems } from "@/server/services/checklist-items.service";
 import { getStrategyReference, listStrategies } from "@/server/services/strategies.service";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 
@@ -30,16 +29,16 @@ import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 // sessions/entry-models/checklists), reusing each feature's own service
 // rather than re-querying Prisma directly.
 export async function getTradeFormOptions(userId: string) {
-  const [accounts, assets, sessions, entryModels, confluenceItems, executionItems, strategies] =
-    await Promise.all([
-      listTradingAccounts(userId),
-      listAssets(userId),
-      listTradingSessions(userId),
-      listEntryModels(userId),
-      listChecklistItems(userId, "CONFLUENCE"),
-      listChecklistItems(userId, "EXECUTION_CONFIRMATION"),
-      listStrategies(userId),
-    ]);
+  // Confluences / execution confirmations are no longer global — they come from
+  // the selected strategy (SOT). Assets + sessions stay global for now (still the
+  // trade form's source until the asset/session FK migration in P9).
+  const [accounts, assets, sessions, entryModels, strategies] = await Promise.all([
+    listTradingAccounts(userId),
+    listAssets(userId),
+    listTradingSessions(userId),
+    listEntryModels(userId),
+    listStrategies(userId),
+  ]);
 
   // Only offer non-archived strategies for a new selection; the edit page adds
   // back a currently-linked archived strategy so it stays visible.
@@ -50,8 +49,6 @@ export async function getTradeFormOptions(userId: string) {
     assets,
     sessions,
     entryModels,
-    confluenceItems,
-    executionItems,
     strategies: selectableStrategies,
   };
 }

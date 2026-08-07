@@ -110,8 +110,8 @@ P2  Strategy Lab: Sessions / Confluences / Execution
 P4  Trade form: strategy-driven, multi-select ........... ✅ (P4a + P4b)
 P5  Adherence & trade-quality scoring (pure, tested) .... ✅ (scorer built + 5 tests)
 P6  Display scores + colored selected tags .............. ✅
-P3  Remove Trade Setup page + global editors; nav ....... ⭘ next
-P7  Colored Tag system everywhere + broader accents ..... ⭘
+P3  Remove global confluence/execution editors .......... ✅ (asset/session editors stay → P9)
+P7  Colored Tag system everywhere + broader accents ..... ⭘ next
 P8  Analytics foundations ............................... ⭘
 P9  Full migration: backfill + drop globals + cleanup ... ⭘
 P10 Polish, tests, full verify .......................... ⭘
@@ -217,3 +217,22 @@ save layer persists. Scores are labeled a discipline measure, **not a market pre
 
 Verified: **tsc + eslint clean; 181 tests green**. Static verification (authed screenshots time out on
 this box). Analytics still on the legacy metric (**P8**); `assetSymbol` denorm still **P9**.
+
+### P3 — Remove the global confluence/execution editors ✅
+Confluences + execution confirmations are now strategy-scoped (SOT), so their **global** editors are
+gone. Removed the two `ChecklistSection` cards from the Trade Setup page (`settings/plan`), deleted
+the now-orphaned `components/plan/sections/checklist-section.tsx` + `actions/checklist-items.actions.ts`,
+and trimmed `getTradeFormOptions` (dropped the two `listChecklistItems` calls + the unused
+`confluenceItems`/`executionItems` returns). The page keeps **Assets to Trade** + **Trading Session**
+(still the trade form's source) and gains a callout pointing confluences/execution to Strategy Lab;
+settings hub + copy updated.
+
+**Scope note (roadmap safety rule):** the page itself is **not** deleted and the asset/session global
+editors **stay**, because the trade form still reads global `assets` (required `assetId` FK) + global
+`sessions`. Fully removing Trade Setup requires strategy-sourcing the asset/session fields and bridging
+the `assetId`/`sessionId` FKs (→ `assetSymbol` / `selectedSession`, columns already exist) — that FK
+migration is bundled with **P9** (drop globals). `checklist-items.service.ts` is now dead but still
+reads the live `ChecklistItemDefinition` table (old-trade fallback), so it's removed **with the table
+in P9**, not here.
+
+Verified: **tsc + eslint clean; 181 tests green**.
