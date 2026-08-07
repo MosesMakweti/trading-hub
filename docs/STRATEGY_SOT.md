@@ -341,5 +341,12 @@ polish + full verify) remains.
 The Strategy = Single Source of Truth refactor is **complete end-to-end**: each strategy fully defines
 how it's traded (markets · sessions · confluences · execution · framework · arsenal · trade
 management); Add Trade is strategy-driven with live adherence + weighted setup scoring; scores + colored
-tags surface across journal/analytics; and the global Trade-Setup tables are gone. Only optional future
-integrations remain (fold sessions/checklist into `StrategyVersion` snapshots; richer analytics UI).
+tags surface across journal/analytics; and the global Trade-Setup tables are gone.
+
+### Follow-up — version snapshots freeze the SOT data ✅
+Closes the P2-deferred item. `buildSnapshot` + `strategyTreeInclude` now freeze the strategy's
+**sessions + confluences/execution** (with weights, mandatory flags, validation criteria) into each
+published `StrategyVersion`; the summary counts them (session/confluence/mandatory/execution), the
+read-only snapshot view renders them as colored tags, and `restoreStrategyVersionAsNewStrategy`
+recreates them. Snapshot fields are optional so legacy snapshots still read. Only richer analytics UI
+remains as a purely optional future integration.
