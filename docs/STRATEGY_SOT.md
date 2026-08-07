@@ -117,7 +117,7 @@ P8  Analytics foundations ............................... ✅
 P9  Full migration: backfill assetSymbol; drop Asset/
     TradingSession/ChecklistItemDefinition + assetId/
     sessionId/watchlistFocus; delete dead read services ... ✅
-P10 Polish, tests, full verify .......................... ⭘ next
+P10 Polish, tests, full verify .......................... ✅ — REFACTOR COMPLETE
 ```
 
 Every phase: `tsc` + `eslint` clean, vitest green, app runnable, follows the design system
@@ -330,3 +330,16 @@ The final destructive phase. **Migration `20260807010000_drop_global_trade_setup
 Verified: **tsc + eslint clean; 193 tests green**; migration applied + client regenerated. The app now
 runs entirely on the strategy-scoped model with no global Trade-Setup tables. Only **P10** (final
 polish + full verify) remains.
+
+### P10 — Polish + full verify ✅ — REFACTOR COMPLETE
+- **Deferred P7 coloring done:** timeframe cards + arsenal-concept cards now carry a `colorForName`
+  colored dot next to the name, so every strategy element has visual identity (they're structured
+  editors, not badges, so a dot rather than a chip).
+- **Full verification:** `tsc` clean, `eslint src` clean, **193 tests green**, and a **production
+  `next build` succeeds** — all 24 routes compile (and `/settings/plan` is correctly gone).
+
+The Strategy = Single Source of Truth refactor is **complete end-to-end**: each strategy fully defines
+how it's traded (markets · sessions · confluences · execution · framework · arsenal · trade
+management); Add Trade is strategy-driven with live adherence + weighted setup scoring; scores + colored
+tags surface across journal/analytics; and the global Trade-Setup tables are gone. Only optional future
+integrations remain (fold sessions/checklist into `StrategyVersion` snapshots; richer analytics UI).
