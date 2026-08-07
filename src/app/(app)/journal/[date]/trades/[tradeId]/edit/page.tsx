@@ -51,12 +51,12 @@ export default async function EditTradePage({
     // SOT: market + session come from the strategy; prefer the frozen values on the
     // trade, falling back to the legacy Asset/Session FKs for pre-SOT trades.
     strategyId: trade.strategyId ?? "",
-    assetSymbol: trade.assetSymbol ?? trade.asset.symbol,
+    assetSymbol: trade.assetSymbol,
     executionMinutes: trade.executionMinutes,
     direction: trade.direction,
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
-    selectedSession: trade.selectedSession ?? trade.session?.name ?? null,
+    selectedSession: trade.selectedSession ?? null,
     expectedRR: trade.expectedRR.toNumber(),
     actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
     performanceClosingPnlGross: performanceAllocation?.closingPnlGross.toNumber() ?? 0,

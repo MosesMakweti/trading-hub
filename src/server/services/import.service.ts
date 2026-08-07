@@ -47,13 +47,13 @@ export async function importTrades(
 ): Promise<ImportSummary> {
   const existingTrades = await prisma.trade.findMany({
     where: { userId },
-    select: { tradeDate: true, executionMinutes: true, asset: { select: { symbol: true } } },
+    select: { tradeDate: true, executionMinutes: true, assetSymbol: true },
   });
   const existingKeys = new Set(
     existingTrades.map((t) =>
       tradeNaturalKey({
         dateKey: utcDateToKey(t.tradeDate),
-        assetSymbol: t.asset.symbol,
+        assetSymbol: t.assetSymbol,
         executionMinutes: t.executionMinutes,
       }),
     ),

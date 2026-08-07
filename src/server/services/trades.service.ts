@@ -49,15 +49,12 @@ export async function getTradeFormOptions(userId: string) {
 }
 
 const tradeInclude = {
-  asset: true,
-  session: true,
   // Live reference for linking only. The nested include is NOT soft-delete
   // filtered (the extension only guards top-level queries), so `deletedAt` is
   // selected too — a soft-deleted strategy must not render a live link. The
   // *Snapshot columns on Trade preserve the strategy identity regardless.
   strategy: { select: { id: true, name: true, version: true, status: true, deletedAt: true } },
   allocations: { include: { tradingAccount: true } },
-  checklistSelections: { include: { checklistItem: true } },
   entryModels: { include: { entryModel: true } },
   images: true,
   psychology: true,
@@ -113,28 +110,12 @@ function tradeScalarData(data: TradeInput) {
   };
 }
 
-// SOT bridge: the market now comes from the strategy as a symbol, but the legacy
-// Asset FK is still NOT NULL and still backs analytics-by-asset until P9. Find (or
-// create) the user's Asset row for that symbol so `assetId` stays populated while
-// `assetSymbol` becomes the source of truth.
-async function resolveAssetId(userId: string, symbol: string): Promise<string> {
-  const existing = await prisma.asset.findFirst({ where: { userId, symbol } });
-  if (existing) return existing.id;
-  const last = await prisma.asset.findFirst({ where: { userId }, orderBy: { sortOrder: "desc" } });
-  const created = await prisma.asset.create({
-    data: { userId, symbol, sortOrder: (last?.sortOrder ?? -1) + 1 },
-  });
-  return created.id;
-}
-
-// The market + session columns written on every trade. `assetSymbol` / `selectedSession`
-// are the SOT source of truth; the legacy `assetId` FK is bridged, and `sessionId` is
-// left null (sessions are strategy-scoped names now; the FK is dropped in P9).
-async function resolveAssetLink(userId: string, data: TradeInput) {
+// The market + session columns written on every trade. `assetSymbol` /
+// `selectedSession` are the SOT source of truth (the global Asset/TradingSession
+// FKs were dropped in P9).
+function tradeMarketData(data: TradeInput) {
   return {
-    assetId: await resolveAssetId(userId, data.assetSymbol),
     assetSymbol: data.assetSymbol,
-    sessionId: null as string | null,
     selectedSession: data.selectedSession,
   };
 }
@@ -376,7 +357,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
   const allocations = await buildAllocations(userId, data);
   const snapshots = await buildTradeSnapshots(userId, data);
   const strategyExec = await buildStrategyExecution(userId, data);
-  const assetLink = await resolveAssetLink(userId, data);
+  const assetLink = tradeMarketData(data);
   const tradeNumber = await nextTradeNumber(userId);
 
   const now = new Date();
@@ -409,7 +390,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
 export async function updateTrade(userId: string, tradeId: string, data: TradeInput) {
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   const allocations = await buildAllocations(userId, data, tradeId);
-  const assetLink = await resolveAssetLink(userId, data);
+  const assetLink = tradeMarketData(data);
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.trade.findFirst({ where: { id: tradeId, userId } });
@@ -427,8 +408,6 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
     });
 
     await tx.tradeAccountAllocation.deleteMany({ where: { tradeId } });
-    // Clear any legacy global checklist selections — new trades use selected* JSON.
-    await tx.tradeChecklistSelection.deleteMany({ where: { tradeId } });
     await tx.tradeEntryModel.deleteMany({ where: { tradeId } });
 
     const now = new Date();

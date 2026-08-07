@@ -48,7 +48,7 @@ export async function getDailyAnalytics(userId: string, dateKey: string) {
         select: {
           tradeDate: true,
           adherencePercent: true,
-          asset: { select: { symbol: true } },
+          assetSymbol: true,
           psychology: { select: { psychologyPercent: true } },
         },
       },
@@ -67,7 +67,7 @@ export async function getDailyAnalytics(userId: string, dateKey: string) {
     if (utcDateToKey(t.tradeDate) === dateKey) {
       points.push({
         dateKey,
-        assetSymbol: t.asset.symbol,
+        assetSymbol: t.assetSymbol,
         actualRR: contributionPercent,
         psychologyPercent: t.psychology?.psychologyPercent ?? null,
         adherencePercent: t.adherencePercent,
@@ -90,7 +90,7 @@ export async function getStrategyPerformance(userId: string, strategyId: string)
           strategyId: true,
           tradeDate: true,
           adherencePercent: true,
-          asset: { select: { symbol: true } },
+          assetSymbol: true,
           psychology: { select: { psychologyPercent: true } },
         },
       },
@@ -108,7 +108,7 @@ export async function getStrategyPerformance(userId: string, strategyId: string)
     if (t.strategyId === strategyId) {
       points.push({
         dateKey: utcDateToKey(t.tradeDate),
-        assetSymbol: t.asset.symbol,
+        assetSymbol: t.assetSymbol,
         actualRR: contributionPercent,
         psychologyPercent: t.psychology?.psychologyPercent ?? null,
         adherencePercent: t.adherencePercent,
@@ -127,8 +127,6 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
     include: {
       trade: {
         include: {
-          asset: true,
-          session: true,
           psychology: true,
           allocations: { include: { tradingAccount: true } },
         },
@@ -181,7 +179,7 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       : null;
     tradeInputs.push({
       dateKey,
-      assetSymbol: t.asset.symbol,
+      assetSymbol: t.assetSymbol,
       actualRR: contributionPercent,
       strategyLabel,
     });
@@ -201,9 +199,9 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
         dateKey,
         percent: t.psychology.psychologyPercent,
         rawScore: t.psychology.rawScore,
-        assetSymbol: t.asset.symbol,
+        assetSymbol: t.assetSymbol,
         accountName: otherAccount?.tradingAccount.name ?? "Performance Account",
-        sessionName: t.session?.name ?? null,
+        sessionName: t.selectedSession ?? null,
         actualRR: contributionPercent,
         ruleAdherencePercent: ruleAdherenceForTrade(t),
       });

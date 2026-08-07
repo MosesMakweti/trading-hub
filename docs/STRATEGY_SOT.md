@@ -116,8 +116,8 @@ P7  Colored Tag system everywhere + broader accents ..... ✅
 P8  Analytics foundations ............................... ✅
 P9  Full migration: backfill assetSymbol; drop Asset/
     TradingSession/ChecklistItemDefinition + assetId/
-    sessionId/watchlistFocus; delete dead read services ... ⭘
-P10 Polish, tests, full verify .......................... ⭘
+    sessionId/watchlistFocus; delete dead read services ... ✅
+P10 Polish, tests, full verify .......................... ⭘ next
 ```
 
 Every phase: `tsc` + `eslint` clean, vitest green, app runnable, follows the design system
@@ -310,3 +310,23 @@ strategy-adherence analytics.
   discipline measure, not a prediction.
 
 Verified: **tsc + eslint clean; 186 tests green** (+5).
+
+### P9 — Full migration: drop the globals ✅
+The final destructive phase. **Migration `20260807010000_drop_global_trade_setup`** backfills first
+(while the old tables still exist), then drops:
+- **Backfill:** `assetSymbol` from `Asset.symbol`; `selectedSession` from `TradingSession.name`;
+  `selectedConfluences`/`selectedExecution` (by name) from the `TradeChecklistSelection` join for
+  pre-SOT trades (SOT trades already carry arrays). A safety-net sets any still-null `assetSymbol` to
+  `'UNKNOWN'` so the NOT NULL can apply.
+- **Dropped:** tables `Asset`, `TradingSession`, `ChecklistItemDefinition`, `TradeChecklistSelection`;
+  the `ChecklistType` enum; `Trade.assetId`/`sessionId` FKs; `TradingDay.watchlistFocus`. `assetSymbol`
+  is now **NOT NULL** (the source of truth).
+- **Code:** `tradeInclude` dropped asset/session/checklistSelections; the trade save path no longer
+  bridges an Asset row (`tradeMarketData` just writes `assetSymbol`/`selectedSession`); mapper /
+  analytics / export / import / accounts / search / dashboard / journal / edit all read the columns
+  directly. Removed the three dead read services (`assets`, `trading-sessions`, `checklist-items`) and
+  the dropped models from the soft-delete extension.
+
+Verified: **tsc + eslint clean; 193 tests green**; migration applied + client regenerated. The app now
+runs entirely on the strategy-scoped model with no global Trade-Setup tables. Only **P10** (final
+polish + full verify) remains.

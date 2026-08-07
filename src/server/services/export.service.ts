@@ -8,10 +8,7 @@ export async function listTradeExportRecords(
   const trades = await prisma.trade.findMany({
     where: { userId },
     include: {
-      asset: true,
-      session: true,
       allocations: { include: { tradingAccount: true } },
-      checklistSelections: { include: { checklistItem: true } },
       entryModels: { include: { entryModel: true } },
       psychology: true,
     },
@@ -28,7 +25,7 @@ export async function listTradeExportRecords(
 
     const record: TradeExportRecord = {
       dateKey: utcDateToKey(t.tradeDate),
-      assetSymbol: t.asset.symbol,
+      assetSymbol: t.assetSymbol,
       executionMinutes: t.executionMinutes,
       direction: t.direction,
       higherTimeframeBias: t.higherTimeframeBias,
@@ -50,24 +47,15 @@ export async function listTradeExportRecords(
       psychLessonsLearned: t.psychLessonsLearned,
       psychWhatToWorkOn: t.psychWhatToWorkOn,
       psychologyAnswers: (t.psychology?.answers as Record<string, string | number>) ?? {},
-      sessionName: t.session?.name ?? null,
+      sessionName: t.selectedSession ?? null,
       allocations: otherAllocations.map((a) => ({
         accountName: a.tradingAccount.name,
         riskInputType: a.riskInputType,
         riskValue: a.riskValue.toNumber(),
       })),
-      // SOT: prefer the by-name selections frozen on the trade; fall back to the
-      // legacy global-checklist join for trades created before the strategy model.
-      confluenceLabels:
-        (t.selectedConfluences as string[] | null) ??
-        t.checklistSelections
-          .filter((c) => c.checklistItem.type === "CONFLUENCE")
-          .map((c) => c.checklistItem.label),
-      executionLabels:
-        (t.selectedExecution as string[] | null) ??
-        t.checklistSelections
-          .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
-          .map((c) => c.checklistItem.label),
+      // SOT: the by-name selections frozen on the trade (pre-SOT trades backfilled in P9).
+      confluenceLabels: (t.selectedConfluences as string[] | null) ?? [],
+      executionLabels: (t.selectedExecution as string[] | null) ?? [],
       entryModelNames: t.entryModels.map((m) => m.entryModel.name),
     };
 

@@ -13,9 +13,9 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
   const performance = trade.allocations.find((a) => a.tradingAccount.kind === "PERFORMANCE");
 
   // SOT: selections are stored by name on the trade and colored from the frozen
-  // strategy snapshot; pre-SOT trades fall back to the legacy global-checklist join.
+  // strategy snapshot (pre-SOT trades were backfilled by name in P9).
   const snapshot = executionSnapshot(trade.strategyExecutionSnapshot);
-  const sessionName = trade.selectedSession ?? trade.session?.name ?? null;
+  const sessionName = trade.selectedSession ?? null;
   const sessionColor =
     (sessionName &&
       (snapshot.sessions?.find((s) => s.name.toLowerCase() === sessionName.toLowerCase())
@@ -34,10 +34,8 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     id: trade.id,
     dateKey: utcDateToKey(trade.tradeDate),
     tradeNumber: trade.tradeNumber ?? 0,
-    // SOT: prefer the market symbol / session name frozen on the trade; fall back
-    // to the legacy Asset/Session FKs for pre-SOT trades.
-    assetSymbol: trade.assetSymbol ?? trade.asset.symbol,
-    assetLabel: trade.asset.label,
+    assetSymbol: trade.assetSymbol,
+    assetLabel: null,
     direction: trade.direction,
     executionMinutes: trade.executionMinutes,
     sessionName,
@@ -56,20 +54,8 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     strategyId: trade.strategy && !trade.strategy.deletedAt ? trade.strategy.id : null,
     strategyName: trade.strategyNameSnapshot,
     strategyVersion: trade.strategyVersionSnapshot,
-    confluenceLabels: resolveSelectedTags(
-      trade.selectedConfluences,
-      snapshot.confluences,
-      trade.checklistSelections
-        .filter((c) => c.checklistItem.type === "CONFLUENCE")
-        .map((c) => c.checklistItem.label),
-    ),
-    executionLabels: resolveSelectedTags(
-      trade.selectedExecution,
-      snapshot.execution,
-      trade.checklistSelections
-        .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
-        .map((c) => c.checklistItem.label),
-    ),
+    confluenceLabels: resolveSelectedTags(trade.selectedConfluences, snapshot.confluences, []),
+    executionLabels: resolveSelectedTags(trade.selectedExecution, snapshot.execution, []),
     confluencePercent: trade.confluencePercent,
     executionPercent: trade.executionPercent,
     tradeQualityPercent: trade.tradeQualityPercent,

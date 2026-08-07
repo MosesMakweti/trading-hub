@@ -50,7 +50,7 @@ export default async function JournalDayPage({
 
   const tradeDtos: TradeListItemDTO[] = trades.map((t) => ({
     id: t.id,
-    assetSymbol: t.assetSymbol ?? t.asset.symbol,
+    assetSymbol: t.assetSymbol,
     executionMinutes: t.executionMinutes,
     direction: t.direction,
     higherTimeframeBias: t.higherTimeframeBias,
@@ -74,16 +74,12 @@ export default async function JournalDayPage({
     confluenceLabels: resolveSelectedTags(
       t.selectedConfluences,
       executionSnapshot(t.strategyExecutionSnapshot).confluences,
-      t.checklistSelections
-        .filter((c) => c.checklistItem.type === "CONFLUENCE")
-        .map((c) => c.checklistItem.label),
+      [],
     ),
     executionLabels: resolveSelectedTags(
       t.selectedExecution,
       executionSnapshot(t.strategyExecutionSnapshot).execution,
-      t.checklistSelections
-        .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
-        .map((c) => c.checklistItem.label),
+      [],
     ),
     tradeQualityPercent: t.tradeQualityPercent,
     setupScore: t.setupScore,

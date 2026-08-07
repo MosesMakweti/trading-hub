@@ -18,8 +18,7 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
 
   const [trades, accounts, entryModels] = await Promise.all([
     prisma.trade.findMany({
-      where: { userId: user.id, asset: { symbol: { contains: q, mode: "insensitive" } } },
-      include: { asset: true },
+      where: { userId: user.id, assetSymbol: { contains: q, mode: "insensitive" } },
       orderBy: { tradeDate: "desc" },
       take: 8,
     }),
@@ -42,7 +41,7 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
     const dateKey = utcDateToKey(t.tradeDate);
     results.push({
       category: "Trade",
-      label: `${t.asset.symbol} — ${t.direction === "LONG" ? "Long" : "Short"}`,
+      label: `${t.assetSymbol} — ${t.direction === "LONG" ? "Long" : "Short"}`,
       sublabel: dateKey,
       href: `/journal/${dateKey}`,
     });

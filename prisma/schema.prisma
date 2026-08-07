@@ -24,10 +24,7 @@ model User {
   accounts Account[]
   sessions Session[]
 
-  assets          Asset[]
   entryModels     EntryModel[]
-  tradingSessions TradingSession[]
-  checklistItems  ChecklistItemDefinition[]
   tradingAccounts TradingAccount[]
   dailyNotes      DailyNote[]
   tradingDays     TradingDay[]
@@ -109,12 +106,11 @@ model TradingDay {
   routineReadyAt  DateTime?
 
   // Today's Trading Plan (P4). Day intentions: higher-timeframe bias
-  // (BULLISH/BEARISH/NEUTRAL) + 1–5 conviction, today's watchlist focus (Asset
-  // ids from the user's watchlist), key levels / areas of interest (Tiptap JSON),
-  // and the day's intended risk budget (% — defaults from the plan's daily limit).
+  // (BULLISH/BEARISH/NEUTRAL) + 1–5 conviction, key levels / areas of interest
+  // (Tiptap JSON), and the day's intended risk budget (% — defaults from the
+  // plan's daily limit). (Watchlist focus was dropped with the global Asset list.)
   bias              String?
   conviction        Int?
-  watchlistFocus    Json?
   keyLevels         Json?
   riskBudgetPercent Decimal? @db.Decimal(6, 2)
 
@@ -187,12 +183,6 @@ model TradingAccount {
   @@index([userId, kind, deletedAt])
 }
 
-enum ChecklistType {
-  CONFLUENCE
-  EXECUTION_CONFIRMATION
-  PRE_SESSION_ROUTINE
-}
-
 // Pre-Session Routine item type. Extensible: adding a future type (RATING,
 // DROPDOWN, NUMBER, TIMER…) is a new enum value + a renderer + optional `config`
 // on RoutineItem — no schema redesign, and per-day responses stay in the snapshot.
@@ -237,23 +227,6 @@ model RoutineItem {
   @@index([userId, sectionId, sortOrder])
 }
 
-// Watchlist entry. Populates the asset dropdown in the journal (later phase).
-model Asset {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  symbol    String
-  label     String?
-  sortOrder Int        @default(0)
-  createdAt DateTime   @default(now())
-  deletedAt DateTime?
-
-  trades Trade[]
-
-  @@unique([userId, symbol])
-  @@index([userId, sortOrder])
-}
-
 // Custom entry model (e.g. "Liquidity Sweep", "SMT"). Selectable per trade later.
 model EntryModel {
   id          String    @id @default(cuid())
@@ -268,43 +241,6 @@ model EntryModel {
   tradeSelections TradeEntryModel[]
 
   @@index([userId, sortOrder])
-}
-
-// Named trading session (e.g. "London Open"). Modeled as a list to support
-// multiple sessions, even though a trader may only define one today.
-model TradingSession {
-  id                     String    @id @default(cuid())
-  userId                 String
-  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name                   String
-  startMinutes           Int
-  endMinutes             Int
-  maxDailyTradingMinutes Int?
-  maxTradesPerDay        Int?
-  sortOrder              Int       @default(0)
-  createdAt              DateTime  @default(now())
-  deletedAt              DateTime?
-
-  trades Trade[]
-
-  @@index([userId, sortOrder])
-}
-
-// Powers both the Confluence and Execution-Confirmation checklists via a
-// type discriminator, avoiding duplicated CRUD/reorder models.
-model ChecklistItemDefinition {
-  id        String        @id @default(cuid())
-  userId    String
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      ChecklistType
-  label     String
-  sortOrder Int           @default(0)
-  createdAt DateTime      @default(now())
-  deletedAt DateTime?
-
-  selections TradeChecklistSelection[]
-
-  @@index([userId, type, sortOrder])
 }
 
 enum Direction {
@@ -333,14 +269,10 @@ model Trade {
   userId                   String
   user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   tradeDate                DateTime  @db.Date
-  assetId                  String
-  asset                    Asset     @relation(fields: [assetId], references: [id])
   executionMinutes         Int
   direction                Direction
   higherTimeframeBias      Bias
   biasConfidencePercent    Int
-  sessionId                String?
-  session                  TradingSession? @relation(fields: [sessionId], references: [id])
   expectedRR               Decimal   @db.Decimal(8, 2)
   actualRR                 Decimal?  @db.Decimal(8, 2)
   hitTP1                   Boolean   @default(false)
@@ -395,13 +327,12 @@ model Trade {
   adherenceAnswers         Json?
   adherencePercent         Float?
 
-  // Strategy = single source of truth (SOT refactor). assetSymbol denormalizes the
-  // market (backfilled from asset.symbol; becomes the source once the Asset FK drops
-  // in P9). strategyExecutionSnapshot freezes the strategy's EXPECTED sessions/
-  // confluences/execution that day; selected* record what was actually present.
-  // *Percent are denormalized adherence scores (selected/expected) for analytics —
-  // NOT market predictions. All nullable/additive; old FKs stay until P9.
-  assetSymbol               String?
+  // Strategy = single source of truth (SOT refactor). assetSymbol is the market
+  // (the global Asset FK was dropped in P9; backfilled from asset.symbol first).
+  // strategyExecutionSnapshot freezes the strategy's EXPECTED sessions/confluences/
+  // execution that day; selected* record what was actually present. *Percent are
+  // denormalized adherence scores (selected/expected) for analytics — NOT predictions.
+  assetSymbol               String
   strategyExecutionSnapshot Json?
   selectedSession           String?
   selectedConfluences       Json?
@@ -426,7 +357,6 @@ model Trade {
 
   allocations         TradeAccountAllocation[]
   images              TradeImage[]
-  checklistSelections TradeChecklistSelection[]
   entryModels         TradeEntryModel[]
   psychology          PsychologyQuestionnaireResponse?
 
@@ -500,18 +430,6 @@ model TradeImage {
   uploadthingKey String
   sortOrder      Int           @default(0)
   createdAt      DateTime      @default(now())
-}
-
-// Join for both the Confluence and Execution-Confirmation checklists
-// (distinguished by the linked ChecklistItemDefinition's own type).
-model TradeChecklistSelection {
-  id              String                  @id @default(cuid())
-  tradeId         String
-  trade           Trade                   @relation(fields: [tradeId], references: [id], onDelete: Cascade)
-  checklistItemId String
-  checklistItem   ChecklistItemDefinition @relation(fields: [checklistItemId], references: [id])
-
-  @@unique([tradeId, checklistItemId])
 }
 
 model TradeEntryModel {
