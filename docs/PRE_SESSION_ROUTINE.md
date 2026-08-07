@@ -247,3 +247,18 @@ relocate the Entry Models *editor* from Settings to **Strategy Lab**.
 (customizable template, per-day snapshot, "I am ready to trade" gate + tab-lock) → Journal (frozen,
 immutable); workflow relabeled; Entry Models under Strategy Lab. Env note: `.env` `DATABASE_URL` host
 is now `127.0.0.1` (was `localhost`, which resolved to a broken IPv6 forward).
+
+### Fix — single source of truth (template drives the live day)
+**Problem:** decision 4 froze the per-day snapshot on *first open*, so editing the routine in Settings
+never reached the current Today (the snapshot was an independent stale copy), and the save actions only
+revalidated `/settings/routine`. **Refinement of decision 4:**
+- The **template** (`RoutineSection`/`RoutineItem`) is the single source of truth for *structure*. For
+  an **ACTIVE** day, `getOrCreateDayRoutine` now **rebuilds the structure from the live template on
+  every load** (carrying responses over by item id, persisting only when the structure changed) — so
+  Settings edits (add/remove/rename/reorder/retype) appear on Today immediately. The per-day JSON is a
+  derived cache, not a separate editable copy.
+- **ARCHIVED** days are still returned verbatim → journal history stays immutable (the original intent,
+  now scoped to finalized days only).
+- All routine mutation actions revalidate **`/today`** as well as `/settings/routine`, so navigating to
+  Today after Save shows the change with no manual refresh; the write-back makes it survive
+  navigate-away-and-back. Default routine still auto-seeds via `getOrCreateDefaultRoutine`.
