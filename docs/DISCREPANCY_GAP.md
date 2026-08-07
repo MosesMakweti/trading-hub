@@ -32,7 +32,7 @@ D1  Execution Engine (pure domain + tests) ............... ✅ the central layer
 D2  Strategy benchmark fields (expected win rate / avg RR /
     expectancy / min execution score) + Strategy Lab editor  ✅
 D3  Wire engine → analytics.service + Dashboard Discrepancy
-    Gap card (dual-line chart beside Equity Curve) .......... ⭘
+    Gap card (dual-line chart beside Equity Curve) .......... ✅
 D4  Journal trade-card integration (expected/actual/gap/dev) . ⭘
 D5  Analytics Discrepancy Gap section + deviation sub-scores
     (entry/exit/risk from planned-vs-actual prices) ......... ⭘
@@ -74,3 +74,17 @@ Strategy Lab → Trade Management section (4 autosaved number inputs + a note ex
 expectancy × execution score). `expectedExpectancy` is the primary input to D3's Expected R.
 Next: D3 freezes the benchmark onto each trade (via the strategy reference/snapshot) and builds the
 Dashboard Discrepancy Gap card.
+
+### D3 — analytics wiring + Dashboard card ✅
+`getAnalyticsData` now builds `ExecutionTradeInput[]` in its existing trade loop and returns
+`trading.discrepancy = { curve, summary }` via the engine — `strategyExpectancyR` reads the strategy's
+**live** `expectedExpectancy` (joined through the trade's `strategy.tradeManagement`); `executionScore`
+= the frozen composite `tradeQualityPercent ?? setupScore ?? confluencePercent`; `actualR` = the trade's
+`actualRR`. Surfaced through `getDashboardData`. New **`DiscrepancyGapCard`** (Recharts ComposedChart):
+Expected (muted dashed `--chart-2`) vs Actual (brand `--chart-1`) cumulative-R lines with the gap band
+shaded between (range-Area), a custom hover tooltip (trade #, Expected, Actual, Gap, Execution), a
+3-metric strip (Current gap / Execution efficiency / Recoverable) and a gap-trend chip. Placed in a
+2-col grid beside the Equity Curve in `PerformanceSnapshot` (identical `glass` card styling).
+**Design note:** used the muted-vs-brand chart pair the design system already ships for two series;
+identity is carried by the legend + line style, per the dataviz method. Empty-safe (prompts to set a
+strategy benchmark). Next: D4 (per-trade gap on the journal card).

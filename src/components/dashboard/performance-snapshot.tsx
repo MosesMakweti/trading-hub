@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import { KpiCard } from "@/components/analytics/kpi-card";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
+import { DiscrepancyGapCard } from "@/components/dashboard/discrepancy-gap-card";
+import type { DiscrepancyPoint, DiscrepancySummary } from "@/domain/analytics/execution-engine";
 
 /**
  * Performance Snapshot — the Dashboard's at-a-glance health check: headline KPIs
@@ -15,12 +17,14 @@ export function PerformanceSnapshot({
   bestAccount,
   bestAsset,
   equityCurve,
+  discrepancy,
 }: {
   winRate: number | null;
   totalTrades: number;
   bestAccount: { name: string; returnPercent: number } | null;
   bestAsset: { assetSymbol: string; totalReturnPercent: number } | null;
   equityCurve: ComponentProps<typeof EquityCurveChart>["data"];
+  discrepancy: { curve: DiscrepancyPoint[]; summary: DiscrepancySummary };
 }) {
   const signed = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
 
@@ -50,7 +54,10 @@ export function PerformanceSnapshot({
         />
       </div>
 
-      <EquityCurveChart data={equityCurve} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <EquityCurveChart data={equityCurve} />
+        <DiscrepancyGapCard curve={discrepancy.curve} summary={discrepancy.summary} />
+      </div>
     </section>
   );
 }

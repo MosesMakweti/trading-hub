@@ -8,6 +8,11 @@ import {
   type AdherenceTradePoint,
 } from "@/domain/performance/adherence-analytics";
 import {
+  buildDiscrepancyCurve,
+  summarizeDiscrepancy,
+  type ExecutionTradeInput,
+} from "@/domain/analytics/execution-engine";
+import {
   summarizeStrategyPerformance,
   type StrategyTradePoint,
 } from "@/domain/performance/strategy-performance";
@@ -129,6 +134,8 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
         include: {
           psychology: true,
           allocations: { include: { tradingAccount: true } },
+          // The strategy's live benchmark (proven edge) → Expected R (Discrepancy Gap).
+          strategy: { select: { tradeManagement: { select: { expectedExpectancy: true } } } },
         },
       },
     },
@@ -163,6 +170,7 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   const tradeInputs: metrics.TradeMetricInput[] = [];
   const psychologyPoints: PsychologyDataPoint[] = [];
   const adherencePoints: AdherenceTradePoint[] = [];
+  const discrepancyInputs: ExecutionTradeInput[] = [];
   const dailyPnlMap = new Map<string, number>();
 
   for (const alloc of inRange) {
@@ -194,6 +202,17 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       tradeQualityPercent: t.tradeQualityPercent,
       setupScore: t.setupScore,
       setupRating: t.setupRating as (typeof adherencePoints)[number]["setupRating"],
+    });
+
+    // Discrepancy Gap: expected R = strategy expectancy × execution quality vs the
+    // trade's realized R (self-reported actualRR). Execution score is the frozen
+    // composite (trade quality → setup → confluence adherence).
+    discrepancyInputs.push({
+      tradeNumber: t.tradeNumber ?? 0,
+      dateKey,
+      strategyExpectancyR: t.strategy?.tradeManagement?.expectedExpectancy ?? null,
+      executionScore: t.tradeQualityPercent ?? t.setupScore ?? t.confluencePercent ?? null,
+      actualR: t.actualRR ? t.actualRR.toNumber() : null,
     });
 
     if (t.psychology) {
@@ -228,6 +247,12 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   const winningCount = tradeInputs.filter((t) => (t.actualRR ?? 0) > 0).length;
   const losingCount = tradeInputs.filter((t) => (t.actualRR ?? 0) < 0).length;
 
+  // Discrepancy Gap — Expected vs Actual equity, via the central Execution Engine.
+  const discrepancy = {
+    curve: buildDiscrepancyCurve(discrepancyInputs),
+    summary: summarizeDiscrepancy(discrepancyInputs),
+  };
+
   return {
     trading: {
       totalTrades: tradeInputs.length,
@@ -249,6 +274,7 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       statsByStrategy: metrics.statsByStrategy(tradeInputs),
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
+      discrepancy,
       dailyPercents,
       // SOT strategy-adherence analytics (foundation): average confluence / execution /
       // trade-quality adherence, avg confluence count on winners vs losers, and a

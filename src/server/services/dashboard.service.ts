@@ -73,6 +73,7 @@ export async function getDashboardData(userId: string) {
     bestAsset,
     winRate: analytics.trading.winRate,
     equityCurve: analytics.trading.equityCurve,
+    discrepancy: analytics.trading.discrepancy,
     totalTrades: analytics.trading.totalTrades,
     tradingDay,
   };

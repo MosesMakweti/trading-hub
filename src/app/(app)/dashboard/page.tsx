@@ -113,6 +113,7 @@ export default async function DashboardPage() {
         bestAccount={data.bestAccount}
         bestAsset={data.bestAsset}
         equityCurve={data.equityCurve}
+        discrepancy={data.discrepancy}
       />
 
       <section id="notes" className="glass space-y-3 rounded-2xl p-4 scroll-mt-20">
