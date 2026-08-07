@@ -23,7 +23,9 @@ import { TradeAccountRow } from "@/components/journal/trade-account-row";
 import { TagToggleGroup } from "@/components/journal/tag-toggle-group";
 import { StrategyTagSelect } from "@/components/journal/strategy-tag-select";
 import { AdherenceMeter } from "@/components/journal/adherence-score";
+import { SetupScoreCard } from "@/components/journal/setup-score-card";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
+import { scoreSetup } from "@/domain/trades/setup-score";
 import { PsychologyQuestionnaire } from "@/components/journal/psychology-questionnaire";
 import { StrategyReferencePanel } from "@/components/journal/strategy-reference-panel";
 import { minutesToTimeString, timeStringToMinutes } from "@/lib/date";
@@ -117,6 +119,15 @@ export function TradeForm({
       : null,
     watchedConfluences ?? [],
     watchedExecution ?? [],
+  );
+  // Live weighted setup score + mandatory validity, mirroring the save layer.
+  const liveSetup = scoreSetup(
+    (strategyReference?.confluences ?? []).map((c) => ({
+      name: c.name,
+      weight: c.weight,
+      mandatory: c.mandatory,
+    })),
+    watchedConfluences ?? [],
   );
 
   useEffect(() => {
@@ -462,6 +473,23 @@ export function TradeForm({
           }
         />
       </section>
+
+      {selectedStrategyId && (
+        <section className="glass space-y-2 rounded-2xl p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-muted-foreground">Setup Quality</h2>
+            <span className="text-xs text-muted-foreground/60">
+              Weighted probability from your confluences — a discipline score, not a prediction
+            </span>
+          </div>
+          <SetupScoreCard
+            score={liveSetup.setupScore}
+            rating={liveSetup.setupRating}
+            valid={liveSetup.setupValid}
+            missingMandatory={liveSetup.missingMandatory}
+          />
+        </section>
+      )}
 
       <section className="glass space-y-2 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Execution Confirmation</h2>
