@@ -8,6 +8,7 @@ export interface StrategyChecklistRef {
   color: TagColor;
   category: string | null;
   weight: number | null;
+  mandatory: boolean;
 }
 export interface StrategyTagRef {
   name: string;

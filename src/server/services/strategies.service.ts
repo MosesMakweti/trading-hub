@@ -404,7 +404,7 @@ export async function getStrategyReference(userId: string, id: string) {
       checklistItems: {
         where: { deletedAt: null, enabled: true },
         orderBy: { sortOrder: "asc" },
-        select: { name: true, color: true, category: true, weight: true, kind: true },
+        select: { name: true, color: true, category: true, weight: true, mandatory: true, kind: true },
       },
       tradeManagement: {
         include: {
@@ -434,10 +434,22 @@ export async function getStrategyReference(userId: string, id: string) {
     sessions: s.sessions.map((x) => ({ name: x.name, color: x.color })),
     confluences: s.checklistItems
       .filter((c) => c.kind === "CONFLUENCE")
-      .map((c) => ({ name: c.name, color: c.color, category: c.category, weight: c.weight })),
+      .map((c) => ({
+        name: c.name,
+        color: c.color,
+        category: c.category,
+        weight: c.weight,
+        mandatory: c.mandatory,
+      })),
     execution: s.checklistItems
       .filter((c) => c.kind === "EXECUTION")
-      .map((c) => ({ name: c.name, color: c.color, category: c.category, weight: c.weight })),
+      .map((c) => ({
+        name: c.name,
+        color: c.color,
+        category: c.category,
+        weight: c.weight,
+        mandatory: c.mandatory,
+      })),
     tradeManagement: s.tradeManagement
       ? {
           maxRiskPercent: s.tradeManagement.maxRiskPercent

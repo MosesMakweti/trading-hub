@@ -22,6 +22,7 @@ import {
 import { listEntryModels } from "@/server/services/entry-models.service";
 import { getStrategyReference, listStrategies } from "@/server/services/strategies.service";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
+import { scoreSetup } from "@/domain/trades/setup-score";
 
 // Composes the reference data the trade form needs (accounts/assets/
 // sessions/entry-models/checklists), reusing each feature's own service
@@ -250,7 +251,13 @@ async function buildTradeSnapshots(
 
 interface FrozenExpected {
   sessions: { name: string; color: string }[];
-  confluences: { name: string; color: string; category: string | null; weight: number | null }[];
+  confluences: {
+    name: string;
+    color: string;
+    category: string | null;
+    weight: number | null;
+    mandatory?: boolean;
+  }[];
   execution: { name: string; color: string; category: string | null; weight: number | null }[];
 }
 
@@ -275,6 +282,17 @@ async function buildStrategyExecution(
 
   const scores = scoreStrategyAdherence(expected, data.selectedConfluences, data.selectedExecution);
 
+  // Weighted confluence "setup score" — the probability/quality engine. Frozen
+  // from the expected confluences' weights + mandatory flags vs what was present.
+  const setup = scoreSetup(
+    (expected?.confluences ?? []).map((c) => ({
+      name: c.name,
+      weight: c.weight,
+      mandatory: c.mandatory ?? false,
+    })),
+    data.selectedConfluences,
+  );
+
   // selected* are stored as plain name arrays; each name's color is resolved at
   // render time from the frozen `strategyExecutionSnapshot` (the expected set),
   // so the record stays compact and a single source carries the colors.
@@ -285,6 +303,13 @@ async function buildStrategyExecution(
     confluencePercent: scores.confluencePercent,
     executionPercent: scores.executionPercent,
     tradeQualityPercent: scores.tradeQualityPercent,
+    // Weighted setup scoring (null score when the strategy defined no weights).
+    setupScore: setup.setupScore,
+    setupRating: expected ? setup.setupRating : null,
+    setupValid: expected ? setup.setupValid : null,
+    missingConfluences: (expected
+      ? setup.missingConfluences
+      : []) as unknown as Prisma.InputJsonValue,
   };
 }
 
