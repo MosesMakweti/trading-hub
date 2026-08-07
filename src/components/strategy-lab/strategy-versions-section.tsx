@@ -45,6 +45,9 @@ function VersionCard({
     `${s.frameworkStepTitles.length} framework`,
     `${s.timeframeCount} timeframe${s.timeframeCount === 1 ? "" : "s"} · ${s.checkpointCount} checkpoint${s.checkpointCount === 1 ? "" : "s"}`,
     `${s.entryModelNames.length} entry model${s.entryModelNames.length === 1 ? "" : "s"}`,
+    `${s.sessionCount} session${s.sessionCount === 1 ? "" : "s"}`,
+    `${s.confluenceCount} confluence${s.confluenceCount === 1 ? "" : "s"}${s.mandatoryConfluenceCount > 0 ? ` (${s.mandatoryConfluenceCount} core)` : ""}`,
+    `${s.executionCount} execution`,
     `${s.customRuleCount} rule${s.customRuleCount === 1 ? "" : "s"}`,
     `${s.partialTpCount} partial TP${s.partialTpCount === 1 ? "" : "s"}`,
   ];

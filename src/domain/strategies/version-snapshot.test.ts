@@ -29,6 +29,16 @@ const full: StrategyVersionSnapshot = {
     partialTakeProfits: [{ id: "p1", trigger: "2R", percentToClose: 50, reason: null }],
     customRules: [{ id: "r1", text: "BE at 2R" }, { id: "r2", text: "No news" }],
   },
+  sessions: [
+    { name: "NY AM", color: "BLUE", startMinutes: 570, endMinutes: 660, enabled: true },
+  ],
+  confluences: [
+    { name: "HTF Bias", color: "GREEN", category: null, description: null, weight: 30, mandatory: true, validationCriteria: null, enabled: true },
+    { name: "FVG", color: "AMBER", category: null, description: null, weight: 10, mandatory: false, validationCriteria: null, enabled: true },
+  ],
+  execution: [
+    { name: "Candle Close", color: "TEAL", category: null, description: null, weight: null, mandatory: false, validationCriteria: null, enabled: true },
+  ],
 };
 
 describe("summarizeStrategyVersionSnapshot", () => {
@@ -42,6 +52,10 @@ describe("summarizeStrategyVersionSnapshot", () => {
       entryModelNames: ["OB"],
       customRuleCount: 2,
       partialTpCount: 1,
+      sessionCount: 1,
+      confluenceCount: 2,
+      mandatoryConfluenceCount: 1,
+      executionCount: 1,
     });
   });
 
@@ -61,6 +75,10 @@ describe("summarizeStrategyVersionSnapshot", () => {
       entryModelNames: [],
       customRuleCount: 0,
       partialTpCount: 0,
+      sessionCount: 0,
+      confluenceCount: 0,
+      mandatoryConfluenceCount: 0,
+      executionCount: 0,
     });
   });
 });
