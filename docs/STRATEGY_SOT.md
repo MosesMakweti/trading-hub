@@ -109,8 +109,8 @@ P2  Strategy Lab: Sessions / Confluences / Execution
     editors (rich, colored) + snapshot .................. ⭘
 P4  Trade form: strategy-driven, multi-select ........... ✅ (P4a + P4b)
 P5  Adherence & trade-quality scoring (pure, tested) .... ✅ (scorer built + 5 tests)
+P6  Display scores + colored selected tags .............. ✅
 P3  Remove Trade Setup page + global editors; nav ....... ⭘ next
-P6  Display scores across the app ....................... ⭘
 P7  Colored Tag system everywhere + broader accents ..... ⭘
 P8  Analytics foundations ............................... ⭘
 P9  Full migration: backfill + drop globals + cleanup ... ⭘
@@ -194,3 +194,26 @@ Verified: **tsc + eslint clean; 181 tests green** (5 new scorer tests). App comp
   8-question `adherencePercent` is unaffected.
 - Colored rendering of the selected tags + the adherence scores across the app is **P6** (the mapper
   currently returns plain `string[]` labels; colors come from the snapshot there).
+
+### P6 — Display scores + colored selected tags ✅
+The SOT record now surfaces visually everywhere a trade is shown. New shared bits:
+- `SelectedTagDTO {name,color}` + `AdherenceScoresDTO` in `types/trades.ts`; `confluenceLabels` /
+  `executionLabels` on both trade DTOs changed `string[]` → `SelectedTagDTO[]`, and the workspace DTO
+  gained `confluencePercent` / `executionPercent` / `tradeQualityPercent` (list DTO gained
+  `tradeQualityPercent`).
+- **`resolveSelectedTags`** (`server/services/selected-tags.ts`) — the single color-resolution
+  helper: maps a trade's selected **names** to colors from its frozen `strategyExecutionSnapshot`,
+  falling back to the legacy checklist labels (neutral GRAY) for pre-SOT trades. Used by both the
+  workspace mapper and the journal list mapper (no duplicated logic).
+- **`AdherenceMeter`** (labeled thin bar, banded green/amber/rose ≥80/≥50/rest) + **`TradeQualityBadge`**
+  (compact pill) in `components/journal/adherence-score.tsx`.
+
+Wired: the workspace **Idea** section renders confluences as colored `Tag`s + a confluence meter; the
+**Execution** section renders execution `Tag`s + an execution meter + a combined "Strategy adherence /
+Trade quality" block. The **trade card** shows colored confluence/execution tags + a quality badge.
+**Add Trade** shows a **live** adherence preview (Confluences / Execution / Trade quality meters)
+recomputed with the same pure `scoreStrategyAdherence` as the trader multi-selects — exactly what the
+save layer persists. Scores are labeled a discipline measure, **not a market prediction**.
+
+Verified: **tsc + eslint clean; 181 tests green**. Static verification (authed screenshots time out on
+this box). Analytics still on the legacy metric (**P8**); `assetSymbol` denorm still **P9**.

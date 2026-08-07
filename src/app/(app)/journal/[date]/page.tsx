@@ -16,6 +16,7 @@ import { TradeCard } from "@/components/journal/trade-card";
 import { WORKFLOW_STEP_META, type WorkflowStep } from "@/components/dashboard/workflow-progress";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FadeIn, StaggerList, StaggerItem } from "@/components/shared/motion";
+import { executionSnapshot, resolveSelectedTags } from "@/server/services/selected-tags";
 import type { TradeListItemDTO } from "@/types/trades";
 
 export default async function JournalDayPage({
@@ -70,12 +71,21 @@ export default async function JournalDayPage({
     entryModelNames: t.entryModels.map((m) => m.entryModel.name),
     strategyName: t.strategyNameSnapshot,
     strategyId: t.strategy && !t.strategy.deletedAt ? t.strategy.id : null,
-    confluenceLabels: t.checklistSelections
-      .filter((c) => c.checklistItem.type === "CONFLUENCE")
-      .map((c) => c.checklistItem.label),
-    executionLabels: t.checklistSelections
-      .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
-      .map((c) => c.checklistItem.label),
+    confluenceLabels: resolveSelectedTags(
+      t.selectedConfluences,
+      executionSnapshot(t.strategyExecutionSnapshot).confluences,
+      t.checklistSelections
+        .filter((c) => c.checklistItem.type === "CONFLUENCE")
+        .map((c) => c.checklistItem.label),
+    ),
+    executionLabels: resolveSelectedTags(
+      t.selectedExecution,
+      executionSnapshot(t.strategyExecutionSnapshot).execution,
+      t.checklistSelections
+        .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
+        .map((c) => c.checklistItem.label),
+    ),
+    tradeQualityPercent: t.tradeQualityPercent,
     psychology: t.psychology
       ? {
           rawScore: t.psychology.rawScore,

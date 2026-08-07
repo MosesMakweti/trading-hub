@@ -1,3 +1,20 @@
+import type { TagColor } from "@prisma/client";
+
+/** A selected confluence / execution tag, resolved with its color (from the trade's
+ * frozen strategy snapshot) so it renders as a colored chip everywhere. */
+export interface SelectedTagDTO {
+  name: string;
+  color: TagColor;
+}
+
+/** Strategy-adherence / trade-quality scores. Null when the strategy defined no
+ * items of that kind (or the trade had no strategy). NOT a market prediction. */
+export interface AdherenceScoresDTO {
+  confluencePercent: number | null;
+  executionPercent: number | null;
+  tradeQualityPercent: number | null;
+}
+
 export interface TradeListItemDTO {
   id: string;
   assetSymbol: string;
@@ -19,8 +36,10 @@ export interface TradeListItemDTO {
     closingPnlNet: number;
   }[];
   entryModelNames: string[];
-  confluenceLabels: string[];
-  executionLabels: string[];
+  confluenceLabels: SelectedTagDTO[];
+  executionLabels: SelectedTagDTO[];
+  // Combined strategy-adherence / trade-quality score (null when no strategy set).
+  tradeQualityPercent: number | null;
   // Strategy the trade was taken under (from the snapshot); strategyId links to
   // the live strategy only while it still exists.
   strategyName: string | null;
@@ -77,8 +96,14 @@ export interface TradeWorkspaceDTO {
   hitFullTP: boolean;
 
   entryModelNames: string[];
-  confluenceLabels: string[];
-  executionLabels: string[];
+  confluenceLabels: SelectedTagDTO[];
+  executionLabels: SelectedTagDTO[];
+
+  // SOT strategy-adherence / trade-quality scores (selected vs the strategy's
+  // frozen expected set). Null per-kind when the strategy defined none.
+  confluencePercent: number | null;
+  executionPercent: number | null;
+  tradeQualityPercent: number | null;
 
   // Strategy Lab reference + historical snapshot (Phase 4). name/version are the
   // frozen snapshot (shown even if the strategy was later deleted); strategyId is

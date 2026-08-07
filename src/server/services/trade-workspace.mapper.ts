@@ -1,5 +1,6 @@
 import { utcDateToKey } from "@/lib/date";
 import { executedAtFromTrade } from "@/domain/trades/lifecycle";
+import { executionSnapshot, resolveSelectedTags } from "@/server/services/selected-tags";
 import type { TradeWithWorkspaceRelations } from "@/server/services/trades.service";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
@@ -11,11 +12,9 @@ import type { TradeWorkspaceDTO } from "@/types/trades";
 export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWorkspaceDTO {
   const performance = trade.allocations.find((a) => a.tradingAccount.kind === "PERFORMANCE");
 
-  // SOT: selections are now stored by name on the trade (frozen from the chosen
-  // strategy). Fall back to the legacy global-checklist join for trades created
-  // before the strategy-scoped model. (Colors + adherence scores land in P6.)
-  const selectedConfluences = trade.selectedConfluences as string[] | null;
-  const selectedExecution = trade.selectedExecution as string[] | null;
+  // SOT: selections are stored by name on the trade and colored from the frozen
+  // strategy snapshot; pre-SOT trades fall back to the legacy global-checklist join.
+  const snapshot = executionSnapshot(trade.strategyExecutionSnapshot);
 
   return {
     id: trade.id,
@@ -40,16 +39,23 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     strategyId: trade.strategy && !trade.strategy.deletedAt ? trade.strategy.id : null,
     strategyName: trade.strategyNameSnapshot,
     strategyVersion: trade.strategyVersionSnapshot,
-    confluenceLabels:
-      selectedConfluences ??
+    confluenceLabels: resolveSelectedTags(
+      trade.selectedConfluences,
+      snapshot.confluences,
       trade.checklistSelections
         .filter((c) => c.checklistItem.type === "CONFLUENCE")
         .map((c) => c.checklistItem.label),
-    executionLabels:
-      selectedExecution ??
+    ),
+    executionLabels: resolveSelectedTags(
+      trade.selectedExecution,
+      snapshot.execution,
       trade.checklistSelections
         .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
         .map((c) => c.checklistItem.label),
+    ),
+    confluencePercent: trade.confluencePercent,
+    executionPercent: trade.executionPercent,
+    tradeQualityPercent: trade.tradeQualityPercent,
     accounts: trade.allocations.map((a) => ({
       name: a.tradingAccount.name,
       kind: a.tradingAccount.kind as TradeWorkspaceDTO["accounts"][number]["kind"],

@@ -9,6 +9,8 @@ import { SquareArrowOutUpRight, Target, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { minutesToTimeString } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
+import { Tag } from "@/components/ui/tag";
+import { TradeQualityBadge } from "@/components/journal/adherence-score";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { archiveTrade } from "@/actions/trades.actions";
@@ -123,8 +125,9 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
       {(trade.entryModelNames.length > 0 ||
         trade.confluenceLabels.length > 0 ||
         trade.executionLabels.length > 0 ||
-        tpHits.length > 0) && (
-        <div className="flex flex-wrap gap-1.5">
+        tpHits.length > 0 ||
+        trade.tradeQualityPercent != null) && (
+        <div className="flex flex-wrap items-center gap-1.5">
           {tpHits.map((label) => (
             <Badge key={label} variant="success">
               {label}
@@ -135,16 +138,17 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
               {label}
             </Badge>
           ))}
-          {trade.confluenceLabels.map((label) => (
-            <Badge key={label} variant="outline">
-              {label}
-            </Badge>
+          {trade.confluenceLabels.map((tag) => (
+            <Tag key={`c-${tag.name}`} color={tag.color}>
+              {tag.name}
+            </Tag>
           ))}
-          {trade.executionLabels.map((label) => (
-            <Badge key={label} variant="outline">
-              {label}
-            </Badge>
+          {trade.executionLabels.map((tag) => (
+            <Tag key={`e-${tag.name}`} color={tag.color}>
+              {tag.name}
+            </Tag>
           ))}
+          <TradeQualityBadge percent={trade.tradeQualityPercent} />
         </div>
       )}
 

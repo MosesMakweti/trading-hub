@@ -22,6 +22,8 @@ import {
 import { TradeAccountRow } from "@/components/journal/trade-account-row";
 import { TagToggleGroup } from "@/components/journal/tag-toggle-group";
 import { StrategyTagSelect } from "@/components/journal/strategy-tag-select";
+import { AdherenceMeter } from "@/components/journal/adherence-score";
+import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 import { PsychologyQuestionnaire } from "@/components/journal/psychology-questionnaire";
 import { StrategyReferencePanel } from "@/components/journal/strategy-reference-panel";
 import { minutesToTimeString, timeStringToMinutes } from "@/lib/date";
@@ -102,6 +104,18 @@ export function TradeForm({
   const selectedStrategyId = useWatch({ control, name: "strategyId" });
   const [strategyReference, setStrategyReference] = useState<StrategyReferenceDTO | null>(null);
   const [referenceLoading, setReferenceLoading] = useState(false);
+
+  // Live strategy-adherence preview — recomputed with the pure scorer as the
+  // trader multi-selects, mirroring exactly what the save layer will persist.
+  const watchedConfluences = useWatch({ control, name: "selectedConfluences" });
+  const watchedExecution = useWatch({ control, name: "selectedExecution" });
+  const liveScores = scoreStrategyAdherence(
+    strategyReference
+      ? { confluences: strategyReference.confluences, execution: strategyReference.execution }
+      : null,
+    watchedConfluences ?? [],
+    watchedExecution ?? [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -452,6 +466,22 @@ export function TradeForm({
           }
         />
       </section>
+
+      {liveScores.tradeQualityPercent != null && (
+        <section className="glass space-y-3 rounded-2xl p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-muted-foreground">Strategy adherence</h2>
+            <span className="text-xs text-muted-foreground/60">
+              How closely this trade follows the strategy — not a prediction
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <AdherenceMeter label="Confluences" percent={liveScores.confluencePercent} />
+            <AdherenceMeter label="Execution" percent={liveScores.executionPercent} />
+            <AdherenceMeter label="Trade quality" percent={liveScores.tradeQualityPercent} />
+          </div>
+        </section>
+      )}
 
       <section className="glass space-y-3 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Trade Result</h2>

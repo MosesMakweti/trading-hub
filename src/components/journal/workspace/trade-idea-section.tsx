@@ -1,4 +1,5 @@
-import { Badge } from "@/components/ui/badge";
+import { Tag } from "@/components/ui/tag";
+import { AdherenceMeter } from "@/components/journal/adherence-score";
 import {
   NoteBlock,
   StrategyRef,
@@ -47,19 +48,22 @@ export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
         <WorkspaceField label="Reference risk" value={referenceRisk} />
       </div>
 
-      <div>
-        <div className="mb-1.5 text-xs text-muted-foreground">Confluences</div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>Confluences</span>
+        </div>
         {trade.confluenceLabels.length ? (
           <div className="flex flex-wrap gap-1.5">
-            {trade.confluenceLabels.map((label) => (
-              <Badge key={label} variant="outline">
-                {label}
-              </Badge>
+            {trade.confluenceLabels.map((tag) => (
+              <Tag key={tag.name} color={tag.color}>
+                {tag.name}
+              </Tag>
             ))}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground/40 italic">None selected.</p>
         )}
+        <AdherenceMeter label="Confluence adherence" percent={trade.confluencePercent} className="max-w-xs" />
       </div>
 
       <NoteBlock label="Pre-trade notes" text={trade.preTradeNotes} />
