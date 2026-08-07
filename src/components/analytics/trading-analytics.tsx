@@ -3,6 +3,7 @@ import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
 import { MonthlyReturnsChart } from "@/components/analytics/monthly-returns-chart";
 import { BestAssetTable } from "@/components/analytics/best-asset-table";
 import { AdherenceAnalytics } from "@/components/analytics/adherence-analytics";
+import { DiscrepancyAnalytics } from "@/components/analytics/discrepancy-analytics";
 import { Heatmap, pnlHeatColor } from "@/components/analytics/heatmap";
 import type { getAnalyticsData } from "@/server/services/analytics.service";
 
@@ -47,6 +48,13 @@ export function TradingAnalytics({ data }: { data: TradingData }) {
 
       <EquityCurveChart data={data.equityCurve} />
       <MonthlyReturnsChart data={data.monthlyReturns} />
+
+      <DiscrepancyAnalytics
+        curve={data.discrepancy.curve}
+        summary={data.discrepancy.summary}
+        avgStrategyAdherence={data.adherence.avgTradeQuality}
+        avgRuleAdherence={data.ruleAdherenceAverage}
+      />
 
       <AdherenceAnalytics data={data.adherence} />
 

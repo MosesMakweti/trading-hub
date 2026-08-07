@@ -34,9 +34,12 @@ D2  Strategy benchmark fields (expected win rate / avg RR /
 D3  Wire engine → analytics.service + Dashboard Discrepancy
     Gap card (dual-line chart beside Equity Curve) .......... ✅
 D4  Journal trade-card integration (expected/actual/gap/dev) . ✅ (primary deviation → D5)
-D5  Analytics Discrepancy Gap section + deviation sub-scores
-    (entry/exit/risk from planned-vs-actual prices) ......... ⭘
-D6  Psychology Lab deviation classification + aggregation ... ⭘
+D5  Analytics Discrepancy Gap section (overall/execution/
+    recoverable/trend + dual-line chart) .................... ✅
+D6  Deviation sub-scores (entry/exit/risk from planned-vs-
+    actual) + Primary Deviation + Psychology Lab classify ... ⭘
+    (re-scoped: deviations moved here — they feed the cause
+    classification directly)
 ```
 Every phase: tsc + eslint clean, vitest green, app runnable, design-system consistent.
 
@@ -99,3 +102,14 @@ strategy select now carries `tradeManagement.expectedExpectancy`; `TradeListItem
 `discrepancy`; the journal maps it via the shared helper. The **trade card** shows a compact
 Discrepancy strip — `Exp → Act`, colored **Gap**, Execution %, and Recoverable — only when
 benchmarked. Primary deviation is D5 (needs the entry/exit/risk sub-scores). Next: D5.
+
+### D5 — Analytics Discrepancy Gap section ✅
+Extracted the dual-line chart into a shared **`DiscrepancyGapChart`** (Dashboard card + Analytics
+section both use it; the card became a thin server wrapper). New **`DiscrepancyAnalytics`** section on
+the analytics dashboard (rendered by `TradingAnalytics`, above the adherence card): grouped stat grid —
+**Overall** (Expected / Actual equity, Lifetime gap), **Execution** (avg execution score / strategy
+adherence / rule adherence), **Recoverable edge** (Recoverable R / % / Edge capture) — plus execution
+efficiency, best/worst execution streaks, the gap-trend chip, and the full dual-line chart. All from
+the already-computed `trading.discrepancy` + adherence, no new queries. **Re-scope:** deviation
+sub-scores (entry/exit/risk) move to **D6** since they feed the psychology cause-classification.
+Next: D6 (deviation engine + Primary Deviation on the card + Psychology Lab).
