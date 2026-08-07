@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
@@ -20,7 +20,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TradeAccountRow } from "@/components/journal/trade-account-row";
-import { TagToggleGroup } from "@/components/journal/tag-toggle-group";
 import { StrategyTagSelect } from "@/components/journal/strategy-tag-select";
 import { AdherenceMeter } from "@/components/journal/adherence-score";
 import { SetupScoreCard } from "@/components/journal/setup-score-card";
@@ -34,6 +33,7 @@ import { createTrade, updateTrade, loadStrategyReference } from "@/actions/trade
 import type { StrategyReferenceDTO } from "@/types/strategies";
 
 const NO_SESSION = "__none__";
+const NO_ENTRY_MODEL = "__no_entry_model__";
 
 // Keep a currently-selected value visible even if the strategy's list changed
 // since the trade was saved (e.g. an asset later removed from the strategy).
@@ -65,7 +65,7 @@ const emptyDefaults: TradeFormValues = {
   allocations: [],
   selectedConfluences: [],
   selectedExecution: [],
-  entryModelIds: [],
+  selectedEntryModel: null,
   psychologyAnswers: {},
 };
 
@@ -74,7 +74,6 @@ interface TradeFormProps {
   mode: "create" | "edit";
   tradeId?: string;
   accounts: { id: string; name: string; kind: string }[];
-  entryModels: { id: string; name: string }[];
   strategies: { id: string; name: string; version: number; archived?: boolean }[];
   defaultValues?: TradeFormValues;
 }
@@ -84,7 +83,6 @@ export function TradeForm({
   mode,
   tradeId,
   accounts,
-  entryModels,
   strategies,
   defaultValues,
 }: TradeFormProps) {
@@ -95,6 +93,7 @@ export function TradeForm({
     register,
     handleSubmit,
     control,
+    setValue,
     formState: { errors },
   } = useForm<TradeFormValues, unknown, TradeInput>({
     resolver: zodResolver(tradeSchema),
@@ -150,6 +149,18 @@ export function TradeForm({
       active = false;
     };
   }, [selectedStrategyId]);
+
+  // When the strategy changes, clear the entry model — a model belongs to exactly
+  // one strategy, so the previous selection can't carry over. Skip the very first
+  // run so an edit-mode trade keeps its saved entry model on load.
+  const strategyInitialised = useRef(false);
+  useEffect(() => {
+    if (!strategyInitialised.current) {
+      strategyInitialised.current = true;
+      return;
+    }
+    setValue("selectedEntryModel", null);
+  }, [selectedStrategyId, setValue]);
 
   function isAccountSelected(accountId: string) {
     return fields.some((f) => f.tradingAccountId === accountId);
@@ -452,11 +463,49 @@ export function TradeForm({
 
       <section className="glass space-y-2 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Entry Model</h2>
-        <TagToggleGroup
+        <Controller
           control={control}
-          name="entryModelIds"
-          items={entryModels.map((m) => ({ id: m.id, label: m.name }))}
-          emptyLabel="No entry models configured yet — add them in Strategy Lab > Entry models."
+          name="selectedEntryModel"
+          render={({ field }) => {
+            if (!selectedStrategyId) {
+              return (
+                <p className="text-sm text-muted-foreground">
+                  Select a strategy to load its entry models.
+                </p>
+              );
+            }
+            const names = withSelected(strategyReference?.entryModels, field.value);
+            if (names.length === 0) {
+              return (
+                <p className="text-sm text-muted-foreground">
+                  This strategy has no entry models yet — add them in Strategy Lab, inside the
+                  strategy&apos;s Entry Models section.
+                </p>
+              );
+            }
+            return (
+              <Select
+                items={[
+                  { value: NO_ENTRY_MODEL, label: "None" },
+                  ...names.map((n) => ({ value: n, label: n })),
+                ]}
+                value={field.value ?? NO_ENTRY_MODEL}
+                onValueChange={(v) => field.onChange(v === NO_ENTRY_MODEL ? null : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select an entry model" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_ENTRY_MODEL}>None</SelectItem>
+                  {names.map((n) => (
+                    <SelectItem key={n} value={n}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            );
+          }}
         />
       </section>
 

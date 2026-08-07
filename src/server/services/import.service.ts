@@ -18,23 +18,6 @@ export interface ImportSummary {
   rows: ImportRowResult[];
 }
 
-/** Resolves/creates a simple by-name reference row (Asset/EntryModel/ChecklistItem), memoized within one import run. */
-function makeResolver<T extends { id: string }>(
-  find: (name: string) => Promise<T | null>,
-  create: (name: string) => Promise<T>,
-) {
-  const cache = new Map<string, Promise<T>>();
-  return (name: string): Promise<T> => {
-    const key = name.trim().toUpperCase();
-    let promise = cache.get(key);
-    if (!promise) {
-      promise = find(name).then((existing) => existing ?? create(name));
-      cache.set(key, promise);
-    }
-    return promise;
-  };
-}
-
 /**
  * Reuses `createTrade` (the exact same path the trade form goes through) for
  * every row, rather than re-implementing risk-scaling/psychology-scoring
@@ -64,17 +47,11 @@ export async function importTrades(
 
   // SOT: asset + session are no longer resolved into global rows here — assetSymbol
   // and the session name are stored on the trade directly (the save layer bridges
-  // the legacy Asset FK by symbol).
-  const resolveEntryModel = makeResolver(
-    (name) => prisma.entryModel.findFirst({ where: { userId, name } }),
-    async (name) => {
-      const last = await prisma.entryModel.findFirst({ where: { userId }, orderBy: { sortOrder: "desc" } });
-      return prisma.entryModel.create({ data: { userId, name, sortOrder: (last?.sortOrder ?? -1) + 1 } });
-    },
-  );
-  // SOT: confluences / execution confirmations are now stored on the trade by
-  // name (frozen from the strategy), so imports pass the CSV labels straight
-  // through instead of resolving them into the (legacy) global checklist tables.
+  // the legacy Asset FK by symbol). Entry models are strategy-scoped now, so the
+  // imported name is passed straight through; the save layer only keeps it when it
+  // matches one of the (strategy's) Entry Models — imported trades carry no
+  // strategy, so historical imports simply have no entry model.
+  // Confluences / execution confirmations are likewise passed through by name.
 
   const rows: ImportRowResult[] = [];
 
@@ -88,8 +65,6 @@ export async function importTrades(
     }
 
     try {
-      const entryModels = await Promise.all(record.entryModelNames.map(resolveEntryModel));
-
       const knownAllocations = record.allocations.filter((a) =>
         accountByName.has(a.accountName.trim().toUpperCase()),
       );
@@ -127,7 +102,7 @@ export async function importTrades(
         })),
         selectedConfluences: record.confluenceLabels,
         selectedExecution: record.executionLabels,
-        entryModelIds: entryModels.map((m) => m.id),
+        selectedEntryModel: record.entryModelNames[0] ?? null,
         psychologyAnswers: record.psychologyAnswers,
       };
 

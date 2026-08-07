@@ -30,8 +30,13 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
       },
       take: 5,
     }),
-    prisma.entryModel.findMany({
-      where: { userId: user.id, name: { contains: q, mode: "insensitive" } },
+    prisma.strategyEntryModel.findMany({
+      where: {
+        name: { contains: q, mode: "insensitive" },
+        deletedAt: null,
+        strategy: { userId: user.id, deletedAt: null },
+      },
+      select: { name: true, strategyId: true },
       take: 5,
     }),
   ]);
@@ -50,7 +55,11 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
     results.push({ category: "Account", label: a.name, href: "/accounts" });
   }
   for (const m of entryModels) {
-    results.push({ category: "Entry Model", label: m.name, href: "/strategy-lab/entry-models" });
+    results.push({
+      category: "Entry Model",
+      label: m.name,
+      href: `/strategy-lab/${m.strategyId}`,
+    });
   }
 
   return results;

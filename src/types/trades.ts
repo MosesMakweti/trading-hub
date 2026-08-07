@@ -50,7 +50,7 @@ export interface TradeListItemDTO {
     closingPnlGross: number;
     closingPnlNet: number;
   }[];
-  entryModelNames: string[];
+  entryModelName: string | null;
   confluenceLabels: SelectedTagDTO[];
   executionLabels: SelectedTagDTO[];
   // Combined strategy-adherence / trade-quality score (null when no strategy set).
@@ -117,7 +117,7 @@ export interface TradeWorkspaceDTO {
   hitTP3: boolean;
   hitFullTP: boolean;
 
-  entryModelNames: string[];
+  entryModelName: string | null;
   confluenceLabels: SelectedTagDTO[];
   executionLabels: SelectedTagDTO[];
 

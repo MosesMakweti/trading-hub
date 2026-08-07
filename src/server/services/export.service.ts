@@ -9,7 +9,6 @@ export async function listTradeExportRecords(
     where: { userId },
     include: {
       allocations: { include: { tradingAccount: true } },
-      entryModels: { include: { entryModel: true } },
       psychology: true,
     },
     orderBy: [{ tradeDate: "asc" }, { executionMinutes: "asc" }],
@@ -56,7 +55,9 @@ export async function listTradeExportRecords(
       // SOT: the by-name selections frozen on the trade (pre-SOT trades backfilled in P9).
       confluenceLabels: (t.selectedConfluences as string[] | null) ?? [],
       executionLabels: (t.selectedExecution as string[] | null) ?? [],
-      entryModelNames: t.entryModels.map((m) => m.entryModel.name),
+      // Kept as an array in the export format for backward compatibility; a trade
+      // now has a single strategy-scoped entry model, so it is [] or one name.
+      entryModelNames: t.selectedEntryModel ? [t.selectedEntryModel] : [],
     };
 
     return { record, psychologyGrade: t.psychology?.grade ?? null };

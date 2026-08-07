@@ -19,7 +19,6 @@ import {
   listTradingAccounts,
   PERFORMANCE_ACCOUNT_STARTING_BALANCE,
 } from "@/server/services/accounts.service";
-import { listEntryModels } from "@/server/services/entry-models.service";
 import { getStrategyReference, listStrategies } from "@/server/services/strategies.service";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 import { scoreSetup } from "@/domain/trades/setup-score";
@@ -28,12 +27,11 @@ import { scoreSetup } from "@/domain/trades/setup-score";
 // sessions/entry-models/checklists), reusing each feature's own service
 // rather than re-querying Prisma directly.
 export async function getTradeFormOptions(userId: string) {
-  // SOT: a trade's strategy is the gateway — its markets, sessions, confluences &
-  // execution are loaded client-side from the selected strategy's reference. The
-  // form only needs the account list, entry models, and the strategy picker.
-  const [accounts, entryModels, strategies] = await Promise.all([
+  // SOT: a trade's strategy is the gateway — its markets, sessions, confluences,
+  // execution AND entry models are loaded client-side from the selected strategy's
+  // reference. The form only needs the account list and the strategy picker.
+  const [accounts, strategies] = await Promise.all([
     listTradingAccounts(userId),
-    listEntryModels(userId),
     listStrategies(userId),
   ]);
 
@@ -43,7 +41,6 @@ export async function getTradeFormOptions(userId: string) {
 
   return {
     accounts,
-    entryModels,
     strategies: selectableStrategies,
   };
 }
@@ -65,7 +62,6 @@ const tradeInclude = {
     },
   },
   allocations: { include: { tradingAccount: true } },
-  entryModels: { include: { entryModel: true } },
   images: true,
   psychology: true,
 } as const;
@@ -182,11 +178,12 @@ async function buildAllocations(userId: string, data: TradeInput, excludeTradeId
 
 /**
  * Freezes the strategy reference + display snapshots at save time. The strategy
- * name/version come from the strategy's *current* state; the entry-model names
- * are the selected models' names joined in selection order. All are stored on the
- * Trade so a completed trade keeps showing the strategy as it was when saved,
- * even if the strategy is later versioned, renamed, or deleted. A strategyId that
- * doesn't belong to the user is dropped (treated as no strategy).
+ * name/version come from the strategy's *current* state; the entry model is the
+ * one chosen from the selected strategy's own Entry Models (validated + frozen by
+ * name). All are stored on the Trade so a completed trade keeps showing the
+ * strategy as it was when saved, even if the strategy is later versioned, renamed,
+ * or deleted. A strategyId that doesn't belong to the user is dropped (treated as
+ * no strategy).
  */
 type StrategySnapshot = {
   strategyId: string | null;
@@ -199,18 +196,21 @@ async function buildTradeSnapshots(
   data: TradeInput,
   existing?: StrategySnapshot,
 ) {
-  // Entry-model names always reflect the current selection (they're part of the
-  // trade, not the strategy).
-  const entryModels = data.entryModelIds.length
-    ? await prisma.entryModel.findMany({
-        where: { userId, id: { in: data.entryModelIds } },
-      })
-    : [];
-  const nameById = new Map(entryModels.map((m) => [m.id, m.name]));
-  const orderedNames = data.entryModelIds
-    .map((id) => nameById.get(id))
-    .filter((name): name is string => Boolean(name));
-  const entryModelNameSnapshot = orderedNames.length ? orderedNames.join(", ") : null;
+  // SOT: the entry model must be one of the *selected strategy's* own Entry Models
+  // — a selection from any other strategy (or a stale/forged name) is rejected. The
+  // validated name is frozen on the trade so the record survives strategy edits.
+  let selectedEntryModel: string | null = null;
+  if (data.selectedEntryModel && data.strategyId) {
+    const match = await prisma.strategyEntryModel.findFirst({
+      where: {
+        name: data.selectedEntryModel,
+        deletedAt: null,
+        strategy: { id: data.strategyId, userId },
+      },
+      select: { name: true },
+    });
+    selectedEntryModel = match?.name ?? null;
+  }
 
   // The strategy snapshot is FROZEN once linked: while the selection is unchanged
   // it's kept exactly as-is — even if the strategy was since renamed, versioned,
@@ -218,7 +218,7 @@ async function buildTradeSnapshots(
   // (re-deriving here would wipe the snapshot the moment its strategy is gone).
   // Recompute only when the selection actually changes (or on create).
   if (existing && data.strategyId === existing.strategyId) {
-    return { ...existing, entryModelNameSnapshot };
+    return { ...existing, selectedEntryModel };
   }
 
   let strategyId: string | null = null;
@@ -237,7 +237,7 @@ async function buildTradeSnapshots(
     }
   }
 
-  return { strategyId, strategyNameSnapshot, strategyVersionSnapshot, entryModelNameSnapshot };
+  return { strategyId, strategyNameSnapshot, strategyVersionSnapshot, selectedEntryModel };
 }
 
 interface FrozenExpected {
@@ -390,7 +390,6 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
       status: deriveStatus(closedAt, reviewedAt),
       ...strategyExec,
       allocations: { create: allocations },
-      entryModels: { create: data.entryModelIds.map((entryModelId) => ({ entryModelId })) },
       psychology: { create: psychology },
     },
     include: tradeInclude,
@@ -418,7 +417,6 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
     });
 
     await tx.tradeAccountAllocation.deleteMany({ where: { tradeId } });
-    await tx.tradeEntryModel.deleteMany({ where: { tradeId } });
 
     const now = new Date();
     // The form owns the psychology reflections; the workspace review prompts
@@ -445,7 +443,6 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
         status: deriveStatus(closedAt, reviewedAt),
         ...strategyExec,
         allocations: { create: allocations },
-        entryModels: { create: data.entryModelIds.map((entryModelId) => ({ entryModelId })) },
         psychology: { upsert: { create: psychology, update: psychology } },
       },
       include: tradeInclude,

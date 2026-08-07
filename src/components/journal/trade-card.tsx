@@ -127,7 +127,7 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
         ))}
       </div>
 
-      {(trade.entryModelNames.length > 0 ||
+      {(trade.entryModelName != null ||
         trade.confluenceLabels.length > 0 ||
         trade.executionLabels.length > 0 ||
         tpHits.length > 0 ||
@@ -140,11 +140,11 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
               {label}
             </Badge>
           ))}
-          {trade.entryModelNames.map((label) => (
-            <Tag key={`m-${label}`} color={colorForName(label)}>
-              {label}
+          {trade.entryModelName && (
+            <Tag key={`m-${trade.entryModelName}`} color={colorForName(trade.entryModelName)}>
+              {trade.entryModelName}
             </Tag>
-          ))}
+          )}
           {trade.confluenceLabels.map((tag) => (
             <Tag key={`c-${tag.name}`} color={tag.color}>
               {tag.name}

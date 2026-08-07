@@ -69,7 +69,7 @@ export default async function JournalDayPage({
       closingPnlGross: a.closingPnlGross.toNumber(),
       closingPnlNet: a.closingPnlNet.toNumber(),
     })),
-    entryModelNames: t.entryModels.map((m) => m.entryModel.name),
+    entryModelName: t.selectedEntryModel,
     strategyName: t.strategyNameSnapshot,
     strategyId: t.strategy && !t.strategy.deletedAt ? t.strategy.id : null,
     confluenceLabels: resolveSelectedTags(

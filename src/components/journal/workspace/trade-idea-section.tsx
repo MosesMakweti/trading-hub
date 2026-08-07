@@ -38,14 +38,8 @@ export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
         <WorkspaceField
           label="Entry model"
           value={
-            trade.entryModelNames.length ? (
-              <div className="flex flex-wrap gap-1">
-                {trade.entryModelNames.map((name) => (
-                  <Tag key={name} color={colorForName(name)}>
-                    {name}
-                  </Tag>
-                ))}
-              </div>
+            trade.entryModelName ? (
+              <Tag color={colorForName(trade.entryModelName)}>{trade.entryModelName}</Tag>
             ) : undefined
           }
           placeholder="None"

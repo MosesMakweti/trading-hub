@@ -48,7 +48,9 @@ export const tradeSchema = z
     // by name. The save layer freezes the strategy's expected set and scores adherence.
     selectedConfluences: z.array(z.string()).default([]),
     selectedExecution: z.array(z.string()).default([]),
-    entryModelIds: z.array(z.string()).default([]),
+    // A single entry model chosen from the selected strategy's own Entry Models
+    // (by name). Null when none is chosen or the strategy defines none.
+    selectedEntryModel: z.string().nullable().default(null),
     psychologyAnswers: psychologyAnswersSchema,
   })
   .refine(

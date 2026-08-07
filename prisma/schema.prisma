@@ -24,7 +24,6 @@ model User {
   accounts Account[]
   sessions Session[]
 
-  entryModels     EntryModel[]
   tradingAccounts TradingAccount[]
   dailyNotes      DailyNote[]
   tradingDays     TradingDay[]
@@ -228,21 +227,6 @@ model RoutineItem {
 }
 
 // Custom entry model (e.g. "Liquidity Sweep", "SMT"). Selectable per trade later.
-model EntryModel {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  description String?
-  sortOrder   Int       @default(0)
-  createdAt   DateTime  @default(now())
-  deletedAt   DateTime?
-
-  tradeSelections TradeEntryModel[]
-
-  @@index([userId, sortOrder])
-}
-
 enum Direction {
   LONG
   SHORT
@@ -315,7 +299,6 @@ model Trade {
   strategy                 Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
   strategyNameSnapshot     String?
   strategyVersionSnapshot  Int?
-  entryModelNameSnapshot   String?
   // Phase 5 (polish extras). tradeNumber is a stable, per-user monotonic counter
   // (unlike the derived ordinal it never shifts when a trade is deleted). status
   // is the materialized lifecycle stage (derived from closedAt/reviewedAt, kept
@@ -337,6 +320,10 @@ model Trade {
   selectedSession           String?
   selectedConfluences       Json?
   selectedExecution         Json?
+  // The one entry model this trade was taken on, by name, from the selected
+  // strategy's own Entry Models (Strategy = SOT). Frozen at save time so the
+  // record survives the strategy being edited/deleted. Null if none chosen.
+  selectedEntryModel        String?
   confluencePercent         Float?
   executionPercent          Float?
   tradeQualityPercent       Float?
@@ -357,7 +344,6 @@ model Trade {
 
   allocations         TradeAccountAllocation[]
   images              TradeImage[]
-  entryModels         TradeEntryModel[]
   psychology          PsychologyQuestionnaireResponse?
 
   @@unique([userId, tradeNumber])
@@ -430,15 +416,6 @@ model TradeImage {
   uploadthingKey String
   sortOrder      Int           @default(0)
   createdAt      DateTime      @default(now())
-}
-
-model TradeEntryModel {
-  tradeId      String
-  trade        Trade      @relation(fields: [tradeId], references: [id], onDelete: Cascade)
-  entryModelId String
-  entryModel   EntryModel @relation(fields: [entryModelId], references: [id])
-
-  @@id([tradeId, entryModelId])
 }
 
 model Account {

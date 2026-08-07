@@ -48,7 +48,7 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     hitTP2: trade.hitTP2,
     hitTP3: trade.hitTP3,
     hitFullTP: trade.hitFullTP,
-    entryModelNames: trade.entryModels.map((m) => m.entryModel.name),
+    entryModelName: trade.selectedEntryModel,
     // Only link to the strategy while it still exists (not soft-deleted); the
     // name/version always come from the snapshot.
     strategyId: trade.strategy && !trade.strategy.deletedAt ? trade.strategy.id : null,

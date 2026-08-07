@@ -24,7 +24,7 @@ export default async function EditTradePage({
   ]);
   if (!trade) notFound();
 
-  const { accounts, entryModels, strategies } = options;
+  const { accounts, strategies } = options;
 
   // The options list is non-archived only; if this trade is still linked to a
   // strategy that's since been archived (or soft-deleted), add it back so the
@@ -79,7 +79,7 @@ export default async function EditTradePage({
     // trader re-picks from the strategy's live confluences/execution on edit.
     selectedConfluences: (trade.selectedConfluences as string[] | null) ?? [],
     selectedExecution: (trade.selectedExecution as string[] | null) ?? [],
-    entryModelIds: trade.entryModels.map((m) => m.entryModelId),
+    selectedEntryModel: trade.selectedEntryModel,
     psychologyAnswers: (trade.psychology?.answers as Record<string, string | number>) ?? {},
   };
 
@@ -105,7 +105,6 @@ export default async function EditTradePage({
         mode="edit"
         tradeId={tradeId}
         accounts={accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind }))}
-        entryModels={entryModels.map((m) => ({ id: m.id, name: m.name }))}
         strategies={formStrategies}
         defaultValues={defaultValues}
       />

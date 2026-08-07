@@ -83,7 +83,7 @@ export function TradeHeader({ trade }: { trade: TradeWorkspaceDTO }) {
         />
         <WorkspaceField
           label="Entry model"
-          value={trade.entryModelNames.length ? trade.entryModelNames.join(", ") : undefined}
+          value={trade.entryModelName ?? undefined}
           placeholder="None"
         />
         <WorkspaceField
