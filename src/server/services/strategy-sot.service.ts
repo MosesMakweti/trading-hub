@@ -72,6 +72,8 @@ export async function createChecklistItem(
       category: data.category ?? null,
       description: data.description ?? null,
       weight: data.weight ?? null,
+      mandatory: data.mandatory,
+      validationCriteria: data.validationCriteria ?? null,
       enabled: data.enabled,
       sortOrder: (last?.sortOrder ?? -1) + 1,
     },
@@ -91,6 +93,8 @@ export async function updateChecklistItem(
       category: data.category ?? null,
       description: data.description ?? null,
       weight: data.weight ?? null,
+      mandatory: data.mandatory,
+      validationCriteria: data.validationCriteria ?? null,
       enabled: data.enabled,
     },
   });

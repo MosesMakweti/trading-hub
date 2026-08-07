@@ -410,6 +410,16 @@ model Trade {
   executionPercent          Float?
   tradeQualityPercent       Float?
 
+  // Weighted confluence scoring (frozen at save time; NOT a market prediction).
+  // setupScore = completed confluence weight / total strategy confluence weight × 100;
+  // setupRating is the A+/A/B/C/Low band; setupValid is false when a mandatory
+  // confluence was missing ("Invalid Setup"); missingConfluences is the string[] of
+  // expected-but-absent confluence names.
+  setupScore                Float?
+  setupRating               String?
+  setupValid                Boolean?
+  missingConfluences        Json?
+
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   deletedAt                DateTime?
@@ -805,7 +815,13 @@ model StrategyChecklistItem {
   icon        String? // optional lucide icon name
   category    String?
   description String?
-  weight      Int? // optional probability weight (future scoring)
+  weight      Int? // probability weight (0-100) used by the weighted setup-scoring engine
+  // Confluence scoring (CONFLUENCE kind): mandatory items gate setup validity — a
+  // setup missing any mandatory confluence is "Invalid Setup". Optional items only
+  // add to the weighted probability score. validationCriteria is the objective test
+  // for "is this confluence actually present?".
+  mandatory          Boolean @default(false)
+  validationCriteria String?
   enabled     Boolean  @default(true)
 
   sortOrder Int       @default(0)
