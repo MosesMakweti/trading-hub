@@ -187,10 +187,13 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
 
     adherencePoints.push({
       win: pnl > 0 ? true : pnl < 0 ? false : null,
+      dateKey,
       confluences: (t.selectedConfluences as string[] | null) ?? [],
       confluencePercent: t.confluencePercent,
       executionPercent: t.executionPercent,
       tradeQualityPercent: t.tradeQualityPercent,
+      setupScore: t.setupScore,
+      setupRating: t.setupRating as (typeof adherencePoints)[number]["setupRating"],
     });
 
     if (t.psychology) {

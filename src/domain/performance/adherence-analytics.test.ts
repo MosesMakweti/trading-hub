@@ -3,16 +3,21 @@ import { describe, expect, it } from "vitest";
 import {
   confluenceCombinations,
   confluenceLeaderboard,
+  setupQualityBuckets,
+  setupQualityTrend,
   summarizeAdherence,
   type AdherenceTradePoint,
 } from "./adherence-analytics";
 
 const point = (over: Partial<AdherenceTradePoint>): AdherenceTradePoint => ({
   win: null,
+  dateKey: "2026-01-15",
   confluences: [],
   confluencePercent: null,
   executionPercent: null,
   tradeQualityPercent: null,
+  setupScore: null,
+  setupRating: null,
   ...over,
 });
 
@@ -44,6 +49,41 @@ describe("summarizeAdherence", () => {
     expect(s.avgConfluencesOnWinners).toBeNull();
     expect(s.confluenceLeaderboard).toEqual([]);
     expect(s.confluenceCombinations).toEqual([]);
+    expect(s.setupQualityBuckets).toEqual([]);
+    expect(s.setupQualityTrend).toEqual([]);
+  });
+});
+
+describe("setupQualityBuckets", () => {
+  it("groups by rating band in quality order with win rate + avg score", () => {
+    const buckets = setupQualityBuckets([
+      point({ setupRating: "A+", setupScore: 100, win: true }),
+      point({ setupRating: "A+", setupScore: 96, win: true }),
+      point({ setupRating: "C", setupScore: 70, win: false }),
+      point({ setupRating: "C", setupScore: 68, win: true }),
+    ]);
+    expect(buckets.map((b) => b.rating)).toEqual(["A+", "C"]); // quality order, empty bands dropped
+    expect(buckets[0]).toMatchObject({ trades: 2, wins: 2, winRate: 100, avgScore: 98 });
+    expect(buckets[1]).toMatchObject({ trades: 2, wins: 1, losses: 1, winRate: 50, avgScore: 69 });
+  });
+
+  it("ignores trades with no rating", () => {
+    expect(setupQualityBuckets([point({ setupRating: null, setupScore: null })])).toEqual([]);
+  });
+});
+
+describe("setupQualityTrend", () => {
+  it("averages setup score per month, chronologically", () => {
+    const trend = setupQualityTrend([
+      point({ dateKey: "2026-02-03", setupScore: 80 }),
+      point({ dateKey: "2026-01-20", setupScore: 60 }),
+      point({ dateKey: "2026-01-05", setupScore: 90 }),
+      point({ dateKey: "2026-02-28", setupScore: null }), // no score → excluded
+    ]);
+    expect(trend).toEqual([
+      { month: "2026-01", avgScore: 75, trades: 2 },
+      { month: "2026-02", avgScore: 80, trades: 1 },
+    ]);
   });
 });
 

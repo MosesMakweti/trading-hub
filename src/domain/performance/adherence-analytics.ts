@@ -5,13 +5,18 @@
 // (which confluences show up on winning trades). Framework-free + fully testable;
 // the analytics service just maps trades into these points.
 
+import type { SetupRating } from "@/domain/trades/setup-score";
+
 export interface AdherenceTradePoint {
   // null = open / break-even → excluded from win/loss splits, still counted in averages.
   win: boolean | null;
+  dateKey: string; // YYYY-MM-DD — for the over-time trend
   confluences: string[]; // selected confluence names
   confluencePercent: number | null;
   executionPercent: number | null;
   tradeQualityPercent: number | null;
+  setupScore: number | null; // weighted probability score
+  setupRating: SetupRating | null; // A+/A/B/C/LOW band
 }
 
 export interface ConfluenceStat {
@@ -30,6 +35,25 @@ export interface ConfluenceCombinationStat {
   winRate: number | null;
 }
 
+// Win rate + volume for one setup-quality band — validates "do higher-quality
+// setups actually win more?", the payoff of the whole weighted-scoring system.
+export interface SetupQualityBucket {
+  rating: SetupRating;
+  label: string; // "A+", "A", "B", "C", "Low"
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number | null;
+  avgScore: number | null;
+}
+
+// Average setup score per calendar month — the discipline trend over time.
+export interface SetupQualityTrendPoint {
+  month: string; // YYYY-MM
+  avgScore: number | null;
+  trades: number;
+}
+
 export interface AdherenceSummary {
   avgConfluenceAdherence: number | null;
   avgExecutionAdherence: number | null;
@@ -38,7 +62,12 @@ export interface AdherenceSummary {
   avgConfluencesOnLosers: number | null;
   confluenceLeaderboard: ConfluenceStat[];
   confluenceCombinations: ConfluenceCombinationStat[];
+  setupQualityBuckets: SetupQualityBucket[];
+  setupQualityTrend: SetupQualityTrendPoint[];
 }
+
+const RATING_ORDER: SetupRating[] = ["A+", "A", "B", "C", "LOW"];
+const RATING_LABEL: Record<SetupRating, string> = { "A+": "A+", A: "A", B: "B", C: "C", LOW: "Low" };
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
@@ -130,6 +159,52 @@ export function confluenceCombinations(
     .sort((a, b) => (b.winRate ?? -1) - (a.winRate ?? -1) || b.trades - a.trades);
 }
 
+/** Win rate + average score per setup-quality band, in quality order (empty bands dropped). */
+export function setupQualityBuckets(points: AdherenceTradePoint[]): SetupQualityBucket[] {
+  const byRating = new Map<SetupRating, AdherenceTradePoint[]>();
+  for (const p of points) {
+    if (p.setupRating == null) continue;
+    const list = byRating.get(p.setupRating) ?? [];
+    list.push(p);
+    byRating.set(p.setupRating, list);
+  }
+
+  return RATING_ORDER.flatMap((rating) => {
+    const group = byRating.get(rating);
+    if (!group || group.length === 0) return [];
+    const wins = group.filter((p) => p.win === true).length;
+    const losses = group.filter((p) => p.win === false).length;
+    const decided = wins + losses;
+    return [
+      {
+        rating,
+        label: RATING_LABEL[rating],
+        trades: group.length,
+        wins,
+        losses,
+        winRate: decided > 0 ? round1((wins / decided) * 100) : null,
+        avgScore: average(group.map((p) => p.setupScore).filter((s): s is number => s != null)),
+      },
+    ];
+  });
+}
+
+/** Average setup score per calendar month (chronological). */
+export function setupQualityTrend(points: AdherenceTradePoint[]): SetupQualityTrendPoint[] {
+  const byMonth = new Map<string, number[]>();
+  for (const p of points) {
+    if (p.setupScore == null || p.dateKey.length < 7) continue;
+    const month = p.dateKey.slice(0, 7);
+    const list = byMonth.get(month) ?? [];
+    list.push(p.setupScore);
+    byMonth.set(month, list);
+  }
+
+  return [...byMonth.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, scores]) => ({ month, avgScore: average(scores), trades: scores.length }));
+}
+
 export function summarizeAdherence(points: AdherenceTradePoint[]): AdherenceSummary {
   const winners = points.filter((p) => p.win === true);
   const losers = points.filter((p) => p.win === false);
@@ -142,5 +217,7 @@ export function summarizeAdherence(points: AdherenceTradePoint[]): AdherenceSumm
     avgConfluencesOnLosers: average(losers.map((p) => p.confluences.length)),
     confluenceLeaderboard: confluenceLeaderboard(points),
     confluenceCombinations: confluenceCombinations(points),
+    setupQualityBuckets: setupQualityBuckets(points),
+    setupQualityTrend: setupQualityTrend(points),
   };
 }

@@ -1,4 +1,9 @@
 import { Tag, colorForName } from "@/components/ui/tag";
+import {
+  ConfluenceWinRateChart,
+  SetupQualityChart,
+  SetupQualityTrendChart,
+} from "@/components/analytics/adherence-charts";
 import type { AdherenceSummary } from "@/domain/performance/adherence-analytics";
 
 function fmtPercent(v: number | null) {
@@ -30,6 +35,25 @@ export function AdherenceAnalytics({ data }: { data: AdherenceSummary }) {
         <Stat label="Trade quality" value={fmtPercent(data.avgTradeQuality)} />
         <Stat label="Avg confluences · winners" value={fmtCount(data.avgConfluencesOnWinners)} tone="success" />
         <Stat label="Avg confluences · losers" value={fmtCount(data.avgConfluencesOnLosers)} tone="danger" />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-muted-foreground">
+            Setup quality → win rate
+            <span className="ml-1 font-normal text-muted-foreground/50">
+              do higher-scored setups win more?
+            </span>
+          </div>
+          <SetupQualityChart data={data.setupQualityBuckets} />
+        </div>
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-muted-foreground">
+            Setup score over time
+            <span className="ml-1 font-normal text-muted-foreground/50">avg per month</span>
+          </div>
+          <SetupQualityTrendChart data={data.setupQualityTrend} />
+        </div>
       </div>
 
       {data.confluenceCombinations.length > 0 && (
@@ -77,6 +101,7 @@ export function AdherenceAnalytics({ data }: { data: AdherenceSummary }) {
       {board.length > 0 && (
         <div className="space-y-2">
           <div className="text-xs font-medium text-muted-foreground">Confluence win rates</div>
+          <ConfluenceWinRateChart data={board} />
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

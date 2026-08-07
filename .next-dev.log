@@ -1,0 +1,163 @@
+
+> trading-hub-app@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.10 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.187.112:3000
+- Environments: .env
+✓ Ready in 2.2s
+○ Compiling proxy ...
+
+○ Compiling /login ...
+ GET /login 200 in 12.3s (next.js: 9.1s, application-code: 3.2s)
+ GET /login 200 in 742ms (next.js: 39ms, application-code: 703ms)
+○ Compiling /dashboard ...
+✓ Finished writing to filesystem cache in 18.4s
+○ Compiling /api/auth/[...nextauth] ...
+ GET /dashboard 200 in 91s (next.js: 21.4s, proxy.ts: 126ms, application-code: 70s)
+ GET /dashboard 200 in 66s (next.js: 1075ms, proxy.ts: 7.5s, application-code: 57s)
+ GET /api/auth/session 200 in 34.6s (next.js: 34.3s, application-code: 304ms)
+ GET /api/auth/session 200 in 118ms (next.js: 52ms, application-code: 66ms)
+ GET /api/auth/session 200 in 151ms (next.js: 43ms, application-code: 108ms)
+ GET /api/auth/session 200 in 60ms (next.js: 13ms, application-code: 46ms)
+ GET /api/auth/session 200 in 565ms (next.js: 83ms, application-code: 482ms)
+ GET /api/auth/session 200 in 79ms (next.js: 29ms, application-code: 50ms)
+○ Compiling /today ...
+ GET /today 200 in 3.6s (next.js: 21ms, application-code: 3.5s)
+ GET /today 200 in 3.5s (next.js: 54ms, application-code: 3.4s)
+ GET /today 200 in 13.8s (next.js: 9.8s, application-code: 4.0s)
+ POST /today 200 in 1743ms (next.js: 10ms, application-code: 1732ms)
+  └─ ƒ updateTodaysPlan("2026-08-07", {"bias":"BEARISH"}) in 171ms src/actions/today.actions.ts
+ POST /today 200 in 1371ms (next.js: 39ms, application-code: 1331ms)
+  └─ ƒ updateTodaysPlan("2026-08-07", {"bias":"NEUTRAL"}) in 285ms src/actions/today.actions.ts
+○ Compiling /journal ...
+ GET /journal 200 in 13.7s (next.js: 12.3s, proxy.ts: 202ms, application-code: 1235ms)
+○ Compiling /journal/[date] ...
+ GET /journal/2026-08-05 200 in 10.3s (next.js: 8.4s, proxy.ts: 45ms, application-code: 1862ms)
+○ Compiling /edge ...
+ GET /edge 200 in 8.0s (next.js: 6.4s, application-code: 1521ms)
+○ Compiling /accounts ...
+ GET /accounts 200 in 13.1s (next.js: 11.1s, proxy.ts: 31ms, application-code: 1999ms)
+ GET /today 200 in 1099ms (next.js: 37ms, application-code: 1062ms)
+○ Compiling /journal/[date]/trades/new ...
+ GET /journal/2026-08-07/trades/new 200 in 10.2s (next.js: 8.5s, proxy.ts: 48ms, application-code: 1628ms)
+ GET /journal/2026-08-07/trades/new 200 in 2.1s (next.js: 197ms, proxy.ts: 275ms, application-code: 1630ms)
+ POST /journal/2026-08-07/trades/new 200 in 841ms (next.js: 38ms, proxy.ts: 73ms, application-code: 729ms)
+  └─ ƒ loadStrategyReference("cmscanpoo000f4gjul6vtfqbr") in 616ms src/actions/trades.actions.ts
+(node:11120) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated and will be removed in pg@9.0. Use async/await or an external async flow control mechanism instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ POST /journal/2026-08-07/trades/new 200 in 1565ms (next.js: 55ms, proxy.ts: 53ms, application-code: 1456ms)
+  └─ ƒ createTrade("2026-08-07", {"actualRR":null,"allocations":["[Object]","[Object]"],"assetSymbol":"XAUUSD","...":"21 items not stringified"}) in 762ms src/actions/trades.actions.ts
+ GET /journal/2026-08-07 200 in 5.0s (next.js: 64ms, proxy.ts: 221ms, application-code: 4.7s)
+ GET /journal/2026-08-07 200 in 5.0s (next.js: 205ms, proxy.ts: 1425ms, application-code: 3.4s)
+ GET /accounts 200 in 1157ms (next.js: 49ms, proxy.ts: 176ms, application-code: 932ms)
+○ Compiling /strategy-lab ...
+ GET /strategy-lab 200 in 6.5s (next.js: 5.5s, proxy.ts: 75ms, application-code: 896ms)
+○ Compiling /strategy-lab/[strategyId] ...
+ GET /strategy-lab/cmscanpoo000f4gjul6vtfqbr 200 in 13.9s (next.js: 12.0s, proxy.ts: 36ms, application-code: 1921ms)
+ GET /api/auth/session 200 in 160ms (next.js: 59ms, application-code: 100ms)
+ GET /api/auth/session 200 in 24ms (next.js: 6ms, application-code: 19ms)
+ GET /login 200 in 339ms (next.js: 16ms, application-code: 323ms)
+ GET /api/auth/session 200 in 44ms (next.js: 23ms, application-code: 21ms)
+ GET /api/auth/session 200 in 81ms (next.js: 40ms, application-code: 42ms)
+ GET /api/auth/session 200 in 39ms (next.js: 10ms, application-code: 29ms)
+ GET /today 200 in 1129ms (next.js: 42ms, application-code: 1088ms)
+○ Compiling /settings/routine ...
+ GET /settings/routine 200 in 6.7s (next.js: 5.4s, proxy.ts: 44ms, application-code: 1198ms)
+ GET /today 200 in 883ms (next.js: 26ms, application-code: 858ms)
+ GET /today 200 in 781ms (next.js: 16ms, application-code: 765ms)
+ GET /api/auth/session 200 in 181ms (next.js: 65ms, application-code: 116ms)
+ GET /api/auth/session 200 in 96ms (next.js: 17ms, application-code: 80ms)
+✓ Compiled in 421ms
+ GET /today 200 in 7.4s (next.js: 820ms, application-code: 6.6s)
+ GET /today 200 in 4.8s (next.js: 399ms, application-code: 4.4s)
+ GET /today 200 in 6.3s (next.js: 57ms, application-code: 6.2s)
+ GET /today 200 in 4.9s (next.js: 516ms, application-code: 4.4s)
+ GET /today 200 in 5.8s (next.js: 37ms, application-code: 5.8s)
+ GET /today 200 in 5.7s (next.js: 439ms, application-code: 5.3s)
+ GET /today 200 in 5.7s (next.js: 245ms, application-code: 5.5s)
+ GET /today 200 in 5.8s (next.js: 204ms, application-code: 5.6s)
+ GET /today 200 in 6.3s (next.js: 355ms, application-code: 6.0s)
+ GET /today 200 in 6.5s (next.js: 126ms, application-code: 6.4s)
+ GET /today 200 in 6.1s (next.js: 292ms, application-code: 5.8s)
+ GET /today 200 in 6.1s (next.js: 146ms, application-code: 5.9s)
+ GET /today 200 in 4.5s (next.js: 347ms, application-code: 4.1s)
+ GET /today 200 in 5.8s (next.js: 37ms, application-code: 5.8s)
+ GET /today 200 in 6.5s (next.js: 230ms, application-code: 6.3s)
+ GET /today 200 in 6.5s (next.js: 793ms, application-code: 5.8s)
+ GET /today 200 in 7.4s (next.js: 281ms, application-code: 7.1s)
+ GET /today 200 in 6.8s (next.js: 375ms, application-code: 6.4s)
+ GET /today 200 in 6.6s (next.js: 443ms, application-code: 6.2s)
+ GET /today 200 in 6.7s (next.js: 571ms, application-code: 6.1s)
+ GET /today 200 in 5.4s (next.js: 107ms, application-code: 5.3s)
+ GET /today 200 in 5.4s (next.js: 305ms, application-code: 5.1s)
+ GET /today 200 in 5.4s (next.js: 214ms, application-code: 5.2s)
+ GET /today 200 in 6.4s (next.js: 728ms, application-code: 5.7s)
+ GET /today 200 in 8.4s (next.js: 769ms, application-code: 7.6s)
+ GET /today 200 in 5.4s (next.js: 229ms, application-code: 5.2s)
+ GET /today 200 in 6.3s (next.js: 39ms, application-code: 6.3s)
+ GET /today 200 in 7.1s (next.js: 629ms, application-code: 6.5s)
+ GET /today 200 in 5.4s (next.js: 309ms, application-code: 5.1s)
+ GET /today 200 in 7.2s (next.js: 391ms, application-code: 6.8s)
+ GET /today 200 in 6.3s (next.js: 403ms, application-code: 5.9s)
+ GET /today 200 in 6.3s (next.js: 480ms, application-code: 5.8s)
+ GET /today 200 in 6.2s (next.js: 564ms, application-code: 5.6s)
+ GET /today 200 in 5.6s (next.js: 88ms, application-code: 5.5s)
+ GET /today 200 in 5.6s (next.js: 165ms, application-code: 5.4s)
+ GET /today 200 in 6.5s (next.js: 235ms, application-code: 6.2s)
+✓ Compiled in 983ms
+ GET /today 200 in 6.8s (next.js: 285ms, application-code: 6.5s)
+ GET /today 200 in 7.3s (next.js: 132ms, application-code: 7.2s)
+ GET /today 200 in 8.9s (next.js: 37ms, application-code: 8.9s)
+ GET /today 200 in 8.8s (next.js: 53ms, application-code: 8.7s)
+ GET /today 200 in 9.0s (next.js: 196ms, application-code: 8.8s)
+ GET /today 200 in 9.0s (next.js: 323ms, application-code: 8.7s)
+ GET /today 200 in 8.6s (next.js: 666ms, application-code: 7.9s)
+ GET /today 200 in 8.8s (next.js: 384ms, application-code: 8.4s)
+ GET /today 200 in 8.8s (next.js: 497ms, application-code: 8.3s)
+ GET /today 200 in 8.8s (next.js: 188ms, application-code: 8.6s)
+ GET /today 200 in 9.0s (next.js: 570ms, application-code: 8.4s)
+ GET /today 200 in 9.0s (next.js: 756ms, application-code: 8.2s)
+ GET /today 200 in 7.5s (next.js: 967ms, application-code: 6.6s)
+ GET /today 200 in 8.5s (next.js: 36ms, application-code: 8.5s)
+ GET /today 200 in 8.5s (next.js: 143ms, application-code: 8.4s)
+ GET /today 200 in 8.2s (next.js: 83ms, application-code: 8.1s)
+ GET /today 200 in 7.9s (next.js: 270ms, application-code: 7.7s)
+ GET /today 200 in 8.4s (next.js: 413ms, application-code: 8.0s)
+ GET /today 200 in 8.3s (next.js: 555ms, application-code: 7.8s)
+ GET /today 200 in 9.0s (next.js: 87ms, application-code: 8.9s)
+ GET /today 200 in 8.5s (next.js: 616ms, application-code: 7.9s)
+ GET /today 200 in 8.5s (next.js: 457ms, application-code: 8.1s)
+ GET /today 200 in 8.3s (next.js: 861ms, application-code: 7.5s)
+ GET /today 200 in 8.6s (next.js: 918ms, application-code: 7.7s)
+ GET /today 200 in 8.9s (next.js: 486ms, application-code: 8.4s)
+ GET /today 200 in 7.3s (next.js: 211ms, application-code: 7.1s)
+ GET /today 200 in 6.7s (next.js: 604ms, application-code: 6.1s)
+ GET /today 200 in 6.7s (next.js: 175ms, application-code: 6.6s)
+ GET /today 200 in 7.4s (next.js: 231ms, application-code: 7.2s)
+ GET /today 200 in 7.6s (next.js: 53ms, application-code: 7.6s)
+ GET /today 200 in 7.6s (next.js: 422ms, application-code: 7.2s)
+ GET /today 200 in 5.2s (next.js: 427ms, application-code: 4.7s)
+ GET /today 200 in 5.7s (next.js: 543ms, application-code: 5.1s)
+ GET /today 200 in 4.9s (next.js: 436ms, application-code: 4.4s)
+ GET /today 200 in 5.2s (next.js: 336ms, application-code: 4.9s)
+ GET /today 200 in 4.9s (next.js: 317ms, application-code: 4.6s)
+ GET /today 200 in 3.0s (next.js: 32ms, application-code: 3.0s)
+ GET /today 200 in 3.4s (next.js: 337ms, application-code: 3.0s)
+ GET /today 200 in 3.4s (next.js: 434ms, application-code: 2.9s)
+ GET /today 200 in 3.4s (next.js: 206ms, application-code: 3.2s)
+ GET /today 200 in 5.7s (next.js: 576ms, application-code: 5.2s)
+ GET /today 200 in 4.2s (next.js: 425ms, application-code: 3.8s)
+ GET /today 200 in 2.7s (next.js: 239ms, application-code: 2.5s)
+ GET /today 200 in 3.0s (next.js: 25ms, application-code: 2.9s)
+ GET /today 200 in 2.8s (next.js: 23ms, application-code: 2.8s)
+ GET /today 200 in 2.6s (next.js: 169ms, application-code: 2.4s)
+ GET /today 200 in 2.3s (next.js: 61ms, application-code: 2.2s)
+ GET /today 200 in 2.7s (next.js: 276ms, application-code: 2.4s)
+✓ Compiled in 2.5s
+ GET /today 200 in 1756ms (next.js: 458ms, application-code: 1298ms)
+✓ Compiled in 3.5s
+ GET /today 200 in 1663ms (next.js: 45ms, application-code: 1618ms)
+ GET /today 200 in 1985ms (next.js: 16ms, application-code: 1970ms)
+ GET /today 200 in 3.3s (next.js: 875ms, application-code: 2.4s)
