@@ -85,7 +85,7 @@ export function PerformanceSnapshot({
         />
       </div>
 
-      <div className="glass grid grid-cols-2 items-center gap-4 rounded-xl px-4 py-5 sm:grid-cols-4 sm:px-6">
+      <div className="glass-strong grid grid-cols-2 items-center gap-4 rounded-xl px-4 py-5 sm:grid-cols-4 sm:px-6">
         <ProgressRing value={winRate} tone="brand" label="Win rate" />
         <ProgressRing
           value={discrepancy.summary.executionEfficiencyPercent}

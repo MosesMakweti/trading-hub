@@ -189,10 +189,17 @@ Glass is **structural depth**, not decoration. Research (glassmorphism is *best 
 dashboards* but demands ≥4.5:1 contrast and selective use): frosted surfaces say "this floats
 above that." Most of the app is **opaque**; glass marks the layers that lift.
 
-**The `.glass` primitive:** `background: var(--glass)` + `1px solid var(--glass-border)` +
-`backdrop-filter: blur(18px) saturate(1.4)` + a **lit top edge** (`box-shadow: inset 0 1px 0
-oklch(1 0 0 / 6%)`) so the surface reads as real frosted glass caught by an overhead light. Dark
-glass is a low-opacity light film (`oklch(0.7 0.03 265 / 8%)`) over the app's brand-washed canvas.
+**The `.glass` primitive** — a frosted **floating panel**: a top **reflection sheen** (a
+`linear-gradient(180deg, oklch(1 0 0 / 6%), transparent 42%)` layered *over* `var(--glass)`) + a
+crisp `1px solid var(--glass-border)` + real frosting (`backdrop-filter: blur(20px) saturate(1.5)
+brightness(1.02)`) + **dual inset edges** (lit top `inset 0 1px 0 oklch(1 0 0 / 8%)` and shaded
+bottom `inset 0 -1px 0 oklch(0 0 0 / 7%)` = the glass's thickness) over a **gentle resting shadow**
+(`0 14px 34px -16px`) so every card reads as floating without a heavy drop. Dark glass is a
+low-opacity light film (`oklch(0.85 0.006 265 / 8%)`) — kept readable, a film not a veil.
+
+**`.glass-strong`** — heavier frosting (`blur(28px)`) + a stronger top reflection + a deeper
+floating shadow, for hero / overlay surfaces that should sit **above** cards: the dashboard vitals
+strip, dialogs, popovers. One `.glass-strong` layer above a field of `.glass` cards — never stacked.
 
 ### Depth hierarchy (bottom → top)
 
@@ -202,7 +209,7 @@ glass is a low-opacity light film (`oklch(0.7 0.03 265 / 8%)`) over the app's br
 | 1 · Sidebar/nav | deepest solid surface (`sidebar`) | app sidebar, topbar |
 | 2 · Surface card | `.glass` (or opaque `card`) `rounded-2xl` | KPI tiles, workspace sections, list cards |
 | 3 · Elevated | `.glass` + `shadow-elevated`, subtle `-translate-y-0.5` on hover | interactive cards, gallery cards |
-| 4 · Overlay | `.glass` (stronger blur) + `shadow-elevated` | dialogs, popovers, dropdowns, command palette |
+| 4 · Overlay | `.glass-strong` (heavier blur + deeper shadow) | dialogs, popovers, dropdowns, command palette, dashboard vitals strip |
 | Accent · Glow | `.shadow-glow` + `bg-brand-gradient` | primary CTAs, active workflow node, brand chips |
 
 **Do:** use glass for cards, nav, overlays, and floating panels; keep exactly one glow accent
