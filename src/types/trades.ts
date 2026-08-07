@@ -1,5 +1,7 @@
 import type { TagColor } from "@prisma/client";
 
+import type { SetupRating } from "@/domain/trades/setup-score";
+
 /** A selected confluence / execution tag, resolved with its color (from the trade's
  * frozen strategy snapshot) so it renders as a colored chip everywhere. */
 export interface SelectedTagDTO {
@@ -40,6 +42,10 @@ export interface TradeListItemDTO {
   executionLabels: SelectedTagDTO[];
   // Combined strategy-adherence / trade-quality score (null when no strategy set).
   tradeQualityPercent: number | null;
+  // Weighted confluence setup score + rating (null when the strategy has no weights).
+  setupScore: number | null;
+  setupRating: SetupRating | null;
+  setupValid: boolean | null;
   // Strategy the trade was taken under (from the snapshot); strategyId links to
   // the live strategy only while it still exists.
   strategyName: string | null;
@@ -105,6 +111,12 @@ export interface TradeWorkspaceDTO {
   confluencePercent: number | null;
   executionPercent: number | null;
   tradeQualityPercent: number | null;
+
+  // Weighted confluence setup scoring (frozen at save time).
+  setupScore: number | null;
+  setupRating: SetupRating | null;
+  setupValid: boolean | null;
+  missingMandatory: string[]; // missing core confluences (for the "Invalid Setup" state)
 
   // Strategy Lab reference + historical snapshot (Phase 4). name/version are the
   // frozen snapshot (shown even if the strategy was later deleted); strategyId is

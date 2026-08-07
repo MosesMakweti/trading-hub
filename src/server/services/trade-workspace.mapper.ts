@@ -22,6 +22,14 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
         ?.color as TradeWorkspaceDTO["sessionColor"])) ||
     null;
 
+  // Of the confluences that were missing at save time, which were mandatory (for
+  // the "Invalid Setup" state) — derived from the frozen snapshot's core flags.
+  const missing = (trade.missingConfluences as string[] | null) ?? [];
+  const mandatoryNames = new Set(
+    (snapshot.confluences ?? []).filter((c) => c.mandatory).map((c) => c.name.toLowerCase()),
+  );
+  const missingMandatory = missing.filter((n) => mandatoryNames.has(n.toLowerCase()));
+
   return {
     id: trade.id,
     dateKey: utcDateToKey(trade.tradeDate),
@@ -65,6 +73,10 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     confluencePercent: trade.confluencePercent,
     executionPercent: trade.executionPercent,
     tradeQualityPercent: trade.tradeQualityPercent,
+    setupScore: trade.setupScore,
+    setupRating: trade.setupRating as TradeWorkspaceDTO["setupRating"],
+    setupValid: trade.setupValid,
+    missingMandatory,
     accounts: trade.allocations.map((a) => ({
       name: a.tradingAccount.name,
       kind: a.tradingAccount.kind as TradeWorkspaceDTO["accounts"][number]["kind"],

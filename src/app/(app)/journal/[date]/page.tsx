@@ -86,6 +86,9 @@ export default async function JournalDayPage({
         .map((c) => c.checklistItem.label),
     ),
     tradeQualityPercent: t.tradeQualityPercent,
+    setupScore: t.setupScore,
+    setupRating: t.setupRating as TradeListItemDTO["setupRating"],
+    setupValid: t.setupValid,
     psychology: t.psychology
       ? {
           rawScore: t.psychology.rawScore,

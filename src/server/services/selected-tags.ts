@@ -11,6 +11,7 @@ import type { SelectedTagDTO } from "@/types/trades";
 interface SnapshotTag {
   name: string;
   color: TagColor | string;
+  mandatory?: boolean;
 }
 
 interface ExecutionSnapshot {

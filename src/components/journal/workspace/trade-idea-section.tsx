@@ -1,5 +1,6 @@
 import { Tag, colorForName } from "@/components/ui/tag";
 import { AdherenceMeter } from "@/components/journal/adherence-score";
+import { SetupScoreCard } from "@/components/journal/setup-score-card";
 import {
   NoteBlock,
   StrategyRef,
@@ -82,6 +83,15 @@ export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
           </div>
         ) : (
           <p className="text-sm text-muted-foreground/40 italic">None selected.</p>
+        )}
+        {(trade.setupValid !== null || trade.setupScore != null) && (
+          <SetupScoreCard
+            score={trade.setupScore}
+            rating={trade.setupRating}
+            valid={trade.setupValid}
+            missingMandatory={trade.missingMandatory}
+            className="max-w-md"
+          />
         )}
         <AdherenceMeter label="Confluence adherence" percent={trade.confluencePercent} className="max-w-xs" />
       </div>

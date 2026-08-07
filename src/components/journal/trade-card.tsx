@@ -11,6 +11,7 @@ import { minutesToTimeString } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
 import { Tag, colorForName } from "@/components/ui/tag";
 import { TradeQualityBadge } from "@/components/journal/adherence-score";
+import { RatingBadge } from "@/components/journal/setup-score-card";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { archiveTrade } from "@/actions/trades.actions";
@@ -126,7 +127,9 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
         trade.confluenceLabels.length > 0 ||
         trade.executionLabels.length > 0 ||
         tpHits.length > 0 ||
-        trade.tradeQualityPercent != null) && (
+        trade.tradeQualityPercent != null ||
+        trade.setupValid != null ||
+        trade.setupRating != null) && (
         <div className="flex flex-wrap items-center gap-1.5">
           {tpHits.map((label) => (
             <Badge key={label} variant="success">
@@ -149,6 +152,22 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
             </Tag>
           ))}
           <TradeQualityBadge percent={trade.tradeQualityPercent} />
+          {trade.setupValid === false ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-xs font-medium text-rose-600 dark:text-rose-400">
+              Invalid setup
+            </span>
+          ) : (
+            trade.setupRating && (
+              <span className="inline-flex items-center gap-1">
+                <RatingBadge rating={trade.setupRating} />
+                {trade.setupScore != null && (
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {trade.setupScore}%
+                  </span>
+                )}
+              </span>
+            )
+          )}
         </div>
       )}
 
