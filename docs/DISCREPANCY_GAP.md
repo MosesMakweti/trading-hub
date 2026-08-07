@@ -37,9 +37,7 @@ D4  Journal trade-card integration (expected/actual/gap/dev) . ✅ (primary devi
 D5  Analytics Discrepancy Gap section (overall/execution/
     recoverable/trend + dual-line chart) .................... ✅
 D6  Deviation sub-scores (entry/exit/risk from planned-vs-
-    actual) + Primary Deviation + Psychology Lab classify ... ⭘
-    (re-scoped: deviations moved here — they feed the cause
-    classification directly)
+    actual) + Primary Deviation + Psychology Lab classify ... ✅ 🎉 COMPLETE
 ```
 Every phase: tsc + eslint clean, vitest green, app runnable, design-system consistent.
 
@@ -113,3 +111,27 @@ efficiency, best/worst execution streaks, the gap-trend chip, and the full dual-
 the already-computed `trading.discrepancy` + adherence, no new queries. **Re-scope:** deviation
 sub-scores (entry/exit/risk) move to **D6** since they feed the psychology cause-classification.
 Next: D6 (deviation engine + Primary Deviation on the card + Psychology Lab).
+
+### D6 — Deviation engine + Primary Deviation + Psychology Lab classification ✅ 🎉
+New pure `domain/analytics/deviation-engine.ts` (+8 tests): `computeDeviations` attributes an
+estimated **R-cost** (1R = planned entry→stop distance) to each planned-vs-actual slip —
+**late/chased entry**, **premature exit**, **loss overrun**, **increased risk** — direction-aware and
+robust to missing inputs; the largest is the trade's **primary deviation**. `aggregateDeviationCauses`
+rolls the primaries into per-cause **occurrences + total/avg R-cost**, ranked by total cost.
+- **Per trade:** `toTradeDiscrepancy` computes the (price-based) primary deviation → `TradeDiscrepancyDTO.primaryDeviation`;
+  the journal trade card shows it as an amber chip with its R-cost (fills the D4 "Primary Deviation" gap).
+- **Analytics:** the loop computes each trade's primary (entry/exit **+ risk**, using the strategy's
+  `maxRiskPercent` vs the performance allocation's risk), aggregated into `discrepancy.causes`. The
+  `DiscrepancyAnalytics` section renders the **"What execution is costing you"** table (Cause ·
+  Occurrences · Avg cost · Total cost) — the Psychology Lab classification (e.g. `Premature exit ·
+  12 · −0.8R · −9.6R`).
+
+tsc + eslint clean; 211 tests green (+8).
+
+## 🎉 Discrepancy Gap — COMPLETE (D1–D6)
+Central **Execution Engine** → strategy **benchmarks** → **Dashboard** dual-curve card beside the
+Equity Curve → per-trade **Journal** breakdown → dedicated **Analytics** section → **deviation engine**
++ Psychology-Lab cause classification. Every number flows from the one engine (no duplicate math),
+auto-generates after each trade like the Equity Curve, and is fully typed + unit-tested. Optional
+future work: freeze the expectancy benchmark per trade for immutable history (currently read live);
+richer per-cause psychology drill-downs; R→$ recoverable using account risk sizing.

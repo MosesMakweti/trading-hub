@@ -1,5 +1,6 @@
 import { DiscrepancyGapChart } from "@/components/analytics/discrepancy-gap-chart";
 import type { DiscrepancyPoint, DiscrepancySummary } from "@/domain/analytics/execution-engine";
+import type { DeviationCauseStat } from "@/domain/analytics/deviation-engine";
 
 const R = (n: number | null, sign = false) =>
   n == null ? "—" : `${sign && n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
@@ -19,11 +20,13 @@ const TREND_META: Record<DiscrepancySummary["gapTrend"], { label: string; classN
 export function DiscrepancyAnalytics({
   curve,
   summary,
+  causes,
   avgStrategyAdherence,
   avgRuleAdherence,
 }: {
   curve: DiscrepancyPoint[];
   summary: DiscrepancySummary;
+  causes: DeviationCauseStat[];
   avgStrategyAdherence: number | null;
   avgRuleAdherence: number | null;
 }) {
@@ -85,6 +88,48 @@ export function DiscrepancyAnalytics({
       </div>
 
       <DiscrepancyGapChart curve={curve} height={240} />
+
+      {causes.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">
+            What execution is costing you
+            <span className="ml-1 font-normal text-muted-foreground/50">
+              biggest deviation per trade, aggregated
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground">
+                  <th className="pb-1.5 font-medium">Cause</th>
+                  <th className="pb-1.5 text-right font-medium">Occurrences</th>
+                  <th className="pb-1.5 text-right font-medium">Avg cost</th>
+                  <th className="pb-1.5 text-right font-medium">Total cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {causes.map((c) => (
+                  <tr key={c.cause} className="border-t border-border/60">
+                    <td className="py-1.5">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="size-1.5 rounded-full bg-amber-500" />
+                        {c.label}
+                      </span>
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">{c.occurrences}</td>
+                    <td className="py-1.5 text-right tabular-nums text-amber-600 dark:text-amber-400">
+                      −{c.avgCostR.toFixed(2)}R
+                    </td>
+                    <td className="py-1.5 text-right font-medium tabular-nums text-amber-600 dark:text-amber-400">
+                      −{c.totalCostR.toFixed(2)}R
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

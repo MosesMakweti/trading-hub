@@ -207,6 +207,14 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
               Recoverable {fmtR(trade.discrepancy.recoverableR)}
             </span>
           )}
+          {trade.discrepancy.primaryDeviation && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300">
+              {trade.discrepancy.primaryDeviation.label}
+              <span className="tabular-nums opacity-70">
+                −{fmtR(trade.discrepancy.primaryDeviation.costR)}
+              </span>
+            </span>
+          )}
         </div>
       )}
 

@@ -52,6 +52,7 @@ export function TradingAnalytics({ data }: { data: TradingData }) {
       <DiscrepancyAnalytics
         curve={data.discrepancy.curve}
         summary={data.discrepancy.summary}
+        causes={data.discrepancy.causes}
         avgStrategyAdherence={data.adherence.avgTradeQuality}
         avgRuleAdherence={data.ruleAdherenceAverage}
       />

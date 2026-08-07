@@ -1,6 +1,7 @@
 import type { TagColor } from "@prisma/client";
 
 import type { SetupRating } from "@/domain/trades/setup-score";
+import type { Deviation } from "@/domain/analytics/deviation-engine";
 
 /** A selected confluence / execution tag, resolved with its color (from the trade's
  * frozen strategy snapshot) so it renders as a colored chip everywhere. */
@@ -18,6 +19,7 @@ export interface TradeDiscrepancyDTO {
   actualR: number | null;
   gapR: number | null;
   recoverableR: number | null;
+  primaryDeviation: Deviation | null; // the biggest planned-vs-actual slip, if any
 }
 
 /** Strategy-adherence / trade-quality scores. Null when the strategy defined no

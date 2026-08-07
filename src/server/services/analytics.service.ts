@@ -14,6 +14,11 @@ import {
   type ExecutionTradeInput,
 } from "@/domain/analytics/execution-engine";
 import {
+  aggregateDeviationCauses,
+  computeDeviations,
+  type Deviation,
+} from "@/domain/analytics/deviation-engine";
+import {
   summarizeStrategyPerformance,
   type StrategyTradePoint,
 } from "@/domain/performance/strategy-performance";
@@ -135,8 +140,10 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
         include: {
           psychology: true,
           allocations: { include: { tradingAccount: true } },
-          // The strategy's live benchmark (proven edge) → Expected R (Discrepancy Gap).
-          strategy: { select: { tradeManagement: { select: { expectedExpectancy: true } } } },
+          // The strategy's live benchmark (proven edge) + risk budget → Discrepancy Gap.
+          strategy: {
+            select: { tradeManagement: { select: { expectedExpectancy: true, maxRiskPercent: true } } },
+          },
         },
       },
     },
@@ -172,6 +179,7 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   const psychologyPoints: PsychologyDataPoint[] = [];
   const adherencePoints: AdherenceTradePoint[] = [];
   const discrepancyInputs: ExecutionTradeInput[] = [];
+  const deviationPrimaries: (Deviation | null)[] = [];
   const dailyPnlMap = new Map<string, number>();
 
   for (const alloc of inRange) {
@@ -216,6 +224,22 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       actualR: t.actualRR ? t.actualRR.toNumber() : null,
     });
 
+    // Deviation engine: WHY did actual differ from plan? (entry/exit/risk slip).
+    const { primary } = computeDeviations({
+      direction: t.direction,
+      plannedEntry: t.plannedEntry ? t.plannedEntry.toNumber() : null,
+      plannedStopLoss: t.plannedStopLoss ? t.plannedStopLoss.toNumber() : null,
+      plannedTarget: t.plannedTarget ? t.plannedTarget.toNumber() : null,
+      actualEntry: t.actualEntry ? t.actualEntry.toNumber() : null,
+      actualExit: t.actualExit ? t.actualExit.toNumber() : null,
+      actualRR: t.actualRR ? t.actualRR.toNumber() : null,
+      plannedRiskPercent: t.strategy?.tradeManagement?.maxRiskPercent
+        ? t.strategy.tradeManagement.maxRiskPercent.toNumber()
+        : null,
+      actualRiskPercent: alloc.riskInputType === "PERCENT" ? alloc.riskValue.toNumber() : null,
+    });
+    deviationPrimaries.push(primary);
+
     if (t.psychology) {
       const otherAccount = t.allocations.find((a) => a.tradingAccount.kind !== "PERFORMANCE");
       psychologyPoints.push({
@@ -252,6 +276,8 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   const discrepancy = {
     curve: buildDiscrepancyCurve(discrepancyInputs),
     summary: summarizeDiscrepancy(discrepancyInputs),
+    // Behavioural causes of the gap (Psychology Lab): per-cause occurrences + R-cost.
+    causes: aggregateDeviationCauses(deviationPrimaries),
   };
 
   return {
