@@ -2,6 +2,7 @@ import { KpiCard } from "@/components/analytics/kpi-card";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
 import { MonthlyReturnsChart } from "@/components/analytics/monthly-returns-chart";
 import { BestAssetTable } from "@/components/analytics/best-asset-table";
+import { AdherenceAnalytics } from "@/components/analytics/adherence-analytics";
 import { Heatmap, pnlHeatColor } from "@/components/analytics/heatmap";
 import type { getAnalyticsData } from "@/server/services/analytics.service";
 
@@ -46,6 +47,8 @@ export function TradingAnalytics({ data }: { data: TradingData }) {
 
       <EquityCurveChart data={data.equityCurve} />
       <MonthlyReturnsChart data={data.monthlyReturns} />
+
+      <AdherenceAnalytics data={data.adherence} />
 
       <div className="glass space-y-3 rounded-2xl p-4">
         <h3 className="text-sm font-medium text-muted-foreground">Best Performing Asset</h3>

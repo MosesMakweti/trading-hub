@@ -4,6 +4,10 @@ import { daysBetweenInclusive } from "@/lib/date-ranges";
 import { buildEquityCurve, dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import * as metrics from "@/domain/performance/metrics";
 import {
+  summarizeAdherence,
+  type AdherenceTradePoint,
+} from "@/domain/performance/adherence-analytics";
+import {
   summarizeStrategyPerformance,
   type StrategyTradePoint,
 } from "@/domain/performance/strategy-performance";
@@ -118,26 +122,20 @@ export async function getStrategyPerformance(userId: string, strategyId: string)
 export async function getAnalyticsData(userId: string, from: string, to: string) {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
 
-  const [allPerformanceAllocations, executionItemCount] = await Promise.all([
-    prisma.tradeAccountAllocation.findMany({
-      where: { tradingAccountId: performanceAccount.id, trade: { deletedAt: null } },
-      include: {
-        trade: {
-          include: {
-            asset: true,
-            session: true,
-            checklistSelections: { include: { checklistItem: true } },
-            psychology: true,
-            allocations: { include: { tradingAccount: true } },
-          },
+  const allPerformanceAllocations = await prisma.tradeAccountAllocation.findMany({
+    where: { tradingAccountId: performanceAccount.id, trade: { deletedAt: null } },
+    include: {
+      trade: {
+        include: {
+          asset: true,
+          session: true,
+          psychology: true,
+          allocations: { include: { tradingAccount: true } },
         },
       },
-      orderBy: [{ trade: { tradeDate: "asc" } }, { trade: { executionMinutes: "asc" } }],
-    }),
-    prisma.checklistItemDefinition.count({
-      where: { userId, type: "EXECUTION_CONFIRMATION" },
-    }),
-  ]);
+    },
+    orderBy: [{ trade: { tradeDate: "asc" } }, { trade: { executionMinutes: "asc" } }],
+  });
 
   const fromDate = dateKeyToUtcDate(from);
   const toDate = dateKeyToUtcDate(to);
@@ -156,17 +154,17 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
     }
   }
 
+  // SOT: rule adherence is now the strategy-execution adherence frozen on the
+  // trade (selected vs the strategy's expected execution set) — no longer derived
+  // from the removed global checklist. Null for pre-SOT trades (excluded from avgs).
   function ruleAdherenceForTrade(t: (typeof inRange)[number]["trade"]): number | null {
-    if (executionItemCount === 0) return null;
-    const checked = t.checklistSelections.filter(
-      (c) => c.checklistItem.type === "EXECUTION_CONFIRMATION",
-    ).length;
-    return (checked / executionItemCount) * 100;
+    return t.executionPercent;
   }
 
   let runningBalance = balanceBeforeRange;
   const tradeInputs: metrics.TradeMetricInput[] = [];
   const psychologyPoints: PsychologyDataPoint[] = [];
+  const adherencePoints: AdherenceTradePoint[] = [];
   const dailyPnlMap = new Map<string, number>();
 
   for (const alloc of inRange) {
@@ -188,6 +186,14 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       strategyLabel,
     });
     dailyPnlMap.set(dateKey, (dailyPnlMap.get(dateKey) ?? 0) + pnl);
+
+    adherencePoints.push({
+      win: pnl > 0 ? true : pnl < 0 ? false : null,
+      confluences: (t.selectedConfluences as string[] | null) ?? [],
+      confluencePercent: t.confluencePercent,
+      executionPercent: t.executionPercent,
+      tradeQualityPercent: t.tradeQualityPercent,
+    });
 
     if (t.psychology) {
       const otherAccount = t.allocations.find((a) => a.tradingAccount.kind !== "PERFORMANCE");
@@ -243,6 +249,10 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
       dailyPercents,
+      // SOT strategy-adherence analytics (foundation): average confluence / execution /
+      // trade-quality adherence, avg confluence count on winners vs losers, and a
+      // per-confluence win-rate leaderboard. Built from each trade's frozen scores.
+      adherence: summarizeAdherence(adherencePoints),
     },
     psychology: {
       averagePercent: psychAnalytics.averagePsychologyPercent(psychologyPoints),

@@ -113,7 +113,7 @@ P5  Adherence & trade-quality scoring (pure, tested) .... ✅ (scorer built + 5 
 P6  Display scores + colored selected tags .............. ✅
 P3  Remove global confluence/execution editors .......... ✅ (asset/session editors now gone too)
 P7  Colored Tag system everywhere + broader accents ..... ✅
-P8  Analytics foundations ............................... ⭘ next
+P8  Analytics foundations ............................... ✅
 P9  Full migration: backfill assetSymbol; drop Asset/
     TradingSession/ChecklistItemDefinition + assetId/
     sessionId/watchlistFocus; delete dead read services ... ⭘
@@ -291,3 +291,22 @@ snapshot's sessions) so the session tag shows its real strategy color, falling b
 
 Verified: **tsc + eslint clean; 181 tests green**. Remaining minor surfaces (timeframe / arsenal-concept
 editor cards are structured editors, not badges) are left as **P10** polish.
+
+### P8 — Analytics foundations ✅
+Migrated analytics off the removed global checklist and laid the tested foundation for
+strategy-adherence analytics.
+- **Rule Adherence metric** (`analytics.service`) now reads each trade's frozen `executionPercent`
+  (selected vs the strategy's expected execution) instead of the old
+  `checklistSelections`-÷-global-`executionItemCount`. Dropped the `checklistItemDefinition.count`
+  query + the `checklistSelections` include. The psychology `correlationWithRuleAdherence` follows
+  automatically. Null for pre-SOT trades (excluded from averages).
+- **New pure module** `domain/performance/adherence-analytics.ts` (+ 5 vitest cases): from per-trade
+  points (`win`, selected `confluences`, the three frozen percents) it computes avg confluence /
+  execution / trade-quality adherence, **avg confluence count on winners vs losers**, and a
+  **per-confluence win-rate leaderboard** (deduped within a trade, ranked by win rate then volume).
+  This is the "expand without a migration" backbone for future adherence analytics.
+- Wired into `getAnalyticsData` under `trading.adherence` and surfaced on the Analytics page via a new
+  **`AdherenceAnalytics`** card (5 stat tiles + colored confluence win-rate table). Labeled a
+  discipline measure, not a prediction.
+
+Verified: **tsc + eslint clean; 186 tests green** (+5).
