@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, EyeOff, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, EyeOff, Lock, Pencil, Plus, Trash2, X } from "lucide-react";
 import type { TagColor } from "@prisma/client";
 
 import { cn } from "@/lib/utils";
@@ -27,6 +27,8 @@ export interface StrategyChecklistItemDTO {
   category: string | null;
   description: string | null;
   weight: number | null;
+  mandatory: boolean;
+  validationCriteria: string | null;
   enabled: boolean;
 }
 
@@ -38,15 +40,28 @@ interface Draft {
   category: string;
   description: string;
   weight: string;
+  mandatory: boolean;
+  validationCriteria: string;
   enabled: boolean;
 }
-const emptyDraft: Draft = { name: "", color: "GRAY", category: "", description: "", weight: "", enabled: true };
+const emptyDraft: Draft = {
+  name: "",
+  color: "GRAY",
+  category: "",
+  description: "",
+  weight: "",
+  mandatory: false,
+  validationCriteria: "",
+  enabled: true,
+};
 const toDraft = (i: StrategyChecklistItemDTO): Draft => ({
   name: i.name,
   color: i.color,
   category: i.category ?? "",
   description: i.description ?? "",
   weight: i.weight == null ? "" : String(i.weight),
+  mandatory: i.mandatory,
+  validationCriteria: i.validationCriteria ?? "",
   enabled: i.enabled,
 });
 
@@ -82,6 +97,8 @@ export function StrategyChecklistSection({
       category: draft.category.trim() || null,
       description: draft.description.trim() || null,
       weight: draft.weight.trim() === "" ? null : Number(draft.weight),
+      mandatory: kind === "CONFLUENCE" ? draft.mandatory : false,
+      validationCriteria: draft.validationCriteria.trim() || null,
       enabled: draft.enabled,
     };
     start(async () => {
@@ -110,8 +127,39 @@ export function StrategyChecklistSection({
     });
   }
 
+  const enabledItems = initialItems.filter((i) => i.enabled);
+  const totalWeight = enabledItems.reduce((sum, i) => sum + (i.weight ?? 0), 0);
+  const mandatoryCount = enabledItems.filter((i) => i.mandatory).length;
+
   return (
     <div className="space-y-2.5">
+      {kind === "CONFLUENCE" && enabledItems.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-background/40 px-3 py-2 text-xs">
+          <span className="text-muted-foreground">
+            Total weight{" "}
+            <span
+              className={cn(
+                "font-semibold tabular-nums",
+                totalWeight === 100 ? "text-success" : "text-foreground",
+              )}
+            >
+              {totalWeight}
+            </span>
+          </span>
+          <span className="text-muted-foreground">
+            <span className="font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+              {mandatoryCount}
+            </span>{" "}
+            mandatory
+          </span>
+          {totalWeight !== 100 && (
+            <span className="text-muted-foreground/60">
+              Tip: weights totalling 100 make the probability score read as a clean percentage.
+            </span>
+          )}
+        </div>
+      )}
+
       {initialItems.length === 0 && !adding && (
         <p className="text-sm text-muted-foreground">
           No {noun}s defined yet. Add the ones this strategy relies on.
@@ -129,6 +177,11 @@ export function StrategyChecklistSection({
             <Tag color={item.color} muted={!item.enabled}>
               {item.name}
             </Tag>
+            {item.mandatory && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                <Lock className="size-2.5" /> Core
+              </span>
+            )}
             {item.category && (
               <span className="text-xs text-muted-foreground">{item.category}</span>
             )}
@@ -248,15 +301,56 @@ function ItemForm({
           value={draft.weight}
           onChange={(e) => setDraft({ ...draft, weight: e.target.value })}
           inputMode="numeric"
-          placeholder="Weight"
-          className="h-8 w-24 tabular-nums"
-          aria-label="Weight"
+          placeholder="Weight 0–100"
+          className="h-8 w-32 tabular-nums"
+          aria-label="Weight (0-100)"
         />
       </div>
+
+      {kind === "CONFLUENCE" && (
+        <div className="flex overflow-hidden rounded-lg border border-border text-xs">
+          <button
+            type="button"
+            onClick={() => setDraft({ ...draft, mandatory: true })}
+            className={cn(
+              "flex-1 px-3 py-1.5 font-medium transition-colors",
+              draft.mandatory
+                ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                : "text-muted-foreground hover:bg-muted",
+            )}
+          >
+            Mandatory (core requirement)
+          </button>
+          <button
+            type="button"
+            onClick={() => setDraft({ ...draft, mandatory: false })}
+            className={cn(
+              "flex-1 border-l border-border px-3 py-1.5 font-medium transition-colors",
+              !draft.mandatory
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted",
+            )}
+          >
+            Optional (adds to score)
+          </button>
+        </div>
+      )}
+
       <Textarea
         value={draft.description}
         onChange={(e) => setDraft({ ...draft, description: e.target.value })}
         placeholder="Notes / how to identify it (optional)"
+        rows={2}
+        className="resize-y"
+      />
+      <Textarea
+        value={draft.validationCriteria}
+        onChange={(e) => setDraft({ ...draft, validationCriteria: e.target.value })}
+        placeholder={
+          kind === "CONFLUENCE"
+            ? "Validation criteria — the objective test for 'is this confluence present?' (optional)"
+            : "Validation criteria (optional)"
+        }
         rows={2}
         className="resize-y"
       />

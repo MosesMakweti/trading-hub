@@ -71,6 +71,8 @@ export default async function StrategyWorkspacePage({
     category: r.category,
     description: r.description,
     weight: r.weight,
+    mandatory: r.mandatory,
+    validationCriteria: r.validationCriteria,
     enabled: r.enabled,
   });
   const confluences = confluenceRows.map(toChecklistDto);
