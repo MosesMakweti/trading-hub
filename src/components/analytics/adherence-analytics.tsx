@@ -73,7 +73,7 @@ export function AdherenceAnalytics({ data }: { data: AdherenceSummary }) {
               </thead>
               <tbody>
                 {data.confluenceCombinations.slice(0, 8).map((combo) => (
-                  <tr key={combo.confluences.join("+")} className="border-t border-border/60">
+                  <tr key={combo.confluences.join("+")} className="border-t border-border/60 transition-colors hover:bg-accent/50">
                     <td className="py-1.5">
                       <div className="flex flex-wrap gap-1">
                         {combo.confluences.map((name) => (
@@ -114,7 +114,7 @@ export function AdherenceAnalytics({ data }: { data: AdherenceSummary }) {
               </thead>
               <tbody>
                 {board.map((c) => (
-                  <tr key={c.name} className="border-t border-border/60">
+                  <tr key={c.name} className="border-t border-border/60 transition-colors hover:bg-accent/50">
                     <td className="py-1.5">
                       <Tag color={colorForName(c.name)}>{c.name}</Tag>
                     </td>

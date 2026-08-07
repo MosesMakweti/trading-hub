@@ -301,9 +301,22 @@ danger · warning · outline · secondary), `Sidebar`, `Skeleton`, dialog/popove
 `EmptyState` (icon + title + description), `ConfirmDialog`, `SectionPlaceholder` (documented
 "coming in phase X" shell), `CommandCenter` (⌘K), `ThemeToggle`.
 
+**Dataviz primitives — `components/analytics/*` (all pure inline SVG, server-safe, zero client JS):**
+- `Sparkline` — tiny dependency-free trend line for KPI cards and table rows; `tone` auto-colors
+  green/red by the series' end-vs-start, or force brand/success/danger/muted. Use it to give a
+  headline number visual context, never as a standalone chart.
+- `DeltaChip` (+ `directionOf` helper) — the "vs previous" pill: arrow + value, tinted
+  green (up) / red (down) / muted (flat). The canonical change-indicator.
+- `ProgressRing` — radial gauge for one 0–100% metric; center holds the value (or `children`),
+  data-hued (brand) by default because a ring shows magnitude, not status.
+- `Donut` — categorical distribution as a segmented ring (2px surface gaps per the dataviz mark
+  specs); optional legend carries identity, never color alone. Center holds a headline via `children`.
+
 **Composites (reuse across modules):**
-- `KpiCard` (`components/analytics`) — the stat tile: uppercase label, hero `tabular-nums`
-  value, optional sublabel, `tone` (neutral/success/danger). The canonical way to show a metric.
+- `KpiCard` (`components/analytics`) — the **metric-with-context** tile: uppercase label + optional
+  `icon`, hero `tabular-nums` value, optional `sublabel`, `tone` (neutral/success/danger), and
+  optional context — a `delta` (→ `DeltaChip`) and/or a `spark` series (→ `Sparkline`, `sparkTone`).
+  The canonical way to show a metric; prefer wiring real context over a bare number.
 - `EquityCurveChart` — the house equity/return chart.
 - `WorkflowProgress` (`components/dashboard`) — the Prep→Plan→Trade→Review→Analyze stepper
   (gradient/ring/dashed nodes; `aria-current="step"`). Driven by the pure `deriveWorkflowSteps`.

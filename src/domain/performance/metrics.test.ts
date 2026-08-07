@@ -5,6 +5,7 @@ import {
   averageRR,
   averageTradesPerDay,
   averageWinner,
+  cumulativeWinRateSeries,
   expectancy,
   longestLossStreak,
   longestWinStreak,
@@ -39,6 +40,22 @@ describe("winRate", () => {
 
   it("returns null when there are no closed trades", () => {
     expect(winRate([T("2026-01-01", "XAUUSD", null)])).toBeNull();
+  });
+});
+
+describe("cumulativeWinRateSeries", () => {
+  it("produces a running win rate that converges to the overall win rate", () => {
+    const series = cumulativeWinRateSeries(MIXED);
+    // win, loss, win, loss → 100, 50, 66.67, 50 (open trade excluded)
+    expect(series).toHaveLength(4);
+    expect(series[0]).toBe(100);
+    expect(series[1]).toBe(50);
+    expect(series[2]).toBeCloseTo(66.667, 2);
+    expect(series[series.length - 1]).toBe(winRate(MIXED));
+  });
+
+  it("is empty when there are no closed trades", () => {
+    expect(cumulativeWinRateSeries([T("2026-01-01", "XAUUSD", null)])).toEqual([]);
   });
 });
 

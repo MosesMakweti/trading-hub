@@ -76,6 +76,8 @@ export function PerformanceAccountSection({
           label="Total Return"
           value={percent(account.totalReturnPercent)}
           tone={account.totalReturnPercent >= 0 ? "success" : "danger"}
+          spark={equityCurve.map((p) => p.cumulativeCompounding)}
+          sparkTone="auto"
         />
         <KpiCard
           label="Net Profit"
