@@ -28,9 +28,9 @@ it without reshaping the engine.
 
 ## Roadmap
 ```
-D1  Execution Engine (pure domain + tests) ............... ▶ this turn — the central layer
+D1  Execution Engine (pure domain + tests) ............... ✅ the central layer
 D2  Strategy benchmark fields (expected win rate / avg RR /
-    expectancy / min execution score) + Strategy Lab editor  ⭘
+    expectancy / min execution score) + Strategy Lab editor  ✅
 D3  Wire engine → analytics.service + Dashboard Discrepancy
     Gap card (dual-line chart beside Equity Curve) .......... ⭘
 D4  Journal trade-card integration (expected/actual/gap/dev) . ⭘
@@ -63,3 +63,14 @@ example). Pure central layer:
 
 tsc + eslint clean; 203 tests green (+7). Next: D2 (strategy benchmark fields feed
 `strategyExpectancyR`; `executionScore` will come from the trade's frozen setup/adherence scores).
+
+### D2 — Strategy benchmark fields ✅
+Each strategy is now a benchmark. Added `expectedWinRate` / `expectedAvgRr` / `expectedExpectancy` /
+`minExecutionScore` to `StrategyTradeManagement` (migration `20260807120000_strategy_benchmarks`,
+additive). Threaded through the validation (`tradeManagementUpdateSchema`), service
+(`updateTradeManagement`), `TradeManagementDTO` + page mapper, and the version-snapshot builder (so
+benchmarks freeze into published versions). New **"Expected performance (benchmark)"** card in the
+Strategy Lab → Trade Management section (4 autosaved number inputs + a note explaining Expected R =
+expectancy × execution score). `expectedExpectancy` is the primary input to D3's Expected R.
+Next: D3 freezes the benchmark onto each trade (via the strategy reference/snapshot) and builds the
+Dashboard Discrepancy Gap card.

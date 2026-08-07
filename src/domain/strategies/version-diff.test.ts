@@ -77,7 +77,9 @@ describe("diffStrategyVersions", () => {
     const tm = (over: Record<string, unknown>) => ({
       id: "tm", takeProfitPhilosophy: null, initialStopPlacement: null, breakEvenRules: null,
       trailingStopRules: null, scalingInRules: null, scalingOutRules: null,
-      maxHoldingTime: null, maxRiskPercent: null, partialTakeProfits: [], customRules: [],
+      maxHoldingTime: null, maxRiskPercent: null,
+      expectedWinRate: null, expectedAvgRr: null, expectedExpectancy: null, minExecutionScore: null,
+      partialTakeProfits: [], customRules: [],
       ...over,
     });
     const d = diffStrategyVersions(

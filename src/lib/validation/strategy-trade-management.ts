@@ -26,6 +26,11 @@ export const tradeManagementUpdateSchema = z.object({
   scalingOutRules: richText.optional(),
   maxHoldingTime: z.string().trim().max(60).nullable().optional(),
   maxRiskPercent: z.number().min(0).max(100).nullable().optional(),
+  // Discrepancy-Gap benchmarks (the strategy's proven edge).
+  expectedWinRate: z.number().min(0).max(100).nullable().optional(),
+  expectedAvgRr: z.number().min(-100).max(100).nullable().optional(),
+  expectedExpectancy: z.number().min(-100).max(100).nullable().optional(),
+  minExecutionScore: z.number().int().min(0).max(100).nullable().optional(),
 });
 
 // ── Partial take-profit levels ───────────────────────────────────────────────

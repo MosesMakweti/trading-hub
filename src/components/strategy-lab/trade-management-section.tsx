@@ -52,6 +52,12 @@ export function TradeManagementSection({
     maxHoldingTime: tm.maxHoldingTime ?? "",
     maxRiskPercent: tm.maxRiskPercent?.toString() ?? "",
   });
+  const [benchmarks, setBenchmarks] = useState({
+    expectedWinRate: tm.expectedWinRate?.toString() ?? "",
+    expectedAvgRr: tm.expectedAvgRr?.toString() ?? "",
+    expectedExpectancy: tm.expectedExpectancy?.toString() ?? "",
+    minExecutionScore: tm.minExecutionScore?.toString() ?? "",
+  });
 
   const limitsSave = useDebouncedAutosave({
     value: limits,
@@ -65,6 +71,39 @@ export function TradeManagementSection({
       return updateTradeManagement(strategyId, tm.id, {
         maxHoldingTime: v.maxHoldingTime.trim() === "" ? null : v.maxHoldingTime.trim(),
         maxRiskPercent: num,
+      });
+    },
+    onError: (m) => {
+      if (m) toast.error(m);
+    },
+  });
+
+  // The strategy's proven edge — feeds the Discrepancy-Gap Execution Engine.
+  const benchmarksSave = useDebouncedAutosave({
+    value: benchmarks,
+    serialize: (v) => JSON.stringify(v),
+    save: async (v) => {
+      const parse = (raw: string, min: number, max: number, integer = false) => {
+        const t = raw.trim();
+        if (t === "") return { ok: true as const, value: null };
+        const n = Number(t);
+        if (Number.isNaN(n) || n < min || n > max || (integer && !Number.isInteger(n))) {
+          return { ok: false as const };
+        }
+        return { ok: true as const, value: n };
+      };
+      const wr = parse(v.expectedWinRate, 0, 100);
+      const rr = parse(v.expectedAvgRr, -100, 100);
+      const ex = parse(v.expectedExpectancy, -100, 100);
+      const mes = parse(v.minExecutionScore, 0, 100, true);
+      if (!wr.ok || !rr.ok || !ex.ok || !mes.ok) {
+        return { success: false, error: "Check the benchmark values." };
+      }
+      return updateTradeManagement(strategyId, tm.id, {
+        expectedWinRate: wr.value,
+        expectedAvgRr: rr.value,
+        expectedExpectancy: ex.value,
+        minExecutionScore: mes.value,
       });
     },
     onError: (m) => {
@@ -131,6 +170,86 @@ export function TradeManagementSection({
               <span className="text-sm text-muted-foreground">%</span>
               {limitsSave === "saving" && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
               {limitsSave === "saved" && <Check className="size-3.5 text-success" />}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Discrepancy-Gap benchmarks — the strategy's proven edge */}
+      <div className="glass space-y-4 rounded-2xl p-5">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-medium">Expected performance (benchmark)</h3>
+            <p className="text-xs text-muted-foreground">
+              Your strategy&apos;s proven edge. Powers the Discrepancy Gap — Expected R ={" "}
+              <span className="tabular-nums">expectancy × execution score</span> — so you can see how
+              much of this edge your execution actually captures.
+            </p>
+          </div>
+          <span className="w-5 shrink-0 pt-0.5">
+            {benchmarksSave === "saving" && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+            {benchmarksSave === "saved" && <Check className="size-3.5 text-success" />}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="bm-wr" className="text-xs">Expected win rate</Label>
+            <div className="flex items-center gap-1.5">
+              <Input
+                id="bm-wr"
+                type="number"
+                min={0}
+                max={100}
+                step="1"
+                value={benchmarks.expectedWinRate}
+                onChange={(e) => setBenchmarks((b) => ({ ...b, expectedWinRate: e.target.value }))}
+                placeholder="55"
+              />
+              <span className="text-sm text-muted-foreground">%</span>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bm-rr" className="text-xs">Expected avg RR</Label>
+            <div className="flex items-center gap-1.5">
+              <Input
+                id="bm-rr"
+                type="number"
+                step="0.1"
+                value={benchmarks.expectedAvgRr}
+                onChange={(e) => setBenchmarks((b) => ({ ...b, expectedAvgRr: e.target.value }))}
+                placeholder="2.0"
+              />
+              <span className="text-sm text-muted-foreground">R</span>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bm-ex" className="text-xs">Expected expectancy</Label>
+            <div className="flex items-center gap-1.5">
+              <Input
+                id="bm-ex"
+                type="number"
+                step="0.05"
+                value={benchmarks.expectedExpectancy}
+                onChange={(e) => setBenchmarks((b) => ({ ...b, expectedExpectancy: e.target.value }))}
+                placeholder="1.5"
+              />
+              <span className="text-sm text-muted-foreground">R</span>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bm-mes" className="text-xs">Min execution score</Label>
+            <div className="flex items-center gap-1.5">
+              <Input
+                id="bm-mes"
+                type="number"
+                min={0}
+                max={100}
+                step="1"
+                value={benchmarks.minExecutionScore}
+                onChange={(e) => setBenchmarks((b) => ({ ...b, minExecutionScore: e.target.value }))}
+                placeholder="80"
+              />
+              <span className="text-sm text-muted-foreground">%</span>
             </div>
           </div>
         </div>

@@ -99,6 +99,11 @@ export interface TradeManagementDTO {
   scalingOutRules: unknown;
   maxHoldingTime: string | null;
   maxRiskPercent: number | null;
+  // Discrepancy-Gap benchmarks (D2) — the strategy's proven edge.
+  expectedWinRate: number | null;
+  expectedAvgRr: number | null;
+  expectedExpectancy: number | null;
+  minExecutionScore: number | null;
   partialTakeProfits: PartialTakeProfitDTO[];
   customRules: CustomRuleDTO[];
 }

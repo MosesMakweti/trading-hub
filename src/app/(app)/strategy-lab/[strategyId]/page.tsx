@@ -142,6 +142,10 @@ export default async function StrategyWorkspacePage({
     scalingOutRules: tradeManagement.scalingOutRules,
     maxHoldingTime: tradeManagement.maxHoldingTime,
     maxRiskPercent: tradeManagement.maxRiskPercent ? tradeManagement.maxRiskPercent.toNumber() : null,
+    expectedWinRate: tradeManagement.expectedWinRate,
+    expectedAvgRr: tradeManagement.expectedAvgRr,
+    expectedExpectancy: tradeManagement.expectedExpectancy,
+    minExecutionScore: tradeManagement.minExecutionScore,
     partialTakeProfits: tradeManagement.partialTakeProfits.map((p) => ({
       id: p.id,
       trigger: p.trigger,

@@ -708,6 +708,15 @@ model StrategyTradeManagement {
   maxHoldingTime String? // free text, e.g. "2 hours", "1 session"
   maxRiskPercent Decimal? @db.Decimal(6, 2)
 
+  // Discrepancy-Gap benchmarks (D2): the strategy's PROVEN edge, used by the
+  // Execution Engine as the "expected" baseline. expectedExpectancy (R per trade at
+  // full execution) is the primary input to Expected R; the others describe the edge
+  // and minExecutionScore is the quality bar below which a setup isn't A-grade.
+  expectedWinRate    Float? // 0–100
+  expectedAvgRr      Float? // avg winner R
+  expectedExpectancy Float? // R per trade (benchmark for Expected Result)
+  minExecutionScore  Int? // 0–100
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
