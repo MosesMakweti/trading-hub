@@ -17,6 +17,7 @@ import { WORKFLOW_STEP_META, type WorkflowStep } from "@/components/dashboard/wo
 import { EmptyState } from "@/components/shared/empty-state";
 import { FadeIn, StaggerList, StaggerItem } from "@/components/shared/motion";
 import { executionSnapshot, resolveSelectedTags } from "@/server/services/selected-tags";
+import { toTradeDiscrepancy } from "@/server/services/trade-discrepancy";
 import type { TradeListItemDTO } from "@/types/trades";
 
 export default async function JournalDayPage({
@@ -85,6 +86,7 @@ export default async function JournalDayPage({
     setupScore: t.setupScore,
     setupRating: t.setupRating as TradeListItemDTO["setupRating"],
     setupValid: t.setupValid,
+    discrepancy: toTradeDiscrepancy(t),
     psychology: t.psychology
       ? {
           rawScore: t.psychology.rawScore,

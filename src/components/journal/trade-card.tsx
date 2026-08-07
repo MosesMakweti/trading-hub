@@ -22,6 +22,10 @@ function percent(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
 }
 
+function fmtR(n: number | null) {
+  return n == null ? "—" : `${n.toFixed(2)}R`;
+}
+
 export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeListItemDTO }) {
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -167,6 +171,41 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
                 )}
               </span>
             )
+          )}
+        </div>
+      )}
+
+      {trade.discrepancy && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-background/40 px-3 py-2 text-xs">
+          <span className="font-medium text-muted-foreground">Discrepancy</span>
+          <span className="tabular-nums">
+            Exp{" "}
+            <span className="font-medium text-foreground">{fmtR(trade.discrepancy.expectedR)}</span>{" "}
+            → Act{" "}
+            <span className="font-medium text-foreground">{fmtR(trade.discrepancy.actualR)}</span>
+          </span>
+          {trade.discrepancy.gapR != null && (
+            <span
+              className={cn(
+                "font-medium tabular-nums",
+                trade.discrepancy.gapR > 0
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-success",
+              )}
+            >
+              Gap {trade.discrepancy.gapR >= 0 ? "+" : ""}
+              {fmtR(trade.discrepancy.gapR)}
+            </span>
+          )}
+          {trade.discrepancy.executionScore != null && (
+            <span className="text-muted-foreground tabular-nums">
+              Exec {trade.discrepancy.executionScore}%
+            </span>
+          )}
+          {trade.discrepancy.recoverableR != null && trade.discrepancy.recoverableR > 0 && (
+            <span className="text-muted-foreground tabular-nums">
+              Recoverable {fmtR(trade.discrepancy.recoverableR)}
+            </span>
           )}
         </div>
       )}

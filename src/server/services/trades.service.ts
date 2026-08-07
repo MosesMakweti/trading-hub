@@ -53,7 +53,17 @@ const tradeInclude = {
   // filtered (the extension only guards top-level queries), so `deletedAt` is
   // selected too — a soft-deleted strategy must not render a live link. The
   // *Snapshot columns on Trade preserve the strategy identity regardless.
-  strategy: { select: { id: true, name: true, version: true, status: true, deletedAt: true } },
+  strategy: {
+    select: {
+      id: true,
+      name: true,
+      version: true,
+      status: true,
+      deletedAt: true,
+      // Live benchmark for the per-trade Discrepancy Gap (D4).
+      tradeManagement: { select: { expectedExpectancy: true } },
+    },
+  },
   allocations: { include: { tradingAccount: true } },
   entryModels: { include: { entryModel: true } },
   images: true,

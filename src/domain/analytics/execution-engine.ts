@@ -78,6 +78,16 @@ const LOW_EXECUTION = 65;
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
+/** The single definition of a trade's composite execution quality (0–100), from its
+ *  frozen scores. Used everywhere the engine is fed, so there is one source of truth. */
+export function compositeExecutionScore(scores: {
+  tradeQualityPercent: number | null;
+  setupScore: number | null;
+  confluencePercent: number | null;
+}): number | null {
+  return scores.tradeQualityPercent ?? scores.setupScore ?? scores.confluencePercent;
+}
+
 /** Per-trade expected / actual / gap. A trade with no strategy expectancy or no
  *  execution score can't be benchmarked → its expected/gap are null (excluded from
  *  the curves), though its actualR still counts on the Actual line. */

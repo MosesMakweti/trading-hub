@@ -33,7 +33,7 @@ D2  Strategy benchmark fields (expected win rate / avg RR /
     expectancy / min execution score) + Strategy Lab editor  ✅
 D3  Wire engine → analytics.service + Dashboard Discrepancy
     Gap card (dual-line chart beside Equity Curve) .......... ✅
-D4  Journal trade-card integration (expected/actual/gap/dev) . ⭘
+D4  Journal trade-card integration (expected/actual/gap/dev) . ✅ (primary deviation → D5)
 D5  Analytics Discrepancy Gap section + deviation sub-scores
     (entry/exit/risk from planned-vs-actual prices) ......... ⭘
 D6  Psychology Lab deviation classification + aggregation ... ⭘
@@ -88,3 +88,14 @@ shaded between (range-Area), a custom hover tooltip (trade #, Expected, Actual, 
 **Design note:** used the muted-vs-brand chart pair the design system already ships for two series;
 identity is carried by the legend + line style, per the dataviz method. Empty-safe (prompts to set a
 strategy benchmark). Next: D4 (per-trade gap on the journal card).
+
+### D4 — Journal trade-card integration ✅
+Centralized the composite-execution-score definition in the engine
+(`compositeExecutionScore`) and refactored the analytics wiring onto it (single source). New shared
+`toTradeDiscrepancy(trade)` (`server/services/trade-discrepancy.ts`) routes each trade through the
+engine's `scoreTrade` → `TradeDiscrepancyDTO` (executionScore, strategyAdherence, expectedR, actualR,
+gapR, recoverableR), returning null when the strategy has no expectancy benchmark. `tradeInclude`'s
+strategy select now carries `tradeManagement.expectedExpectancy`; `TradeListItemDTO` gains
+`discrepancy`; the journal maps it via the shared helper. The **trade card** shows a compact
+Discrepancy strip — `Exp → Act`, colored **Gap**, Execution %, and Recoverable — only when
+benchmarked. Primary deviation is D5 (needs the entry/exit/risk sub-scores). Next: D5.

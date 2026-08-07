@@ -9,6 +9,7 @@ import {
 } from "@/domain/performance/adherence-analytics";
 import {
   buildDiscrepancyCurve,
+  compositeExecutionScore,
   summarizeDiscrepancy,
   type ExecutionTradeInput,
 } from "@/domain/analytics/execution-engine";
@@ -211,7 +212,7 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       tradeNumber: t.tradeNumber ?? 0,
       dateKey,
       strategyExpectancyR: t.strategy?.tradeManagement?.expectedExpectancy ?? null,
-      executionScore: t.tradeQualityPercent ?? t.setupScore ?? t.confluencePercent ?? null,
+      executionScore: compositeExecutionScore(t),
       actualR: t.actualRR ? t.actualRR.toNumber() : null,
     });
 

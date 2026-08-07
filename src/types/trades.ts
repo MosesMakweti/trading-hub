@@ -9,6 +9,17 @@ export interface SelectedTagDTO {
   color: TagColor;
 }
 
+/** Per-trade Discrepancy-Gap breakdown (from the Execution Engine). Null when the
+ * trade's strategy has no expectancy benchmark set. R-multiples. */
+export interface TradeDiscrepancyDTO {
+  executionScore: number | null;
+  strategyAdherence: number | null;
+  expectedR: number | null;
+  actualR: number | null;
+  gapR: number | null;
+  recoverableR: number | null;
+}
+
 /** Strategy-adherence / trade-quality scores. Null when the strategy defined no
  * items of that kind (or the trade had no strategy). NOT a market prediction. */
 export interface AdherenceScoresDTO {
@@ -46,6 +57,8 @@ export interface TradeListItemDTO {
   setupScore: number | null;
   setupRating: SetupRating | null;
   setupValid: boolean | null;
+  // Per-trade Discrepancy Gap (null when the strategy has no expectancy benchmark).
+  discrepancy: TradeDiscrepancyDTO | null;
   // Strategy the trade was taken under (from the snapshot); strategyId links to
   // the live strategy only while it still exists.
   strategyName: string | null;
