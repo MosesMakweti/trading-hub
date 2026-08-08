@@ -12,6 +12,7 @@ import {
   WorkspaceNoteField,
   WorkspacePriceField,
 } from "@/components/journal/workspace/workspace-fields";
+import { TradeImageBucket } from "@/components/journal/workspace/trade-image-bucket";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
 const ACCOUNT_KIND_LABEL: Record<string, string> = {
@@ -170,6 +171,12 @@ export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
           placeholder="How did the entry and management actually go?"
           className="sm:col-span-2"
         />
+      </div>
+
+      {/* After-Trade images — what happened during/after execution: actual entry,
+          trade management, exit, final chart. */}
+      <div className="space-y-2 rounded-xl border border-border bg-background/30 p-3">
+        <TradeImageBucket tradeId={trade.id} category="AFTER" label="After-Trade Images" />
       </div>
     </div>
   );
