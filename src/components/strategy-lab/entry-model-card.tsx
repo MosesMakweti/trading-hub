@@ -3,7 +3,7 @@
 import { useState, useTransition, type HTMLAttributes } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, ChevronDown, GripVertical, ImageOff, Loader2, Trash2 } from "lucide-react";
+import { Check, ChevronDown, GripVertical, Loader2, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { RichTextEditor } from "@/components/plan/rich-text-editor";
+import { ImageAttachments } from "@/components/media/image-attachments";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import {
   archiveEntryModel,
@@ -152,10 +153,10 @@ export function EntryModelCard({
               />
             </div>
           ))}
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground sm:col-span-2">
-            <ImageOff className="size-3.5" />
-            Example images arrive when image hosting is connected.
-          </p>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label className="text-xs">Example images</Label>
+            <ImageAttachments ownerType="STRATEGY_ENTRY_MODEL" ownerId={model.id} max={8} />
+          </div>
         </div>
       )}
 

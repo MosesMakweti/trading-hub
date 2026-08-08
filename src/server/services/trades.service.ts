@@ -62,7 +62,6 @@ const tradeInclude = {
     },
   },
   allocations: { include: { tradingAccount: true } },
-  images: true,
   psychology: true,
 } as const;
 

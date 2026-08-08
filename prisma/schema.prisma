@@ -34,6 +34,7 @@ model User {
   routineItems    RoutineItem[]
   strategySessions      StrategySession[]
   strategyChecklistItems StrategyChecklistItem[]
+  mediaAssets     MediaAsset[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -242,10 +243,19 @@ enum RiskInputType {
   AMOUNT
 }
 
-enum ImageCategory {
-  ANALYSIS
-  BEFORE
-  AFTER
+// Which kind of record a media attachment hangs off. Polymorphic on purpose:
+// one media system serves every feature (Trade, Strategy, Entry Model, …) and new
+// modules just add a value here — no per-feature image table. ownerId is the
+// target row's id (validated + user-scoped in the media service, so there is no
+// hard FK). Extend this enum as new surfaces gain attachments.
+enum MediaOwnerType {
+  TRADE
+  DAILY_NOTE
+  STRATEGY
+  STRATEGY_ENTRY_MODEL
+  STRATEGY_CHECKLIST_ITEM
+  STRATEGY_FRAMEWORK_STEP
+  ARSENAL_CONCEPT
 }
 
 model Trade {
@@ -343,7 +353,6 @@ model Trade {
   deletedAt                DateTime?
 
   allocations         TradeAccountAllocation[]
-  images              TradeImage[]
   psychology          PsychologyQuestionnaireResponse?
 
   @@unique([userId, tradeNumber])
@@ -407,15 +416,42 @@ model TradeAccountAllocation {
   @@unique([tradeId, tradingAccountId])
 }
 
-model TradeImage {
-  id             String        @id @default(cuid())
-  tradeId        String
-  trade          Trade         @relation(fields: [tradeId], references: [id], onDelete: Cascade)
-  category       ImageCategory
-  url            String
-  uploadthingKey String
-  sortOrder      Int           @default(0)
-  createdAt      DateTime      @default(now())
+// ── Universal media system ───────────────────────────────────────────────────
+// One user-owned asset per uploaded file (the file lives in UploadThing; we keep
+// the metadata + storage key). Attachments (below) link an asset to any record,
+// so a feature never needs its own image table.
+model MediaAsset {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storageKey String // UploadThing file key (for retrieval + deletion)
+  fileName   String
+  mimeType   String
+  fileSize   Int // bytes
+  url        String
+  createdAt  DateTime @default(now())
+
+  attachments MediaAttachment[]
+
+  @@index([userId, createdAt])
+}
+
+// Polymorphic link between an asset and the record it documents. Deleting the
+// asset cascades its attachments; deleting an owner record is handled in app code
+// (there is no hard FK, by design — see MediaOwnerType). An optional `category`
+// buckets attachments within one owner (e.g. a trade's ANALYSIS/BEFORE/AFTER).
+model MediaAttachment {
+  id        String         @id @default(cuid())
+  mediaId   String
+  media     MediaAsset     @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  ownerType MediaOwnerType
+  ownerId   String
+  category  String?
+  sortOrder Int            @default(0)
+  createdAt DateTime       @default(now())
+
+  @@index([ownerType, ownerId, sortOrder])
+  @@index([mediaId])
 }
 
 model Account {

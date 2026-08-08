@@ -1,10 +1,9 @@
 import { TradeAttachments } from "@/components/journal/workspace/trade-attachments";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
-// Server wrapper: uploads are only offered when image hosting (UploadThing) is
-// configured. The token is server-only, so we resolve the flag here and hand the
-// client component a plain boolean — existing images render either way.
+// Thin wrapper kept for import stability. The universal <ImageAttachments> inside
+// resolves upload availability (UploadThing config) itself, so there is nothing to
+// thread through here anymore.
 export function TradeAttachmentsSection({ trade }: { trade: TradeWorkspaceDTO }) {
-  const uploadsEnabled = Boolean(process.env.UPLOADTHING_TOKEN);
-  return <TradeAttachments trade={trade} uploadsEnabled={uploadsEnabled} />;
+  return <TradeAttachments trade={trade} />;
 }

@@ -97,7 +97,6 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
           grade: trade.psychology.grade,
         }
       : null,
-    images: trade.images.map((img) => ({ id: img.id, category: img.category, url: img.url })),
     adherenceAnswers: (trade.adherenceAnswers as Record<string, boolean> | null) ?? {},
     adherencePercent: trade.adherencePercent,
     status: trade.status,

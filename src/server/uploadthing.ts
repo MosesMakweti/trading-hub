@@ -6,53 +6,85 @@ import { auth } from "@/server/auth";
 import { utcDateToKey } from "@/lib/date";
 import { getTrade } from "@/server/services/trades.service";
 import { assertDayEditable, DayArchivedError } from "@/server/services/trading-day.service";
-import { attachTradeImage, MAX_IMAGES_PER_CATEGORY } from "@/server/services/trade-images.service";
+import {
+  assertOwnsMediaTarget,
+  attachMedia,
+  MAX_ATTACHMENTS_PER_OWNER,
+} from "@/server/services/media.service";
 
 const f = createUploadthing();
 
+// Must mirror the Prisma MediaOwnerType enum.
+const ownerTypeSchema = z.enum([
+  "TRADE",
+  "DAILY_NOTE",
+  "STRATEGY",
+  "STRATEGY_ENTRY_MODEL",
+  "STRATEGY_CHECKLIST_ITEM",
+  "STRATEGY_FRAMEWORK_STEP",
+  "ARSENAL_CONCEPT",
+]);
+
 /**
- * The app's only upload route: trade screenshots, bucketed by category. Auth and
- * trade-ownership are proven in the middleware (which runs on our server before a
- * presigned URL is ever issued), so an unauthenticated or cross-tenant request
- * can never reach storage. onUploadComplete then links the file to the trade.
+ * The app's universal image-upload route. Auth + ownership of the target record
+ * are proven in the middleware — which runs on our server before a presigned URL
+ * is ever issued — so an unauthenticated or cross-tenant request can never reach
+ * storage. Server-side MIME/size validation is enforced by the `image` filter
+ * (non-images and oversized files are rejected before onUploadComplete).
+ * onUploadComplete then links the file to its owner via the media service.
  */
 export const ourFileRouter = {
-  tradeImage: f({
-    image: { maxFileSize: "8MB", maxFileCount: MAX_IMAGES_PER_CATEGORY },
+  media: f({
+    image: { maxFileSize: "8MB", maxFileCount: MAX_ATTACHMENTS_PER_OWNER },
   })
     .input(
       z.object({
-        tradeId: z.string().min(1),
-        category: z.enum(["ANALYSIS", "BEFORE", "AFTER"]),
+        ownerType: ownerTypeSchema,
+        ownerId: z.string().min(1),
+        category: z.string().max(40).optional(),
       }),
     )
     .middleware(async ({ input }) => {
       const session = await auth();
       if (!session?.user?.id) throw new UploadThingError("You must be signed in to upload.");
 
-      const trade = await getTrade(session.user.id, input.tradeId);
-      if (!trade) throw new UploadThingError("Trade not found.");
+      const owns = await assertOwnsMediaTarget(session.user.id, input.ownerType, input.ownerId);
+      if (!owns) throw new UploadThingError("Not found or access denied.");
 
-      // An archived day is read-only — block new uploads to it too.
-      try {
-        await assertDayEditable(session.user.id, utcDateToKey(trade.tradeDate));
-      } catch (e) {
-        if (e instanceof DayArchivedError) throw new UploadThingError(e.message);
-        throw e;
+      // A trade on an archived (read-only) day can't receive new uploads either.
+      if (input.ownerType === "TRADE") {
+        const trade = await getTrade(session.user.id, input.ownerId);
+        if (trade) {
+          try {
+            await assertDayEditable(session.user.id, utcDateToKey(trade.tradeDate));
+          } catch (e) {
+            if (e instanceof DayArchivedError) throw new UploadThingError(e.message);
+            throw e;
+          }
+        }
       }
 
-      return { userId: session.user.id, tradeId: input.tradeId, category: input.category };
+      return {
+        userId: session.user.id,
+        ownerType: input.ownerType,
+        ownerId: input.ownerId,
+        category: input.category ?? null,
+      };
     })
     .onUploadComplete(async ({ metadata, file }) => {
-      await attachTradeImage({
+      await attachMedia({
         userId: metadata.userId,
-        tradeId: metadata.tradeId,
+        ownerType: metadata.ownerType,
+        ownerId: metadata.ownerId,
         category: metadata.category,
+        storageKey: file.key,
         url: file.ufsUrl,
-        uploadthingKey: file.key,
+        fileName: file.name,
+        mimeType: file.type,
+        fileSize: file.size,
       });
       // Returned to the client's onClientUploadComplete callback.
-      return { category: metadata.category };
+      return { ownerId: metadata.ownerId, category: metadata.category };
     }),
 } satisfies FileRouter;
 

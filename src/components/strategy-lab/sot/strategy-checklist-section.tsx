@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, EyeOff, Lock, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, EyeOff, ImagePlus, Lock, Pencil, Plus, Trash2, X } from "lucide-react";
 import type { TagColor } from "@prisma/client";
 
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tag } from "@/components/ui/tag";
+import { ImageAttachments } from "@/components/media/image-attachments";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ColorPicker } from "@/components/strategy-lab/sot/color-picker";
 import {
@@ -80,6 +81,7 @@ export function StrategyChecklistSection({
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [imagesFor, setImagesFor] = useState<string | null>(null);
   const [isPending, start] = useTransition();
 
   function reset() {
@@ -170,8 +172,8 @@ export function StrategyChecklistSection({
         editingId === item.id ? (
           <ItemForm key={item.id} draft={draft} setDraft={setDraft} onSave={submit} onCancel={reset} isPending={isPending} kind={kind} />
         ) : (
+          <div key={item.id} className="space-y-2">
           <div
-            key={item.id}
             className="glass flex items-center gap-3 rounded-xl px-3 py-2.5"
           >
             <Tag color={item.color} muted={!item.enabled}>
@@ -198,6 +200,17 @@ export function StrategyChecklistSection({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
+                aria-label={`Images for ${noun}`}
+                aria-pressed={imagesFor === item.id}
+                className={cn(imagesFor === item.id && "text-primary")}
+                onClick={() => setImagesFor((cur) => (cur === item.id ? null : item.id))}
+              >
+                <ImagePlus />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
                 aria-label={`Edit ${noun}`}
                 disabled={isPending}
                 onClick={() => {
@@ -219,6 +232,12 @@ export function StrategyChecklistSection({
                 <Trash2 />
               </Button>
             </div>
+          </div>
+          {imagesFor === item.id && (
+            <div className="glass rounded-xl p-3">
+              <ImageAttachments ownerType="STRATEGY_CHECKLIST_ITEM" ownerId={item.id} max={6} />
+            </div>
+          )}
           </div>
         ),
       )}

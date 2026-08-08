@@ -17,8 +17,7 @@ import type { TradeWorkspaceDTO } from "@/types/trades";
  * card links to the trade's workspace. Reuses the workspace DTO + shared badges.
  */
 export function TradeGalleryCard({ trade }: { trade: TradeWorkspaceDTO }) {
-  const image =
-    trade.images.find((i) => i.category === "ANALYSIS") ?? trade.images[0] ?? null;
+  const image = trade.previewImageUrl ?? null;
   const rrTone =
     trade.actualRR == null ? "text-muted-foreground" : trade.actualRR >= 0 ? "text-success" : "text-danger";
 
@@ -31,7 +30,7 @@ export function TradeGalleryCard({ trade }: { trade: TradeWorkspaceDTO }) {
         <div className="relative aspect-video w-full overflow-hidden bg-background/40">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={image.url}
+            src={image}
             alt={`${trade.assetSymbol} analysis`}
             className="size-full object-cover transition-transform group-hover:scale-[1.02]"
           />

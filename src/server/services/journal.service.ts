@@ -14,6 +14,21 @@ export async function getDailyNote(userId: string, dateKey: string) {
   });
 }
 
+/**
+ * Ensures a DailyNote row exists for the day and returns it — used where we need a
+ * stable id to hang media off (the day's image gallery). The row may be
+ * content-less; `listNoteDateKeys` ignores content-less notes so this never
+ * creates a false "has a note" calendar dot.
+ */
+export async function getOrCreateDailyNote(userId: string, dateKey: string) {
+  const date = dateKeyToUtcDate(dateKey);
+  return prisma.dailyNote.upsert({
+    where: { userId_date: { userId, date } },
+    create: { userId, date },
+    update: {},
+  });
+}
+
 export async function upsertDailyNote(userId: string, dateKey: string, data: DailyNoteInput) {
   const date = dateKeyToUtcDate(dateKey);
   const content = (data.content ?? Prisma.JsonNull) as Prisma.InputJsonValue;
@@ -69,7 +84,9 @@ export async function getJournalDayRecap(
 // the dataset is small and this avoids a round-trip on every month change.
 export async function listNoteDateKeys(userId: string): Promise<string[]> {
   const notes = await prisma.dailyNote.findMany({
-    where: { userId },
+    // Content-less rows (auto-created only to anchor a day's image gallery) don't
+    // count as "has a note" — only rows with actual note content get a dot.
+    where: { userId, content: { not: Prisma.DbNull } },
     select: { date: true },
   });
   return notes.map((n) => utcDateToKey(n.date));
