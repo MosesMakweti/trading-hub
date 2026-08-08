@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, Database, ListChecks, type LucideIcon } from "lucide-react";
+import { ChevronRight, Database, ListChecks, Trash2, type LucideIcon } from "lucide-react";
 
 import { FadeIn } from "@/components/shared/motion";
 
@@ -16,6 +16,12 @@ const AREAS: { href: string; icon: LucideIcon; title: string; description: strin
     icon: Database,
     title: "Data",
     description: "Export your trade history, or restore it from a backup.",
+  },
+  {
+    href: "/settings/data-management",
+    icon: Trash2,
+    title: "Data Management",
+    description: "Control and permanently remove your TradeOS data — by section, or a full reset.",
   },
 ];
 
