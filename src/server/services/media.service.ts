@@ -1,14 +1,16 @@
-import { UTApi } from "uploadthing/server";
-
 import { prisma } from "@/server/db";
+import { deleteMediaFile } from "@/lib/media-storage";
 import type { MediaOwnerType } from "@prisma/client";
 
 /** Per-owner (and per-category) attachment cap, so no single record grows an
- * unbounded gallery. Mirrored in the FileRouter's maxFileCount. */
+ * unbounded gallery. Mirrored in the client uploader. */
 export const MAX_ATTACHMENTS_PER_OWNER = 12;
 
-/** The browser-safe image formats we accept (validated server-side by the
- * FileRouter's `image` filter; listed here for the client `accept` + messaging). */
+/** Max upload size (bytes) — validated server-side in the upload route. */
+export const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8MB
+
+/** The browser-safe image formats we accept (validated server-side in the upload
+ * route; listed here for the client `accept` + messaging). */
 export const ACCEPTED_IMAGE_MIME = [
   "image/png",
   "image/jpeg",
@@ -18,6 +20,11 @@ export const ACCEPTED_IMAGE_MIME = [
   "image/avif",
   "image/bmp",
 ] as const;
+
+/** Public (auth-scoped) URL a stored asset is served from. */
+export function mediaUrl(assetId: string): string {
+  return `/api/media/${assetId}`;
+}
 
 export interface MediaItemDTO {
   /** The attachment id (what you delete). */
@@ -29,9 +36,9 @@ export interface MediaItemDTO {
   category: string | null;
 }
 
-/** True when image hosting (UploadThing) is configured for this deployment. */
+/** Local filesystem storage is always available, so uploads are always enabled. */
 export function isUploadsEnabled(): boolean {
-  return Boolean(process.env.UPLOADTHING_TOKEN);
+  return true;
 }
 
 /**
@@ -96,9 +103,10 @@ export async function assertOwnsMediaTarget(
 }
 
 /**
- * Links an already-uploaded file (in UploadThing) to an owner record. Called from
- * the FileRouter's server-trusted onUploadComplete; we re-verify ownership here as
- * defense in depth and skip (rather than orphan) if the owner vanished mid-upload.
+ * Links a just-saved file to an owner record and returns the resulting gallery
+ * item. Ownership is re-verified here (defense in depth) even though the upload
+ * route already checked it. Throws if the owner isn't the user's — the caller
+ * should have deleted the file it wrote.
  */
 export async function attachMedia(args: {
   userId: string;
@@ -106,13 +114,12 @@ export async function attachMedia(args: {
   ownerId: string;
   category: string | null;
   storageKey: string;
-  url: string;
   fileName: string;
   mimeType: string;
   fileSize: number;
-}): Promise<void> {
+}): Promise<MediaItemDTO> {
   const owns = await assertOwnsMediaTarget(args.userId, args.ownerType, args.ownerId);
-  if (!owns) return;
+  if (!owns) throw new Error("Not found or access denied.");
 
   const count = await prisma.mediaAttachment.count({
     where: { ownerType: args.ownerType, ownerId: args.ownerId, category: args.category },
@@ -125,11 +132,13 @@ export async function attachMedia(args: {
       fileName: args.fileName,
       mimeType: args.mimeType,
       fileSize: args.fileSize,
-      url: args.url,
+      url: mediaUrl("pending"), // replaced below once the id exists
     },
   });
+  const url = mediaUrl(asset.id);
+  await prisma.mediaAsset.update({ where: { id: asset.id }, data: { url } });
 
-  await prisma.mediaAttachment.create({
+  const attachment = await prisma.mediaAttachment.create({
     data: {
       mediaId: asset.id,
       ownerType: args.ownerType,
@@ -138,6 +147,15 @@ export async function attachMedia(args: {
       sortOrder: count,
     },
   });
+
+  return {
+    id: attachment.id,
+    url,
+    fileName: args.fileName,
+    mimeType: args.mimeType,
+    fileSize: args.fileSize,
+    category: args.category,
+  };
 }
 
 /**
@@ -167,7 +185,7 @@ export async function listMedia(
 
 /**
  * Batched preview lookup for the trade gallery: one representative image URL per
- * trade (the ANALYSIS screenshot if present, else the first), in a single query —
+ * trade (a Before-Trade screenshot if present, else the first), in a single query —
  * so the gallery never fires N per-trade requests. Scoped to the user via the asset.
  */
 export async function listTradePreviewImages(
@@ -188,8 +206,8 @@ export async function listTradePreviewImages(
   }
   const previews = new Map<string, string>();
   for (const [tradeId, list] of byTrade) {
-    const analysis = list.find((i) => i.category === "ANALYSIS");
-    previews.set(tradeId, (analysis ?? list[0]).url);
+    const before = list.find((i) => i.category === "BEFORE");
+    previews.set(tradeId, (before ?? list[0]).url);
   }
   return previews;
 }
@@ -210,7 +228,7 @@ export async function deleteMediaAttachment(
   });
   if (!attachment) throw new Error("Media not found.");
 
-  await new UTApi().deleteFiles([attachment.media.storageKey]);
+  await deleteMediaFile(attachment.media.storageKey);
   // Deleting the asset cascades the attachment row (1 asset : 1 attachment here).
   await prisma.mediaAsset.delete({ where: { id: attachment.media.id } });
 

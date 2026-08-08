@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ImageOff, Loader2, Trash2, UploadCloud, ZoomIn } from "lucide-react";
 
@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { useUploadThing } from "@/lib/uploadthing";
 import { deleteMediaAction, loadMediaAction } from "@/actions/media.actions";
 import type { MediaItemDTO } from "@/server/services/media.service";
 import type { MediaOwnerType } from "@prisma/client";
@@ -21,9 +20,9 @@ const DEFAULT_MAX = 12;
  * the whole lifecycle: click-to-upload AND drag-and-drop, live progress, compact
  * glass thumbnails, full-size zoom, and delete. It self-fetches its list on mount
  * (so wiring is a one-liner), or accepts `initial`/`uploadsEnabled` to skip the
- * fetch when the server already has the data. Uploads stream straight to
- * UploadThing via the shared FileRouter, which enforces auth, ownership, and
- * server-side MIME/size validation before any file reaches storage.
+ * fetch when the server already has the data. Uploads POST straight to the
+ * app's own /api/media/upload route (local filesystem backend), which enforces
+ * auth, ownership, and server-side MIME/size validation before any file is saved.
  */
 export function ImageAttachments({
   ownerType,
@@ -55,13 +54,8 @@ export function ImageAttachments({
   const [zoomed, setZoomed] = useState<MediaItemDTO | null>(null);
   const [pendingDelete, setPendingDelete] = useState<MediaItemDTO | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const refresh = useCallback(async () => {
-    const res = await loadMediaAction(ownerType, ownerId);
-    setUploadsEnabled(res.uploadsEnabled);
-    setItems(category ? res.items.filter((i) => i.category === category) : res.items);
-  }, [ownerType, ownerId, category]);
 
   // Self-fetch on mount unless the caller supplied `initial`.
   useEffect(() => {
@@ -79,22 +73,45 @@ export function ImageAttachments({
     };
   }, [ownerType, ownerId, category, initial]);
 
-  const { startUpload, isUploading } = useUploadThing("media", {
-    onUploadProgress: (p) => setProgress(p),
-    onClientUploadComplete: () => {
-      setProgress(0);
-      void refresh();
-      toast.success("Image uploaded.");
-    },
-    onUploadError: (e) => {
-      setProgress(0);
-      toast.error(e.message || "Upload failed.");
-    },
-  });
-
   const remaining = max - items.length;
   const canManage = uploadsEnabled && !disabled;
   const canUpload = canManage && remaining > 0 && !isUploading;
+
+  /** POST the files to our own upload route, reporting progress via XHR. */
+  function uploadFiles(files: File[]): Promise<MediaItemDTO[]> {
+    return new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.set("ownerType", ownerType);
+      form.set("ownerId", ownerId);
+      if (category) form.set("category", category);
+      for (const file of files) form.append("files", file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/media/upload");
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve((JSON.parse(xhr.responseText).items ?? []) as MediaItemDTO[]);
+          } catch {
+            reject(new Error("Unexpected server response."));
+          }
+        } else {
+          let message = "Upload failed.";
+          try {
+            message = JSON.parse(xhr.responseText).error ?? message;
+          } catch {
+            /* keep default */
+          }
+          reject(new Error(message));
+        }
+      };
+      xhr.onerror = () => reject(new Error("Upload failed."));
+      xhr.send(form);
+    });
+  }
 
   function beginUpload(files: File[]) {
     const images = files.filter((file) => file.type.startsWith("image/"));
@@ -110,7 +127,22 @@ export function ImageAttachments({
       toast.warning(`Only ${remaining} more image${remaining === 1 ? "" : "s"} allowed here.`);
     }
     if (picked.length === 0) return;
-    void startUpload(picked, { ownerType, ownerId, category });
+
+    setIsUploading(true);
+    setProgress(0);
+    uploadFiles(picked)
+      .then((created) => {
+        const relevant = category ? created.filter((i) => i.category === category) : created;
+        setItems((prev) => [...prev, ...relevant]);
+        toast.success(`Image${picked.length === 1 ? "" : "s"} uploaded.`);
+      })
+      .catch((e: unknown) => {
+        toast.error(e instanceof Error ? e.message : "Upload failed.");
+      })
+      .finally(() => {
+        setIsUploading(false);
+        setProgress(0);
+      });
   }
 
   function onFilesPicked(fileList: FileList | null) {
