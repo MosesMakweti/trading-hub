@@ -24,10 +24,6 @@ model User {
   accounts Account[]
   sessions Session[]
 
-  assets          Asset[]
-  entryModels     EntryModel[]
-  tradingSessions TradingSession[]
-  checklistItems  ChecklistItemDefinition[]
   tradingAccounts TradingAccount[]
   dailyNotes      DailyNote[]
   tradingDays     TradingDay[]
@@ -109,12 +105,11 @@ model TradingDay {
   routineReadyAt  DateTime?
 
   // Today's Trading Plan (P4). Day intentions: higher-timeframe bias
-  // (BULLISH/BEARISH/NEUTRAL) + 1–5 conviction, today's watchlist focus (Asset
-  // ids from the user's watchlist), key levels / areas of interest (Tiptap JSON),
-  // and the day's intended risk budget (% — defaults from the plan's daily limit).
+  // (BULLISH/BEARISH/NEUTRAL) + 1–5 conviction, key levels / areas of interest
+  // (Tiptap JSON), and the day's intended risk budget (% — defaults from the
+  // plan's daily limit). (Watchlist focus was dropped with the global Asset list.)
   bias              String?
   conviction        Int?
-  watchlistFocus    Json?
   keyLevels         Json?
   riskBudgetPercent Decimal? @db.Decimal(6, 2)
 
@@ -187,12 +182,6 @@ model TradingAccount {
   @@index([userId, kind, deletedAt])
 }
 
-enum ChecklistType {
-  CONFLUENCE
-  EXECUTION_CONFIRMATION
-  PRE_SESSION_ROUTINE
-}
-
 // Pre-Session Routine item type. Extensible: adding a future type (RATING,
 // DROPDOWN, NUMBER, TIMER…) is a new enum value + a renderer + optional `config`
 // on RoutineItem — no schema redesign, and per-day responses stay in the snapshot.
@@ -237,76 +226,7 @@ model RoutineItem {
   @@index([userId, sectionId, sortOrder])
 }
 
-// Watchlist entry. Populates the asset dropdown in the journal (later phase).
-model Asset {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  symbol    String
-  label     String?
-  sortOrder Int        @default(0)
-  createdAt DateTime   @default(now())
-  deletedAt DateTime?
-
-  trades Trade[]
-
-  @@unique([userId, symbol])
-  @@index([userId, sortOrder])
-}
-
 // Custom entry model (e.g. "Liquidity Sweep", "SMT"). Selectable per trade later.
-model EntryModel {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  description String?
-  sortOrder   Int       @default(0)
-  createdAt   DateTime  @default(now())
-  deletedAt   DateTime?
-
-  tradeSelections TradeEntryModel[]
-
-  @@index([userId, sortOrder])
-}
-
-// Named trading session (e.g. "London Open"). Modeled as a list to support
-// multiple sessions, even though a trader may only define one today.
-model TradingSession {
-  id                     String    @id @default(cuid())
-  userId                 String
-  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name                   String
-  startMinutes           Int
-  endMinutes             Int
-  maxDailyTradingMinutes Int?
-  maxTradesPerDay        Int?
-  sortOrder              Int       @default(0)
-  createdAt              DateTime  @default(now())
-  deletedAt              DateTime?
-
-  trades Trade[]
-
-  @@index([userId, sortOrder])
-}
-
-// Powers both the Confluence and Execution-Confirmation checklists via a
-// type discriminator, avoiding duplicated CRUD/reorder models.
-model ChecklistItemDefinition {
-  id        String        @id @default(cuid())
-  userId    String
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      ChecklistType
-  label     String
-  sortOrder Int           @default(0)
-  createdAt DateTime      @default(now())
-  deletedAt DateTime?
-
-  selections TradeChecklistSelection[]
-
-  @@index([userId, type, sortOrder])
-}
-
 enum Direction {
   LONG
   SHORT
@@ -333,14 +253,10 @@ model Trade {
   userId                   String
   user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   tradeDate                DateTime  @db.Date
-  assetId                  String
-  asset                    Asset     @relation(fields: [assetId], references: [id])
   executionMinutes         Int
   direction                Direction
   higherTimeframeBias      Bias
   biasConfidencePercent    Int
-  sessionId                String?
-  session                  TradingSession? @relation(fields: [sessionId], references: [id])
   expectedRR               Decimal   @db.Decimal(8, 2)
   actualRR                 Decimal?  @db.Decimal(8, 2)
   hitTP1                   Boolean   @default(false)
@@ -383,7 +299,6 @@ model Trade {
   strategy                 Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
   strategyNameSnapshot     String?
   strategyVersionSnapshot  Int?
-  entryModelNameSnapshot   String?
   // Phase 5 (polish extras). tradeNumber is a stable, per-user monotonic counter
   // (unlike the derived ordinal it never shifts when a trade is deleted). status
   // is the materialized lifecycle stage (derived from closedAt/reviewedAt, kept
@@ -395,20 +310,33 @@ model Trade {
   adherenceAnswers         Json?
   adherencePercent         Float?
 
-  // Strategy = single source of truth (SOT refactor). assetSymbol denormalizes the
-  // market (backfilled from asset.symbol; becomes the source once the Asset FK drops
-  // in P9). strategyExecutionSnapshot freezes the strategy's EXPECTED sessions/
-  // confluences/execution that day; selected* record what was actually present.
-  // *Percent are denormalized adherence scores (selected/expected) for analytics —
-  // NOT market predictions. All nullable/additive; old FKs stay until P9.
-  assetSymbol               String?
+  // Strategy = single source of truth (SOT refactor). assetSymbol is the market
+  // (the global Asset FK was dropped in P9; backfilled from asset.symbol first).
+  // strategyExecutionSnapshot freezes the strategy's EXPECTED sessions/confluences/
+  // execution that day; selected* record what was actually present. *Percent are
+  // denormalized adherence scores (selected/expected) for analytics — NOT predictions.
+  assetSymbol               String
   strategyExecutionSnapshot Json?
   selectedSession           String?
   selectedConfluences       Json?
   selectedExecution         Json?
+  // The one entry model this trade was taken on, by name, from the selected
+  // strategy's own Entry Models (Strategy = SOT). Frozen at save time so the
+  // record survives the strategy being edited/deleted. Null if none chosen.
+  selectedEntryModel        String?
   confluencePercent         Float?
   executionPercent          Float?
   tradeQualityPercent       Float?
+
+  // Weighted confluence scoring (frozen at save time; NOT a market prediction).
+  // setupScore = completed confluence weight / total strategy confluence weight × 100;
+  // setupRating is the A+/A/B/C/Low band; setupValid is false when a mandatory
+  // confluence was missing ("Invalid Setup"); missingConfluences is the string[] of
+  // expected-but-absent confluence names.
+  setupScore                Float?
+  setupRating               String?
+  setupValid                Boolean?
+  missingConfluences        Json?
 
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
@@ -416,8 +344,6 @@ model Trade {
 
   allocations         TradeAccountAllocation[]
   images              TradeImage[]
-  checklistSelections TradeChecklistSelection[]
-  entryModels         TradeEntryModel[]
   psychology          PsychologyQuestionnaireResponse?
 
   @@unique([userId, tradeNumber])
@@ -490,27 +416,6 @@ model TradeImage {
   uploadthingKey String
   sortOrder      Int           @default(0)
   createdAt      DateTime      @default(now())
-}
-
-// Join for both the Confluence and Execution-Confirmation checklists
-// (distinguished by the linked ChecklistItemDefinition's own type).
-model TradeChecklistSelection {
-  id              String                  @id @default(cuid())
-  tradeId         String
-  trade           Trade                   @relation(fields: [tradeId], references: [id], onDelete: Cascade)
-  checklistItemId String
-  checklistItem   ChecklistItemDefinition @relation(fields: [checklistItemId], references: [id])
-
-  @@unique([tradeId, checklistItemId])
-}
-
-model TradeEntryModel {
-  tradeId      String
-  trade        Trade      @relation(fields: [tradeId], references: [id], onDelete: Cascade)
-  entryModelId String
-  entryModel   EntryModel @relation(fields: [entryModelId], references: [id])
-
-  @@id([tradeId, entryModelId])
 }
 
 model Account {
@@ -780,6 +685,15 @@ model StrategyTradeManagement {
   maxHoldingTime String? // free text, e.g. "2 hours", "1 session"
   maxRiskPercent Decimal? @db.Decimal(6, 2)
 
+  // Discrepancy-Gap benchmarks (D2): the strategy's PROVEN edge, used by the
+  // Execution Engine as the "expected" baseline. expectedExpectancy (R per trade at
+  // full execution) is the primary input to Expected R; the others describe the edge
+  // and minExecutionScore is the quality bar below which a setup isn't A-grade.
+  expectedWinRate    Float? // 0–100
+  expectedAvgRr      Float? // avg winner R
+  expectedExpectancy Float? // R per trade (benchmark for Expected Result)
+  minExecutionScore  Int? // 0–100
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -805,7 +719,13 @@ model StrategyChecklistItem {
   icon        String? // optional lucide icon name
   category    String?
   description String?
-  weight      Int? // optional probability weight (future scoring)
+  weight      Int? // probability weight (0-100) used by the weighted setup-scoring engine
+  // Confluence scoring (CONFLUENCE kind): mandatory items gate setup validity — a
+  // setup missing any mandatory confluence is "Invalid Setup". Optional items only
+  // add to the weighted probability score. validationCriteria is the objective test
+  // for "is this confluence actually present?".
+  mandatory          Boolean @default(false)
+  validationCriteria String?
   enabled     Boolean  @default(true)
 
   sortOrder Int       @default(0)

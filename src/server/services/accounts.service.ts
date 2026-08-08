@@ -81,7 +81,7 @@ export async function getAccountTrackRecord(accountId: string): Promise<{
   const account = await prisma.tradingAccount.findUniqueOrThrow({ where: { id: accountId } });
   const allocations = await prisma.tradeAccountAllocation.findMany({
     where: { tradingAccountId: accountId, trade: { deletedAt: null } },
-    include: { trade: { include: { asset: true } } },
+    include: { trade: true },
     orderBy: [{ trade: { tradeDate: "asc" } }, { trade: { executionMinutes: "asc" } }],
   });
 
@@ -92,7 +92,7 @@ export async function getAccountTrackRecord(accountId: string): Promise<{
     return {
       tradeId: a.tradeId,
       dateKey: utcDateToKey(a.trade.tradeDate),
-      assetSymbol: a.trade.asset.symbol,
+      assetSymbol: a.trade.assetSymbol,
       direction: a.trade.direction,
       riskInputType: a.riskInputType,
       riskValue: a.riskValue.toNumber(),

@@ -3,46 +3,66 @@ import { Prisma, type TradingDay } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { getOrCreateTradingDay, getTradingDay } from "@/server/services/trading-day.service";
 import { getOrCreateDefaultRoutine } from "@/server/services/routine.service";
-import type { RoutineResponse, RoutineSnapshot } from "@/domain/today/routine-snapshot";
+import type {
+  RoutineResponse,
+  RoutineSnapshot,
+  RoutineSnapshotSection,
+} from "@/domain/today/routine-snapshot";
 
 export interface DayRoutine {
   snapshot: RoutineSnapshot;
   readyAt: string | null;
 }
 
+/** The live template, projected into the snapshot's structure shape. */
+function sectionsFromTemplate(
+  template: Awaited<ReturnType<typeof getOrCreateDefaultRoutine>>,
+): RoutineSnapshotSection[] {
+  return template.map((s) => ({
+    id: s.id,
+    title: s.title,
+    items: s.items.map((i) => ({ id: i.id, label: i.label, type: i.type })),
+  }));
+}
+
 /**
- * The day's routine. Freezes a snapshot of the current template the first time the
- * day is opened (seeding the default template if the user has none), then always
- * returns that frozen copy — template edits afterwards never change this day.
+ * The day's routine. The **template** (RoutineSection/RoutineItem, edited in
+ * Settings) is the single source of truth for the routine's structure:
  *
- * Takes an already-created `day` (rather than upserting it) so the caller can
- * create the TradingDay once — upserting it here in parallel with the caller's own
- * get-or-create raced on the (userId, date) unique constraint.
+ * - **Editable (ACTIVE) day** — the structure is always rebuilt from the live
+ *   template, so edits made in Settings (add/remove/rename/reorder/retype items)
+ *   show up on Today immediately, while the trader's responses (keyed by item id)
+ *   are carried over. The per-day JSON is a derived cache, not an independent copy.
+ * - **ARCHIVED day** — immutable journal history: the frozen snapshot is returned
+ *   verbatim, so a past day always shows the exact routine run that day.
+ *
+ * Seeds the default template on first use. Takes an already-created `day` (rather
+ * than upserting) so the caller creates the TradingDay once — upserting here in
+ * parallel raced on the (userId, date) unique constraint.
  */
 export async function getOrCreateDayRoutine(userId: string, day: TradingDay): Promise<DayRoutine> {
-  if (day.routineSnapshot) {
-    return {
-      snapshot: day.routineSnapshot as unknown as RoutineSnapshot,
-      readyAt: day.routineReadyAt?.toISOString() ?? null,
-    };
+  const stored = (day.routineSnapshot as unknown as RoutineSnapshot | null) ?? null;
+  const readyAt = day.routineReadyAt?.toISOString() ?? null;
+
+  // Archived days are immutable history — never re-read the mutable template.
+  if (day.status === "ARCHIVED" && stored) {
+    return { snapshot: stored, readyAt };
   }
 
   const template = await getOrCreateDefaultRoutine(userId);
-  const snapshot: RoutineSnapshot = {
-    sections: template.map((s) => ({
-      id: s.id,
-      title: s.title,
-      items: s.items.map((i) => ({ id: i.id, label: i.label, type: i.type })),
-    })),
-    responses: {},
-  };
+  const sections = sectionsFromTemplate(template);
+  const snapshot: RoutineSnapshot = { sections, responses: stored?.responses ?? {} };
 
-  await prisma.tradingDay.update({
-    where: { id: day.id },
-    data: { routineSnapshot: snapshot as unknown as Prisma.InputJsonValue },
-  });
+  // Persist only when the structure actually changed, so a normal page load isn't
+  // a write (and doesn't churn the cache) — but a Settings edit is picked up here.
+  if (!stored || JSON.stringify(stored.sections) !== JSON.stringify(sections)) {
+    await prisma.tradingDay.update({
+      where: { id: day.id },
+      data: { routineSnapshot: snapshot as unknown as Prisma.InputJsonValue },
+    });
+  }
 
-  return { snapshot, readyAt: day.routineReadyAt?.toISOString() ?? null };
+  return { snapshot, readyAt };
 }
 
 /** Merge a single item's response into the day's snapshot (structure untouched). */

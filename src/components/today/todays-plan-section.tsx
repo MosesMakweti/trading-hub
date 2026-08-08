@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -27,9 +26,7 @@ export function TodaysPlanSection({ dateKey, plan }: { dateKey: string; plan: To
 
   const [bias, setBias] = useState<DayBias | null>(plan.bias);
   const [conviction, setConviction] = useState<number | null>(plan.conviction);
-  const [focus, setFocus] = useState<Set<string>>(new Set(plan.watchlistFocus));
   const [biasSave, setBiasSave] = useState<SaveState>("idle");
-  const [focusSave, setFocusSave] = useState<SaveState>("idle");
   const [risk, setRisk] = useState(plan.riskBudgetPercent == null ? "" : String(plan.riskBudgetPercent));
   const [isComplete, setIsComplete] = useState(plan.planComplete);
   const [completing, startComplete] = useTransition();
@@ -74,20 +71,6 @@ export function TodaysPlanSection({ dateKey, plan }: { dateKey: string; plan: To
     }
   }
 
-  async function toggleFocus(id: string) {
-    const next = new Set(focus);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setFocus(next);
-    setFocusSave("saving");
-    const r = await updateTodaysPlan(dateKey, { watchlistFocus: [...next] });
-    if (r.success) setFocusSave("saved");
-    else {
-      setFocusSave("error");
-      toast.error(r.error);
-    }
-  }
-
   function toggleComplete() {
     const next = !isComplete;
     startComplete(async () => {
@@ -105,8 +88,7 @@ export function TodaysPlanSection({ dateKey, plan }: { dateKey: string; plan: To
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Set your intentions for the day — bias, what you&apos;re watching, key levels, and how much
-        you&apos;re willing to risk.
+        Set your intentions for the day — bias, key levels, and how much you&apos;re willing to risk.
       </p>
 
       {/* Bias & conviction */}
@@ -143,48 +125,6 @@ export function TodaysPlanSection({ dateKey, plan }: { dateKey: string; plan: To
             ))}
           </div>
         </div>
-      </SectionCard>
-
-      {/* Watchlist focus */}
-      <SectionCard
-        title="Watchlist focus"
-        action={
-          plan.assets.length > 0 ? (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
-              <SaveDot state={focusSave} />
-              {focus.size} selected
-            </span>
-          ) : null
-        }
-      >
-        {plan.assets.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No assets on your watchlist yet.{" "}
-            <Link href="/settings/plan" className="text-primary hover:underline">
-              Add them in Settings → Trade Setup
-            </Link>
-            .
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {plan.assets.map((a) => {
-              const on = focus.has(a.id);
-              return (
-                <Button
-                  key={a.id}
-                  type="button"
-                  size="sm"
-                  variant={on ? "default" : "outline"}
-                  aria-pressed={on}
-                  onClick={() => toggleFocus(a.id)}
-                  title={a.label ?? undefined}
-                >
-                  {a.symbol}
-                </Button>
-              );
-            })}
-          </div>
-        )}
       </SectionCard>
 
       {/* Key levels */}

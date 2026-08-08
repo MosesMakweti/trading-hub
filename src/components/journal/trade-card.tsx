@@ -9,6 +9,9 @@ import { SquareArrowOutUpRight, Target, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { minutesToTimeString } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
+import { Tag, colorForName } from "@/components/ui/tag";
+import { TradeQualityBadge } from "@/components/journal/adherence-score";
+import { RatingBadge } from "@/components/journal/setup-score-card";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { archiveTrade } from "@/actions/trades.actions";
@@ -17,6 +20,10 @@ import type { TradeListItemDTO } from "@/types/trades";
 
 function percent(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
+}
+
+function fmtR(n: number | null) {
+  return n == null ? "—" : `${n.toFixed(2)}R`;
 }
 
 export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeListItemDTO }) {
@@ -120,31 +127,94 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
         ))}
       </div>
 
-      {(trade.entryModelNames.length > 0 ||
+      {(trade.entryModelName != null ||
         trade.confluenceLabels.length > 0 ||
         trade.executionLabels.length > 0 ||
-        tpHits.length > 0) && (
-        <div className="flex flex-wrap gap-1.5">
+        tpHits.length > 0 ||
+        trade.tradeQualityPercent != null ||
+        trade.setupValid != null ||
+        trade.setupRating != null) && (
+        <div className="flex flex-wrap items-center gap-1.5">
           {tpHits.map((label) => (
             <Badge key={label} variant="success">
               {label}
             </Badge>
           ))}
-          {trade.entryModelNames.map((label) => (
-            <Badge key={label} variant="outline">
-              {label}
-            </Badge>
+          {trade.entryModelName && (
+            <Tag key={`m-${trade.entryModelName}`} color={colorForName(trade.entryModelName)}>
+              {trade.entryModelName}
+            </Tag>
+          )}
+          {trade.confluenceLabels.map((tag) => (
+            <Tag key={`c-${tag.name}`} color={tag.color}>
+              {tag.name}
+            </Tag>
           ))}
-          {trade.confluenceLabels.map((label) => (
-            <Badge key={label} variant="outline">
-              {label}
-            </Badge>
+          {trade.executionLabels.map((tag) => (
+            <Tag key={`e-${tag.name}`} color={tag.color}>
+              {tag.name}
+            </Tag>
           ))}
-          {trade.executionLabels.map((label) => (
-            <Badge key={label} variant="outline">
-              {label}
-            </Badge>
-          ))}
+          <TradeQualityBadge percent={trade.tradeQualityPercent} />
+          {trade.setupValid === false ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-xs font-medium text-rose-600 dark:text-rose-400">
+              Invalid setup
+            </span>
+          ) : (
+            trade.setupRating && (
+              <span className="inline-flex items-center gap-1">
+                <RatingBadge rating={trade.setupRating} />
+                {trade.setupScore != null && (
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {trade.setupScore}%
+                  </span>
+                )}
+              </span>
+            )
+          )}
+        </div>
+      )}
+
+      {trade.discrepancy && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-background/40 px-3 py-2 text-xs">
+          <span className="font-medium text-muted-foreground">Discrepancy</span>
+          <span className="tabular-nums">
+            Exp{" "}
+            <span className="font-medium text-foreground">{fmtR(trade.discrepancy.expectedR)}</span>{" "}
+            → Act{" "}
+            <span className="font-medium text-foreground">{fmtR(trade.discrepancy.actualR)}</span>
+          </span>
+          {trade.discrepancy.gapR != null && (
+            <span
+              className={cn(
+                "font-medium tabular-nums",
+                trade.discrepancy.gapR > 0
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-success",
+              )}
+            >
+              Gap {trade.discrepancy.gapR >= 0 ? "+" : ""}
+              {fmtR(trade.discrepancy.gapR)}
+            </span>
+          )}
+          {trade.discrepancy.executionScore != null && (
+            <span className="text-muted-foreground tabular-nums">
+              Exec {trade.discrepancy.executionScore}%
+            </span>
+          )}
+          {trade.discrepancy.recoverableR != null && trade.discrepancy.recoverableR > 0 && (
+            <span className="text-muted-foreground tabular-nums">
+              Recoverable {fmtR(trade.discrepancy.recoverableR)}
+            </span>
+          )}
+          {trade.discrepancy.primaryDeviation && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300">
+              {trade.discrepancy.primaryDeviation.label}
+              <span className="tabular-nums opacity-70">
+                −{fmtR(trade.discrepancy.primaryDeviation.costR)}
+              </span>
+            </span>
+          )}
         </div>
       )}
 

@@ -8,6 +8,7 @@ export interface StrategyChecklistRef {
   color: TagColor;
   category: string | null;
   weight: number | null;
+  mandatory: boolean;
 }
 export interface StrategyTagRef {
   name: string;
@@ -98,6 +99,11 @@ export interface TradeManagementDTO {
   scalingOutRules: unknown;
   maxHoldingTime: string | null;
   maxRiskPercent: number | null;
+  // Discrepancy-Gap benchmarks (D2) — the strategy's proven edge.
+  expectedWinRate: number | null;
+  expectedAvgRr: number | null;
+  expectedExpectancy: number | null;
+  minExecutionScore: number | null;
   partialTakeProfits: PartialTakeProfitDTO[];
   customRules: CustomRuleDTO[];
 }
@@ -129,6 +135,25 @@ export interface StrategyReferenceDTO {
 // A published, immutable snapshot of the full strategy tree at a point in time.
 // Stored as JSON on StrategyVersion.snapshot; reuses the section DTOs so it is a
 // faithful record (viewable/restorable later), not just names.
+export interface StrategyVersionSessionSnapshot {
+  name: string;
+  color: TagColor;
+  startMinutes: number | null;
+  endMinutes: number | null;
+  enabled: boolean;
+}
+
+export interface StrategyVersionConfluenceSnapshot {
+  name: string;
+  color: TagColor;
+  category: string | null;
+  description: string | null;
+  weight: number | null;
+  mandatory: boolean;
+  validationCriteria: string | null;
+  enabled: boolean;
+}
+
 export interface StrategyVersionSnapshot {
   name: string;
   description: string | null;
@@ -139,6 +164,11 @@ export interface StrategyVersionSnapshot {
   timeframes: TimeframeDTO[];
   entryModels: EntryModelDTO[];
   tradeManagement: TradeManagementDTO | null;
+  // SOT (added later — optional so pre-SOT snapshots still read): the strategy's
+  // sessions + confluences/execution frozen at publish time.
+  sessions?: StrategyVersionSessionSnapshot[];
+  confluences?: StrategyVersionConfluenceSnapshot[];
+  execution?: StrategyVersionConfluenceSnapshot[];
 }
 
 // Compact, at-a-glance description of a snapshot (what the history list shows).
@@ -151,6 +181,10 @@ export interface StrategyVersionSummary {
   entryModelNames: string[];
   customRuleCount: number;
   partialTpCount: number;
+  sessionCount: number;
+  confluenceCount: number;
+  mandatoryConfluenceCount: number;
+  executionCount: number;
 }
 
 export interface StrategyVersionDTO {

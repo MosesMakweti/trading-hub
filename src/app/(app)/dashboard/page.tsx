@@ -24,7 +24,7 @@ export default async function DashboardPage() {
     return {
       id: t.id,
       dateKey: t.tradeDate.toISOString().slice(0, 10),
-      assetSymbol: t.asset.symbol,
+      assetSymbol: t.assetSymbol,
       direction: t.direction,
       performancePnl: performanceAllocation ? performanceAllocation.closingPnlNet.toNumber() : 0,
       psychologyGrade: t.psychology?.grade ?? null,
@@ -113,6 +113,7 @@ export default async function DashboardPage() {
         bestAccount={data.bestAccount}
         bestAsset={data.bestAsset}
         equityCurve={data.equityCurve}
+        discrepancy={data.discrepancy}
       />
 
       <section id="notes" className="glass space-y-3 rounded-2xl p-4 scroll-mt-20">
@@ -149,7 +150,7 @@ export default async function DashboardPage() {
                   className="glass block rounded-xl p-3 text-sm transition-all hover:-translate-y-0.5 hover:shadow-elevated"
                 >
                   <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">{t.asset.symbol}</span>
+                    <span className="font-medium text-foreground">{t.assetSymbol}</span>
                     <span className="tabular-nums">{t.tradeDate.toISOString().slice(0, 10)}</span>
                   </div>
                   <p className="line-clamp-2">{t.psychPostTradeReflection || t.psychLessonsLearned}</p>

@@ -22,6 +22,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { TAG_STYLES, colorForName } from "@/components/ui/tag";
+import { cn } from "@/lib/utils";
 import { StrategyStatusBadge } from "@/components/strategy-lab/strategy-status-badge";
 import { RenameStrategyDialog } from "@/components/strategy-lab/rename-strategy-dialog";
 import {
@@ -144,8 +146,12 @@ export function StrategyCard({ strategy }: { strategy: StrategyDTO }) {
           {strategy.applicableAssets.slice(0, 6).map((asset) => (
             <span
               key={asset}
-              className="rounded-md border border-border bg-background/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[11px]",
+                TAG_STYLES[colorForName(asset)].chip,
+              )}
             >
+              <span className={cn("size-1.5 rounded-full", TAG_STYLES[colorForName(asset)].dot)} />
               {asset}
             </span>
           ))}

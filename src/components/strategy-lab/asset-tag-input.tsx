@@ -4,6 +4,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { TAG_STYLES, colorForName } from "@/components/ui/tag";
 
 /**
  * Chip-style editor for a strategy's applicable market symbols.
@@ -50,22 +51,29 @@ export function AssetTagInput({
         disabled && "pointer-events-none opacity-50",
       )}
     >
-      {value.map((symbol) => (
-        <span
-          key={symbol}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/60 px-1.5 py-0.5 font-mono text-xs"
-        >
-          {symbol}
-          <button
-            type="button"
-            aria-label={`Remove ${symbol}`}
-            onClick={() => remove(symbol)}
-            className="text-muted-foreground transition-colors hover:text-foreground"
+      {value.map((symbol) => {
+        const s = TAG_STYLES[colorForName(symbol)];
+        return (
+          <span
+            key={symbol}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-xs",
+              s.chip,
+            )}
           >
-            <X className="size-3" />
-          </button>
-        </span>
-      ))}
+            <span className={cn("size-1.5 shrink-0 rounded-full", s.dot)} />
+            {symbol}
+            <button
+              type="button"
+              aria-label={`Remove ${symbol}`}
+              onClick={() => remove(symbol)}
+              className="opacity-70 transition-opacity hover:opacity-100"
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        );
+      })}
       <input
         value={draft}
         onChange={(e) => setDraft(e.target.value)}

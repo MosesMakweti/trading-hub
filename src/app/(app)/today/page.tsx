@@ -7,7 +7,6 @@ import {
 import { listTradesForDay } from "@/server/services/trades.service";
 import { toTradeWorkspaceDTO } from "@/server/services/trade-workspace.mapper";
 import { getOrCreateDayRoutine } from "@/server/services/today-routine.service";
-import { listAssets } from "@/server/services/assets.service";
 import { getDailyAnalytics } from "@/server/services/analytics.service";
 import { localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
@@ -26,20 +25,17 @@ export default async function TodayPage() {
   // Create the day once, THEN load everything else — passing the day into the
   // routine service avoids a second concurrent upsert racing the (userId, date) unique.
   const day = await getOrCreateTradingDay(user.id, todayKey);
-  const [trades, routine, assets, dailyPerf] = await Promise.all([
+  const [trades, routine, dailyPerf] = await Promise.all([
     listTradesForDay(user.id, todayKey),
     getOrCreateDayRoutine(user.id, day),
-    listAssets(user.id),
     getDailyAnalytics(user.id, todayKey),
   ]);
 
   const dailyAnalytics: DailyAnalyticsDTO = { ...dailyPerf, analyzed: day.analyzedAt != null };
 
   const todaysPlan: TodaysPlanDTO = {
-    assets: assets.map((a) => ({ id: a.id, symbol: a.symbol, label: a.label })),
     bias: (day.bias as TodaysPlanDTO["bias"]) ?? null,
     conviction: day.conviction,
-    watchlistFocus: (day.watchlistFocus as string[] | null) ?? [],
     keyLevels: day.keyLevels,
     riskBudgetPercent: day.riskBudgetPercent ? day.riskBudgetPercent.toNumber() : null,
     // Risk limits used to come from the Trading Plan; that's gone (Strategy Lab

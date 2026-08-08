@@ -18,23 +18,6 @@ export interface ImportSummary {
   rows: ImportRowResult[];
 }
 
-/** Resolves/creates a simple by-name reference row (Asset/EntryModel/ChecklistItem), memoized within one import run. */
-function makeResolver<T extends { id: string }>(
-  find: (name: string) => Promise<T | null>,
-  create: (name: string) => Promise<T>,
-) {
-  const cache = new Map<string, Promise<T>>();
-  return (name: string): Promise<T> => {
-    const key = name.trim().toUpperCase();
-    let promise = cache.get(key);
-    if (!promise) {
-      promise = find(name).then((existing) => existing ?? create(name));
-      cache.set(key, promise);
-    }
-    return promise;
-  };
-}
-
 /**
  * Reuses `createTrade` (the exact same path the trade form goes through) for
  * every row, rather than re-implementing risk-scaling/psychology-scoring
@@ -47,64 +30,28 @@ export async function importTrades(
 ): Promise<ImportSummary> {
   const existingTrades = await prisma.trade.findMany({
     where: { userId },
-    select: { tradeDate: true, executionMinutes: true, asset: { select: { symbol: true } } },
+    select: { tradeDate: true, executionMinutes: true, assetSymbol: true },
   });
   const existingKeys = new Set(
     existingTrades.map((t) =>
       tradeNaturalKey({
         dateKey: utcDateToKey(t.tradeDate),
-        assetSymbol: t.asset.symbol,
+        assetSymbol: t.assetSymbol,
         executionMinutes: t.executionMinutes,
       }),
     ),
   );
 
-  const [accounts, sessions] = await Promise.all([
-    prisma.tradingAccount.findMany({ where: { userId } }),
-    prisma.tradingSession.findMany({ where: { userId } }),
-  ]);
+  const accounts = await prisma.tradingAccount.findMany({ where: { userId } });
   const accountByName = new Map(accounts.map((a) => [a.name.trim().toUpperCase(), a]));
-  const sessionByName = new Map(sessions.map((s) => [s.name.trim().toUpperCase(), s]));
 
-  const resolveAsset = makeResolver(
-    (symbol) => prisma.asset.findFirst({ where: { userId, symbol } }),
-    async (symbol) => {
-      const last = await prisma.asset.findFirst({ where: { userId }, orderBy: { sortOrder: "desc" } });
-      return prisma.asset.create({ data: { userId, symbol, sortOrder: (last?.sortOrder ?? -1) + 1 } });
-    },
-  );
-  const resolveEntryModel = makeResolver(
-    (name) => prisma.entryModel.findFirst({ where: { userId, name } }),
-    async (name) => {
-      const last = await prisma.entryModel.findFirst({ where: { userId }, orderBy: { sortOrder: "desc" } });
-      return prisma.entryModel.create({ data: { userId, name, sortOrder: (last?.sortOrder ?? -1) + 1 } });
-    },
-  );
-  const resolveConfluence = makeResolver(
-    (label) => prisma.checklistItemDefinition.findFirst({ where: { userId, label, type: "CONFLUENCE" } }),
-    async (label) => {
-      const last = await prisma.checklistItemDefinition.findFirst({
-        where: { userId, type: "CONFLUENCE" },
-        orderBy: { sortOrder: "desc" },
-      });
-      return prisma.checklistItemDefinition.create({
-        data: { userId, label, type: "CONFLUENCE", sortOrder: (last?.sortOrder ?? -1) + 1 },
-      });
-    },
-  );
-  const resolveExecutionItem = makeResolver(
-    (label) =>
-      prisma.checklistItemDefinition.findFirst({ where: { userId, label, type: "EXECUTION_CONFIRMATION" } }),
-    async (label) => {
-      const last = await prisma.checklistItemDefinition.findFirst({
-        where: { userId, type: "EXECUTION_CONFIRMATION" },
-        orderBy: { sortOrder: "desc" },
-      });
-      return prisma.checklistItemDefinition.create({
-        data: { userId, label, type: "EXECUTION_CONFIRMATION", sortOrder: (last?.sortOrder ?? -1) + 1 },
-      });
-    },
-  );
+  // SOT: asset + session are no longer resolved into global rows here — assetSymbol
+  // and the session name are stored on the trade directly (the save layer bridges
+  // the legacy Asset FK by symbol). Entry models are strategy-scoped now, so the
+  // imported name is passed straight through; the save layer only keeps it when it
+  // matches one of the (strategy's) Entry Models — imported trades carry no
+  // strategy, so historical imports simply have no entry model.
+  // Confluences / execution confirmations are likewise passed through by name.
 
   const rows: ImportRowResult[] = [];
 
@@ -118,17 +65,6 @@ export async function importTrades(
     }
 
     try {
-      const [asset, entryModels, confluenceItems, executionItems] = await Promise.all([
-        resolveAsset(record.assetSymbol),
-        Promise.all(record.entryModelNames.map(resolveEntryModel)),
-        Promise.all(record.confluenceLabels.map(resolveConfluence)),
-        Promise.all(record.executionLabels.map(resolveExecutionItem)),
-      ]);
-
-      const session = record.sessionName
-        ? sessionByName.get(record.sessionName.trim().toUpperCase())
-        : undefined;
-
       const knownAllocations = record.allocations.filter((a) =>
         accountByName.has(a.accountName.trim().toUpperCase()),
       );
@@ -137,13 +73,16 @@ export async function importTrades(
       );
 
       const tradeInput: TradeInput = {
-        assetId: asset.id,
+        // SOT: the service bridges the legacy Asset FK from assetSymbol. Imported
+        // (historical) trades predate strategies, so they carry no strategy — the
+        // save layer treats an empty strategyId as "no strategy" (no adherence).
+        strategyId: "",
+        assetSymbol: record.assetSymbol,
         executionMinutes: record.executionMinutes,
         direction: record.direction,
         higherTimeframeBias: record.higherTimeframeBias,
         biasConfidencePercent: record.biasConfidencePercent,
-        sessionId: session?.id ?? null,
-        strategyId: null,
+        selectedSession: record.sessionName ?? null,
         expectedRR: record.expectedRR,
         actualRR: record.actualRR,
         performanceClosingPnlGross: record.performanceClosingPnlGross,
@@ -161,8 +100,9 @@ export async function importTrades(
           riskInputType: a.riskInputType,
           riskValue: a.riskValue,
         })),
-        checklistItemIds: [...confluenceItems, ...executionItems].map((c) => c.id),
-        entryModelIds: entryModels.map((m) => m.id),
+        selectedConfluences: record.confluenceLabels,
+        selectedExecution: record.executionLabels,
+        selectedEntryModel: record.entryModelNames[0] ?? null,
         psychologyAnswers: record.psychologyAnswers,
       };
 

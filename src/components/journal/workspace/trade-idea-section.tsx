@@ -1,4 +1,6 @@
-import { Badge } from "@/components/ui/badge";
+import { Tag, colorForName } from "@/components/ui/tag";
+import { AdherenceMeter } from "@/components/journal/adherence-score";
+import { SetupScoreCard } from "@/components/journal/setup-score-card";
 import {
   NoteBlock,
   StrategyRef,
@@ -35,10 +37,24 @@ export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
         />
         <WorkspaceField
           label="Entry model"
-          value={trade.entryModelNames.length ? trade.entryModelNames.join(", ") : undefined}
+          value={
+            trade.entryModelName ? (
+              <Tag color={colorForName(trade.entryModelName)}>{trade.entryModelName}</Tag>
+            ) : undefined
+          }
           placeholder="None"
         />
-        <WorkspaceField label="Session" value={trade.sessionName} placeholder="No session" />
+        <WorkspaceField
+          label="Session"
+          value={
+            trade.sessionName ? (
+              <Tag color={trade.sessionColor ?? colorForName(trade.sessionName)}>
+                {trade.sessionName}
+              </Tag>
+            ) : undefined
+          }
+          placeholder="No session"
+        />
         <WorkspaceField
           label="Higher-timeframe bias"
           value={`${trade.higherTimeframeBias === "BULLISH" ? "Bullish" : "Bearish"} · ${trade.biasConfidencePercent}%`}
@@ -47,19 +63,31 @@ export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
         <WorkspaceField label="Reference risk" value={referenceRisk} />
       </div>
 
-      <div>
-        <div className="mb-1.5 text-xs text-muted-foreground">Confluences</div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>Confluences</span>
+        </div>
         {trade.confluenceLabels.length ? (
           <div className="flex flex-wrap gap-1.5">
-            {trade.confluenceLabels.map((label) => (
-              <Badge key={label} variant="outline">
-                {label}
-              </Badge>
+            {trade.confluenceLabels.map((tag) => (
+              <Tag key={tag.name} color={tag.color}>
+                {tag.name}
+              </Tag>
             ))}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground/40 italic">None selected.</p>
         )}
+        {(trade.setupValid !== null || trade.setupScore != null) && (
+          <SetupScoreCard
+            score={trade.setupScore}
+            rating={trade.setupRating}
+            valid={trade.setupValid}
+            missingMandatory={trade.missingMandatory}
+            className="max-w-md"
+          />
+        )}
+        <AdherenceMeter label="Confluence adherence" percent={trade.confluencePercent} className="max-w-xs" />
       </div>
 
       <NoteBlock label="Pre-trade notes" text={trade.preTradeNotes} />

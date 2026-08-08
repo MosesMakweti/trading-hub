@@ -25,6 +25,9 @@ const strategyTreeInclude = {
     include: { checkpoints: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } } },
   },
   entryModels: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+  // SOT strategy-scoped sessions + confluences/execution (frozen in version snapshots).
+  sessions: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+  checklistItems: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
   tradeManagement: {
     include: {
       partialTakeProfits: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
@@ -93,6 +96,10 @@ function buildSnapshot(s: StrategyTree): StrategyVersionSnapshot {
           maxRiskPercent: s.tradeManagement.maxRiskPercent
             ? s.tradeManagement.maxRiskPercent.toNumber()
             : null,
+          expectedWinRate: s.tradeManagement.expectedWinRate,
+          expectedAvgRr: s.tradeManagement.expectedAvgRr,
+          expectedExpectancy: s.tradeManagement.expectedExpectancy,
+          minExecutionScore: s.tradeManagement.minExecutionScore,
           partialTakeProfits: s.tradeManagement.partialTakeProfits.map((p) => ({
             id: p.id,
             trigger: p.trigger,
@@ -102,6 +109,37 @@ function buildSnapshot(s: StrategyTree): StrategyVersionSnapshot {
           customRules: s.tradeManagement.customRules.map((r) => ({ id: r.id, text: r.text })),
         }
       : null,
+    sessions: s.sessions.map((x) => ({
+      name: x.name,
+      color: x.color,
+      startMinutes: x.startMinutes,
+      endMinutes: x.endMinutes,
+      enabled: x.enabled,
+    })),
+    confluences: s.checklistItems
+      .filter((c) => c.kind === "CONFLUENCE")
+      .map((c) => ({
+        name: c.name,
+        color: c.color,
+        category: c.category,
+        description: c.description,
+        weight: c.weight,
+        mandatory: c.mandatory,
+        validationCriteria: c.validationCriteria,
+        enabled: c.enabled,
+      })),
+    execution: s.checklistItems
+      .filter((c) => c.kind === "EXECUTION")
+      .map((c) => ({
+        name: c.name,
+        color: c.color,
+        category: c.category,
+        description: c.description,
+        weight: c.weight,
+        mandatory: c.mandatory,
+        validationCriteria: c.validationCriteria,
+        enabled: c.enabled,
+      })),
   };
 }
 
@@ -345,6 +383,46 @@ export async function restoreStrategyVersionAsNewStrategy(
       }
     }
 
+    // SOT: restore the frozen sessions + confluences/execution too.
+    if (snap.sessions?.length) {
+      await tx.strategySession.createMany({
+        data: snap.sessions.map((x, i) => ({
+          userId,
+          strategyId: created.id,
+          name: x.name,
+          color: x.color,
+          startMinutes: x.startMinutes,
+          endMinutes: x.endMinutes,
+          enabled: x.enabled,
+          sortOrder: i,
+        })),
+      });
+    }
+    const restoreChecklist = (
+      items: StrategyVersionSnapshot["confluences"],
+      kind: "CONFLUENCE" | "EXECUTION",
+    ) =>
+      items?.length
+        ? tx.strategyChecklistItem.createMany({
+            data: items.map((c, i) => ({
+              userId,
+              strategyId: created.id,
+              kind,
+              name: c.name,
+              color: c.color,
+              category: c.category,
+              description: c.description,
+              weight: c.weight,
+              mandatory: c.mandatory,
+              validationCriteria: c.validationCriteria,
+              enabled: c.enabled,
+              sortOrder: i,
+            })),
+          })
+        : null;
+    await restoreChecklist(snap.confluences, "CONFLUENCE");
+    await restoreChecklist(snap.execution, "EXECUTION");
+
     return created;
   });
 }
@@ -404,7 +482,7 @@ export async function getStrategyReference(userId: string, id: string) {
       checklistItems: {
         where: { deletedAt: null, enabled: true },
         orderBy: { sortOrder: "asc" },
-        select: { name: true, color: true, category: true, weight: true, kind: true },
+        select: { name: true, color: true, category: true, weight: true, mandatory: true, kind: true },
       },
       tradeManagement: {
         include: {
@@ -434,10 +512,22 @@ export async function getStrategyReference(userId: string, id: string) {
     sessions: s.sessions.map((x) => ({ name: x.name, color: x.color })),
     confluences: s.checklistItems
       .filter((c) => c.kind === "CONFLUENCE")
-      .map((c) => ({ name: c.name, color: c.color, category: c.category, weight: c.weight })),
+      .map((c) => ({
+        name: c.name,
+        color: c.color,
+        category: c.category,
+        weight: c.weight,
+        mandatory: c.mandatory,
+      })),
     execution: s.checklistItems
       .filter((c) => c.kind === "EXECUTION")
-      .map((c) => ({ name: c.name, color: c.color, category: c.category, weight: c.weight })),
+      .map((c) => ({
+        name: c.name,
+        color: c.color,
+        category: c.category,
+        weight: c.weight,
+        mandatory: c.mandatory,
+      })),
     tradeManagement: s.tradeManagement
       ? {
           maxRiskPercent: s.tradeManagement.maxRiskPercent

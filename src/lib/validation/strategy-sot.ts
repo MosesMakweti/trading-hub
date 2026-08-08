@@ -19,6 +19,10 @@ export const strategyChecklistItemSchema = z.object({
   category: z.string().trim().max(60).nullish(),
   description: z.string().trim().max(2000).nullish(),
   weight: z.coerce.number().int().min(0).max(100).nullish(),
+  // Confluence scoring: mandatory gates setup validity; validationCriteria is the
+  // objective "is it present?" test. Optional/empty for execution confirmations.
+  mandatory: z.boolean().default(false),
+  validationCriteria: z.string().trim().max(2000).nullish(),
   enabled: z.boolean().default(true),
 });
 

@@ -51,13 +51,15 @@
   --color-brand: var(--brand);
   --color-brand-from: var(--brand-from);
   --color-brand-to: var(--brand-to);
-  --radius-sm: calc(var(--radius) * 0.6);
+  /* Sharper, institutional radius scale (base --radius = 10px):
+     inputs 8 · buttons 10 · inner tiles 11 · cards 13 — no soft pills on surfaces. */
+  --radius-sm: calc(var(--radius) * 0.55);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-xl: calc(var(--radius) * 1.1);
+  --radius-2xl: calc(var(--radius) * 1.3);
+  --radius-3xl: calc(var(--radius) * 1.6);
+  --radius-4xl: calc(var(--radius) * 2);
 }
 
 /* ------------------------------------------------------------------ *
@@ -112,7 +114,9 @@
   --chart-3: oklch(0.44 0.01 255);
   --chart-4: oklch(0.55 0.2 25);
   --chart-5: oklch(0.52 0.12 158);
-  --radius: 0.75rem;
+  --radius: 0.625rem;
+  /* Matte canvas: no colored wash on light (kept flat + neutral). */
+  --app-canvas-glow: transparent;
   --sidebar: oklch(0.988 0.002 255);
   --sidebar-foreground: oklch(0.17 0.008 255);
   --sidebar-primary: oklch(0.53 0.19 255);
@@ -124,29 +128,31 @@
 }
 
 /* ------------------------------------------------------------------ *
- * DARK THEME — deep blue-black trading terminal with vivid accents.   *
+ * DARK THEME — matte graphite trading terminal (institutional).        *
+ * Layered neutral blacks (#0B0B0D → #1C1E24); blue reserved for         *
+ * interaction/data only. Near-zero chroma = true graphite, not blue.   *
  * ------------------------------------------------------------------ */
 .dark {
-  /* Cool near-black ground (hue 255, faint chroma) — not pure black */
-  --background: oklch(0.155 0.006 255);
-  --foreground: oklch(0.965 0.004 255);
-  --card: oklch(0.2 0.006 255);
-  --card-foreground: oklch(0.965 0.004 255);
-  --popover: oklch(0.21 0.006 255);
-  --popover-foreground: oklch(0.965 0.004 255);
-  /* Signal Blue — the single accent */
-  --primary: oklch(0.62 0.17 255);
+  /* Matte near-black ground — neutral graphite (chroma ≈ 0), not blue-black */
+  --background: oklch(0.15 0.003 265);
+  --foreground: oklch(0.965 0.003 265);
+  --card: oklch(0.196 0.004 265);
+  --card-foreground: oklch(0.965 0.003 265);
+  --popover: oklch(0.205 0.004 265);
+  --popover-foreground: oklch(0.965 0.003 265);
+  /* Signal Blue — interaction/data accent only */
+  --primary: oklch(0.62 0.16 262);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.26 0.007 255);
-  --secondary-foreground: oklch(0.965 0.004 255);
-  --muted: oklch(0.24 0.006 255);
-  --muted-foreground: oklch(0.72 0.012 255);
-  --accent: oklch(0.28 0.008 255);
-  --accent-foreground: oklch(0.965 0.004 255);
+  --secondary: oklch(0.235 0.005 265);
+  --secondary-foreground: oklch(0.965 0.003 265);
+  --muted: oklch(0.225 0.004 265);
+  --muted-foreground: oklch(0.705 0.006 265);
+  --accent: oklch(0.265 0.006 265);
+  --accent-foreground: oklch(0.965 0.003 265);
   --destructive: oklch(0.64 0.19 25);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.62 0.17 255 / 55%);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 11%);
+  --ring: oklch(0.62 0.16 262 / 55%);
 
   /* Semantic P&L / grade colors — reserved, restrained; numbers only */
   --success: oklch(0.72 0.13 158);
@@ -156,30 +162,33 @@
   --warning: oklch(0.78 0.13 80);
   --warning-foreground: oklch(0.2 0.03 80);
 
-  /* Brand = Signal Blue (indigo→violet gradient retired). Near-single-hue sheen. */
-  --brand: oklch(0.62 0.17 255);
-  --brand-from: oklch(0.66 0.16 255);
-  --brand-to: oklch(0.58 0.18 258);
+  /* Brand = Signal Blue (used sparingly — CTAs/active only). */
+  --brand: oklch(0.62 0.16 262);
+  --brand-from: oklch(0.64 0.15 262);
+  --brand-to: oklch(0.57 0.17 268);
 
-  /* Glassmorphism surfaces — neutral cool film */
-  --glass: oklch(0.72 0.012 255 / 6%);
-  --glass-border: oklch(1 0 0 / 10%);
-  --shadow-color: 240 30% 2%;
+  /* Glass — neutral frosted film with a touch more presence (floating panel). */
+  --glass: oklch(0.82 0.006 265 / 6.5%);
+  --glass-border: oklch(1 0 0 / 9%);
+  --shadow-color: 260 18% 1%;
 
-  /* Charts: blue + monochrome grays + semantic (no rainbow) */
-  --chart-1: oklch(0.62 0.17 255);
-  --chart-2: oklch(0.72 0.012 255);
-  --chart-3: oklch(0.5 0.01 255);
+  /* Charts: blue + neutral graphite grays + semantic (no rainbow) */
+  --chart-1: oklch(0.62 0.16 262);
+  --chart-2: oklch(0.7 0.008 265);
+  --chart-3: oklch(0.5 0.008 265);
   --chart-4: oklch(0.66 0.19 25);
   --chart-5: oklch(0.72 0.13 158);
-  --sidebar: oklch(0.135 0.006 255);
-  --sidebar-foreground: oklch(0.965 0.004 255);
-  --sidebar-primary: oklch(0.62 0.17 255);
+  --sidebar: oklch(0.125 0.003 265);
+  --sidebar-foreground: oklch(0.965 0.003 265);
+  --sidebar-primary: oklch(0.62 0.16 262);
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.225 0.008 255);
-  --sidebar-accent-foreground: oklch(0.965 0.004 255);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.62 0.17 255 / 55%);
+  --sidebar-accent: oklch(0.215 0.005 265);
+  --sidebar-accent-foreground: oklch(0.965 0.003 265);
+  --sidebar-border: oklch(1 0 0 / 7%);
+  --sidebar-ring: oklch(0.62 0.16 262 / 55%);
+
+  /* Matte canvas: a barely-there top light for depth — neutral, not colored. */
+  --app-canvas-glow: oklch(1 0 0 / 2.5%);
 }
 
 @layer base {
@@ -188,11 +197,11 @@
   }
   body {
     @apply bg-background text-foreground;
-    /* Almost monochromatic: one barely-there blue breath at the top, nothing else. */
+    /* Matte canvas: a neutral top light for subtle depth (dark only) — no color wash. */
     background-image: radial-gradient(
-      ellipse 92% 52% at 50% -14%,
-      color-mix(in oklch, var(--primary) 7%, transparent),
-      transparent 72%
+      ellipse 100% 56% at 50% -16%,
+      var(--app-canvas-glow),
+      transparent 70%
     );
     background-attachment: fixed;
     /* The caret belongs to the palette, not the browser. */

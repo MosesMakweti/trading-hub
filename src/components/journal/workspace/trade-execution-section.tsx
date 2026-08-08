@@ -1,4 +1,6 @@
 import { Badge } from "@/components/ui/badge";
+import { Tag } from "@/components/ui/tag";
+import { AdherenceMeter } from "@/components/journal/adherence-score";
 import { cn } from "@/lib/utils";
 import { minutesToTimeString } from "@/lib/date";
 import {
@@ -107,17 +109,36 @@ export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
       </div>
 
       {(tpHits.length > 0 || trade.executionLabels.length > 0) && (
-        <div className="flex flex-wrap gap-1.5">
-          {tpHits.map((label) => (
-            <Badge key={label} variant="success">
-              {label}
-            </Badge>
-          ))}
-          {trade.executionLabels.map((label) => (
-            <Badge key={label} variant="outline">
-              {label}
-            </Badge>
-          ))}
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-1.5">
+            {tpHits.map((label) => (
+              <Badge key={label} variant="success">
+                {label}
+              </Badge>
+            ))}
+            {trade.executionLabels.map((tag) => (
+              <Tag key={tag.name} color={tag.color}>
+                {tag.name}
+              </Tag>
+            ))}
+          </div>
+          <AdherenceMeter
+            label="Execution adherence"
+            percent={trade.executionPercent}
+            className="max-w-xs"
+          />
+        </div>
+      )}
+
+      {/* Combined strategy-adherence / trade-quality — a discipline score, not a
+          market prediction. Shown when the trade had a strategy with expected items. */}
+      {trade.tradeQualityPercent != null && (
+        <div className="rounded-xl border border-border bg-background/40 p-3">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">Strategy adherence</span>
+            <span className="text-xs text-muted-foreground/60">selected vs the strategy&apos;s plan</span>
+          </div>
+          <AdherenceMeter label="Trade quality" percent={trade.tradeQualityPercent} />
         </div>
       )}
 

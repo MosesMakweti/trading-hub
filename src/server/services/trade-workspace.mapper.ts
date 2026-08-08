@@ -1,5 +1,6 @@
 import { utcDateToKey } from "@/lib/date";
 import { executedAtFromTrade } from "@/domain/trades/lifecycle";
+import { executionSnapshot, resolveSelectedTags } from "@/server/services/selected-tags";
 import type { TradeWithWorkspaceRelations } from "@/server/services/trades.service";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
@@ -11,15 +12,34 @@ import type { TradeWorkspaceDTO } from "@/types/trades";
 export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWorkspaceDTO {
   const performance = trade.allocations.find((a) => a.tradingAccount.kind === "PERFORMANCE");
 
+  // SOT: selections are stored by name on the trade and colored from the frozen
+  // strategy snapshot (pre-SOT trades were backfilled by name in P9).
+  const snapshot = executionSnapshot(trade.strategyExecutionSnapshot);
+  const sessionName = trade.selectedSession ?? null;
+  const sessionColor =
+    (sessionName &&
+      (snapshot.sessions?.find((s) => s.name.toLowerCase() === sessionName.toLowerCase())
+        ?.color as TradeWorkspaceDTO["sessionColor"])) ||
+    null;
+
+  // Of the confluences that were missing at save time, which were mandatory (for
+  // the "Invalid Setup" state) — derived from the frozen snapshot's core flags.
+  const missing = (trade.missingConfluences as string[] | null) ?? [];
+  const mandatoryNames = new Set(
+    (snapshot.confluences ?? []).filter((c) => c.mandatory).map((c) => c.name.toLowerCase()),
+  );
+  const missingMandatory = missing.filter((n) => mandatoryNames.has(n.toLowerCase()));
+
   return {
     id: trade.id,
     dateKey: utcDateToKey(trade.tradeDate),
     tradeNumber: trade.tradeNumber ?? 0,
-    assetSymbol: trade.asset.symbol,
-    assetLabel: trade.asset.label,
+    assetSymbol: trade.assetSymbol,
+    assetLabel: null,
     direction: trade.direction,
     executionMinutes: trade.executionMinutes,
-    sessionName: trade.session?.name ?? null,
+    sessionName,
+    sessionColor,
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
     expectedRR: trade.expectedRR.toNumber(),
@@ -28,18 +48,21 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     hitTP2: trade.hitTP2,
     hitTP3: trade.hitTP3,
     hitFullTP: trade.hitFullTP,
-    entryModelNames: trade.entryModels.map((m) => m.entryModel.name),
+    entryModelName: trade.selectedEntryModel,
     // Only link to the strategy while it still exists (not soft-deleted); the
     // name/version always come from the snapshot.
     strategyId: trade.strategy && !trade.strategy.deletedAt ? trade.strategy.id : null,
     strategyName: trade.strategyNameSnapshot,
     strategyVersion: trade.strategyVersionSnapshot,
-    confluenceLabels: trade.checklistSelections
-      .filter((c) => c.checklistItem.type === "CONFLUENCE")
-      .map((c) => c.checklistItem.label),
-    executionLabels: trade.checklistSelections
-      .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
-      .map((c) => c.checklistItem.label),
+    confluenceLabels: resolveSelectedTags(trade.selectedConfluences, snapshot.confluences, []),
+    executionLabels: resolveSelectedTags(trade.selectedExecution, snapshot.execution, []),
+    confluencePercent: trade.confluencePercent,
+    executionPercent: trade.executionPercent,
+    tradeQualityPercent: trade.tradeQualityPercent,
+    setupScore: trade.setupScore,
+    setupRating: trade.setupRating as TradeWorkspaceDTO["setupRating"],
+    setupValid: trade.setupValid,
+    missingMandatory,
     accounts: trade.allocations.map((a) => ({
       name: a.tradingAccount.name,
       kind: a.tradingAccount.kind as TradeWorkspaceDTO["accounts"][number]["kind"],

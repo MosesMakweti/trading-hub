@@ -1,3 +1,35 @@
+import type { TagColor } from "@prisma/client";
+
+import type { SetupRating } from "@/domain/trades/setup-score";
+import type { Deviation } from "@/domain/analytics/deviation-engine";
+
+/** A selected confluence / execution tag, resolved with its color (from the trade's
+ * frozen strategy snapshot) so it renders as a colored chip everywhere. */
+export interface SelectedTagDTO {
+  name: string;
+  color: TagColor;
+}
+
+/** Per-trade Discrepancy-Gap breakdown (from the Execution Engine). Null when the
+ * trade's strategy has no expectancy benchmark set. R-multiples. */
+export interface TradeDiscrepancyDTO {
+  executionScore: number | null;
+  strategyAdherence: number | null;
+  expectedR: number | null;
+  actualR: number | null;
+  gapR: number | null;
+  recoverableR: number | null;
+  primaryDeviation: Deviation | null; // the biggest planned-vs-actual slip, if any
+}
+
+/** Strategy-adherence / trade-quality scores. Null when the strategy defined no
+ * items of that kind (or the trade had no strategy). NOT a market prediction. */
+export interface AdherenceScoresDTO {
+  confluencePercent: number | null;
+  executionPercent: number | null;
+  tradeQualityPercent: number | null;
+}
+
 export interface TradeListItemDTO {
   id: string;
   assetSymbol: string;
@@ -18,9 +50,17 @@ export interface TradeListItemDTO {
     closingPnlGross: number;
     closingPnlNet: number;
   }[];
-  entryModelNames: string[];
-  confluenceLabels: string[];
-  executionLabels: string[];
+  entryModelName: string | null;
+  confluenceLabels: SelectedTagDTO[];
+  executionLabels: SelectedTagDTO[];
+  // Combined strategy-adherence / trade-quality score (null when no strategy set).
+  tradeQualityPercent: number | null;
+  // Weighted confluence setup score + rating (null when the strategy has no weights).
+  setupScore: number | null;
+  setupRating: SetupRating | null;
+  setupValid: boolean | null;
+  // Per-trade Discrepancy Gap (null when the strategy has no expectancy benchmark).
+  discrepancy: TradeDiscrepancyDTO | null;
   // Strategy the trade was taken under (from the snapshot); strategyId links to
   // the live strategy only while it still exists.
   strategyName: string | null;
@@ -66,6 +106,7 @@ export interface TradeWorkspaceDTO {
   direction: "LONG" | "SHORT";
   executionMinutes: number;
   sessionName: string | null;
+  sessionColor: TagColor | null; // the session's assigned color (from the strategy snapshot)
   higherTimeframeBias: "BULLISH" | "BEARISH";
   biasConfidencePercent: number;
 
@@ -76,9 +117,21 @@ export interface TradeWorkspaceDTO {
   hitTP3: boolean;
   hitFullTP: boolean;
 
-  entryModelNames: string[];
-  confluenceLabels: string[];
-  executionLabels: string[];
+  entryModelName: string | null;
+  confluenceLabels: SelectedTagDTO[];
+  executionLabels: SelectedTagDTO[];
+
+  // SOT strategy-adherence / trade-quality scores (selected vs the strategy's
+  // frozen expected set). Null per-kind when the strategy defined none.
+  confluencePercent: number | null;
+  executionPercent: number | null;
+  tradeQualityPercent: number | null;
+
+  // Weighted confluence setup scoring (frozen at save time).
+  setupScore: number | null;
+  setupRating: SetupRating | null;
+  setupValid: boolean | null;
+  missingMandatory: string[]; // missing core confluences (for the "Invalid Setup" state)
 
   // Strategy Lab reference + historical snapshot (Phase 4). name/version are the
   // frozen snapshot (shown even if the strategy was later deleted); strategyId is

@@ -16,6 +16,8 @@ import { TradeCard } from "@/components/journal/trade-card";
 import { WORKFLOW_STEP_META, type WorkflowStep } from "@/components/dashboard/workflow-progress";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FadeIn, StaggerList, StaggerItem } from "@/components/shared/motion";
+import { executionSnapshot, resolveSelectedTags } from "@/server/services/selected-tags";
+import { toTradeDiscrepancy } from "@/server/services/trade-discrepancy";
 import type { TradeListItemDTO } from "@/types/trades";
 
 export default async function JournalDayPage({
@@ -49,7 +51,7 @@ export default async function JournalDayPage({
 
   const tradeDtos: TradeListItemDTO[] = trades.map((t) => ({
     id: t.id,
-    assetSymbol: t.asset.symbol,
+    assetSymbol: t.assetSymbol,
     executionMinutes: t.executionMinutes,
     direction: t.direction,
     higherTimeframeBias: t.higherTimeframeBias,
@@ -67,15 +69,24 @@ export default async function JournalDayPage({
       closingPnlGross: a.closingPnlGross.toNumber(),
       closingPnlNet: a.closingPnlNet.toNumber(),
     })),
-    entryModelNames: t.entryModels.map((m) => m.entryModel.name),
+    entryModelName: t.selectedEntryModel,
     strategyName: t.strategyNameSnapshot,
     strategyId: t.strategy && !t.strategy.deletedAt ? t.strategy.id : null,
-    confluenceLabels: t.checklistSelections
-      .filter((c) => c.checklistItem.type === "CONFLUENCE")
-      .map((c) => c.checklistItem.label),
-    executionLabels: t.checklistSelections
-      .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
-      .map((c) => c.checklistItem.label),
+    confluenceLabels: resolveSelectedTags(
+      t.selectedConfluences,
+      executionSnapshot(t.strategyExecutionSnapshot).confluences,
+      [],
+    ),
+    executionLabels: resolveSelectedTags(
+      t.selectedExecution,
+      executionSnapshot(t.strategyExecutionSnapshot).execution,
+      [],
+    ),
+    tradeQualityPercent: t.tradeQualityPercent,
+    setupScore: t.setupScore,
+    setupRating: t.setupRating as TradeListItemDTO["setupRating"],
+    setupValid: t.setupValid,
+    discrepancy: toTradeDiscrepancy(t),
     psychology: t.psychology
       ? {
           rawScore: t.psychology.rawScore,

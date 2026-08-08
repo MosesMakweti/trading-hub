@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate } from "@/lib/date";
@@ -19,26 +19,21 @@ import {
   listTradingAccounts,
   PERFORMANCE_ACCOUNT_STARTING_BALANCE,
 } from "@/server/services/accounts.service";
-import { listAssets } from "@/server/services/assets.service";
-import { listTradingSessions } from "@/server/services/trading-sessions.service";
-import { listEntryModels } from "@/server/services/entry-models.service";
-import { listChecklistItems } from "@/server/services/checklist-items.service";
-import { listStrategies } from "@/server/services/strategies.service";
+import { getStrategyReference, listStrategies } from "@/server/services/strategies.service";
+import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
+import { scoreSetup } from "@/domain/trades/setup-score";
 
 // Composes the reference data the trade form needs (accounts/assets/
 // sessions/entry-models/checklists), reusing each feature's own service
 // rather than re-querying Prisma directly.
 export async function getTradeFormOptions(userId: string) {
-  const [accounts, assets, sessions, entryModels, confluenceItems, executionItems, strategies] =
-    await Promise.all([
-      listTradingAccounts(userId),
-      listAssets(userId),
-      listTradingSessions(userId),
-      listEntryModels(userId),
-      listChecklistItems(userId, "CONFLUENCE"),
-      listChecklistItems(userId, "EXECUTION_CONFIRMATION"),
-      listStrategies(userId),
-    ]);
+  // SOT: a trade's strategy is the gateway — its markets, sessions, confluences,
+  // execution AND entry models are loaded client-side from the selected strategy's
+  // reference. The form only needs the account list and the strategy picker.
+  const [accounts, strategies] = await Promise.all([
+    listTradingAccounts(userId),
+    listStrategies(userId),
+  ]);
 
   // Only offer non-archived strategies for a new selection; the edit page adds
   // back a currently-linked archived strategy so it stays visible.
@@ -46,26 +41,27 @@ export async function getTradeFormOptions(userId: string) {
 
   return {
     accounts,
-    assets,
-    sessions,
-    entryModels,
-    confluenceItems,
-    executionItems,
     strategies: selectableStrategies,
   };
 }
 
 const tradeInclude = {
-  asset: true,
-  session: true,
   // Live reference for linking only. The nested include is NOT soft-delete
   // filtered (the extension only guards top-level queries), so `deletedAt` is
   // selected too — a soft-deleted strategy must not render a live link. The
   // *Snapshot columns on Trade preserve the strategy identity regardless.
-  strategy: { select: { id: true, name: true, version: true, status: true, deletedAt: true } },
+  strategy: {
+    select: {
+      id: true,
+      name: true,
+      version: true,
+      status: true,
+      deletedAt: true,
+      // Live benchmark for the per-trade Discrepancy Gap (D4).
+      tradeManagement: { select: { expectedExpectancy: true } },
+    },
+  },
   allocations: { include: { tradingAccount: true } },
-  checklistSelections: { include: { checklistItem: true } },
-  entryModels: { include: { entryModel: true } },
   images: true,
   psychology: true,
 } as const;
@@ -103,12 +99,10 @@ function hasText(value: unknown): boolean {
 
 function tradeScalarData(data: TradeInput) {
   return {
-    assetId: data.assetId,
     executionMinutes: data.executionMinutes,
     direction: data.direction,
     higherTimeframeBias: data.higherTimeframeBias,
     biasConfidencePercent: data.biasConfidencePercent,
-    sessionId: data.sessionId,
     expectedRR: data.expectedRR,
     actualRR: data.actualRR,
     hitTP1: data.hitTP1,
@@ -119,6 +113,16 @@ function tradeScalarData(data: TradeInput) {
     psychPostTradeReflection: data.psychPostTradeReflection,
     psychLessonsLearned: data.psychLessonsLearned,
     psychWhatToWorkOn: data.psychWhatToWorkOn,
+  };
+}
+
+// The market + session columns written on every trade. `assetSymbol` /
+// `selectedSession` are the SOT source of truth (the global Asset/TradingSession
+// FKs were dropped in P9).
+function tradeMarketData(data: TradeInput) {
+  return {
+    assetSymbol: data.assetSymbol,
+    selectedSession: data.selectedSession,
   };
 }
 
@@ -174,11 +178,12 @@ async function buildAllocations(userId: string, data: TradeInput, excludeTradeId
 
 /**
  * Freezes the strategy reference + display snapshots at save time. The strategy
- * name/version come from the strategy's *current* state; the entry-model names
- * are the selected models' names joined in selection order. All are stored on the
- * Trade so a completed trade keeps showing the strategy as it was when saved,
- * even if the strategy is later versioned, renamed, or deleted. A strategyId that
- * doesn't belong to the user is dropped (treated as no strategy).
+ * name/version come from the strategy's *current* state; the entry model is the
+ * one chosen from the selected strategy's own Entry Models (validated + frozen by
+ * name). All are stored on the Trade so a completed trade keeps showing the
+ * strategy as it was when saved, even if the strategy is later versioned, renamed,
+ * or deleted. A strategyId that doesn't belong to the user is dropped (treated as
+ * no strategy).
  */
 type StrategySnapshot = {
   strategyId: string | null;
@@ -191,18 +196,21 @@ async function buildTradeSnapshots(
   data: TradeInput,
   existing?: StrategySnapshot,
 ) {
-  // Entry-model names always reflect the current selection (they're part of the
-  // trade, not the strategy).
-  const entryModels = data.entryModelIds.length
-    ? await prisma.entryModel.findMany({
-        where: { userId, id: { in: data.entryModelIds } },
-      })
-    : [];
-  const nameById = new Map(entryModels.map((m) => [m.id, m.name]));
-  const orderedNames = data.entryModelIds
-    .map((id) => nameById.get(id))
-    .filter((name): name is string => Boolean(name));
-  const entryModelNameSnapshot = orderedNames.length ? orderedNames.join(", ") : null;
+  // SOT: the entry model must be one of the *selected strategy's* own Entry Models
+  // — a selection from any other strategy (or a stale/forged name) is rejected. The
+  // validated name is frozen on the trade so the record survives strategy edits.
+  let selectedEntryModel: string | null = null;
+  if (data.selectedEntryModel && data.strategyId) {
+    const match = await prisma.strategyEntryModel.findFirst({
+      where: {
+        name: data.selectedEntryModel,
+        deletedAt: null,
+        strategy: { id: data.strategyId, userId },
+      },
+      select: { name: true },
+    });
+    selectedEntryModel = match?.name ?? null;
+  }
 
   // The strategy snapshot is FROZEN once linked: while the selection is unchanged
   // it's kept exactly as-is — even if the strategy was since renamed, versioned,
@@ -210,7 +218,7 @@ async function buildTradeSnapshots(
   // (re-deriving here would wipe the snapshot the moment its strategy is gone).
   // Recompute only when the selection actually changes (or on create).
   if (existing && data.strategyId === existing.strategyId) {
-    return { ...existing, entryModelNameSnapshot };
+    return { ...existing, selectedEntryModel };
   }
 
   let strategyId: string | null = null;
@@ -229,7 +237,71 @@ async function buildTradeSnapshots(
     }
   }
 
-  return { strategyId, strategyNameSnapshot, strategyVersionSnapshot, entryModelNameSnapshot };
+  return { strategyId, strategyNameSnapshot, strategyVersionSnapshot, selectedEntryModel };
+}
+
+interface FrozenExpected {
+  sessions: { name: string; color: string }[];
+  confluences: {
+    name: string;
+    color: string;
+    category: string | null;
+    weight: number | null;
+    mandatory?: boolean;
+  }[];
+  execution: { name: string; color: string; category: string | null; weight: number | null }[];
+}
+
+/**
+ * Strategy = single source of truth: freeze the strategy's expected confluences /
+ * execution set at trade time, record what the trader selected (enriched with each
+ * tag's color so the record is self-contained), and score adherence. Frozen on the
+ * first save; kept on update while the strategy selection is unchanged.
+ */
+async function buildStrategyExecution(
+  userId: string,
+  data: TradeInput,
+  existing?: { strategyId: string | null; strategyExecutionSnapshot: Prisma.JsonValue | null },
+) {
+  let expected: FrozenExpected | null = null;
+  if (existing && data.strategyId === existing.strategyId && existing.strategyExecutionSnapshot) {
+    expected = existing.strategyExecutionSnapshot as unknown as FrozenExpected;
+  } else if (data.strategyId) {
+    const ref = await getStrategyReference(userId, data.strategyId);
+    expected = ref ? { sessions: ref.sessions, confluences: ref.confluences, execution: ref.execution } : null;
+  }
+
+  const scores = scoreStrategyAdherence(expected, data.selectedConfluences, data.selectedExecution);
+
+  // Weighted confluence "setup score" — the probability/quality engine. Frozen
+  // from the expected confluences' weights + mandatory flags vs what was present.
+  const setup = scoreSetup(
+    (expected?.confluences ?? []).map((c) => ({
+      name: c.name,
+      weight: c.weight,
+      mandatory: c.mandatory ?? false,
+    })),
+    data.selectedConfluences,
+  );
+
+  // selected* are stored as plain name arrays; each name's color is resolved at
+  // render time from the frozen `strategyExecutionSnapshot` (the expected set),
+  // so the record stays compact and a single source carries the colors.
+  return {
+    strategyExecutionSnapshot: (expected ?? Prisma.DbNull) as Prisma.InputJsonValue | typeof Prisma.DbNull,
+    selectedConfluences: data.selectedConfluences as unknown as Prisma.InputJsonValue,
+    selectedExecution: data.selectedExecution as unknown as Prisma.InputJsonValue,
+    confluencePercent: scores.confluencePercent,
+    executionPercent: scores.executionPercent,
+    tradeQualityPercent: scores.tradeQualityPercent,
+    // Weighted setup scoring (null score when the strategy defined no weights).
+    setupScore: setup.setupScore,
+    setupRating: expected ? setup.setupRating : null,
+    setupValid: expected ? setup.setupValid : null,
+    missingConfluences: (expected
+      ? setup.missingConfluences
+      : []) as unknown as Prisma.InputJsonValue,
+  };
 }
 
 export async function listTradesForDay(userId: string, dateKey: string) {
@@ -294,6 +366,8 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   const allocations = await buildAllocations(userId, data);
   const snapshots = await buildTradeSnapshots(userId, data);
+  const strategyExec = await buildStrategyExecution(userId, data);
+  const assetLink = tradeMarketData(data);
   const tradeNumber = await nextTradeNumber(userId);
 
   const now = new Date();
@@ -308,16 +382,14 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
       userId,
       tradeDate: dateKeyToUtcDate(dateKey),
       ...tradeScalarData(data),
+      ...assetLink,
       ...snapshots,
       tradeNumber,
       closedAt,
       reviewedAt,
       status: deriveStatus(closedAt, reviewedAt),
+      ...strategyExec,
       allocations: { create: allocations },
-      checklistSelections: {
-        create: data.checklistItemIds.map((checklistItemId) => ({ checklistItemId })),
-      },
-      entryModels: { create: data.entryModelIds.map((entryModelId) => ({ entryModelId })) },
       psychology: { create: psychology },
     },
     include: tradeInclude,
@@ -327,6 +399,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
 export async function updateTrade(userId: string, tradeId: string, data: TradeInput) {
   const psychology = scorePsychologyAnswers(data.psychologyAnswers);
   const allocations = await buildAllocations(userId, data, tradeId);
+  const assetLink = tradeMarketData(data);
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.trade.findFirst({ where: { id: tradeId, userId } });
@@ -338,10 +411,12 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
       strategyNameSnapshot: existing.strategyNameSnapshot,
       strategyVersionSnapshot: existing.strategyVersionSnapshot,
     });
+    const strategyExec = await buildStrategyExecution(userId, data, {
+      strategyId: existing.strategyId,
+      strategyExecutionSnapshot: existing.strategyExecutionSnapshot,
+    });
 
     await tx.tradeAccountAllocation.deleteMany({ where: { tradeId } });
-    await tx.tradeChecklistSelection.deleteMany({ where: { tradeId } });
-    await tx.tradeEntryModel.deleteMany({ where: { tradeId } });
 
     const now = new Date();
     // The form owns the psychology reflections; the workspace review prompts
@@ -361,15 +436,13 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
       where: { id: tradeId },
       data: {
         ...tradeScalarData(data),
+        ...assetLink,
         ...snapshots,
         closedAt,
         reviewedAt,
         status: deriveStatus(closedAt, reviewedAt),
+        ...strategyExec,
         allocations: { create: allocations },
-        checklistSelections: {
-          create: data.checklistItemIds.map((checklistItemId) => ({ checklistItemId })),
-        },
-        entryModels: { create: data.entryModelIds.map((entryModelId) => ({ entryModelId })) },
         psychology: { upsert: { create: psychology, update: psychology } },
       },
       include: tradeInclude,

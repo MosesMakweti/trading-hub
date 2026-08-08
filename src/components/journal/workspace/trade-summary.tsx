@@ -65,8 +65,8 @@ export function TradeSummary({ trade }: { trade: TradeWorkspaceDTO }) {
         )}
       </Stat>
       <Stat label="Entry model">
-        {trade.entryModelNames.length ? (
-          trade.entryModelNames.join(", ")
+        {trade.entryModelName ? (
+          trade.entryModelName
         ) : (
           <span className="text-muted-foreground/40 italic">None</span>
         )}

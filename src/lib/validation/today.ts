@@ -2,8 +2,8 @@ import { z } from "zod";
 
 /**
  * Today's Trading Plan patch. Partial — the section autosaves piece by
- * piece. `watchlistFocus` is the focused Asset ids, `keyLevels` is Tiptap JSON,
- * and `planComplete` finalizes the step (sets/clears the day's planCompletedAt).
+ * piece. `keyLevels` is Tiptap JSON, and `planComplete` finalizes the step
+ * (sets/clears the day's planCompletedAt).
  */
 export const dayBiasSchema = z.enum(["BULLISH", "BEARISH", "NEUTRAL"]);
 
@@ -11,7 +11,6 @@ export const todaysPlanSchema = z
   .object({
     bias: dayBiasSchema.nullable(),
     conviction: z.number().int().min(1).max(5).nullable(),
-    watchlistFocus: z.array(z.string()).max(500),
     keyLevels: z.unknown(),
     riskBudgetPercent: z.coerce.number().min(0).max(100).nullable(),
     planComplete: z.boolean(),

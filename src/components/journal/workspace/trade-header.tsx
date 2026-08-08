@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { Tag, colorForName } from "@/components/ui/tag";
 import { formatDateKeyLong, minutesToTimeString } from "@/lib/date";
 import {
   StrategyRef,
@@ -53,10 +54,10 @@ export function TradeHeader({ trade }: { trade: TradeWorkspaceDTO }) {
         <WorkspaceField
           label="Asset"
           value={
-            <span className="font-medium">
-              {trade.assetSymbol}
+            <span className="inline-flex items-center gap-1.5">
+              <Tag color={colorForName(trade.assetSymbol)}>{trade.assetSymbol}</Tag>
               {trade.assetLabel && (
-                <span className="ml-1 text-xs text-muted-foreground">{trade.assetLabel}</span>
+                <span className="text-xs text-muted-foreground">{trade.assetLabel}</span>
               )}
             </span>
           }
@@ -69,10 +70,20 @@ export function TradeHeader({ trade }: { trade: TradeWorkspaceDTO }) {
             </Badge>
           }
         />
-        <WorkspaceField label="Session" value={trade.sessionName} placeholder="No session" />
+        <WorkspaceField
+          label="Session"
+          value={
+            trade.sessionName ? (
+              <Tag color={trade.sessionColor ?? colorForName(trade.sessionName)}>
+                {trade.sessionName}
+              </Tag>
+            ) : undefined
+          }
+          placeholder="No session"
+        />
         <WorkspaceField
           label="Entry model"
-          value={trade.entryModelNames.length ? trade.entryModelNames.join(", ") : undefined}
+          value={trade.entryModelName ?? undefined}
           placeholder="None"
         />
         <WorkspaceField

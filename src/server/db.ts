@@ -2,10 +2,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
 const SOFT_DELETE_MODELS = new Set([
-  "Asset",
   "EntryModel",
-  "TradingSession",
-  "ChecklistItemDefinition",
   "RoutineSection",
   "RoutineItem",
   "TradingAccount",

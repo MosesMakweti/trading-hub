@@ -107,14 +107,17 @@ P1  Additive data model + migration (new models, Trade
     fields; nothing removed) ............................ ⭘ next
 P2  Strategy Lab: Sessions / Confluences / Execution
     editors (rich, colored) + snapshot .................. ⭘
-P3  Remove Trade Setup page + global editors; nav ....... ⭘
-P4  Trade form: strategy-driven, multi-select ........... ⭘
-P5  Adherence & trade-quality scoring (pure, tested) .... ⭘
-P6  Display scores across the app ....................... ⭘
-P7  Colored Tag system everywhere + broader accents ..... ⭘
-P8  Analytics foundations ............................... ⭘
-P9  Full migration: backfill + drop globals + cleanup ... ⭘
-P10 Polish, tests, full verify .......................... ⭘
+P4  Trade form: strategy-driven, multi-select ........... ✅ (P4a + P4b)
+P4c Strategy-source asset+session; delete Trade Setup .... ✅ (require strategy; watchlist dropped)
+P5  Adherence & trade-quality scoring (pure, tested) .... ✅ (scorer built + 5 tests)
+P6  Display scores + colored selected tags .............. ✅
+P3  Remove global confluence/execution editors .......... ✅ (asset/session editors now gone too)
+P7  Colored Tag system everywhere + broader accents ..... ✅
+P8  Analytics foundations ............................... ✅
+P9  Full migration: backfill assetSymbol; drop Asset/
+    TradingSession/ChecklistItemDefinition + assetId/
+    sessionId/watchlistFocus; delete dead read services ... ✅
+P10 Polish, tests, full verify .......................... ✅ — REFACTOR COMPLETE
 ```
 
 Every phase: `tsc` + `eslint` clean, vitest green, app runnable, follows the design system
@@ -163,9 +166,187 @@ Re-sequenced P4 ahead of P3 (see NOTE above). Foundation for the trade-form rewi
 trade form will multi-select and snapshot as the "expected" set. Additive & safe (nothing consumes
 it yet). tsc + eslint clean.
 
-### P4b — Trade form rewire (NEXT, the crux)
-Rewire Add Trade: pick strategy → multi-select its sessions/confluences/execution (colored tags) →
-store `selected*` + `strategyExecutionSnapshot` (expected set) + `assetSymbol` (from the strategy's
-markets), while bridging the old `assetId` FK via find-or-create so analytics-by-asset keep working
-until P9. This touches the core trade-creation flow + display; do it carefully (hard to visually
-verify on this box). Then P3 (remove Trade Setup) becomes safe.
+### P4b — Trade form rewire ✅
+Add Trade is now strategy-driven. Picking a strategy loads its **enabled** confluences + execution
+confirmations as **colored, multi-select** tag groups (new `StrategyTagSelect`, sourced from the
+`strategyReference` already fetched for the form); the two old global `TagToggleGroup`s (which both
+wrote the single `checklistItemIds` field) are gone. The form stores `selectedConfluences` /
+`selectedExecution` as **name arrays**. `tradeSchema` swapped `checklistItemIds` → those two fields.
+
+Save layer (`trades.service.ts` → `buildStrategyExecution`): freezes the strategy's expected set into
+`strategyExecutionSnapshot` (kept across an edit while the strategy selection is unchanged, re-fetched
+otherwise), stores the selected names, and scores adherence via the pure
+`scoreStrategyAdherence` (P5 scorer, already tested) into `confluencePercent` / `executionPercent` /
+`tradeQualityPercent`. Colors are **not** duplicated onto the selections — they're resolved at render
+time from the snapshot's expected set (single source, compact record).
+
+Wiring: `new` + `edit` pages drop the confluence/execution props; edit defaults read the new name
+arrays (old trades start empty — re-picked from the strategy on edit). Display/export
+(`trade-workspace.mapper.ts`, `export.service.ts`) read `selected*` with a **fallback to the legacy
+`checklistSelections` join** for pre-SOT trades. Import passes CSV labels straight through as names
+(dropped the global-checklist resolvers). `TagToggleGroup` now types `name: "entryModelIds"` only.
+
+Verified: **tsc + eslint clean; 181 tests green** (5 new scorer tests). App compiles + runs.
+
+**Deferred out of P4b (by design):**
+- `assetSymbol` write-time denormalization → **folded into P9**, which backfills `assetSymbol` from
+  `asset.symbol` for all trades wholesale. New trades keep the working global `assetId` FK meanwhile.
+- Analytics' old process-adherence metric (`analytics.service.ts`, built from the global
+  execution-confirmation join + `executionItemCount`) still reads the legacy join, so it reads 0 for
+  new SOT trades. **Migrating it onto the new `executionPercent` column is P8.** The separate
+  8-question `adherencePercent` is unaffected.
+- Colored rendering of the selected tags + the adherence scores across the app is **P6** (the mapper
+  currently returns plain `string[]` labels; colors come from the snapshot there).
+
+### P6 — Display scores + colored selected tags ✅
+The SOT record now surfaces visually everywhere a trade is shown. New shared bits:
+- `SelectedTagDTO {name,color}` + `AdherenceScoresDTO` in `types/trades.ts`; `confluenceLabels` /
+  `executionLabels` on both trade DTOs changed `string[]` → `SelectedTagDTO[]`, and the workspace DTO
+  gained `confluencePercent` / `executionPercent` / `tradeQualityPercent` (list DTO gained
+  `tradeQualityPercent`).
+- **`resolveSelectedTags`** (`server/services/selected-tags.ts`) — the single color-resolution
+  helper: maps a trade's selected **names** to colors from its frozen `strategyExecutionSnapshot`,
+  falling back to the legacy checklist labels (neutral GRAY) for pre-SOT trades. Used by both the
+  workspace mapper and the journal list mapper (no duplicated logic).
+- **`AdherenceMeter`** (labeled thin bar, banded green/amber/rose ≥80/≥50/rest) + **`TradeQualityBadge`**
+  (compact pill) in `components/journal/adherence-score.tsx`.
+
+Wired: the workspace **Idea** section renders confluences as colored `Tag`s + a confluence meter; the
+**Execution** section renders execution `Tag`s + an execution meter + a combined "Strategy adherence /
+Trade quality" block. The **trade card** shows colored confluence/execution tags + a quality badge.
+**Add Trade** shows a **live** adherence preview (Confluences / Execution / Trade quality meters)
+recomputed with the same pure `scoreStrategyAdherence` as the trader multi-selects — exactly what the
+save layer persists. Scores are labeled a discipline measure, **not a market prediction**.
+
+Verified: **tsc + eslint clean; 181 tests green**. Static verification (authed screenshots time out on
+this box). Analytics still on the legacy metric (**P8**); `assetSymbol` denorm still **P9**.
+
+### P3 — Remove the global confluence/execution editors ✅
+Confluences + execution confirmations are now strategy-scoped (SOT), so their **global** editors are
+gone. Removed the two `ChecklistSection` cards from the Trade Setup page (`settings/plan`), deleted
+the now-orphaned `components/plan/sections/checklist-section.tsx` + `actions/checklist-items.actions.ts`,
+and trimmed `getTradeFormOptions` (dropped the two `listChecklistItems` calls + the unused
+`confluenceItems`/`executionItems` returns). The page keeps **Assets to Trade** + **Trading Session**
+(still the trade form's source) and gains a callout pointing confluences/execution to Strategy Lab;
+settings hub + copy updated.
+
+**Scope note (roadmap safety rule):** the page itself is **not** deleted and the asset/session global
+editors **stay**, because the trade form still reads global `assets` (required `assetId` FK) + global
+`sessions`. Fully removing Trade Setup requires strategy-sourcing the asset/session fields and bridging
+the `assetId`/`sessionId` FKs (→ `assetSymbol` / `selectedSession`, columns already exist) — that FK
+migration is bundled with **P9** (drop globals). `checklist-items.service.ts` is now dead but still
+reads the live `ChecklistItemDefinition` table (old-trade fallback), so it's removed **with the table
+in P9**, not here.
+
+Verified: **tsc + eslint clean; 181 tests green**.
+
+### P4c — Strategy-source asset + session; delete Trade Setup ✅
+**User directive (post-P3):** in Add Trade the market **and** session must come from the selected
+strategy, making the global Trade Setup lists redundant → delete them. Two product decisions taken:
+**(1)** every trade now **requires a strategy**; **(2)** the Today **Watchlist-focus** feature (which
+also rode the global Asset list) is **dropped**.
+
+- **Schema** (`tradeSchema`): `assetId`→`assetSymbol` (required), `sessionId`→`selectedSession`
+  (nullable), `strategyId` now **required** (`min(1)`). The service/import still accept an empty
+  strategyId as "no strategy" (historical CSV imports), which `buildTradeSnapshots` already treats
+  as none.
+- **Form:** Strategy moved to the top as the gateway (required, no "None"). Asset is a dropdown of the
+  strategy's `applicableAssets`; Session a dropdown of the strategy's sessions — both hint "select a
+  strategy first" when empty, and keep a currently-selected value visible if the strategy's list later
+  changed (`withSelected`). Dropped the global `assets`/`sessions` props from the form + new/edit pages.
+- **Save path:** `resolveAssetLink` bridges the still-NOT-NULL `assetId` FK by find-or-creating the
+  user's Asset row from `assetSymbol` (keeps analytics-by-asset working until P9); writes
+  `assetSymbol` + `selectedSession`; leaves the legacy `sessionId` null. Display (workspace mapper +
+  journal list) now reads `assetSymbol`/`selectedSession` with a fallback to the legacy FKs.
+- **Import:** passes `assetSymbol` + session name straight through (no more global-row resolution);
+  imported trades carry no strategy.
+- **Watchlist dropped:** removed Today's Watchlist-focus UI + `TodaysPlanDTO.assets`/`watchlistFocus`,
+  `JournalDayRecapDTO.plan.watchlistSymbols`, the `watchlistFocus` write path + validation, and the
+  recap field. The `TradingDay.watchlistFocus` column is left dormant (dropped in P9).
+- **Dashboard SessionCountdown** used the global session list — repointed to a new
+  `listStrategySessionWindows` (union of the user's strategies' enabled, timed sessions, deduped by
+  name), so it survives with no global list.
+- **Deleted:** the Trade Setup page (`settings/plan`), `AssetsSection`, `TradingSessionsSection`,
+  `assets.actions`, `trading-sessions.actions`; removed the Trade Setup nav (settings hub + topbar) and
+  the global-search **Asset** category (linked to the deleted page). `getTradeFormOptions` slimmed to
+  accounts + entry models + strategies.
+- Now-dead read services `assets.service` / `trading-sessions.service` (+ `checklist-items.service`)
+  still read live tables → removed **with the tables in P9**.
+
+Verified: **tsc + eslint clean; 181 tests green**. Static verification (authed screenshots time out).
+
+### P7 — Colored Tag system everywhere ✅
+No more plain monochrome badges for tag-like properties. Added `colorForName(name)` to
+`components/ui/tag.tsx` — a deterministic hash into the 7 vivid palette colors (GRAY reserved for
+neutral/none), so a value like `NQ` gets the same hue everywhere. Confluences / execution / sessions
+keep their **explicitly assigned** colors; free-text properties (assets, entry models, timeframes,
+concepts) derive a stable color from the name.
+
+Applied colored `Tag`s to: the Add-Trade **Strategy reference panel** (applicable assets + entry
+models), the **trade card** (entry models — confluences/execution/quality already colored in P6), the
+workspace **Idea** section (entry models + session, session using its assigned color) and **Header**
+(asset + session), the Strategy Lab **asset-tag-input** (Settings `applicableAssets` chips) and
+**strategy card** asset chips. `TradeWorkspaceDTO` gained `sessionColor` (resolved from the frozen
+snapshot's sessions) so the session tag shows its real strategy color, falling back to `colorForName`.
+
+Verified: **tsc + eslint clean; 181 tests green**. Remaining minor surfaces (timeframe / arsenal-concept
+editor cards are structured editors, not badges) are left as **P10** polish.
+
+### P8 — Analytics foundations ✅
+Migrated analytics off the removed global checklist and laid the tested foundation for
+strategy-adherence analytics.
+- **Rule Adherence metric** (`analytics.service`) now reads each trade's frozen `executionPercent`
+  (selected vs the strategy's expected execution) instead of the old
+  `checklistSelections`-÷-global-`executionItemCount`. Dropped the `checklistItemDefinition.count`
+  query + the `checklistSelections` include. The psychology `correlationWithRuleAdherence` follows
+  automatically. Null for pre-SOT trades (excluded from averages).
+- **New pure module** `domain/performance/adherence-analytics.ts` (+ 5 vitest cases): from per-trade
+  points (`win`, selected `confluences`, the three frozen percents) it computes avg confluence /
+  execution / trade-quality adherence, **avg confluence count on winners vs losers**, and a
+  **per-confluence win-rate leaderboard** (deduped within a trade, ranked by win rate then volume).
+  This is the "expand without a migration" backbone for future adherence analytics.
+- Wired into `getAnalyticsData` under `trading.adherence` and surfaced on the Analytics page via a new
+  **`AdherenceAnalytics`** card (5 stat tiles + colored confluence win-rate table). Labeled a
+  discipline measure, not a prediction.
+
+Verified: **tsc + eslint clean; 186 tests green** (+5).
+
+### P9 — Full migration: drop the globals ✅
+The final destructive phase. **Migration `20260807010000_drop_global_trade_setup`** backfills first
+(while the old tables still exist), then drops:
+- **Backfill:** `assetSymbol` from `Asset.symbol`; `selectedSession` from `TradingSession.name`;
+  `selectedConfluences`/`selectedExecution` (by name) from the `TradeChecklistSelection` join for
+  pre-SOT trades (SOT trades already carry arrays). A safety-net sets any still-null `assetSymbol` to
+  `'UNKNOWN'` so the NOT NULL can apply.
+- **Dropped:** tables `Asset`, `TradingSession`, `ChecklistItemDefinition`, `TradeChecklistSelection`;
+  the `ChecklistType` enum; `Trade.assetId`/`sessionId` FKs; `TradingDay.watchlistFocus`. `assetSymbol`
+  is now **NOT NULL** (the source of truth).
+- **Code:** `tradeInclude` dropped asset/session/checklistSelections; the trade save path no longer
+  bridges an Asset row (`tradeMarketData` just writes `assetSymbol`/`selectedSession`); mapper /
+  analytics / export / import / accounts / search / dashboard / journal / edit all read the columns
+  directly. Removed the three dead read services (`assets`, `trading-sessions`, `checklist-items`) and
+  the dropped models from the soft-delete extension.
+
+Verified: **tsc + eslint clean; 193 tests green**; migration applied + client regenerated. The app now
+runs entirely on the strategy-scoped model with no global Trade-Setup tables. Only **P10** (final
+polish + full verify) remains.
+
+### P10 — Polish + full verify ✅ — REFACTOR COMPLETE
+- **Deferred P7 coloring done:** timeframe cards + arsenal-concept cards now carry a `colorForName`
+  colored dot next to the name, so every strategy element has visual identity (they're structured
+  editors, not badges, so a dot rather than a chip).
+- **Full verification:** `tsc` clean, `eslint src` clean, **193 tests green**, and a **production
+  `next build` succeeds** — all 24 routes compile (and `/settings/plan` is correctly gone).
+
+The Strategy = Single Source of Truth refactor is **complete end-to-end**: each strategy fully defines
+how it's traded (markets · sessions · confluences · execution · framework · arsenal · trade
+management); Add Trade is strategy-driven with live adherence + weighted setup scoring; scores + colored
+tags surface across journal/analytics; and the global Trade-Setup tables are gone.
+
+### Follow-up — version snapshots freeze the SOT data ✅
+Closes the P2-deferred item. `buildSnapshot` + `strategyTreeInclude` now freeze the strategy's
+**sessions + confluences/execution** (with weights, mandatory flags, validation criteria) into each
+published `StrategyVersion`; the summary counts them (session/confluence/mandatory/execution), the
+read-only snapshot view renders them as colored tags, and `restoreStrategyVersionAsNewStrategy`
+recreates them. Snapshot fields are optional so legacy snapshots still read. Only richer analytics UI
+remains as a purely optional future integration.

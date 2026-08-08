@@ -2,9 +2,14 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Tag } from "@/components/ui/tag";
 import { StrategyStatusBadge } from "@/components/strategy-lab/strategy-status-badge";
 import { tiptapToPlainText } from "@/lib/tiptap-text";
-import type { StrategyVersionSnapshot } from "@/types/strategies";
+import { minutesToTimeString } from "@/lib/date";
+import type {
+  StrategyVersionConfluenceSnapshot,
+  StrategyVersionSnapshot,
+} from "@/types/strategies";
 
 const FULL = 100_000; // effectively no truncation for the full read-only view
 
@@ -72,6 +77,38 @@ const TM_FIELDS = [
   ["scalingOutRules", "Scaling-out rules"],
 ] as const;
 
+/** Read-only colored list of frozen confluences / execution confirmations. */
+function ChecklistCard({
+  title,
+  items,
+}: {
+  title: string;
+  items: StrategyVersionConfluenceSnapshot[];
+}) {
+  return (
+    <Card title={title}>
+      <div className="space-y-1.5">
+        {items.map((c) => (
+          <div key={c.name} className="flex flex-wrap items-center gap-2">
+            <Tag color={c.color} muted={!c.enabled}>
+              {c.name}
+            </Tag>
+            {c.mandatory && (
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                Core
+              </span>
+            )}
+            {c.weight != null && (
+              <span className="text-xs text-muted-foreground tabular-nums">w{c.weight}</span>
+            )}
+            {c.category && <span className="text-xs text-muted-foreground">{c.category}</span>}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 export function StrategyVersionSnapshotView({
   strategyId,
   version,
@@ -87,6 +124,9 @@ export function StrategyVersionSnapshotView({
 }) {
   const s = snapshot;
   const tm = s.tradeManagement;
+  const sessions = s.sessions ?? [];
+  const confluences = s.confluences ?? [];
+  const execution = s.execution ?? [];
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -126,6 +166,35 @@ export function StrategyVersionSnapshotView({
             </div>
           )}
         </Card>
+      )}
+
+      {sessions.length > 0 && (
+        <Card title="Trading sessions">
+          <div className="flex flex-wrap gap-1.5">
+            {sessions.map((sess) => (
+              <Tag key={sess.name} color={sess.color} muted={!sess.enabled}>
+                {sess.name}
+                {sess.startMinutes != null && sess.endMinutes != null && (
+                  <span className="ml-1 opacity-70 tabular-nums">
+                    {minutesToTimeString(sess.startMinutes)}–{minutesToTimeString(sess.endMinutes)}
+                  </span>
+                )}
+              </Tag>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {confluences.length > 0 && (
+        <Section title="Confluences">
+          <ChecklistCard title="Confluences" items={confluences} />
+        </Section>
+      )}
+
+      {execution.length > 0 && (
+        <Section title="Execution confirmations">
+          <ChecklistCard title="Execution confirmations" items={execution} />
+        </Section>
       )}
 
       {s.arsenalConcepts.length > 0 && (

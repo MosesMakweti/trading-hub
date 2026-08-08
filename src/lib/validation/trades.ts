@@ -17,13 +17,16 @@ export const tradeAllocationSchema = z.object({
 
 export const tradeSchema = z
   .object({
-    assetId: z.string().min(1, "Select an asset."),
+    // SOT: a trade is taken under a strategy, and its market + session come from
+    // that strategy (never a global list). assetSymbol is the chosen market symbol
+    // (the save layer bridges the legacy Asset FK from it until P9).
+    strategyId: z.string().min(1, "Select a strategy."),
+    assetSymbol: z.string().min(1, "Select an asset."),
     executionMinutes: z.coerce.number().int().min(0).max(1439),
     direction: directionSchema,
     higherTimeframeBias: biasSchema,
     biasConfidencePercent: z.coerce.number().int().min(0).max(100),
-    sessionId: z.string().nullable().default(null),
-    strategyId: z.string().nullable().default(null),
+    selectedSession: z.string().nullable().default(null),
     expectedRR: z.coerce.number(),
     actualRR: z.coerce.number().nullable().default(null),
     // The one Closing PnL the trader manually enters — always the
@@ -41,8 +44,13 @@ export const tradeSchema = z
     // Additional participating accounts beyond the Performance Account —
     // may be empty (a trade can affect only the Performance Account).
     allocations: z.array(tradeAllocationSchema).default([]),
-    checklistItemIds: z.array(z.string()).default([]),
-    entryModelIds: z.array(z.string()).default([]),
+    // SOT: confluences + execution confirmations selected from the chosen strategy,
+    // by name. The save layer freezes the strategy's expected set and scores adherence.
+    selectedConfluences: z.array(z.string()).default([]),
+    selectedExecution: z.array(z.string()).default([]),
+    // A single entry model chosen from the selected strategy's own Entry Models
+    // (by name). Null when none is chosen or the strategy defines none.
+    selectedEntryModel: z.string().nullable().default(null),
     psychologyAnswers: psychologyAnswersSchema,
   })
   .refine(

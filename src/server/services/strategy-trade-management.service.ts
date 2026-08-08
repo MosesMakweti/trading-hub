@@ -62,9 +62,13 @@ export async function updateTradeManagement(
     const value = data[key];
     if (value !== undefined) patch[key] = value === null ? Prisma.DbNull : value;
   }
-  // String? / Decimal? columns take a literal null directly (not DbNull).
+  // String? / Decimal? / Float? / Int? columns take a literal null directly (not DbNull).
   if (data.maxHoldingTime !== undefined) patch.maxHoldingTime = data.maxHoldingTime;
   if (data.maxRiskPercent !== undefined) patch.maxRiskPercent = data.maxRiskPercent;
+  if (data.expectedWinRate !== undefined) patch.expectedWinRate = data.expectedWinRate;
+  if (data.expectedAvgRr !== undefined) patch.expectedAvgRr = data.expectedAvgRr;
+  if (data.expectedExpectancy !== undefined) patch.expectedExpectancy = data.expectedExpectancy;
+  if (data.minExecutionScore !== undefined) patch.minExecutionScore = data.minExecutionScore;
 
   const result = await prisma.strategyTradeManagement.updateMany({
     where: ownedRecord(userId, id),

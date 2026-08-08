@@ -8,6 +8,7 @@ import { Check, ChevronDown, GripVertical, Loader2, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TagDot, colorForName } from "@/components/ui/tag";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { CheckpointList } from "@/components/strategy-lab/checkpoint-list";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
@@ -73,6 +74,8 @@ export function TimeframeCard({
         >
           <GripVertical className="size-4" />
         </button>
+
+        <TagDot color={colorForName(name || "timeframe")} className="shrink-0" />
 
         <Input
           value={name}

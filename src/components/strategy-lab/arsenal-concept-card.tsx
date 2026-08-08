@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TagDot, colorForName } from "@/components/ui/tag";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { RichTextEditor } from "@/components/plan/rich-text-editor";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
@@ -105,6 +106,8 @@ export function ArsenalConceptCard({
         >
           <GripVertical className="size-4" />
         </button>
+
+        <TagDot color={colorForName(name || "concept")} className="shrink-0" />
 
         <Input
           value={name}

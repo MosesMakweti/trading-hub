@@ -4,6 +4,21 @@ import { daysBetweenInclusive } from "@/lib/date-ranges";
 import { buildEquityCurve, dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import * as metrics from "@/domain/performance/metrics";
 import {
+  summarizeAdherence,
+  type AdherenceTradePoint,
+} from "@/domain/performance/adherence-analytics";
+import {
+  buildDiscrepancyCurve,
+  compositeExecutionScore,
+  summarizeDiscrepancy,
+  type ExecutionTradeInput,
+} from "@/domain/analytics/execution-engine";
+import {
+  aggregateDeviationCauses,
+  computeDeviations,
+  type Deviation,
+} from "@/domain/analytics/deviation-engine";
+import {
   summarizeStrategyPerformance,
   type StrategyTradePoint,
 } from "@/domain/performance/strategy-performance";
@@ -44,7 +59,7 @@ export async function getDailyAnalytics(userId: string, dateKey: string) {
         select: {
           tradeDate: true,
           adherencePercent: true,
-          asset: { select: { symbol: true } },
+          assetSymbol: true,
           psychology: { select: { psychologyPercent: true } },
         },
       },
@@ -63,7 +78,7 @@ export async function getDailyAnalytics(userId: string, dateKey: string) {
     if (utcDateToKey(t.tradeDate) === dateKey) {
       points.push({
         dateKey,
-        assetSymbol: t.asset.symbol,
+        assetSymbol: t.assetSymbol,
         actualRR: contributionPercent,
         psychologyPercent: t.psychology?.psychologyPercent ?? null,
         adherencePercent: t.adherencePercent,
@@ -86,7 +101,7 @@ export async function getStrategyPerformance(userId: string, strategyId: string)
           strategyId: true,
           tradeDate: true,
           adherencePercent: true,
-          asset: { select: { symbol: true } },
+          assetSymbol: true,
           psychology: { select: { psychologyPercent: true } },
         },
       },
@@ -104,7 +119,7 @@ export async function getStrategyPerformance(userId: string, strategyId: string)
     if (t.strategyId === strategyId) {
       points.push({
         dateKey: utcDateToKey(t.tradeDate),
-        assetSymbol: t.asset.symbol,
+        assetSymbol: t.assetSymbol,
         actualRR: contributionPercent,
         psychologyPercent: t.psychology?.psychologyPercent ?? null,
         adherencePercent: t.adherencePercent,
@@ -118,26 +133,22 @@ export async function getStrategyPerformance(userId: string, strategyId: string)
 export async function getAnalyticsData(userId: string, from: string, to: string) {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
 
-  const [allPerformanceAllocations, executionItemCount] = await Promise.all([
-    prisma.tradeAccountAllocation.findMany({
-      where: { tradingAccountId: performanceAccount.id, trade: { deletedAt: null } },
-      include: {
-        trade: {
-          include: {
-            asset: true,
-            session: true,
-            checklistSelections: { include: { checklistItem: true } },
-            psychology: true,
-            allocations: { include: { tradingAccount: true } },
+  const allPerformanceAllocations = await prisma.tradeAccountAllocation.findMany({
+    where: { tradingAccountId: performanceAccount.id, trade: { deletedAt: null } },
+    include: {
+      trade: {
+        include: {
+          psychology: true,
+          allocations: { include: { tradingAccount: true } },
+          // The strategy's live benchmark (proven edge) + risk budget → Discrepancy Gap.
+          strategy: {
+            select: { tradeManagement: { select: { expectedExpectancy: true, maxRiskPercent: true } } },
           },
         },
       },
-      orderBy: [{ trade: { tradeDate: "asc" } }, { trade: { executionMinutes: "asc" } }],
-    }),
-    prisma.checklistItemDefinition.count({
-      where: { userId, type: "EXECUTION_CONFIRMATION" },
-    }),
-  ]);
+    },
+    orderBy: [{ trade: { tradeDate: "asc" } }, { trade: { executionMinutes: "asc" } }],
+  });
 
   const fromDate = dateKeyToUtcDate(from);
   const toDate = dateKeyToUtcDate(to);
@@ -156,17 +167,19 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
     }
   }
 
+  // SOT: rule adherence is now the strategy-execution adherence frozen on the
+  // trade (selected vs the strategy's expected execution set) — no longer derived
+  // from the removed global checklist. Null for pre-SOT trades (excluded from avgs).
   function ruleAdherenceForTrade(t: (typeof inRange)[number]["trade"]): number | null {
-    if (executionItemCount === 0) return null;
-    const checked = t.checklistSelections.filter(
-      (c) => c.checklistItem.type === "EXECUTION_CONFIRMATION",
-    ).length;
-    return (checked / executionItemCount) * 100;
+    return t.executionPercent;
   }
 
   let runningBalance = balanceBeforeRange;
   const tradeInputs: metrics.TradeMetricInput[] = [];
   const psychologyPoints: PsychologyDataPoint[] = [];
+  const adherencePoints: AdherenceTradePoint[] = [];
+  const discrepancyInputs: ExecutionTradeInput[] = [];
+  const deviationPrimaries: (Deviation | null)[] = [];
   const dailyPnlMap = new Map<string, number>();
 
   for (const alloc of inRange) {
@@ -183,11 +196,49 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       : null;
     tradeInputs.push({
       dateKey,
-      assetSymbol: t.asset.symbol,
+      assetSymbol: t.assetSymbol,
       actualRR: contributionPercent,
       strategyLabel,
     });
     dailyPnlMap.set(dateKey, (dailyPnlMap.get(dateKey) ?? 0) + pnl);
+
+    adherencePoints.push({
+      win: pnl > 0 ? true : pnl < 0 ? false : null,
+      dateKey,
+      confluences: (t.selectedConfluences as string[] | null) ?? [],
+      confluencePercent: t.confluencePercent,
+      executionPercent: t.executionPercent,
+      tradeQualityPercent: t.tradeQualityPercent,
+      setupScore: t.setupScore,
+      setupRating: t.setupRating as (typeof adherencePoints)[number]["setupRating"],
+    });
+
+    // Discrepancy Gap: expected R = strategy expectancy × execution quality vs the
+    // trade's realized R (self-reported actualRR). Execution score is the frozen
+    // composite (trade quality → setup → confluence adherence).
+    discrepancyInputs.push({
+      tradeNumber: t.tradeNumber ?? 0,
+      dateKey,
+      strategyExpectancyR: t.strategy?.tradeManagement?.expectedExpectancy ?? null,
+      executionScore: compositeExecutionScore(t),
+      actualR: t.actualRR ? t.actualRR.toNumber() : null,
+    });
+
+    // Deviation engine: WHY did actual differ from plan? (entry/exit/risk slip).
+    const { primary } = computeDeviations({
+      direction: t.direction,
+      plannedEntry: t.plannedEntry ? t.plannedEntry.toNumber() : null,
+      plannedStopLoss: t.plannedStopLoss ? t.plannedStopLoss.toNumber() : null,
+      plannedTarget: t.plannedTarget ? t.plannedTarget.toNumber() : null,
+      actualEntry: t.actualEntry ? t.actualEntry.toNumber() : null,
+      actualExit: t.actualExit ? t.actualExit.toNumber() : null,
+      actualRR: t.actualRR ? t.actualRR.toNumber() : null,
+      plannedRiskPercent: t.strategy?.tradeManagement?.maxRiskPercent
+        ? t.strategy.tradeManagement.maxRiskPercent.toNumber()
+        : null,
+      actualRiskPercent: alloc.riskInputType === "PERCENT" ? alloc.riskValue.toNumber() : null,
+    });
+    deviationPrimaries.push(primary);
 
     if (t.psychology) {
       const otherAccount = t.allocations.find((a) => a.tradingAccount.kind !== "PERFORMANCE");
@@ -195,9 +246,9 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
         dateKey,
         percent: t.psychology.psychologyPercent,
         rawScore: t.psychology.rawScore,
-        assetSymbol: t.asset.symbol,
+        assetSymbol: t.assetSymbol,
         accountName: otherAccount?.tradingAccount.name ?? "Performance Account",
-        sessionName: t.session?.name ?? null,
+        sessionName: t.selectedSession ?? null,
         actualRR: contributionPercent,
         ruleAdherencePercent: ruleAdherenceForTrade(t),
       });
@@ -221,6 +272,14 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   const winningCount = tradeInputs.filter((t) => (t.actualRR ?? 0) > 0).length;
   const losingCount = tradeInputs.filter((t) => (t.actualRR ?? 0) < 0).length;
 
+  // Discrepancy Gap — Expected vs Actual equity, via the central Execution Engine.
+  const discrepancy = {
+    curve: buildDiscrepancyCurve(discrepancyInputs),
+    summary: summarizeDiscrepancy(discrepancyInputs),
+    // Behavioural causes of the gap (Psychology Lab): per-cause occurrences + R-cost.
+    causes: aggregateDeviationCauses(deviationPrimaries),
+  };
+
   return {
     trading: {
       totalTrades: tradeInputs.length,
@@ -242,7 +301,12 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       statsByStrategy: metrics.statsByStrategy(tradeInputs),
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
+      discrepancy,
       dailyPercents,
+      // SOT strategy-adherence analytics (foundation): average confluence / execution /
+      // trade-quality adherence, avg confluence count on winners vs losers, and a
+      // per-confluence win-rate leaderboard. Built from each trade's frozen scores.
+      adherence: summarizeAdherence(adherencePoints),
     },
     psychology: {
       averagePercent: psychAnalytics.averagePsychologyPercent(psychologyPoints),

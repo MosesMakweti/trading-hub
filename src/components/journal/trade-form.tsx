@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
@@ -20,7 +20,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TradeAccountRow } from "@/components/journal/trade-account-row";
-import { TagToggleGroup } from "@/components/journal/tag-toggle-group";
+import { StrategyTagSelect } from "@/components/journal/strategy-tag-select";
+import { AdherenceMeter } from "@/components/journal/adherence-score";
+import { SetupScoreCard } from "@/components/journal/setup-score-card";
+import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
+import { scoreSetup } from "@/domain/trades/setup-score";
 import { PsychologyQuestionnaire } from "@/components/journal/psychology-questionnaire";
 import { StrategyReferencePanel } from "@/components/journal/strategy-reference-panel";
 import { minutesToTimeString, timeStringToMinutes } from "@/lib/date";
@@ -29,16 +33,23 @@ import { createTrade, updateTrade, loadStrategyReference } from "@/actions/trade
 import type { StrategyReferenceDTO } from "@/types/strategies";
 
 const NO_SESSION = "__none__";
-const NO_STRATEGY = "__none__";
+const NO_ENTRY_MODEL = "__no_entry_model__";
+
+// Keep a currently-selected value visible even if the strategy's list changed
+// since the trade was saved (e.g. an asset later removed from the strategy).
+function withSelected(list: string[] | undefined, current: string | null | undefined): string[] {
+  const base = list ?? [];
+  return current && !base.includes(current) ? [current, ...base] : base;
+}
 
 const emptyDefaults: TradeFormValues = {
-  assetId: "",
+  strategyId: "",
+  assetSymbol: "",
   executionMinutes: 570,
   direction: "LONG",
   higherTimeframeBias: "BULLISH",
   biasConfidencePercent: 50,
-  sessionId: null,
-  strategyId: null,
+  selectedSession: null,
   expectedRR: 2,
   actualRR: null,
   performanceClosingPnlGross: 0,
@@ -52,8 +63,9 @@ const emptyDefaults: TradeFormValues = {
   psychLessonsLearned: null,
   psychWhatToWorkOn: null,
   allocations: [],
-  checklistItemIds: [],
-  entryModelIds: [],
+  selectedConfluences: [],
+  selectedExecution: [],
+  selectedEntryModel: null,
   psychologyAnswers: {},
 };
 
@@ -62,11 +74,6 @@ interface TradeFormProps {
   mode: "create" | "edit";
   tradeId?: string;
   accounts: { id: string; name: string; kind: string }[];
-  assets: { id: string; symbol: string; label: string | null }[];
-  sessions: { id: string; name: string }[];
-  entryModels: { id: string; name: string }[];
-  confluenceItems: { id: string; label: string }[];
-  executionItems: { id: string; label: string }[];
   strategies: { id: string; name: string; version: number; archived?: boolean }[];
   defaultValues?: TradeFormValues;
 }
@@ -76,11 +83,6 @@ export function TradeForm({
   mode,
   tradeId,
   accounts,
-  assets,
-  sessions,
-  entryModels,
-  confluenceItems,
-  executionItems,
   strategies,
   defaultValues,
 }: TradeFormProps) {
@@ -91,6 +93,7 @@ export function TradeForm({
     register,
     handleSubmit,
     control,
+    setValue,
     formState: { errors },
   } = useForm<TradeFormValues, unknown, TradeInput>({
     resolver: zodResolver(tradeSchema),
@@ -104,6 +107,27 @@ export function TradeForm({
   const selectedStrategyId = useWatch({ control, name: "strategyId" });
   const [strategyReference, setStrategyReference] = useState<StrategyReferenceDTO | null>(null);
   const [referenceLoading, setReferenceLoading] = useState(false);
+
+  // Live strategy-adherence preview — recomputed with the pure scorer as the
+  // trader multi-selects, mirroring exactly what the save layer will persist.
+  const watchedConfluences = useWatch({ control, name: "selectedConfluences" });
+  const watchedExecution = useWatch({ control, name: "selectedExecution" });
+  const liveScores = scoreStrategyAdherence(
+    strategyReference
+      ? { confluences: strategyReference.confluences, execution: strategyReference.execution }
+      : null,
+    watchedConfluences ?? [],
+    watchedExecution ?? [],
+  );
+  // Live weighted setup score + mandatory validity, mirroring the save layer.
+  const liveSetup = scoreSetup(
+    (strategyReference?.confluences ?? []).map((c) => ({
+      name: c.name,
+      weight: c.weight,
+      mandatory: c.mandatory,
+    })),
+    watchedConfluences ?? [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -125,6 +149,18 @@ export function TradeForm({
       active = false;
     };
   }, [selectedStrategyId]);
+
+  // When the strategy changes, clear the entry model — a model belongs to exactly
+  // one strategy, so the previous selection can't carry over. Skip the very first
+  // run so an edit-mode trade keeps its saved entry model on load.
+  const strategyInitialised = useRef(false);
+  useEffect(() => {
+    if (!strategyInitialised.current) {
+      strategyInitialised.current = true;
+      return;
+    }
+    setValue("selectedEntryModel", null);
+  }, [selectedStrategyId, setValue]);
 
   function isAccountSelected(accountId: string) {
     return fields.some((f) => f.tradingAccountId === accountId);
@@ -167,32 +203,72 @@ export function TradeForm({
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
       <section className="glass space-y-4 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Trade Basics</h2>
+
+        {/* Strategy is the gateway: its markets, sessions, confluences & execution
+            load the fields below. A trade is always taken under a strategy (SOT). */}
+        <div className="space-y-1.5">
+          <Label className="text-xs">Strategy</Label>
+          <Controller
+            control={control}
+            name="strategyId"
+            render={({ field }) => (
+              <Select
+                items={strategies.map((s) => ({ value: s.id, label: s.name }))}
+                value={field.value}
+                onValueChange={field.onChange}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a strategy" />
+                </SelectTrigger>
+                <SelectContent>
+                  {strategies.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name} · v{s.version}
+                      {s.archived ? " (archived)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+          {errors.strategyId && <p className="text-xs text-danger">{errors.strategyId.message}</p>}
+          <p className="text-xs text-muted-foreground">
+            Its markets, sessions, confluences &amp; execution load below — and its name &amp;
+            version are snapshotted at save time so the record stays accurate later.
+          </p>
+        </div>
+
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="col-span-2 space-y-1.5 sm:col-span-1">
             <Label className="text-xs">Asset</Label>
             <Controller
               control={control}
-              name="assetId"
-              render={({ field }) => (
-                <Select
-                  items={assets.map((a) => ({ value: a.id, label: a.symbol }))}
-                  value={field.value}
-                  onValueChange={field.onChange}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select asset" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assets.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.symbol}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
+              name="assetSymbol"
+              render={({ field }) => {
+                const opts = withSelected(strategyReference?.applicableAssets, field.value);
+                return (
+                  <Select
+                    items={opts.map((s) => ({ value: s, label: s }))}
+                    value={field.value}
+                    onValueChange={field.onChange}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue
+                        placeholder={selectedStrategyId ? "Select asset" : "Select a strategy first"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {opts.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                );
+              }}
             />
-            {errors.assetId && <p className="text-xs text-danger">{errors.assetId.message}</p>}
+            {errors.assetSymbol && <p className="text-xs text-danger">{errors.assetSymbol.message}</p>}
           </div>
 
           <div className="space-y-1.5">
@@ -238,29 +314,35 @@ export function TradeForm({
             <Label className="text-xs">Session</Label>
             <Controller
               control={control}
-              name="sessionId"
-              render={({ field }) => (
-                <Select
-                  items={[
-                    { value: NO_SESSION, label: "None" },
-                    ...sessions.map((s) => ({ value: s.id, label: s.name })),
-                  ]}
-                  value={field.value ?? NO_SESSION}
-                  onValueChange={(v) => field.onChange(v === NO_SESSION ? null : v)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_SESSION}>None</SelectItem>
-                    {sessions.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
+              name="selectedSession"
+              render={({ field }) => {
+                const names = withSelected(
+                  strategyReference?.sessions.map((s) => s.name),
+                  field.value,
+                );
+                return (
+                  <Select
+                    items={[
+                      { value: NO_SESSION, label: "None" },
+                      ...names.map((n) => ({ value: n, label: n })),
+                    ]}
+                    value={field.value ?? NO_SESSION}
+                    onValueChange={(v) => field.onChange(v === NO_SESSION ? null : v)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_SESSION}>None</SelectItem>
+                      {names.map((n) => (
+                        <SelectItem key={n} value={n}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                );
+              }}
             />
           </div>
 
@@ -291,44 +373,6 @@ export function TradeForm({
             <Label className="text-xs">Bias confidence %</Label>
             <Input type="number" min={0} max={100} {...register("biasConfidencePercent")} />
           </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">Strategy</Label>
-          <Controller
-            control={control}
-            name="strategyId"
-            render={({ field }) => (
-              <Select
-                items={[
-                  { value: NO_STRATEGY, label: "None" },
-                  ...strategies.map((s) => ({
-                    value: s.id,
-                    label: `${s.name} · v${s.version}${s.archived ? " (archived)" : ""}`,
-                  })),
-                ]}
-                value={field.value ?? NO_STRATEGY}
-                onValueChange={(v) => field.onChange(v === NO_STRATEGY ? null : v)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="No strategy" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_STRATEGY}>None</SelectItem>
-                  {strategies.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name} · v{s.version}
-                      {s.archived ? " (archived)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          />
-          <p className="text-xs text-muted-foreground">
-            Links this trade to a Strategy Lab strategy and snapshots its name &amp; version at
-            save time, so the record stays accurate even if the strategy changes later.
-          </p>
         </div>
 
         {(referenceLoading || strategyReference) && (
@@ -419,33 +463,112 @@ export function TradeForm({
 
       <section className="glass space-y-2 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Entry Model</h2>
-        <TagToggleGroup
+        <Controller
           control={control}
-          name="entryModelIds"
-          items={entryModels.map((m) => ({ id: m.id, label: m.name }))}
-          emptyLabel="No entry models configured yet — add them in Strategy Lab > Entry models."
+          name="selectedEntryModel"
+          render={({ field }) => {
+            if (!selectedStrategyId) {
+              return (
+                <p className="text-sm text-muted-foreground">
+                  Select a strategy to load its entry models.
+                </p>
+              );
+            }
+            const names = withSelected(strategyReference?.entryModels, field.value);
+            if (names.length === 0) {
+              return (
+                <p className="text-sm text-muted-foreground">
+                  This strategy has no entry models yet — add them in Strategy Lab, inside the
+                  strategy&apos;s Entry Models section.
+                </p>
+              );
+            }
+            return (
+              <Select
+                items={[
+                  { value: NO_ENTRY_MODEL, label: "None" },
+                  ...names.map((n) => ({ value: n, label: n })),
+                ]}
+                value={field.value ?? NO_ENTRY_MODEL}
+                onValueChange={(v) => field.onChange(v === NO_ENTRY_MODEL ? null : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select an entry model" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_ENTRY_MODEL}>None</SelectItem>
+                  {names.map((n) => (
+                    <SelectItem key={n} value={n}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            );
+          }}
         />
       </section>
 
       <section className="glass space-y-2 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Confluences</h2>
-        <TagToggleGroup
+        <StrategyTagSelect
           control={control}
-          name="checklistItemIds"
-          items={confluenceItems}
-          emptyLabel="No confluences configured yet — add them in Settings > Trade Setup."
+          name="selectedConfluences"
+          options={strategyReference?.confluences ?? []}
+          emptyLabel={
+            selectedStrategyId
+              ? "This strategy has no confluences yet — add them in Strategy Lab > Confluences."
+              : "Select a strategy to load its confluences."
+          }
         />
       </section>
 
+      {selectedStrategyId && (
+        <section className="glass space-y-2 rounded-2xl p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-muted-foreground">Setup Quality</h2>
+            <span className="text-xs text-muted-foreground/60">
+              Weighted probability from your confluences — a discipline score, not a prediction
+            </span>
+          </div>
+          <SetupScoreCard
+            score={liveSetup.setupScore}
+            rating={liveSetup.setupRating}
+            valid={liveSetup.setupValid}
+            missingMandatory={liveSetup.missingMandatory}
+          />
+        </section>
+      )}
+
       <section className="glass space-y-2 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Execution Confirmation</h2>
-        <TagToggleGroup
+        <StrategyTagSelect
           control={control}
-          name="checklistItemIds"
-          items={executionItems}
-          emptyLabel="No execution-confirmation items configured yet — add them in Settings > Trade Setup."
+          name="selectedExecution"
+          options={strategyReference?.execution ?? []}
+          emptyLabel={
+            selectedStrategyId
+              ? "This strategy has no execution confirmations yet — add them in Strategy Lab > Execution."
+              : "Select a strategy to load its execution confirmations."
+          }
         />
       </section>
+
+      {liveScores.tradeQualityPercent != null && (
+        <section className="glass space-y-3 rounded-2xl p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-muted-foreground">Strategy adherence</h2>
+            <span className="text-xs text-muted-foreground/60">
+              How closely this trade follows the strategy — not a prediction
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <AdherenceMeter label="Confluences" percent={liveScores.confluencePercent} />
+            <AdherenceMeter label="Execution" percent={liveScores.executionPercent} />
+            <AdherenceMeter label="Trade quality" percent={liveScores.tradeQualityPercent} />
+          </div>
+        </section>
+      )}
 
       <section className="glass space-y-3 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Trade Result</h2>

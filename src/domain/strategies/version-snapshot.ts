@@ -18,6 +18,8 @@ export function summarizeStrategyVersionSnapshot(
     0,
   );
 
+  const confluences = snapshot.confluences ?? [];
+
   return {
     applicableAssets: snapshot.applicableAssets ?? [],
     arsenalCount: snapshot.arsenalConcepts?.length ?? 0,
@@ -27,5 +29,9 @@ export function summarizeStrategyVersionSnapshot(
     entryModelNames: (snapshot.entryModels ?? []).map((m) => m.name),
     customRuleCount: snapshot.tradeManagement?.customRules?.length ?? 0,
     partialTpCount: snapshot.tradeManagement?.partialTakeProfits?.length ?? 0,
+    sessionCount: snapshot.sessions?.length ?? 0,
+    confluenceCount: confluences.length,
+    mandatoryConfluenceCount: confluences.filter((c) => c.mandatory).length,
+    executionCount: snapshot.execution?.length ?? 0,
   };
 }

@@ -20,16 +20,6 @@ export const assetSchema = z.object({
     .transform((v) => (v ? v : undefined)),
 });
 
-export const entryModelSchema = z.object({
-  name: z.string().trim().min(1, "Name is required.").max(80),
-  description: z
-    .string()
-    .trim()
-    .max(500)
-    .optional()
-    .transform((v) => (v ? v : undefined)),
-});
-
 export const tradingSessionSchema = z.object({
   name: z.string().trim().min(1, "Name is required.").max(60),
   startMinutes: z.coerce.number().int().min(0).max(1439),
@@ -54,7 +44,6 @@ export const reorderSchema = z.object({
 });
 
 export type AssetInput = z.infer<typeof assetSchema>;
-export type EntryModelInput = z.infer<typeof entryModelSchema>;
 export type TradingSessionInput = z.infer<typeof tradingSessionSchema>;
 export type ChecklistItemInput = z.infer<typeof checklistItemSchema>;
 export type ReorderInput = z.infer<typeof reorderSchema>;

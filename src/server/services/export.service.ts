@@ -8,11 +8,7 @@ export async function listTradeExportRecords(
   const trades = await prisma.trade.findMany({
     where: { userId },
     include: {
-      asset: true,
-      session: true,
       allocations: { include: { tradingAccount: true } },
-      checklistSelections: { include: { checklistItem: true } },
-      entryModels: { include: { entryModel: true } },
       psychology: true,
     },
     orderBy: [{ tradeDate: "asc" }, { executionMinutes: "asc" }],
@@ -28,7 +24,7 @@ export async function listTradeExportRecords(
 
     const record: TradeExportRecord = {
       dateKey: utcDateToKey(t.tradeDate),
-      assetSymbol: t.asset.symbol,
+      assetSymbol: t.assetSymbol,
       executionMinutes: t.executionMinutes,
       direction: t.direction,
       higherTimeframeBias: t.higherTimeframeBias,
@@ -50,19 +46,18 @@ export async function listTradeExportRecords(
       psychLessonsLearned: t.psychLessonsLearned,
       psychWhatToWorkOn: t.psychWhatToWorkOn,
       psychologyAnswers: (t.psychology?.answers as Record<string, string | number>) ?? {},
-      sessionName: t.session?.name ?? null,
+      sessionName: t.selectedSession ?? null,
       allocations: otherAllocations.map((a) => ({
         accountName: a.tradingAccount.name,
         riskInputType: a.riskInputType,
         riskValue: a.riskValue.toNumber(),
       })),
-      confluenceLabels: t.checklistSelections
-        .filter((c) => c.checklistItem.type === "CONFLUENCE")
-        .map((c) => c.checklistItem.label),
-      executionLabels: t.checklistSelections
-        .filter((c) => c.checklistItem.type === "EXECUTION_CONFIRMATION")
-        .map((c) => c.checklistItem.label),
-      entryModelNames: t.entryModels.map((m) => m.entryModel.name),
+      // SOT: the by-name selections frozen on the trade (pre-SOT trades backfilled in P9).
+      confluenceLabels: (t.selectedConfluences as string[] | null) ?? [],
+      executionLabels: (t.selectedExecution as string[] | null) ?? [],
+      // Kept as an array in the export format for backward compatibility; a trade
+      // now has a single strategy-scoped entry model, so it is [] or one name.
+      entryModelNames: t.selectedEntryModel ? [t.selectedEntryModel] : [],
     };
 
     return { record, psychologyGrade: t.psychology?.grade ?? null };
