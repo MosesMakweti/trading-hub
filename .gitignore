@@ -43,3 +43,8 @@ next-env.d.ts
 
 # Local media storage (universal image system)
 /uploads/
+
+# Installed agent skills (npx skills)
+/.agents/
+/.claude/skills/
+/skills-lock.json
