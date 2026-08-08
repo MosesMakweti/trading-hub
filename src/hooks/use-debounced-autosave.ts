@@ -35,6 +35,12 @@ export function useDebouncedAutosave<T>({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [, startTransition] = useTransition();
 
+  // Latest value/snapshot/save, so the unmount flush uses current data.
+  const latest = useRef({ value, snapshot, save });
+  useEffect(() => {
+    latest.current = { value, snapshot, save };
+  });
+
   useEffect(() => {
     // The effect re-runs whenever `snapshot` changes, so its closure always
     // holds the `value` that produced the current snapshot — no ref needed.
@@ -58,6 +64,19 @@ export function useDebouncedAutosave<T>({
     // Intentionally keyed only on the serialized snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot]);
+
+  // Flush a still-pending edit on unmount — e.g. switching the focused trade
+  // before the debounce fires (which remounts this field). The save is scoped to
+  // this field's own tradeId via its closure, so it can't leak into another trade.
+  useEffect(() => {
+    return () => {
+      const { value: v, snapshot: s, save: sv } = latest.current;
+      if (s !== lastSaved.current) {
+        lastSaved.current = s;
+        void sv(v);
+      }
+    };
+  }, []);
 
   return saveState;
 }

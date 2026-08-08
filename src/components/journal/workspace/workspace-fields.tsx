@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Check, Loader2 } from "lucide-react";
 
@@ -45,11 +46,21 @@ function useFieldSave(
   field: keyof TradeWorkspaceSectionInput,
   value: string,
 ) {
+  const router = useRouter();
   return useDebouncedAutosave({
     value,
     serialize: (v) => v.trim(),
-    save: async (v) =>
-      updateTradeSection(dateKey, tradeId, { [field]: v.trim() } as TradeWorkspaceSectionInput),
+    save: async (v) => {
+      const result = await updateTradeSection(dateKey, tradeId, {
+        [field]: v.trim(),
+      } as TradeWorkspaceSectionInput);
+      // Refresh so the server-provided trade data reflects the save — the Today
+      // view re-seeds a trade's fields from props when you switch back to it, and
+      // this keeps that seed current. The focused field isn't remounted (its key
+      // is stable), so typing is never interrupted.
+      if (result.success) router.refresh();
+      return result;
+    },
     onError: (m) => {
       if (m) toast.error(m);
     },
@@ -153,6 +164,7 @@ export function WorkspaceDecisionField({
   className?: string;
 }) {
   const editable = useWorkspaceEditable();
+  const router = useRouter();
   const [value, setValue] = useState<boolean | null>(initialValue);
   const [saving, setSaving] = useState<SaveState>("idle");
 
@@ -163,6 +175,7 @@ export function WorkspaceDecisionField({
     const result = await updateTradeSection(dateKey, tradeId, { wouldTakeAgain: next });
     if (result.success) {
       setSaving("saved");
+      router.refresh();
     } else {
       setSaving("error");
       toast.error(result.error);
