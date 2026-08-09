@@ -5,6 +5,16 @@ import { buildEquityCurve, dailyPercentsFromBalanceHistory } from "@/domain/perf
 import * as metrics from "@/domain/performance/metrics";
 import { maxDrawdown, pnlStats, recoveryFactor } from "@/domain/performance/pnl-stats";
 import {
+  dayOfWeekPerformance,
+  hourPerformance,
+  longShortPerformance,
+  monthlyPerformance,
+  rMultipleDistribution,
+  riskStats,
+  sessionPerformance,
+  type AnalyticsTradePoint,
+} from "@/domain/performance/breakdowns";
+import {
   summarizeAdherence,
   type AdherenceTradePoint,
 } from "@/domain/performance/adherence-analytics";
@@ -186,6 +196,9 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   // drawdown (Analytics module). Same allocations as everything else — no new query.
   const tradePnls: number[] = [];
   const balanceSeries: number[] = [balanceBeforeRange];
+  // Per-trade points for the Phase B breakdowns (day-of-week / month / direction /
+  // session / hour / risk) — built from the same rows, not a second data source.
+  const analyticsPoints: AnalyticsTradePoint[] = [];
 
   for (const alloc of inRange) {
     const t = alloc.trade;
@@ -195,6 +208,17 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
     runningBalance += pnl;
     tradePnls.push(pnl);
     balanceSeries.push(runningBalance);
+    analyticsPoints.push({
+      dateKey,
+      monthKey: dateKey.slice(0, 7),
+      weekday: t.tradeDate.getUTCDay(),
+      hour: Math.floor(t.executionMinutes / 60),
+      pnl,
+      actualR: contributionPercent,
+      direction: t.direction,
+      session: t.selectedSession ?? null,
+      riskPercent: alloc.riskInputType === "PERCENT" ? alloc.riskValue.toNumber() : null,
+    });
 
     const strategyLabel = t.strategyNameSnapshot
       ? t.strategyVersionSnapshot != null
@@ -283,6 +307,17 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   const dollars = pnlStats(tradePnls);
   const drawdown = maxDrawdown(balanceSeries);
 
+  // Phase B breakdowns (all from analyticsPoints — no extra query).
+  const breakdowns = {
+    dayOfWeek: dayOfWeekPerformance(analyticsPoints),
+    monthly: monthlyPerformance(analyticsPoints),
+    longShort: longShortPerformance(analyticsPoints),
+    sessions: sessionPerformance(analyticsPoints),
+    hours: hourPerformance(analyticsPoints),
+    rDistribution: rMultipleDistribution(analyticsPoints),
+    risk: riskStats(analyticsPoints.map((p) => p.riskPercent ?? NaN)),
+  };
+
   // Discrepancy Gap — Expected vs Actual equity, via the central Execution Engine.
   const discrepancy = {
     curve: buildDiscrepancyCurve(discrepancyInputs),
@@ -325,6 +360,7 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
       discrepancy,
+      breakdowns,
       dailyPercents,
       // SOT strategy-adherence analytics (foundation): average confluence / execution /
       // trade-quality adherence, avg confluence count on winners vs losers, and a

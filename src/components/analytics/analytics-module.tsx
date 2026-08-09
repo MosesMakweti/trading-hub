@@ -6,6 +6,7 @@ import { KpiCard } from "@/components/analytics/kpi-card";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
 import { DiscrepancyAnalytics } from "@/components/analytics/discrepancy-analytics";
 import { AdherenceAnalytics } from "@/components/analytics/adherence-analytics";
+import { AnalyticsBreakdowns } from "@/components/analytics/analytics-breakdowns";
 import { PsychologyAnalytics } from "@/components/analytics/psychology-analytics";
 import { BestAssetTable } from "@/components/analytics/best-asset-table";
 import { Heatmap, pnlHeatColor } from "@/components/analytics/heatmap";
@@ -273,6 +274,9 @@ export function AnalyticsModule({
 
           {/* Strategy Adherence + Confluences (self-titled) */}
           <AdherenceAnalytics data={d.adherence} />
+
+          {/* Phase B: day-of-week, monthly, risk, and distribution breakdowns */}
+          <AnalyticsBreakdowns trading={d} />
 
           {/* Behavioral analytics (self-titled inside) */}
           <section className="space-y-3">
