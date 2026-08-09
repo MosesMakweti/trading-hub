@@ -439,6 +439,9 @@ model TradeOpportunity {
 
   // Validation — reuses the SAME setup-score model as Trade (domain/trades/setup-score).
   // setupValid is the "is this a real opportunity" gate; only valid ones affect the gap.
+  // strategyExecutionSnapshot freezes the strategy's EXPECTED sessions/confluences/
+  // execution (mirrors Trade) so chips resolve colors + the record survives edits.
+  strategyExecutionSnapshot Json?
   selectedConfluences Json? // present confluences at spot time
   selectedExecution   Json? // present execution confirmations
   missingConfluences  Json? // expected-but-absent (drives the Invalid Setup state)
