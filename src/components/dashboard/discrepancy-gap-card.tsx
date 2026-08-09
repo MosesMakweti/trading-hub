@@ -59,7 +59,7 @@ function Metric({
       : tone === "danger"
         ? "text-danger"
         : tone === "warning"
-          ? "text-amber-600 dark:text-amber-400"
+          ? "text-warning"
           : "text-foreground";
   return (
     <div className="rounded-xl border border-border bg-background/40 p-2.5">

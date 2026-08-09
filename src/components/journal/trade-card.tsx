@@ -157,7 +157,7 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
           ))}
           <TradeQualityBadge percent={trade.tradeQualityPercent} />
           {trade.setupValid === false ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-xs font-medium text-rose-600 dark:text-rose-400">
+            <span className="inline-flex items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
               Invalid setup
             </span>
           ) : (
@@ -188,9 +188,7 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
             <span
               className={cn(
                 "font-medium tabular-nums",
-                trade.discrepancy.gapR > 0
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-success",
+                trade.discrepancy.gapR > 0 ? "text-warning" : "text-success",
               )}
             >
               Gap {trade.discrepancy.gapR >= 0 ? "+" : ""}
@@ -208,7 +206,7 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
             </span>
           )}
           {trade.discrepancy.primaryDeviation && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300">
+            <span className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 font-medium text-warning">
               {trade.discrepancy.primaryDeviation.label}
               <span className="tabular-nums opacity-70">
                 −{fmtR(trade.discrepancy.primaryDeviation.costR)}

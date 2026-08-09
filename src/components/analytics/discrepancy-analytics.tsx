@@ -109,18 +109,21 @@ export function DiscrepancyAnalytics({
               </thead>
               <tbody>
                 {causes.map((c) => (
-                  <tr key={c.cause} className="border-t border-border/60">
+                  <tr
+                    key={c.cause}
+                    className="border-t border-border/60 transition-colors hover:bg-accent/50"
+                  >
                     <td className="py-1.5">
                       <span className="inline-flex items-center gap-1.5">
-                        <span className="size-1.5 rounded-full bg-amber-500" />
+                        <span className="size-1.5 rounded-full bg-warning" />
                         {c.label}
                       </span>
                     </td>
                     <td className="py-1.5 text-right tabular-nums">{c.occurrences}</td>
-                    <td className="py-1.5 text-right tabular-nums text-amber-600 dark:text-amber-400">
+                    <td className="py-1.5 text-right tabular-nums text-warning">
                       −{c.avgCostR.toFixed(2)}R
                     </td>
-                    <td className="py-1.5 text-right font-medium tabular-nums text-amber-600 dark:text-amber-400">
+                    <td className="py-1.5 text-right font-medium tabular-nums text-warning">
                       −{c.totalCostR.toFixed(2)}R
                     </td>
                   </tr>
@@ -160,7 +163,7 @@ function Stat({
       : tone === "danger"
         ? "text-danger"
         : tone === "warning"
-          ? "text-amber-600 dark:text-amber-400"
+          ? "text-warning"
           : "text-foreground";
   return (
     <div className="flex items-center justify-between gap-2">
