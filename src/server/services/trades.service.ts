@@ -497,9 +497,25 @@ export async function updateTradeSections(
 }
 
 export async function archiveTrade(userId: string, tradeId: string) {
-  return prisma.trade.update({
-    where: { id: tradeId, userId },
-    data: { deletedAt: new Date() },
+  return prisma.$transaction(async (tx) => {
+    // If this trade resolved an opportunity, deleting the execution un-resolves it:
+    // unlink and return the opportunity to PENDING so it stays consistent (nested
+    // includes aren't soft-delete filtered, and analytics must not count a ghost
+    // trade as an executed opportunity). The opportunity can then be re-resolved.
+    const trade = await tx.trade.findFirst({
+      where: { id: tradeId, userId },
+      select: { opportunityId: true },
+    });
+    if (trade?.opportunityId) {
+      await tx.tradeOpportunity.updateMany({
+        where: { id: trade.opportunityId, userId },
+        data: { status: "PENDING" },
+      });
+    }
+    return tx.trade.update({
+      where: { id: tradeId, userId },
+      data: { deletedAt: new Date(), opportunityId: null },
+    });
   });
 }
 
