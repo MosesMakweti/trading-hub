@@ -10,11 +10,13 @@ export const routineItemSchema = z.object({
   sectionId: z.string().min(1),
   label: z.string().trim().min(1, "Label is required.").max(160),
   type: routineItemTypeSchema,
+  isMandatory: z.boolean().default(false),
 });
 
 export const routineItemUpdateSchema = z.object({
   label: z.string().trim().min(1, "Label is required.").max(160),
   type: routineItemTypeSchema,
+  isMandatory: z.boolean().default(false),
 });
 
 export const routineReorderSchema = z.object({

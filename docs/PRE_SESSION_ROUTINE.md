@@ -248,6 +248,27 @@ relocate the Entry Models *editor* from Settings to **Strategy Lab**.
 immutable); workflow relabeled; Entry Models under Strategy Lab. Env note: `.env` `DATABASE_URL` host
 is now `127.0.0.1` (was `localhost`, which resolved to a broken IPv6 forward).
 
+### Feature — Mandatory routine items gate Today's Plan ✅
+Routine items can be marked **mandatory**; Today's Plan (and the rest of the workflow) stays locked
+until every mandatory item is complete. Optional items never block.
+- **Schema** `RoutineItem.isMandatory Boolean @default(false)` (migration `20260810120000_routine_mandatory`);
+  carried into the per-day snapshot (`RoutineSnapshotItem.isMandatory?`, optional so pre-existing
+  archived snapshots read as non-mandatory).
+- **Domain** `routine-snapshot.ts` — `mandatoryProgress` / `optionalProgress` / **`allMandatoryComplete`**
+  (true when no mandatory items; a legacy item with no flag counts as optional). 5 new unit tests.
+- **Server gate (§8)** `setRoutineReady` now throws `RoutineGateError` unless `allMandatoryComplete` —
+  the enforcement point. Because the whole downstream workflow is gated on `routineReadyAt`, the
+  requirement can't be bypassed by navigation/refresh/URL. The action surfaces the error.
+- **Settings** editor gains a "Required" toggle per item (add + edit) + a REQUIRED badge; validation +
+  service persist `isMandatory`.
+- **Today** shows REQUIRED badges, a Mandatory X/Y + Optional A/B breakdown, and the gate button
+  ("Continue to Today's Plan") is disabled with "N mandatory items remaining" until complete, then
+  "Pre-session routine complete". The workspace tab-lock uses **effective** readiness
+  (`readyAt != null && allMandatoryComplete`), so a required item added mid-day re-locks the day.
+- Persistence / daily reset / template-edit behavior are unchanged (existing per-day snapshot +
+  single-source-of-truth model already satisfy §5/§6/§7). Verified: tsc + eslint clean, 256 tests,
+  production build green.
+
 ### Fix — single source of truth (template drives the live day)
 **Problem:** decision 4 froze the per-day snapshot on *first open*, so editing the routine in Settings
 never reached the current Today (the snapshot was an independent stale copy), and the save actions only

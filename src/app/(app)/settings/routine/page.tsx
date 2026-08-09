@@ -16,7 +16,12 @@ export default async function RoutineSettingsPage() {
     id: s.id,
     title: s.title,
     collapsed: s.collapsed,
-    items: s.items.map((i) => ({ id: i.id, label: i.label, type: i.type })),
+    items: s.items.map((i) => ({
+      id: i.id,
+      label: i.label,
+      type: i.type,
+      isMandatory: i.isMandatory,
+    })),
   }));
 
   return (

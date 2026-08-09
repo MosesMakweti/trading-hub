@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -45,6 +46,7 @@ export interface RoutineItemDTO {
   id: string;
   label: string;
   type: RoutineItemTypeValue;
+  isMandatory: boolean;
 }
 export interface RoutineSectionDTO {
   id: string;
@@ -339,6 +341,7 @@ function ItemRow({
   const [editing, setEditing] = useState(false);
   const [labelDraft, setLabelDraft] = useState(item.label);
   const [typeDraft, setTypeDraft] = useState<RoutineItemTypeValue>(item.type);
+  const [mandatoryDraft, setMandatoryDraft] = useState(item.isMandatory);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const TypeIcon = ROUTINE_TYPE_META[item.type].icon;
@@ -347,7 +350,11 @@ function ItemRow({
     const label = labelDraft.trim();
     if (!label) return;
     startTransition(async () => {
-      const result = await updateRoutineItem(item.id, { label, type: typeDraft });
+      const result = await updateRoutineItem(item.id, {
+        label,
+        type: typeDraft,
+        isMandatory: mandatoryDraft,
+      });
       if (!result.success) {
         toast.error(result.error);
         return;
@@ -385,6 +392,7 @@ function ItemRow({
           className="h-7 min-w-40 flex-1 text-sm"
         />
         <TypePicker value={typeDraft} onChange={setTypeDraft} />
+        <MandatoryToggle checked={mandatoryDraft} onChange={setMandatoryDraft} />
         <Button type="submit" size="icon-sm" variant="ghost" aria-label="Save item" disabled={isPending}>
           <Check />
         </Button>
@@ -397,6 +405,7 @@ function ItemRow({
             setEditing(false);
             setLabelDraft(item.label);
             setTypeDraft(item.type);
+            setMandatoryDraft(item.isMandatory);
           }}
           disabled={isPending}
         >
@@ -411,6 +420,11 @@ function ItemRow({
       <div className="flex min-w-0 items-center gap-2 text-sm">
         <TypeIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span className="truncate">{item.label}</span>
+        {item.isMandatory && (
+          <span className="shrink-0 rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-warning uppercase">
+            Required
+          </span>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button
@@ -461,18 +475,20 @@ function AddItemForm({
   const [adding, setAdding] = useState(false);
   const [label, setLabel] = useState("");
   const [type, setType] = useState<RoutineItemTypeValue>("CHECKBOX");
+  const [mandatory, setMandatory] = useState(false);
 
   function add() {
     const trimmed = label.trim();
     if (!trimmed) return;
     startTransition(async () => {
-      const result = await createRoutineItem({ sectionId, label: trimmed, type });
+      const result = await createRoutineItem({ sectionId, label: trimmed, type, isMandatory: mandatory });
       if (!result.success) {
         toast.error(result.error);
         return;
       }
       setLabel("");
       setType("CHECKBOX");
+      setMandatory(false);
       router.refresh();
     });
   }
@@ -508,6 +524,7 @@ function AddItemForm({
         className="h-7 min-w-40 flex-1 text-sm"
       />
       <TypePicker value={type} onChange={setType} />
+      <MandatoryToggle checked={mandatory} onChange={setMandatory} />
       <Button type="submit" size="icon-sm" variant="ghost" aria-label="Add item" disabled={isPending}>
         <Check />
       </Button>
@@ -552,5 +569,21 @@ function TypePicker({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+/** Toggle that marks an item as required to start trading (gates Today's Plan). */
+function MandatoryToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground select-none">
+      <Checkbox checked={checked} onCheckedChange={(c) => onChange(c === true)} aria-label="Required" />
+      Required
+    </label>
   );
 }

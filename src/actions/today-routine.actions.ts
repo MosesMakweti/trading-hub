@@ -6,6 +6,7 @@ import { requireUser } from "@/server/guards";
 import { dayEditableGuard } from "@/actions/day-guard";
 import { routineResponseSchema } from "@/lib/validation/routine";
 import * as dayRoutineService from "@/server/services/today-routine.service";
+import { RoutineGateError } from "@/server/services/today-routine.service";
 
 type SimpleResult = { success: true } | { success: false; error: string };
 
@@ -37,7 +38,12 @@ export async function setRoutineReady(dateKey: string, ready: boolean): Promise<
   const blocked = await dayEditableGuard(user.id, dateKey);
   if (blocked) return blocked;
 
-  await dayRoutineService.setRoutineReady(user.id, dateKey, Boolean(ready));
+  try {
+    await dayRoutineService.setRoutineReady(user.id, dateKey, Boolean(ready));
+  } catch (e) {
+    if (e instanceof RoutineGateError) return { success: false, error: e.message };
+    throw e;
+  }
   revalidatePath("/today");
   return { success: true };
 }
