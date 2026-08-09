@@ -44,8 +44,8 @@ const SECTIONS: SectionMeta[] = [
       "Every logged trade — entries, execution, psychology, and before/after screenshots.",
     detail: (
       <>
-        <p>This permanently deletes every logged trade, including its execution details, psychology questionnaire, and before/after images.</p>
-        <p>Your equity curve, P&amp;L, win rate, discrepancy gap, and strategy adherence will reset automatically — they are calculated from these trades.</p>
+        <p>This permanently deletes every logged trade, including its execution details, psychology questionnaire, and before/after images — plus any spotted trade opportunities (executed &amp; missed).</p>
+        <p>Your equity curve, P&amp;L, win rate, discrepancy gap, edge capture, and strategy adherence will reset automatically — they are calculated from these trades.</p>
       </>
     ),
     count: (c) => c.trades,

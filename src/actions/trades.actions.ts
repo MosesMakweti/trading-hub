@@ -7,12 +7,17 @@ import { dayEditableGuard } from "@/actions/day-guard";
 import { tradeSchema, tradeWorkspaceSectionSchema } from "@/lib/validation/trades";
 import * as tradesService from "@/server/services/trades.service";
 import { getStrategyReference } from "@/server/services/strategies.service";
+import { linkExecutedTrade, OpportunityError } from "@/server/services/opportunity.service";
 import type { StrategyReferenceDTO } from "@/types/strategies";
 
 type ActionResult = { success: true; tradeId: string } | { success: false; error: string };
 type SimpleResult = { success: true } | { success: false; error: string };
 
-export async function createTrade(dateKey: string, input: unknown): Promise<ActionResult> {
+export async function createTrade(
+  dateKey: string,
+  input: unknown,
+  opportunityId?: string,
+): Promise<ActionResult> {
   const user = await requireUser();
   const blocked = await dayEditableGuard(user.id, dateKey);
   if (blocked) return blocked;
@@ -23,6 +28,20 @@ export async function createTrade(dateKey: string, input: unknown): Promise<Acti
   }
 
   const trade = await tradesService.createTrade(user.id, dateKey, parsed.data);
+
+  // If this trade was created from a spotted opportunity, resolve it to EXECUTED.
+  // A failed link (e.g. the opportunity was already resolved) must not fail the
+  // trade save — the trade is a valid record on its own.
+  if (opportunityId) {
+    try {
+      await linkExecutedTrade(user.id, opportunityId, trade.id);
+    } catch (e) {
+      if (!(e instanceof OpportunityError)) throw e;
+    }
+    revalidatePath("/dashboard");
+    revalidatePath("/analytics");
+  }
+
   revalidatePath(`/journal/${dateKey}`);
   revalidatePath("/journal");
   return { success: true, tradeId: trade.id };

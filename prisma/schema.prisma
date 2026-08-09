@@ -29,6 +29,7 @@ model User {
   tradingDays     TradingDay[]
   weeklyReviews   WeeklyReview[]
   trades          Trade[]
+  opportunities   TradeOpportunity[]
   strategies      Strategy[]
   routineSections RoutineSection[]
   routineItems    RoutineItem[]
@@ -348,6 +349,13 @@ model Trade {
   setupValid                Boolean?
   missingConfluences        Json?
 
+  // Trade Opportunity architecture: the valid setup this executed trade came from
+  // (when logged via the opportunity flow). Optional — trades logged directly have
+  // no opportunity. @unique enforces one executed trade per opportunity (no
+  // double-counting). SetNull so deleting the opportunity never deletes the trade.
+  opportunityId            String?          @unique
+  opportunity              TradeOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   deletedAt                DateTime?
@@ -364,6 +372,118 @@ enum TradeStatus {
   OPEN
   CLOSED
   REVIEWED
+}
+
+// ── Trade Opportunity architecture ───────────────────────────────────────────
+// A TradeOpportunity is a *valid strategy setup* that was spotted. It is the
+// single parent that resolves into exactly ONE outcome:
+//   • EXECUTED   → the trader took it (an executed Trade links back via Trade.opportunityId)
+//   • MISSED     → the trader did NOT take a valid setup (miss reason + optional outcome)
+//   • INVALIDATED→ the setup broke its own rules before triggering (not a real miss)
+//   • EXPIRED    → the window passed with no trigger (not a real miss)
+//   • PENDING    → still being monitored (no outcome yet)
+// Only EXECUTED and MISSED (of a *valid* setup) feed the Discrepancy Gap. This is
+// how "missed opportunity cost" is separated from "execution leakage" WITHOUT
+// double-counting (one opportunity → one outcome). Historical trades logged before
+// this system existed have NO opportunity — they stay pure executed trades.
+enum OpportunityStatus {
+  PENDING
+  EXECUTED
+  MISSED
+  INVALIDATED
+  EXPIRED
+}
+
+// Why a valid setup was NOT taken (MISSED only). Behavioral, feeds Psychology Lab.
+enum MissReason {
+  FEAR
+  HESITATION
+  FOMO_ELSEWHERE // was chasing / in another trade
+  DISTRACTED
+  MISSED_ALERT // wasn't watching / no alert
+  LATE_CONFIRMATION // saw it too late to enter safely
+  RISK_CONCERNS // deliberately stood aside on risk
+  TECHNICAL_ISSUE // platform / connectivity
+  RULE_UNCERTAINTY // unsure it qualified in the moment
+  INTENTIONAL_SKIP // conscious, disciplined pass (not a lapse)
+  OTHER
+}
+
+// What a MISSED valid setup would have done — TRADER-ENTERED, never auto-derived
+// (TradeOS has no price feed). UNDETERMINED = market didn't give enough info; such
+// misses are tracked for behavior but excluded from missed-opportunity R cost.
+enum MissedOutcome {
+  MISSED_WIN
+  MISSED_LOSS
+  MISSED_BREAKEVEN
+  MISSED_UNDETERMINED
+}
+
+model TradeOpportunity {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // When the setup was spotted (the "trading day" it belongs to) + market context.
+  spottedAt   DateTime  @db.Date
+  assetSymbol String
+  direction   Direction
+  timeframe   String? // optional label (e.g. "5m", "1h")
+
+  // Live strategy reference + frozen snapshot (mirrors Trade — survives strategy
+  // edits/deletes). SetNull keeps the opportunity if the strategy is deleted.
+  strategyId              String?
+  strategy                Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  strategyNameSnapshot    String?
+  strategyVersionSnapshot Int?
+
+  // Validation — reuses the SAME setup-score model as Trade (domain/trades/setup-score).
+  // setupValid is the "is this a real opportunity" gate; only valid ones affect the gap.
+  // strategyExecutionSnapshot freezes the strategy's EXPECTED sessions/confluences/
+  // execution (mirrors Trade) so chips resolve colors + the record survives edits.
+  strategyExecutionSnapshot Json?
+  selectedConfluences Json? // present confluences at spot time
+  selectedExecution   Json? // present execution confirmations
+  missingConfluences  Json? // expected-but-absent (drives the Invalid Setup state)
+  confluencePercent   Float?
+  executionPercent    Float?
+  setupScore          Float?
+  setupRating         String?
+  setupValid          Boolean? // false = INVALIDATED candidate; null = unscored
+
+  // Planned trade (the intended idea), same precision as Trade's plan fields.
+  plannedEntry    Decimal? @db.Decimal(18, 8)
+  plannedStopLoss Decimal? @db.Decimal(18, 8)
+  plannedTarget   Decimal? @db.Decimal(18, 8)
+  plannedRR       Decimal? @db.Decimal(8, 2) // the intended R:R of the idea
+
+  // The strategy's proven edge per trade, FROZEN at spot time (from
+  // StrategyTradeManagement.expectedExpectancy). This is the "expected R" the
+  // Execution/Opportunity engine benchmarks against — a missed valid setup forfeits
+  // this full R; an executed one is scaled by execution quality.
+  expectedExpectancyR Decimal? @db.Decimal(8, 2)
+
+  status OpportunityStatus @default(PENDING)
+
+  // MISSED-only fields (null otherwise).
+  missReason    MissReason?
+  missNote      String?
+  missedOutcome MissedOutcome? // trader-entered; UNDETERMINED excluded from R cost
+  // Realized-if-taken R, TRADER-ENTERED (e.g. +3.0 for a missed win, −1.0 for a
+  // missed loss). Null when UNDETERMINED. Used as the actual-forgone R.
+  missedRealizedR Decimal? @db.Decimal(8, 2)
+
+  // The executed trade, when status = EXECUTED (reverse of Trade.opportunityId,
+  // one-to-one). Null for every non-executed outcome.
+  executedTrade Trade?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft delete (registered in server/db.ts)
+
+  @@index([userId, spottedAt])
+  @@index([userId, status])
+  @@index([userId, strategyId])
 }
 
 enum Grade {
@@ -563,6 +683,7 @@ model Strategy {
   // Journal link: a trade references a strategy (not a copy). onDelete: SetNull
   // on the Trade side keeps completed trades (with their snapshots) intact.
   trades          Trade[]
+  opportunities   TradeOpportunity[] // valid setups spotted under this strategy (executed or missed)
   versions        StrategyVersion[] // published, immutable snapshots of the tree
 
   @@index([userId, deletedAt, sortOrder])

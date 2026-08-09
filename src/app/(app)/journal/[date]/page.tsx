@@ -5,7 +5,9 @@ import { ChevronLeft, ChevronRight, ListChecks, Plus } from "lucide-react";
 import { requireUser } from "@/server/guards";
 import { getOrCreateDailyNote, getJournalDayRecap } from "@/server/services/journal.service";
 import { ImageAttachments } from "@/components/media/image-attachments";
-import { listTradesForDay } from "@/server/services/trades.service";
+import { getTradeFormOptions, listTradesForDay } from "@/server/services/trades.service";
+import { listOpportunityDtosForDay } from "@/server/services/opportunity.service";
+import { OpportunitiesSection } from "@/components/journal/opportunity/opportunities-section";
 import { addDaysToKey, formatDateKeyLong, isValidDateKey, localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 import { Badge } from "@/components/ui/badge";
@@ -30,10 +32,12 @@ export default async function JournalDayPage({
   if (!isValidDateKey(dateKey)) notFound();
 
   const user = await requireUser();
-  const [note, trades, recap] = await Promise.all([
+  const [note, trades, recap, opportunities, formOptions] = await Promise.all([
     getOrCreateDailyNote(user.id, dateKey),
     listTradesForDay(user.id, dateKey),
     getJournalDayRecap(user.id, dateKey),
+    listOpportunityDtosForDay(user.id, dateKey),
+    getTradeFormOptions(user.id),
   ]);
 
   // Workflow recap (only for days that were opened in the Today workspace).
@@ -103,6 +107,22 @@ export default async function JournalDayPage({
   // Archived days are read-only until reopened (null recap = never opened = editable).
   const editable = recap?.status !== "ARCHIVED";
 
+  // Opportunities: strategies drive validity; trades not already tied to an
+  // opportunity can be linked as the "executed" outcome.
+  const strategyOptions = formOptions.strategies.map((s) => ({
+    id: s.id,
+    name: s.name,
+    version: s.version,
+  }));
+  const linkableTrades = trades
+    .filter((t) => t.opportunityId == null)
+    .map((t) => ({
+      id: t.id,
+      tradeNumber: t.tradeNumber,
+      assetSymbol: t.assetSymbol,
+      direction: t.direction,
+    }));
+
   return (
     <FadeIn className="mx-auto max-w-4xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -160,6 +180,14 @@ export default async function JournalDayPage({
           <ImageAttachments ownerType="DAILY_NOTE" ownerId={note.id} max={12} disabled={!editable} />
         </div>
       </section>
+
+      <OpportunitiesSection
+        dateKey={dateKey}
+        opportunities={opportunities}
+        strategies={strategyOptions}
+        linkableTrades={linkableTrades}
+        editable={editable}
+      />
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">

@@ -57,6 +57,9 @@ export async function deleteDataSection(userId: string, section: DataSection): P
       const media = await collectMedia(userId, ["TRADE"]);
       await prisma.$transaction([
         prisma.mediaAsset.deleteMany({ where: { id: { in: media.assetIds }, userId } }),
+        // Opportunities are journal/trade data — remove them too. (Trade.opportunityId
+        // is SetNull, so deleting trades alone would strand the opportunity records.)
+        prisma.tradeOpportunity.deleteMany({ where: { userId } }),
         // Trade cascade removes its psychology response + account allocations.
         prisma.trade.deleteMany({ where: { userId } }),
       ]);
@@ -131,6 +134,7 @@ export async function resetAllData(userId: string): Promise<void> {
 
   await prisma.$transaction([
     prisma.mediaAsset.deleteMany({ where: { userId } }), // cascade attachments
+    prisma.tradeOpportunity.deleteMany({ where: { userId } }), // executed/missed opportunities
     prisma.trade.deleteMany({ where: { userId } }), // cascade psychology + allocations
     prisma.dailyNote.deleteMany({ where: { userId } }),
     prisma.weeklyReview.deleteMany({ where: { userId } }),

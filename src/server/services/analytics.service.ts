@@ -30,6 +30,14 @@ import {
   type Deviation,
 } from "@/domain/analytics/deviation-engine";
 import {
+  buildOpportunityCurve,
+  summarizeOpportunities,
+} from "@/domain/analytics/opportunity-engine";
+import {
+  getMissReasonAggregate,
+  getOpportunityInputs,
+} from "@/server/services/opportunity.service";
+import {
   summarizeStrategyPerformance,
   type StrategyTradePoint,
 } from "@/domain/performance/strategy-performance";
@@ -392,11 +400,30 @@ export async function getAnalyticsData(
   };
 
   // Discrepancy Gap — Expected vs Actual equity, via the central Execution Engine.
+  // This is the VERIFIED historical view: it works for every executed trade, whether
+  // or not it came from a tracked opportunity, and is unchanged by this feature.
   const discrepancy = {
     curve: buildDiscrepancyCurve(discrepancyInputs),
     summary: summarizeDiscrepancy(discrepancyInputs),
     // Behavioural causes of the gap (Psychology Lab): per-cause occurrences + R-cost.
     causes: aggregateDeviationCauses(deviationPrimaries),
+  };
+
+  // Opportunity-aware layer (additive). Resolved opportunities in range split the
+  // gap into Execution Leakage (trades taken) + Missed Opportunity Cost (valid
+  // setups skipped) and yield the funnel + Edge Capture %. Only meaningful once
+  // opportunities are captured — `hasData` gates the UI so nothing is fabricated for
+  // historical trades that never had an opportunity record.
+  const [opportunityInputs, missReasons] = await Promise.all([
+    getOpportunityInputs(userId, fromDate, toDate),
+    getMissReasonAggregate(userId, fromDate, toDate),
+  ]);
+  const opportunity = {
+    hasData: opportunityInputs.length > 0,
+    summary: summarizeOpportunities(opportunityInputs),
+    curve: buildOpportunityCurve(opportunityInputs),
+    // Behavioral: which lapse (fear/hesitation/…) costs the most missed R.
+    missReasons,
   };
 
   return {
@@ -434,6 +461,7 @@ export async function getAnalyticsData(
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
       discrepancy,
+      opportunity,
       breakdowns,
       dailyPercents,
       // SOT strategy-adherence analytics (foundation): average confluence / execution /
