@@ -2,6 +2,7 @@ import { CandlestickChart, Timer } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { DateRangeFilter } from "@/components/analytics/date-range-filter";
+import { AnalyticsFilterBar } from "@/components/analytics/analytics-filter-bar";
 import { KpiCard } from "@/components/analytics/kpi-card";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
 import { DiscrepancyAnalytics } from "@/components/analytics/discrepancy-analytics";
@@ -11,7 +12,10 @@ import { PsychologyAnalytics } from "@/components/analytics/psychology-analytics
 import { BestAssetTable } from "@/components/analytics/best-asset-table";
 import { Heatmap, pnlHeatColor } from "@/components/analytics/heatmap";
 import { EmptyState } from "@/components/shared/empty-state";
-import type { getAnalyticsData } from "@/server/services/analytics.service";
+import type {
+  AnalyticsFilterOptions,
+  getAnalyticsData,
+} from "@/server/services/analytics.service";
 import type { DateRangePreset } from "@/lib/date-ranges";
 
 type Data = Awaited<ReturnType<typeof getAnalyticsData>>;
@@ -163,26 +167,31 @@ export function AnalyticsModule({
   to,
   trading,
   psychology,
+  filterOptions,
 }: {
   preset: DateRangePreset;
   from: string;
   to: string;
   trading: TradingData;
   psychology: PsychologyData;
+  filterOptions: AnalyticsFilterOptions;
 }) {
   const d = trading;
   const summary = d.discrepancy.summary;
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Analytics</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Your trading performance intelligence center — how, why, and when you perform.
-          </p>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Analytics</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Your trading performance intelligence center — how, why, and when you perform.
+            </p>
+          </div>
+          <DateRangeFilter preset={preset} from={from} to={to} />
         </div>
-        <DateRangeFilter preset={preset} from={from} to={to} />
+        <AnalyticsFilterBar options={filterOptions} />
       </div>
 
       {d.totalTrades === 0 ? (

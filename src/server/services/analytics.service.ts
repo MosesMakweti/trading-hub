@@ -141,7 +141,62 @@ export async function getStrategyPerformance(userId: string, strategyId: string)
   return summarizeStrategyPerformance(points);
 }
 
-export async function getAnalyticsData(userId: string, from: string, to: string) {
+/**
+ * Optional analytics filters. Date range stays a separate (from/to) argument; these
+ * narrow WHICH trades are aggregated. The account balance is still walked over ALL
+ * in-range trades (so each included trade's contribution % is account-correct) —
+ * only the aggregation is filtered. Absent filters = unchanged behavior.
+ */
+export interface AnalyticsFilters {
+  strategyId?: string;
+  entryModel?: string;
+  asset?: string;
+  direction?: "LONG" | "SHORT";
+  session?: string;
+  accountId?: string;
+  status?: "OPEN" | "CLOSED" | "REVIEWED";
+  winLoss?: "win" | "loss";
+}
+
+export interface AnalyticsFilterOptions {
+  strategies: { id: string; name: string }[];
+  accounts: { id: string; name: string }[];
+  assets: string[];
+  sessions: string[];
+  entryModels: string[];
+}
+
+/** Distinct values the Analytics filter bar offers — from the user's own data. */
+export async function getAnalyticsFilterOptions(userId: string): Promise<AnalyticsFilterOptions> {
+  const [trades, strategies, accounts] = await Promise.all([
+    prisma.trade.findMany({
+      where: { userId },
+      select: { assetSymbol: true, selectedSession: true, selectedEntryModel: true },
+    }),
+    prisma.strategy.findMany({ where: { userId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.tradingAccount.findMany({
+      where: { userId, kind: { not: "PERFORMANCE" } },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  const uniqSorted = (xs: (string | null)[]) =>
+    [...new Set(xs.filter((x): x is string => Boolean(x)))].sort((a, b) => a.localeCompare(b));
+  return {
+    strategies,
+    accounts,
+    assets: uniqSorted(trades.map((t) => t.assetSymbol)),
+    sessions: uniqSorted(trades.map((t) => t.selectedSession)),
+    entryModels: uniqSorted(trades.map((t) => t.selectedEntryModel)),
+  };
+}
+
+export async function getAnalyticsData(
+  userId: string,
+  from: string,
+  to: string,
+  filters?: AnalyticsFilters,
+) {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
 
   const allPerformanceAllocations = await prisma.tradeAccountAllocation.findMany({
@@ -186,6 +241,8 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   }
 
   let runningBalance = balanceBeforeRange;
+  // Filtered equity — advances only for included trades (drawdown of the subset).
+  let filteredBalance = balanceBeforeRange;
   const tradeInputs: metrics.TradeMetricInput[] = [];
   const psychologyPoints: PsychologyDataPoint[] = [];
   const adherencePoints: AdherenceTradePoint[] = [];
@@ -205,9 +262,25 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
     const dateKey = utcDateToKey(t.tradeDate);
     const pnl = alloc.closingPnlNet.toNumber();
     const contributionPercent = runningBalance !== 0 ? (pnl / runningBalance) * 100 : 0;
-    runningBalance += pnl;
+    runningBalance += pnl; // true account balance — always advances (all in-range trades)
+
+    // Aggregate only trades matching the active filters. The balance already
+    // advanced above, so a filtered-out trade still counts toward later trades'
+    // account-relative contribution %, but never enters the analytics.
+    const included =
+      (!filters?.strategyId || t.strategyId === filters.strategyId) &&
+      (!filters?.entryModel || t.selectedEntryModel === filters.entryModel) &&
+      (!filters?.asset || t.assetSymbol === filters.asset) &&
+      (!filters?.direction || t.direction === filters.direction) &&
+      (!filters?.session || (t.selectedSession ?? "") === filters.session) &&
+      (!filters?.status || t.status === filters.status) &&
+      (!filters?.accountId || t.allocations.some((a) => a.tradingAccountId === filters.accountId)) &&
+      (!filters?.winLoss || (filters.winLoss === "win" ? pnl > 0 : pnl < 0));
+    if (!included) continue;
+
+    filteredBalance += pnl;
     tradePnls.push(pnl);
-    balanceSeries.push(runningBalance);
+    balanceSeries.push(filteredBalance);
     analyticsPoints.push({
       dateKey,
       monthKey: dateKey.slice(0, 7),
