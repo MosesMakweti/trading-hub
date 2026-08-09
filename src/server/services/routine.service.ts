@@ -108,6 +108,7 @@ export async function createItem(userId: string, data: RoutineItemInput) {
       sectionId: data.sectionId,
       label: data.label,
       type: data.type,
+      isMandatory: data.isMandatory,
       sortOrder: (last?.sortOrder ?? -1) + 1,
     },
   });
@@ -116,7 +117,7 @@ export async function createItem(userId: string, data: RoutineItemInput) {
 export async function updateItem(userId: string, id: string, data: RoutineItemUpdateInput) {
   return prisma.routineItem.update({
     where: { id, userId },
-    data: { label: data.label, type: data.type },
+    data: { label: data.label, type: data.type, isMandatory: data.isMandatory },
   });
 }
 

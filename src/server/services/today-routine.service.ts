@@ -3,11 +3,15 @@ import { Prisma, type TradingDay } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { getOrCreateTradingDay, getTradingDay } from "@/server/services/trading-day.service";
 import { getOrCreateDefaultRoutine } from "@/server/services/routine.service";
-import type {
-  RoutineResponse,
-  RoutineSnapshot,
-  RoutineSnapshotSection,
+import {
+  allMandatoryComplete,
+  type RoutineResponse,
+  type RoutineSnapshot,
+  type RoutineSnapshotSection,
 } from "@/domain/today/routine-snapshot";
+
+/** Thrown when the "ready to trade" gate is attempted with mandatory items unmet. */
+export class RoutineGateError extends Error {}
 
 export interface DayRoutine {
   snapshot: RoutineSnapshot;
@@ -21,7 +25,12 @@ function sectionsFromTemplate(
   return template.map((s) => ({
     id: s.id,
     title: s.title,
-    items: s.items.map((i) => ({ id: i.id, label: i.label, type: i.type })),
+    items: s.items.map((i) => ({
+      id: i.id,
+      label: i.label,
+      type: i.type,
+      isMandatory: i.isMandatory,
+    })),
   }));
 }
 
@@ -94,9 +103,23 @@ export async function setRoutineResponse(
  * The "I am ready to trade" gate. Sets routineReadyAt (and prepCompletedAt, which
  * advances the workflow's `prep` step / unlocks the rest of Today). Un-readying
  * clears both.
+ *
+ * The gate is enforced HERE, server-side: readiness can only be set when every
+ * MANDATORY routine item is complete. Because the whole downstream workflow (Today's
+ * Plan, Trade Ideas, …) is gated on routineReadyAt, guarding this write means the
+ * requirement can't be bypassed by the client (direct navigation, refresh, URL
+ * manipulation) — the state that unlocks Today's Plan is unreachable otherwise.
  */
 export async function setRoutineReady(userId: string, dateKey: string, ready: boolean): Promise<void> {
   const day = await getOrCreateTradingDay(userId, dateKey);
+
+  if (ready) {
+    const snapshot = (day.routineSnapshot as unknown as RoutineSnapshot | null) ?? null;
+    if (!snapshot || !allMandatoryComplete(snapshot)) {
+      throw new RoutineGateError("Complete every required routine item before continuing.");
+    }
+  }
+
   const now = ready ? new Date() : null;
   await prisma.tradingDay.update({
     where: { id: day.id },

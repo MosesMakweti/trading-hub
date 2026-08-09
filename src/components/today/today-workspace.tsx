@@ -28,6 +28,7 @@ import {
   PreSessionRoutineSection,
   type DayRoutineDTO,
 } from "@/components/today/pre-session-routine-section";
+import { allMandatoryComplete } from "@/domain/today/routine-snapshot";
 import { TodaysPlanSection } from "@/components/today/todays-plan-section";
 import { DailyAnalyticsSection } from "@/components/today/daily-analytics-section";
 import { TodayTradeBar } from "@/components/today/today-trade-bar";
@@ -73,8 +74,10 @@ export function TodayWorkspace({
   dailyAnalytics: DailyAnalyticsDTO;
 }) {
   const router = useRouter();
-  // The Pre-Session Routine gates the rest of the day.
-  const routineReady = routine.readyAt != null;
+  // The Pre-Session Routine gates the rest of the day: the trader must have confirmed
+  // readiness AND every mandatory routine item must still be complete. (Confirmation
+  // alone isn't enough — a required item added mid-day re-locks Today's Plan.)
+  const routineReady = routine.readyAt != null && allMandatoryComplete(routine.snapshot);
   const [focusedId, setFocusedId] = useState<string | null>(trades[0]?.id ?? null);
   const focusedTrade = trades.find((t) => t.id === focusedId) ?? null;
 

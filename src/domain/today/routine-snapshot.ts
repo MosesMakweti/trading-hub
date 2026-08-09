@@ -9,6 +9,9 @@ export interface RoutineSnapshotItem {
   id: string;
   label: string;
   type: RoutineItemTypeValue;
+  // Mandatory items gate the day. Optional on the type so snapshots frozen before
+  // this field existed (older archived days) read as non-mandatory, never blocking.
+  isMandatory?: boolean;
 }
 
 export interface RoutineSnapshotSection {
@@ -45,14 +48,43 @@ export interface RoutineProgress {
 
 /** Completion across every item in the snapshot. */
 export function routineProgress(snapshot: RoutineSnapshot): RoutineProgress {
+  return progressOf(snapshot, () => true);
+}
+
+/** Completion across only the MANDATORY items — the gate's denominator. */
+export function mandatoryProgress(snapshot: RoutineSnapshot): RoutineProgress {
+  return progressOf(snapshot, (item) => item.isMandatory === true);
+}
+
+/** Completion across only the OPTIONAL items (never blocks progression). */
+export function optionalProgress(snapshot: RoutineSnapshot): RoutineProgress {
+  return progressOf(snapshot, (item) => item.isMandatory !== true);
+}
+
+function progressOf(
+  snapshot: RoutineSnapshot,
+  include: (item: RoutineSnapshotItem) => boolean,
+): RoutineProgress {
   let total = 0;
   let completed = 0;
   for (const section of snapshot.sections) {
     for (const item of section.items) {
+      if (!include(item)) continue;
       total += 1;
       if (isItemComplete(item, snapshot.responses[item.id])) completed += 1;
     }
   }
   const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
   return { completed, total, percent };
+}
+
+/**
+ * The gate: whether EVERY mandatory item is complete. True when there are no
+ * mandatory items (optional-only routines never block). This is the single
+ * predicate the workflow checks before unlocking Today's Plan — enforced on the
+ * server so it can't be bypassed by the client.
+ */
+export function allMandatoryComplete(snapshot: RoutineSnapshot): boolean {
+  const { completed, total } = mandatoryProgress(snapshot);
+  return completed === total;
 }

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CircleCheck, Lock, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
+import { CircleCheck, Lock, RotateCcw, SlidersHorizontal, Sparkles, TriangleAlert } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  allMandatoryComplete,
   isItemComplete,
+  mandatoryProgress,
+  optionalProgress,
   routineProgress,
   type RoutineResponse,
   type RoutineSnapshot,
@@ -40,7 +43,14 @@ export function PreSessionRoutineSection({
 
   const snapshot: RoutineSnapshot = { sections: routine.snapshot.sections, responses };
   const progress = routineProgress(snapshot);
-  const isReady = readyAt != null;
+  const mandatory = mandatoryProgress(snapshot);
+  const optional = optionalProgress(snapshot);
+  const mandatoryDone = allMandatoryComplete(snapshot);
+  const mandatoryRemaining = mandatory.total - mandatory.completed;
+  // Effective readiness: the confirmation only holds while every mandatory item is
+  // still complete (e.g. a newly-added required item re-locks the day). The server
+  // enforces the same rule when setting readiness.
+  const isReady = readyAt != null && mandatoryDone;
 
   function persist(itemId: string, patch: RoutineResponse) {
     startTransition(async () => {
@@ -77,7 +87,7 @@ export function PreSessionRoutineSection({
       {/* Progress */}
       <div className="glass space-y-2 rounded-2xl p-4">
         <div className="flex items-center justify-between gap-2 text-sm">
-          <span className="font-medium">Preparation progress</span>
+          <span className="font-medium">Pre-session routine</span>
           <div className="flex items-center gap-3">
             <span className="text-muted-foreground tabular-nums">
               {progress.completed} / {progress.total} · {progress.percent}%
@@ -100,6 +110,21 @@ export function PreSessionRoutineSection({
             style={{ width: `${progress.percent}%` }}
           />
         </div>
+        {(mandatory.total > 0 || optional.total > 0) && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-0.5 text-xs">
+            {mandatory.total > 0 && (
+              <span className={cn("flex items-center gap-1.5 tabular-nums", mandatoryDone ? "text-success" : "text-warning")}>
+                {mandatoryDone ? <CircleCheck className="size-3.5" /> : <Lock className="size-3.5" />}
+                Mandatory {mandatory.completed}/{mandatory.total}
+              </span>
+            )}
+            {optional.total > 0 && (
+              <span className="text-muted-foreground tabular-nums">
+                Optional {optional.completed}/{optional.total}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Sections */}
@@ -128,14 +153,16 @@ export function PreSessionRoutineSection({
                     >
                       {item.label}
                     </label>
+                    {item.isMandatory && <RequiredBadge />}
                   </li>
                 );
               }
 
               return (
                 <li key={item.id} className="space-y-1">
-                  <label htmlFor={`r-${item.id}`} className="text-xs text-muted-foreground">
+                  <label htmlFor={`r-${item.id}`} className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     {item.label}
+                    {item.isMandatory && <RequiredBadge />}
                   </label>
                   {item.type === "LONG_TEXT" ? (
                     <Textarea
@@ -190,22 +217,43 @@ export function PreSessionRoutineSection({
         </div>
       ) : (
         <div className="space-y-2">
+          {mandatoryDone ? (
+            <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-success">
+              <CircleCheck className="size-3.5" />
+              Pre-session routine complete
+            </p>
+          ) : (
+            <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-warning">
+              <TriangleAlert className="size-3.5" />
+              {mandatoryRemaining} mandatory {mandatoryRemaining === 1 ? "item" : "items"} remaining
+            </p>
+          )}
           <Button
             type="button"
             size="lg"
             onClick={toggleReady}
-            disabled={isPending}
-            className="bg-brand-gradient shadow-glow h-12 w-full gap-2 text-base text-white hover:opacity-95"
+            disabled={isPending || !mandatoryDone}
+            title={mandatoryDone ? undefined : "Complete every required routine item to continue"}
+            className="bg-brand-gradient shadow-glow h-12 w-full gap-2 text-base text-white hover:opacity-95 disabled:opacity-50"
           >
-            <Sparkles className="size-5" />
-            I am ready to trade
+            {mandatoryDone ? <Sparkles className="size-5" /> : <Lock className="size-5" />}
+            Continue to Today&apos;s Plan
           </Button>
           <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
             <Lock className="size-3" />
-            Completing your routine unlocks the rest of today&apos;s workflow.
+            Complete all mandatory pre-session routines to unlock the rest of today&apos;s workflow.
           </p>
         </div>
       )}
     </div>
+  );
+}
+
+/** Small REQUIRED tag marking a mandatory routine item. */
+function RequiredBadge() {
+  return (
+    <span className="shrink-0 rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-warning uppercase">
+      Required
+    </span>
   );
 }

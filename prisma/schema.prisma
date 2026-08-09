@@ -221,6 +221,9 @@ model RoutineItem {
   type      RoutineItemType @default(CHECKBOX)
   label     String
   config    Json?
+  // Mandatory items GATE the day: Today's Plan (and the rest of the workflow) stays
+  // locked until every mandatory item is complete. Optional items never block.
+  isMandatory Boolean       @default(false)
   sortOrder Int             @default(0)
   createdAt DateTime        @default(now())
   deletedAt DateTime?
