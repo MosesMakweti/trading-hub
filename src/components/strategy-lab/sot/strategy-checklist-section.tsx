@@ -149,7 +149,7 @@ export function StrategyChecklistSection({
             </span>
           </span>
           <span className="text-muted-foreground">
-            <span className="font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+            <span className="font-semibold tabular-nums text-warning">
               {mandatoryCount}
             </span>{" "}
             mandatory
@@ -180,7 +180,7 @@ export function StrategyChecklistSection({
               {item.name}
             </Tag>
             {item.mandatory && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+              <span className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
                 <Lock className="size-2.5" /> Core
               </span>
             )}
@@ -334,7 +334,7 @@ function ItemForm({
             className={cn(
               "flex-1 px-3 py-1.5 font-medium transition-colors",
               draft.mandatory
-                ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                ? "bg-warning/15 text-warning"
                 : "text-muted-foreground hover:bg-muted",
             )}
           >

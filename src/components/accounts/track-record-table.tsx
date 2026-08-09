@@ -38,13 +38,25 @@ export function TrackRecordTable({
         </thead>
         <tbody>
           {shown.map((e) => (
-            <tr key={e.tradeId} className="border-b border-border/50 last:border-0">
+            <tr
+              key={e.tradeId}
+              className="border-b border-border/50 transition-colors last:border-0 hover:bg-accent/50"
+            >
               <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">
                 {formatDateKeyLong(e.dateKey).replace(/^\w+, /, "")}
               </td>
               <td className="py-1.5 pr-3 font-medium">{e.assetSymbol}</td>
-              <td className="py-1.5 pr-3 text-muted-foreground">
-                {e.direction === "LONG" ? "Long" : "Short"}
+              <td className="py-1.5 pr-3">
+                <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      e.direction === "LONG" ? "bg-success" : "bg-danger",
+                    )}
+                    aria-hidden
+                  />
+                  {e.direction === "LONG" ? "Long" : "Short"}
+                </span>
               </td>
               <td className="py-1.5 pr-3 text-right text-muted-foreground tabular-nums">
                 {e.riskValue}

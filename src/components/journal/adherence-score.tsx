@@ -4,9 +4,9 @@ import { cn } from "@/lib/utils";
 // followed its strategy's expected confluences + execution), NOT a market
 // prediction. Banded like a grade: strong / partial / weak adherence.
 function tone(percent: number) {
-  if (percent >= 80) return { bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" };
-  if (percent >= 50) return { bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" };
-  return { bar: "bg-rose-500", text: "text-rose-600 dark:text-rose-400" };
+  if (percent >= 80) return { bar: "bg-success", text: "text-success" };
+  if (percent >= 50) return { bar: "bg-warning", text: "text-warning" };
+  return { bar: "bg-danger", text: "text-danger" };
 }
 
 /** A labeled thin progress bar for one adherence percentage. Renders nothing when

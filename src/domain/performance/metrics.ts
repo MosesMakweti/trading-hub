@@ -22,6 +22,22 @@ export function winRate(trades: TradeMetricInput[]): number | null {
   return (closed.filter((t) => t.actualRR > 0).length / closed.length) * 100;
 }
 
+/**
+ * Running win rate after each closed trade, in chronological order — the series
+ * that converges to the overall `winRate`. Powers KPI sparklines (trend context
+ * behind the headline percentage). Empty when there are no closed trades.
+ */
+export function cumulativeWinRateSeries(trades: TradeMetricInput[]): number[] {
+  const closed = [...closedTrades(trades)].sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+  const series: number[] = [];
+  let wins = 0;
+  closed.forEach((t, i) => {
+    if (t.actualRR > 0) wins += 1;
+    series.push((wins / (i + 1)) * 100);
+  });
+  return series;
+}
+
 export function averageRR(trades: TradeMetricInput[]): number | null {
   return average(closedTrades(trades).map((t) => t.actualRR));
 }

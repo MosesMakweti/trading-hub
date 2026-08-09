@@ -109,7 +109,10 @@ export default async function DashboardPage() {
 
       <PerformanceSnapshot
         winRate={data.winRate}
+        winRateSeries={data.winRateSeries}
         totalTrades={data.totalTrades}
+        winningTrades={data.winningTrades}
+        losingTrades={data.losingTrades}
         bestAccount={data.bestAccount}
         bestAsset={data.bestAsset}
         equityCurve={data.equityCurve}

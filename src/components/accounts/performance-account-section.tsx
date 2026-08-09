@@ -71,21 +71,34 @@ export function PerformanceAccountSection({
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <KpiCard label="Current Balance" value={currency(account.currentBalance)} />
+        <KpiCard
+          label="Current Balance"
+          value={currency(account.currentBalance)}
+          count={{ value: account.currentBalance, prefix: "$", decimals: 2, grouping: true }}
+        />
         <KpiCard
           label="Total Return"
           value={percent(account.totalReturnPercent)}
+          count={{ value: account.totalReturnPercent, decimals: 2, suffix: "%", signed: true }}
           tone={account.totalReturnPercent >= 0 ? "success" : "danger"}
+          spark={equityCurve.map((p) => p.cumulativeCompounding)}
+          sparkTone="auto"
         />
         <KpiCard
           label="Net Profit"
           value={currency(account.netProfit)}
+          count={{ value: account.netProfit, prefix: "$", decimals: 2, grouping: true }}
           tone={account.netProfit >= 0 ? "success" : "danger"}
         />
-        <KpiCard label="Win Rate" value={winRate == null ? "—" : `${winRate.toFixed(1)}%`} />
+        <KpiCard
+          label="Win Rate"
+          value={winRate == null ? "—" : `${winRate.toFixed(1)}%`}
+          count={winRate == null ? undefined : { value: winRate, decimals: 1, suffix: "%" }}
+        />
         <KpiCard
           label="Profit Factor"
           value={profitFactor == null ? "—" : profitFactor.toFixed(2)}
+          count={profitFactor == null ? undefined : { value: profitFactor, decimals: 2 }}
         />
       </div>
 

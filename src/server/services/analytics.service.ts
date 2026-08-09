@@ -406,6 +406,7 @@ export async function getAnalyticsData(
       winningTrades: winningCount,
       losingTrades: losingCount,
       winRate: metrics.winRate(tradeInputs),
+      winRateSeries: metrics.cumulativeWinRateSeries(tradeInputs),
       averageRR: metrics.averageRR(tradeInputs),
       profitFactor: metrics.profitFactor(tradeInputs),
       expectancy: metrics.expectancy(tradeInputs),

@@ -23,6 +23,8 @@ export function PsychologyAnalytics({ data }: { data: PsychologyData }) {
         <KpiCard
           label="Avg Psychology %"
           value={data.averagePercent == null ? "—" : `${data.averagePercent.toFixed(1)}%`}
+          spark={data.trendByWeek.map((p) => p.averagePercent)}
+          sparkTone="brand"
         />
         <KpiCard
           label="Avg Grade"
