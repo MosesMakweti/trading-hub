@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Sparkles, Trophy } from "lucide-react";
+import { Sparkles, Target, Trophy } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
 import { getDashboardData } from "@/server/services/dashboard.service";
@@ -11,6 +11,7 @@ import { QuickActions } from "@/components/dashboard/quick-actions";
 import { PerformanceSnapshot } from "@/components/dashboard/performance-snapshot";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
 import { RecentTradesList, type RecentTradeSummary } from "@/components/dashboard/recent-trades-list";
+import { KpiCard } from "@/components/analytics/kpi-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FadeIn } from "@/components/shared/motion";
 
@@ -118,6 +119,56 @@ export default async function DashboardPage() {
         equityCurve={data.equityCurve}
         discrepancy={data.discrepancy}
       />
+
+      {data.opportunity.hasData && (
+        <section className="space-y-3">
+          <h2 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+            <Target className="size-4" />
+            Edge Capture
+            <Link href="/analytics" className="ml-auto text-xs font-medium text-primary hover:underline">
+              Full opportunity analytics →
+            </Link>
+          </h2>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <KpiCard
+              label="Edge capture"
+              value={
+                data.opportunity.summary.edgeCapturePercent == null
+                  ? "—"
+                  : `${data.opportunity.summary.edgeCapturePercent.toFixed(0)}%`
+              }
+              tone={
+                data.opportunity.summary.edgeCapturePercent != null &&
+                data.opportunity.summary.edgeCapturePercent >= 60
+                  ? "success"
+                  : "neutral"
+              }
+              sublabel="of available edge banked"
+            />
+            <KpiCard
+              label="Execution rate"
+              value={
+                data.opportunity.summary.executionRatePercent == null
+                  ? "—"
+                  : `${data.opportunity.summary.executionRatePercent.toFixed(0)}%`
+              }
+              sublabel={`${data.opportunity.summary.executed} of ${data.opportunity.summary.validOpportunities} valid setups`}
+            />
+            <KpiCard
+              label="Missed opportunity"
+              value={`${data.opportunity.summary.missedOpportunityCostR > 0 ? "+" : ""}${data.opportunity.summary.missedOpportunityCostR.toFixed(2)}R`}
+              tone={data.opportunity.summary.missedOpportunityCostR > 0 ? "danger" : "neutral"}
+              sublabel={`${data.opportunity.summary.missed} missed`}
+            />
+            <KpiCard
+              label="Execution leakage"
+              value={`${data.opportunity.summary.executionLeakageR > 0 ? "+" : ""}${data.opportunity.summary.executionLeakageR.toFixed(2)}R`}
+              tone={data.opportunity.summary.executionLeakageR > 0 ? "danger" : "neutral"}
+              sublabel="edge lost on trades taken"
+            />
+          </div>
+        </section>
+      )}
 
       <section id="notes" className="glass space-y-3 rounded-2xl p-4 scroll-mt-20">
         <h2 className="text-sm font-medium text-muted-foreground">Today&apos;s Notes</h2>

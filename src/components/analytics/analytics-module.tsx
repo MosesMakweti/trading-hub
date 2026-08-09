@@ -1,4 +1,4 @@
-import { CandlestickChart, Timer } from "lucide-react";
+import { CandlestickChart } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { DateRangeFilter } from "@/components/analytics/date-range-filter";
@@ -8,6 +8,7 @@ import { ProgressRing } from "@/components/analytics/progress-ring";
 import { Donut } from "@/components/analytics/donut";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
 import { DiscrepancyAnalytics } from "@/components/analytics/discrepancy-analytics";
+import { OpportunityAnalytics } from "@/components/analytics/opportunity-analytics";
 import { AdherenceAnalytics } from "@/components/analytics/adherence-analytics";
 import { AnalyticsBreakdowns } from "@/components/analytics/analytics-breakdowns";
 import { PsychologyAnalytics } from "@/components/analytics/psychology-analytics";
@@ -224,19 +225,13 @@ export function AnalyticsModule({
             </div>
           </section>
 
-          {/* Missed Trades — placeholder (data not captured yet) */}
+          {/* Opportunity Funnel — Edge Capture + Leakage vs Missed split */}
           <section className="space-y-3">
-            <SectionHeading title="Missed Trades" />
-            <div className="glass flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border py-10 text-center">
-              <Timer className="size-6 text-muted-foreground/60" />
-              <p className="text-sm font-medium">Missed-trade analytics — coming soon</p>
-              <p className="max-w-md text-xs text-muted-foreground">
-                Analyzing missed opportunities (count, estimated impact, executed-vs-missed, effect on
-                the Discrepancy Gap) requires a missed-trade capture feature, which TradeOS doesn&apos;t
-                collect yet. This stays separate from realized P&L — opportunity is never counted as
-                actual performance.
-              </p>
-            </div>
+            <SectionHeading
+              title="Opportunity & Edge Capture"
+              hint="from tracked opportunities — separate from realized P&L"
+            />
+            <OpportunityAnalytics data={d.opportunity} />
           </section>
         </>
       )}
