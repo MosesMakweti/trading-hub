@@ -3,6 +3,7 @@ import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { daysBetweenInclusive } from "@/lib/date-ranges";
 import { buildEquityCurve, dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import * as metrics from "@/domain/performance/metrics";
+import { maxDrawdown, pnlStats, recoveryFactor } from "@/domain/performance/pnl-stats";
 import {
   summarizeAdherence,
   type AdherenceTradePoint,
@@ -181,6 +182,10 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   const discrepancyInputs: ExecutionTradeInput[] = [];
   const deviationPrimaries: (Deviation | null)[] = [];
   const dailyPnlMap = new Map<string, number>();
+  // $ P&L per trade + the running-balance series, for the dollar summary and
+  // drawdown (Analytics module). Same allocations as everything else — no new query.
+  const tradePnls: number[] = [];
+  const balanceSeries: number[] = [balanceBeforeRange];
 
   for (const alloc of inRange) {
     const t = alloc.trade;
@@ -188,6 +193,8 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
     const pnl = alloc.closingPnlNet.toNumber();
     const contributionPercent = runningBalance !== 0 ? (pnl / runningBalance) * 100 : 0;
     runningBalance += pnl;
+    tradePnls.push(pnl);
+    balanceSeries.push(runningBalance);
 
     const strategyLabel = t.strategyNameSnapshot
       ? t.strategyVersionSnapshot != null
@@ -272,6 +279,10 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   const winningCount = tradeInputs.filter((t) => (t.actualRR ?? 0) > 0).length;
   const losingCount = tradeInputs.filter((t) => (t.actualRR ?? 0) < 0).length;
 
+  // Dollar summary + drawdown for the Analytics module (from the realized $ P&L).
+  const dollars = pnlStats(tradePnls);
+  const drawdown = maxDrawdown(balanceSeries);
+
   // Discrepancy Gap — Expected vs Actual equity, via the central Execution Engine.
   const discrepancy = {
     curve: buildDiscrepancyCurve(discrepancyInputs),
@@ -294,6 +305,18 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       averageLoser: metrics.averageLoser(tradeInputs),
       longestWinStreak: metrics.longestWinStreak(tradeInputs),
       longestLossStreak: metrics.longestLossStreak(tradeInputs),
+      breakevenTrades: dollars.breakevenTrades,
+      // Realized $ performance (from the Performance Account ledger).
+      netPnl: dollars.netPnl,
+      grossProfit: dollars.grossProfit,
+      grossLoss: dollars.grossLoss,
+      largestWin: dollars.largestWin,
+      largestLoss: dollars.largestLoss,
+      maxDrawdownAmount: drawdown.amount,
+      maxDrawdownPercent: drawdown.percent,
+      recoveryFactor: recoveryFactor(dollars.netPnl, drawdown.amount),
+      startingBalance: balanceBeforeRange,
+      currentBalance: runningBalance,
       mostTradedAsset: metrics.mostTradedAsset(tradeInputs),
       averageTradesPerDay: metrics.averageTradesPerDay(tradeInputs, rangeDays),
       ruleAdherenceAverage,
