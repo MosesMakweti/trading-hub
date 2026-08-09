@@ -3,12 +3,15 @@ import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SetupRating } from "@/domain/trades/setup-score";
 
+// Semantic quality bands via reserved tokens (no hardcoded hues): A+/A/B read as
+// good (success), C as marginal (warning), Low as poor (danger). The letter badge
+// carries the finer A↔B↔C distinction; color stays a restrained accent.
 const RATING_TONE: Record<SetupRating, { text: string; bar: string; ring: string; label: string }> = {
-  "A+": { text: "text-emerald-600 dark:text-emerald-400", bar: "bg-emerald-500", ring: "border-emerald-500/30 bg-emerald-500/10", label: "A+" },
-  A: { text: "text-emerald-600 dark:text-emerald-400", bar: "bg-emerald-500", ring: "border-emerald-500/30 bg-emerald-500/10", label: "A" },
-  B: { text: "text-teal-600 dark:text-teal-400", bar: "bg-teal-500", ring: "border-teal-500/30 bg-teal-500/10", label: "B" },
-  C: { text: "text-amber-600 dark:text-amber-400", bar: "bg-amber-500", ring: "border-amber-500/30 bg-amber-500/10", label: "C" },
-  LOW: { text: "text-rose-600 dark:text-rose-400", bar: "bg-rose-500", ring: "border-rose-500/30 bg-rose-500/10", label: "Low quality" },
+  "A+": { text: "text-success", bar: "bg-success", ring: "border-success/30 bg-success/10", label: "A+" },
+  A: { text: "text-success", bar: "bg-success", ring: "border-success/30 bg-success/10", label: "A" },
+  B: { text: "text-success", bar: "bg-success", ring: "border-success/30 bg-success/10", label: "B" },
+  C: { text: "text-warning", bar: "bg-warning", ring: "border-warning/30 bg-warning/10", label: "C" },
+  LOW: { text: "text-danger", bar: "bg-danger", ring: "border-danger/30 bg-danger/10", label: "Low quality" },
 };
 
 /** Compact setup-quality rating pill (A+/A/B/C/Low). */
@@ -50,11 +53,11 @@ export function SetupScoreCard({
     return (
       <div
         className={cn(
-          "rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm",
+          "rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm",
           className,
         )}
       >
-        <div className="flex items-center gap-2 font-medium text-rose-600 dark:text-rose-400">
+        <div className="flex items-center gap-2 font-medium text-danger">
           <AlertTriangle className="size-4" />
           Invalid Setup — Missing Core Requirement
         </div>

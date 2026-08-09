@@ -64,9 +64,13 @@ gradients on content · large distracting animation · emoji as icons · raw hex
 
 ### 3.1 Semantic tokens (each has a `-foreground` pair where text sits on it)
 
-**Identity: matte graphite + Signal Blue (interaction/data only).** The dark ground is layered
-*neutral* graphite (`#0B0B0D` → `#1C1E24`, chroma ≈ 0 — not blue-black); blue appears only on
-interaction states, the primary CTA, and `chart-1`/links. Light mode is neutral (no blue tint).
+**Identity: monochromatic graphite glassmorphism.** The interface is **black / white / gray** —
+a layered *neutral* graphite ground (chroma ≈ 0, not blue-black) with frosted translucent surfaces.
+There is **no color accent**: the primary CTA/active state is an **inverting ink↔white pair**
+(`primary` = near-black in light → near-white in dark; `primary-foreground` inverts with it), giving
+a premium near-black button in light mode and a near-white button in dark. Color appears **only**
+where it is semantic: `success`/`danger`/`warning` for P&L & state, and the muted confluence tag
+hues. `chart-1`, links, and `brand` are all neutral graphite — never blue.
 
 | Token | Role | Dark value (primary) |
 |---|---|---|
@@ -75,17 +79,21 @@ interaction states, the primary CTA, and `chart-1`/links. Light mode is neutral 
 | `card` / `card-foreground` | opaque raised surface | `oklch(0.196 0.004 265)` ≈ `#16181D` |
 | `muted` / `muted-foreground` | secondary surface / secondary ink | `oklch(0.225 …)` / `oklch(0.705 …)` |
 | `accent` / `accent-foreground` | hover/active tint | `oklch(0.265 0.006 265)` |
-| `primary` / `primary-foreground` | Signal Blue action | `oklch(0.62 0.16 262)` |
+| `primary` / `primary-foreground` | **monochrome action** (inverting ink↔white) | `oklch(0.93 0.003 265)` / `oklch(0.2 0.004 265)` |
 | `sidebar` | deepest surface | `oklch(0.125 0.003 265)` ≈ `#0B0B0D` |
 | `border` | hairlines | `oklch(1 0 0 / 8%)` |
-| `ring` | focus ring | `oklch(0.62 0.16 262 / 55%)` |
-| `success` | **profit / good** | `oklch(0.75 0.17 158)` (green) |
-| `danger` | **loss / destructive** | `oklch(0.66 0.21 25)` (red) |
-| `warning` | caution | `oklch(0.80 0.16 85)` (amber) |
+| `ring` | focus ring (neutral) | `oklch(0.8 0.004 265 / 40%)` |
+| `success` | **profit / good** | `oklch(0.72 0.13 158)` (green) |
+| `danger` | **loss / destructive** | `oklch(0.66 0.19 25)` (red) |
+| `warning` | caution | `oklch(0.78 0.13 80)` (amber) |
 | `glass` / `glass-border` | frosted surface + its edge | see §7 |
-| `brand` / `brand-from` / `brand-to` | gradient poles (indigo→violet) | `258 → 305` hue |
+| `brand` / `brand-from` / `brand-to` | **neutral graphite** (decorative chips/nodes only) | `~0.34 0.006 265` |
 | `sidebar*` | nav surface family | deepest surface |
-| `chart-1…5` | data series | see §10 |
+| `chart-1…5` | data series (neutral + semantic) | see §10 |
+
+> **Monochrome rule:** the UI is graphite/white/gray. Never introduce blue/purple/pink/neon as an
+> accent. The only colors are the reserved semantic set (§3.2) and the muted tag hues (§4). `primary`
+> and `brand` are neutral — a colored primary is a regression.
 
 ### 3.2 PnL & status color — the most important rule
 
@@ -220,7 +228,8 @@ tiny elements (badges, inputs); rely on blur where text would drop below 4.5:1.
 
 - `shadow-elevated` — layered soft shadow (theme-aware via `--shadow-color`); default lift for
   cards/menus/dialogs.
-- `shadow-glow` — brand-tinted ring+glow for primary actions and the "current"/gradient nodes.
+- `shadow-glow` — a restrained **neutral** ring+depth for the primary CTA / active node (the colored
+  glow is retired; monochrome interface).
 - Hover lift: `hover:-translate-y-0.5 hover:shadow-elevated` (transform+shadow only — see §8).
 - `gradient-ring` — a subtle 1px gradient border for a premium framed element (use rarely).
 
@@ -281,9 +290,11 @@ level of motion onto a work surface.
 
 All charts must look like one application (Recharts is the house library).
 
-- **Series colors:** `--chart-1…5` (indigo, green, amber, red, violet) — assigned in fixed
-  order, never cycled/recolored per filter. For **P&L/equity**, use `success`/`danger` (up/down),
-  not an arbitrary series color.
+- **Series colors:** `--chart-1…5` — a **neutral, monochrome-first** ramp: `chart-1` graphite ink
+  (the primary series), `chart-2`/`chart-3` mid/dark grays, and `chart-4`/`chart-5` the semantic
+  **danger**/**success** for anything win/loss. Assigned in fixed order, never cycled/recolored per
+  filter. For **P&L/equity**, use `success`/`danger` (up/down); Expected vs Actual = graphite
+  (`chart-1`) vs a lighter gray or dashed, never two hues.
 - **One axis** — never dual-y. Two measures of different scale → two charts or index to a common
   base.
 - **Recessive frame:** faint gridlines (`border` at low opacity), muted axis labels, no chart

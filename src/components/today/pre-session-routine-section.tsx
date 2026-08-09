@@ -234,7 +234,7 @@ export function PreSessionRoutineSection({
             onClick={toggleReady}
             disabled={isPending || !mandatoryDone}
             title={mandatoryDone ? undefined : "Complete every required routine item to continue"}
-            className="bg-brand-gradient shadow-glow h-12 w-full gap-2 text-base text-white hover:opacity-95 disabled:opacity-50"
+            className="bg-primary text-primary-foreground shadow-elevated h-12 w-full gap-2 text-base hover:brightness-110 disabled:opacity-50"
           >
             {mandatoryDone ? <Sparkles className="size-5" /> : <Lock className="size-5" />}
             Continue to Today&apos;s Plan

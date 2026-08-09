@@ -5,15 +5,19 @@ import { cn } from "@/lib/utils";
 // The shared Notion-style tag palette. Full static class strings (never templated)
 // so Tailwind keeps them. Theme-aware via the `dark:` variant. Used everywhere a
 // colored tag/chip appears — confluences, execution confirmations, sessions, etc.
+// Muted, sophisticated tint system: an identifiable hue per tag, but restrained —
+// a soft 10% fill, a subtle 18% border, deep readable text, and a small dot at 80%
+// (never a neon full-saturation chip). This is the ONLY place non-semantic hues live
+// (confluence identity); the rest of the UI stays monochrome.
 export const TAG_STYLES: Record<TagColor, { chip: string; dot: string; label: string }> = {
-  GRAY: { chip: "border-slate-400/25 bg-slate-400/10 text-slate-600 dark:text-slate-300", dot: "bg-slate-400", label: "Gray" },
-  BLUE: { chip: "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300", dot: "bg-blue-500", label: "Blue" },
-  GREEN: { chip: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300", dot: "bg-emerald-500", label: "Green" },
-  AMBER: { chip: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300", dot: "bg-amber-500", label: "Amber" },
-  RED: { chip: "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300", dot: "bg-rose-500", label: "Red" },
-  PURPLE: { chip: "border-violet-500/25 bg-violet-500/10 text-violet-700 dark:text-violet-300", dot: "bg-violet-500", label: "Purple" },
-  YELLOW: { chip: "border-yellow-500/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-300", dot: "bg-yellow-500", label: "Yellow" },
-  TEAL: { chip: "border-teal-500/25 bg-teal-500/10 text-teal-700 dark:text-teal-300", dot: "bg-teal-500", label: "Teal" },
+  GRAY: { chip: "border-slate-400/18 bg-slate-400/10 text-slate-600 dark:text-slate-300", dot: "bg-slate-400/80", label: "Gray" },
+  BLUE: { chip: "border-blue-500/18 bg-blue-500/10 text-blue-700 dark:text-blue-300", dot: "bg-blue-500/80", label: "Blue" },
+  GREEN: { chip: "border-emerald-500/18 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300", dot: "bg-emerald-500/80", label: "Green" },
+  AMBER: { chip: "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300", dot: "bg-amber-500/80", label: "Amber" },
+  RED: { chip: "border-rose-500/18 bg-rose-500/10 text-rose-700 dark:text-rose-300", dot: "bg-rose-500/80", label: "Red" },
+  PURPLE: { chip: "border-violet-500/18 bg-violet-500/10 text-violet-700 dark:text-violet-300", dot: "bg-violet-500/80", label: "Purple" },
+  YELLOW: { chip: "border-yellow-500/20 bg-yellow-500/10 text-yellow-700 dark:text-yellow-300", dot: "bg-yellow-500/80", label: "Yellow" },
+  TEAL: { chip: "border-teal-500/18 bg-teal-500/10 text-teal-700 dark:text-teal-300", dot: "bg-teal-500/80", label: "Teal" },
 };
 
 export const TAG_COLORS = Object.keys(TAG_STYLES) as TagColor[];

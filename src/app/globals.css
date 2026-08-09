@@ -76,8 +76,9 @@
   --card-foreground: oklch(0.17 0.008 255);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.17 0.008 255);
-  /* Signal Blue — the single accent */
-  --primary: oklch(0.53 0.19 255);
+  /* Monochrome accent — near-black ink. The interface is black/white/gray; the
+     primary CTA is an inverting ink↔white pair (dark button + white text here). */
+  --primary: oklch(0.22 0.006 255);
   --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.965 0.004 255);
   --secondary-foreground: oklch(0.26 0.01 255);
@@ -88,7 +89,7 @@
   --destructive: oklch(0.55 0.2 25);
   --border: oklch(0.17 0.02 255 / 9%);
   --input: oklch(0.17 0.02 255 / 13%);
-  --ring: oklch(0.53 0.19 255 / 45%);
+  --ring: oklch(0.22 0.01 255 / 35%);
 
   /* Semantic P&L / grade colors — reserved, restrained; numbers only */
   --success: oklch(0.52 0.12 158);
@@ -98,18 +99,20 @@
   --warning: oklch(0.62 0.12 75);
   --warning-foreground: oklch(0.99 0.01 75);
 
-  /* Brand = Signal Blue (indigo→violet gradient retired). Near-single-hue sheen. */
-  --brand: oklch(0.53 0.19 255);
-  --brand-from: oklch(0.58 0.18 255);
-  --brand-to: oklch(0.5 0.2 258);
+  /* Brand = neutral graphite (decorative chips/nodes only; white text stays legible
+     on it in both themes). Not an accent hue — the interface is monochrome. */
+  --brand: oklch(0.30 0.006 255);
+  --brand-from: oklch(0.34 0.006 255);
+  --brand-to: oklch(0.24 0.006 255);
 
   /* Glassmorphism surfaces — neutral cool film */
   --glass: oklch(1 0 0 / 64%);
   --glass-border: oklch(0.17 0.02 255 / 10%);
   --shadow-color: 240 12% 30%;
 
-  /* Charts: blue + monochrome grays + semantic (no rainbow) */
-  --chart-1: oklch(0.53 0.19 255);
+  /* Charts: graphite ink primary + monochrome grays + semantic P&L (no rainbow).
+     chart-1 is the neutral primary series; success/danger carry win/loss. */
+  --chart-1: oklch(0.34 0.008 255);
   --chart-2: oklch(0.62 0.012 255);
   --chart-3: oklch(0.44 0.01 255);
   --chart-4: oklch(0.55 0.2 25);
@@ -119,12 +122,12 @@
   --app-canvas-glow: transparent;
   --sidebar: oklch(0.988 0.002 255);
   --sidebar-foreground: oklch(0.17 0.008 255);
-  --sidebar-primary: oklch(0.53 0.19 255);
+  --sidebar-primary: oklch(0.22 0.006 255);
   --sidebar-primary-foreground: oklch(0.99 0 0);
   --sidebar-accent: oklch(0.955 0.006 255);
   --sidebar-accent-foreground: oklch(0.26 0.01 255);
   --sidebar-border: oklch(0.17 0.02 255 / 8%);
-  --sidebar-ring: oklch(0.53 0.19 255 / 45%);
+  --sidebar-ring: oklch(0.22 0.01 255 / 35%);
 }
 
 /* ------------------------------------------------------------------ *
@@ -140,9 +143,10 @@
   --card-foreground: oklch(0.965 0.003 265);
   --popover: oklch(0.205 0.004 265);
   --popover-foreground: oklch(0.965 0.003 265);
-  /* Signal Blue — interaction/data accent only */
-  --primary: oklch(0.62 0.16 262);
-  --primary-foreground: oklch(0.99 0 0);
+  /* Monochrome accent — off-white. The inverting CTA pair flips here: a near-white
+     button with near-black text. No blue; the interface stays graphite/white/gray. */
+  --primary: oklch(0.93 0.003 265);
+  --primary-foreground: oklch(0.2 0.004 265);
   --secondary: oklch(0.235 0.005 265);
   --secondary-foreground: oklch(0.965 0.003 265);
   --muted: oklch(0.225 0.004 265);
@@ -152,7 +156,7 @@
   --destructive: oklch(0.64 0.19 25);
   --border: oklch(1 0 0 / 8%);
   --input: oklch(1 0 0 / 11%);
-  --ring: oklch(0.62 0.16 262 / 55%);
+  --ring: oklch(0.8 0.004 265 / 40%);
 
   /* Semantic P&L / grade colors — reserved, restrained; numbers only */
   --success: oklch(0.72 0.13 158);
@@ -162,30 +166,30 @@
   --warning: oklch(0.78 0.13 80);
   --warning-foreground: oklch(0.2 0.03 80);
 
-  /* Brand = Signal Blue (used sparingly — CTAs/active only). */
-  --brand: oklch(0.62 0.16 262);
-  --brand-from: oklch(0.64 0.15 262);
-  --brand-to: oklch(0.57 0.17 268);
+  /* Brand = neutral graphite (decorative chips/nodes only; white text stays legible). */
+  --brand: oklch(0.34 0.006 265);
+  --brand-from: oklch(0.38 0.006 265);
+  --brand-to: oklch(0.30 0.006 265);
 
   /* Glass — neutral frosted film with a touch more presence (floating panel). */
   --glass: oklch(0.85 0.006 265 / 8%);
   --glass-border: oklch(1 0 0 / 11%);
   --shadow-color: 260 18% 1%;
 
-  /* Charts: blue + neutral graphite grays + semantic (no rainbow) */
-  --chart-1: oklch(0.62 0.16 262);
+  /* Charts: light graphite primary series + neutral grays + semantic P&L (no rainbow) */
+  --chart-1: oklch(0.80 0.008 265);
   --chart-2: oklch(0.7 0.008 265);
   --chart-3: oklch(0.5 0.008 265);
   --chart-4: oklch(0.66 0.19 25);
   --chart-5: oklch(0.72 0.13 158);
   --sidebar: oklch(0.125 0.003 265);
   --sidebar-foreground: oklch(0.965 0.003 265);
-  --sidebar-primary: oklch(0.62 0.16 262);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-primary: oklch(0.93 0.003 265);
+  --sidebar-primary-foreground: oklch(0.2 0.004 265);
   --sidebar-accent: oklch(0.215 0.005 265);
   --sidebar-accent-foreground: oklch(0.965 0.003 265);
   --sidebar-border: oklch(1 0 0 / 7%);
-  --sidebar-ring: oklch(0.62 0.16 262 / 55%);
+  --sidebar-ring: oklch(0.8 0.004 265 / 40%);
 
   /* Matte canvas: a barely-there top light for depth — neutral, not colored. */
   --app-canvas-glow: oklch(1 0 0 / 2.5%);
@@ -298,10 +302,12 @@
       0 2px 8px -4px hsl(var(--shadow-color) / 0.12);
   }
 
+  /* Restrained neutral elevation for the primary CTA / active node — a soft ring +
+     depth, NOT a colored glow (the interface is monochrome; glow is retired). */
   .shadow-glow {
     box-shadow:
       0 0 0 1px var(--glass-border),
-      0 10px 40px -10px color-mix(in oklch, var(--brand) 55%, transparent);
+      0 8px 24px -10px hsl(var(--shadow-color) / 0.35);
   }
 
   /* Subtle animated gradient border wrapper */
