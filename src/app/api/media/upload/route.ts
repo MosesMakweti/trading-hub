@@ -10,6 +10,8 @@ import {
   ACCEPTED_IMAGE_MIME,
   assertOwnsMediaTarget,
   attachMedia,
+  countMediaForOwner,
+  MAX_ATTACHMENTS_PER_OWNER,
   MAX_FILE_SIZE,
   type MediaItemDTO,
 } from "@/server/services/media.service";
@@ -60,9 +62,19 @@ export async function POST(request: Request) {
 
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
   if (files.length === 0) return bad("No files provided.");
+  // Cap files per request (defense-in-depth; the client already limits this).
+  if (files.length > MAX_ATTACHMENTS_PER_OWNER) {
+    return bad(`Too many files in one upload (max ${MAX_ATTACHMENTS_PER_OWNER}).`);
+  }
 
   const owns = await assertOwnsMediaTarget(userId, ownerType, ownerId);
   if (!owns) return bad("Not found or access denied.", 403);
+
+  // Enforce the per-owner/category attachment cap server-side (not just in the UI).
+  const existing = await countMediaForOwner(ownerType, ownerId, category);
+  if (existing + files.length > MAX_ATTACHMENTS_PER_OWNER) {
+    return bad(`This gallery is full (max ${MAX_ATTACHMENTS_PER_OWNER} images).`);
+  }
 
   // A trade on an archived (read-only) day can't receive new uploads.
   if (ownerType === "TRADE") {

@@ -56,7 +56,7 @@ export async function deleteDataSection(userId: string, section: DataSection): P
     case "journal-trades": {
       const media = await collectMedia(userId, ["TRADE"]);
       await prisma.$transaction([
-        prisma.mediaAsset.deleteMany({ where: { id: { in: media.assetIds } } }),
+        prisma.mediaAsset.deleteMany({ where: { id: { in: media.assetIds }, userId } }),
         // Trade cascade removes its psychology response + account allocations.
         prisma.trade.deleteMany({ where: { userId } }),
       ]);
@@ -73,7 +73,7 @@ export async function deleteDataSection(userId: string, section: DataSection): P
     case "strategies": {
       const media = await collectMedia(userId, STRATEGY_MEDIA_OWNERS);
       await prisma.$transaction([
-        prisma.mediaAsset.deleteMany({ where: { id: { in: media.assetIds } } }),
+        prisma.mediaAsset.deleteMany({ where: { id: { in: media.assetIds }, userId } }),
         // Strategy cascade removes versions, arsenal, framework, timeframes,
         // checkpoints, entry models, trade management (+ PTP/rules), checklist
         // items, and sessions. Trades keep their frozen snapshot (strategyId → null).
@@ -103,7 +103,7 @@ export async function deleteDataSection(userId: string, section: DataSection): P
     case "notes": {
       const media = await collectMedia(userId, ["DAILY_NOTE"]);
       await prisma.$transaction([
-        prisma.mediaAsset.deleteMany({ where: { id: { in: media.assetIds } } }),
+        prisma.mediaAsset.deleteMany({ where: { id: { in: media.assetIds }, userId } }),
         prisma.dailyNote.deleteMany({ where: { userId } }),
       ]);
       await deleteFiles(media.storageKeys);

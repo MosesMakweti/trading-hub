@@ -41,6 +41,15 @@ export function isUploadsEnabled(): boolean {
   return true;
 }
 
+/** How many attachments an owner already has in a given category (for the cap). */
+export function countMediaForOwner(
+  ownerType: MediaOwnerType,
+  ownerId: string,
+  category: string | null,
+): Promise<number> {
+  return prisma.mediaAttachment.count({ where: { ownerType, ownerId, category } });
+}
+
 /**
  * The single authorization gate for the universal media system: does `userId`
  * own the record identified by (ownerType, ownerId)? Every owner type resolves
