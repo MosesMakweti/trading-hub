@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { KpiCard } from "@/components/analytics/kpi-card";
+import { ProgressRing } from "@/components/analytics/progress-ring";
 import { MonthlyReturnsChart } from "@/components/analytics/monthly-returns-chart";
 import type { getAnalyticsData } from "@/server/services/analytics.service";
 
@@ -96,39 +97,6 @@ function Histogram({ bars }: { bars: { label: string; count: number; tone: "succ
   );
 }
 
-function RiskRing({ value, label }: { value: number | null; label: string }) {
-  const size = 88;
-  const stroke = 7;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const v = value == null ? 0 : Math.max(0, Math.min(100, value));
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="relative" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="-rotate-90" aria-hidden>
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={stroke} />
-          {value != null && (
-            <circle
-              cx={size / 2}
-              cy={size / 2}
-              r={r}
-              fill="none"
-              stroke="var(--chart-1)"
-              strokeWidth={stroke}
-              strokeLinecap="round"
-              strokeDasharray={`${(v / 100) * c} ${c}`}
-            />
-          )}
-        </svg>
-        <div className="absolute inset-0 flex items-center justify-center text-sm font-semibold tabular-nums">
-          {value == null ? "—" : `${Math.round(value)}%`}
-        </div>
-      </div>
-      <span className="text-center text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</span>
-    </div>
-  );
-}
-
 function pickBy<T>(items: T[], score: (t: T) => number | null): T | null {
   let best: T | null = null;
   let bestScore = -Infinity;
@@ -211,7 +179,7 @@ export function AnalyticsBreakdowns({ trading }: { trading: TradingData }) {
         <SectionHeading title="Risk Analytics" />
         <div className="grid gap-4 lg:grid-cols-[auto_1fr]">
           <div className="glass flex items-center justify-center rounded-2xl px-8 py-4">
-            <RiskRing value={b.risk.consistency} label="Risk consistency" />
+            <ProgressRing value={b.risk.consistency} tone="brand" label="Risk consistency" />
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <KpiCard label="Avg Risk / Trade" value={b.risk.avgRisk == null ? "—" : `${b.risk.avgRisk.toFixed(2)}%`} />
