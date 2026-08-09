@@ -18,6 +18,11 @@ import {
   toOpportunityInputs,
   type OpportunityRow,
 } from "@/domain/analytics/opportunity-mapper";
+import {
+  aggregateMissReasons,
+  type MissReasonKey,
+  type MissReasonRow,
+} from "@/domain/analytics/miss-reasons";
 import type { OpportunityCreateInput, MissOutcomeInput } from "@/lib/validation/opportunity";
 import type { MissReason, MissedOutcome, OpportunityListItemDTO } from "@/types/opportunity";
 
@@ -296,4 +301,27 @@ export async function getOpportunityInputs(userId: string, from?: Date, to?: Dat
   }));
 
   return toOpportunityInputs(mapped);
+}
+
+/** Behavioral breakdown of WHY valid setups were missed, in range — feeds the
+ *  Psychology / Opportunity analytics (which lapse costs the most forgone R). */
+export async function getMissReasonAggregate(userId: string, from?: Date, to?: Date) {
+  const where: Prisma.TradeOpportunityWhereInput = { userId, status: "MISSED" };
+  if (from || to) {
+    where.spottedAt = {};
+    if (from) (where.spottedAt as Prisma.DateTimeFilter).gte = from;
+    if (to) (where.spottedAt as Prisma.DateTimeFilter).lte = to;
+  }
+
+  const rows = await prisma.tradeOpportunity.findMany({
+    where,
+    select: { missReason: true, missedRealizedR: true },
+  });
+
+  const mapped: MissReasonRow[] = rows.map((r) => ({
+    reason: (r.missReason as MissReasonKey | null) ?? null,
+    missedRealizedR: num(r.missedRealizedR),
+  }));
+
+  return aggregateMissReasons(mapped);
 }

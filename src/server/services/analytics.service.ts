@@ -33,7 +33,10 @@ import {
   buildOpportunityCurve,
   summarizeOpportunities,
 } from "@/domain/analytics/opportunity-engine";
-import { getOpportunityInputs } from "@/server/services/opportunity.service";
+import {
+  getMissReasonAggregate,
+  getOpportunityInputs,
+} from "@/server/services/opportunity.service";
 import {
   summarizeStrategyPerformance,
   type StrategyTradePoint,
@@ -411,11 +414,16 @@ export async function getAnalyticsData(
   // setups skipped) and yield the funnel + Edge Capture %. Only meaningful once
   // opportunities are captured — `hasData` gates the UI so nothing is fabricated for
   // historical trades that never had an opportunity record.
-  const opportunityInputs = await getOpportunityInputs(userId, fromDate, toDate);
+  const [opportunityInputs, missReasons] = await Promise.all([
+    getOpportunityInputs(userId, fromDate, toDate),
+    getMissReasonAggregate(userId, fromDate, toDate),
+  ]);
   const opportunity = {
     hasData: opportunityInputs.length > 0,
     summary: summarizeOpportunities(opportunityInputs),
     curve: buildOpportunityCurve(opportunityInputs),
+    // Behavioral: which lapse (fear/hesitation/…) costs the most missed R.
+    missReasons,
   };
 
   return {

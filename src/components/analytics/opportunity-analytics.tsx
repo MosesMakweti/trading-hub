@@ -7,6 +7,8 @@ import type {
   OpportunityCurvePoint,
   OpportunitySummary,
 } from "@/domain/analytics/opportunity-engine";
+import type { MissReasonAggregate } from "@/domain/analytics/miss-reasons";
+import { MISS_REASON_LABELS } from "@/types/opportunity";
 
 const rr = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}R`;
 const pct = (v: number | null) => (v == null ? "—" : `${v.toFixed(0)}%`);
@@ -21,7 +23,12 @@ const pct = (v: number | null) => (v == null ? "—" : `${v.toFixed(0)}%`);
 export function OpportunityAnalytics({
   data,
 }: {
-  data: { hasData: boolean; summary: OpportunitySummary; curve: OpportunityCurvePoint[] };
+  data: {
+    hasData: boolean;
+    summary: OpportunitySummary;
+    curve: OpportunityCurvePoint[];
+    missReasons: MissReasonAggregate;
+  };
 }) {
   if (!data.hasData) {
     return (
@@ -100,12 +107,70 @@ export function OpportunityAnalytics({
         </div>
       </div>
 
+      {data.missReasons.totalMissed > 0 && <MissReasonsBlock agg={data.missReasons} />}
+
       {s.invalidOpportunities > 0 && (
         <p className="text-xs text-muted-foreground">
           {s.invalidOpportunities} invalid setup{s.invalidOpportunities === 1 ? "" : "s"} excluded —
           a setup that failed its own rules is never counted as a missed opportunity.
         </p>
       )}
+    </div>
+  );
+}
+
+const rrCost = (v: number) => (v > 0 ? `−${v.toFixed(2)}R` : "0.00R");
+
+/** Why valid setups were missed — the discipline signal: which lapse costs the most
+ *  forgone R, and how many misses were disciplined passes vs behavioral lapses. */
+function MissReasonsBlock({ agg }: { agg: MissReasonAggregate }) {
+  const maxCost = Math.max(...agg.byReason.map((r) => r.missedCostR), 0.0001);
+  return (
+    <div className="glass space-y-3 rounded-2xl p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="text-sm font-semibold tracking-tight">Why setups were missed</h3>
+        <span className="text-xs text-muted-foreground/70">
+          {agg.lapseCount} lapse{agg.lapseCount === 1 ? "" : "s"} · {agg.disciplinedCount} disciplined
+          pass{agg.disciplinedCount === 1 ? "" : "es"}
+        </span>
+      </div>
+
+      {agg.costliestLapse && (
+        <p className="text-xs text-muted-foreground">
+          Costliest lapse:{" "}
+          <span className="font-medium text-foreground">
+            {MISS_REASON_LABELS[agg.costliestLapse.reason]}
+          </span>{" "}
+          — <span className="tabular-nums text-danger">{rrCost(agg.costliestLapse.missedCostR)}</span>{" "}
+          forgone across {agg.costliestLapse.count} miss{agg.costliestLapse.count === 1 ? "" : "es"}.
+        </p>
+      )}
+
+      <ul className="space-y-2">
+        {agg.byReason.map((r) => (
+          <li key={r.reason} className="space-y-1">
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="flex items-center gap-1.5">
+                {MISS_REASON_LABELS[r.reason]}
+                {r.disciplined && (
+                  <span className="rounded-full border border-success/30 bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">
+                    disciplined
+                  </span>
+                )}
+              </span>
+              <span className="tabular-nums text-muted-foreground">
+                {r.count}×{r.missedCostR > 0 && <span className="ml-2 text-danger">{rrCost(r.missedCostR)}</span>}
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn("h-full rounded-full", r.disciplined ? "bg-success/50" : "bg-danger/60")}
+                style={{ width: `${Math.max(4, (r.missedCostR / maxCost) * 100)}%` }}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
