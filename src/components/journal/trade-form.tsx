@@ -76,6 +76,9 @@ interface TradeFormProps {
   accounts: { id: string; name: string; kind: string }[];
   strategies: { id: string; name: string; version: number; archived?: boolean }[];
   defaultValues?: TradeFormValues;
+  // When creating from a spotted opportunity, the new trade is linked to it on save
+  // (the opportunity resolves to EXECUTED).
+  opportunityId?: string;
 }
 
 export function TradeForm({
@@ -85,6 +88,7 @@ export function TradeForm({
   accounts,
   strategies,
   defaultValues,
+  opportunityId,
 }: TradeFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -183,7 +187,7 @@ export function TradeForm({
     setIsSubmitting(true);
     const result =
       mode === "create"
-        ? await createTrade(dateKey, values)
+        ? await createTrade(dateKey, values, opportunityId)
         : await updateTrade(dateKey, tradeId!, values);
     setIsSubmitting(false);
 

@@ -10,14 +10,16 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
-import { scoreSetup } from "@/domain/trades/setup-score";
+import { scoreSetup, type SetupRating } from "@/domain/trades/setup-score";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 import { getStrategyReference } from "@/server/services/strategies.service";
+import { executionSnapshot, resolveSelectedTags } from "@/server/services/selected-tags";
 import {
   toOpportunityInputs,
   type OpportunityRow,
 } from "@/domain/analytics/opportunity-mapper";
 import type { OpportunityCreateInput, MissOutcomeInput } from "@/lib/validation/opportunity";
+import type { MissReason, MissedOutcome, OpportunityListItemDTO } from "@/types/opportunity";
 
 export class OpportunityError extends Error {}
 
@@ -98,6 +100,59 @@ export function listOpportunitiesForDay(userId: string, dateKey: string) {
     where: { userId, spottedAt: dateKeyToUtcDate(dateKey) },
     include: { executedTrade: { select: { id: true, tradeNumber: true, actualRR: true } } },
     orderBy: { createdAt: "asc" },
+  });
+}
+
+/** The day's opportunities as view DTOs — tag colors resolved from the frozen
+ *  snapshot (same as trades), and missingMandatory re-derived from that snapshot so
+ *  the Invalid-Setup state names the exact core requirements that were absent. */
+export async function listOpportunityDtosForDay(
+  userId: string,
+  dateKey: string,
+): Promise<OpportunityListItemDTO[]> {
+  const rows = await listOpportunitiesForDay(userId, dateKey);
+  return rows.map((o) => {
+    const snap = executionSnapshot(o.strategyExecutionSnapshot);
+    const missingMandatory = scoreSetup(
+      (snap.confluences ?? []).map((c) => ({
+        name: c.name,
+        weight: null,
+        mandatory: c.mandatory ?? false,
+      })),
+      (o.selectedConfluences as string[] | null) ?? [],
+    ).missingMandatory;
+
+    return {
+      id: o.id,
+      status: o.status,
+      assetSymbol: o.assetSymbol,
+      direction: o.direction,
+      timeframe: o.timeframe,
+      strategyId: o.strategyId,
+      strategyName: o.strategyNameSnapshot,
+      setupScore: o.setupScore,
+      setupRating: o.setupRating as SetupRating | null,
+      setupValid: o.setupValid,
+      missingMandatory,
+      confluenceLabels: resolveSelectedTags(o.selectedConfluences, snap.confluences, []),
+      executionLabels: resolveSelectedTags(o.selectedExecution, snap.execution, []),
+      plannedEntry: num(o.plannedEntry),
+      plannedStopLoss: num(o.plannedStopLoss),
+      plannedTarget: num(o.plannedTarget),
+      plannedRR: num(o.plannedRR),
+      expectedExpectancyR: num(o.expectedExpectancyR),
+      missReason: o.missReason as MissReason | null,
+      missNote: o.missNote,
+      missedOutcome: o.missedOutcome as MissedOutcome | null,
+      missedRealizedR: num(o.missedRealizedR),
+      executedTrade: o.executedTrade
+        ? {
+            id: o.executedTrade.id,
+            tradeNumber: o.executedTrade.tradeNumber,
+            actualRR: num(o.executedTrade.actualRR),
+          }
+        : null,
+    } satisfies OpportunityListItemDTO;
   });
 }
 
