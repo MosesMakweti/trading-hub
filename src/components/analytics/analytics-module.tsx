@@ -4,6 +4,8 @@ import { cn } from "@/lib/utils";
 import { DateRangeFilter } from "@/components/analytics/date-range-filter";
 import { AnalyticsFilterBar } from "@/components/analytics/analytics-filter-bar";
 import { KpiCard } from "@/components/analytics/kpi-card";
+import { ProgressRing } from "@/components/analytics/progress-ring";
+import { Donut } from "@/components/analytics/donut";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
 import { DiscrepancyAnalytics } from "@/components/analytics/discrepancy-analytics";
 import { AdherenceAnalytics } from "@/components/analytics/adherence-analytics";
@@ -29,103 +31,6 @@ const rr = (v: number | null) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.t
 const ratio = (v: number | null) => (v == null ? "—" : v.toFixed(2));
 const toneOf = (n: number): "success" | "danger" | "neutral" =>
   n > 0 ? "success" : n < 0 ? "danger" : "neutral";
-
-// Inline SVG ring + outcome donut — kept local so this module doesn't depend on
-// the UI-overhaul primitives (ProgressRing/Donut) that live on a separate branch.
-// Swap for the shared primitives once that lands.
-function Ring({ value, label, color }: { value: number | null; label: string; color: string }) {
-  const size = 76;
-  const stroke = 6;
-  const r = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * r;
-  const clamped = value == null ? 0 : Math.max(0, Math.min(100, value));
-  const dash = (clamped / 100) * circumference;
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="relative" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="-rotate-90" aria-hidden>
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={stroke} />
-          {value != null && (
-            <circle
-              cx={size / 2}
-              cy={size / 2}
-              r={r}
-              fill="none"
-              stroke={color}
-              strokeWidth={stroke}
-              strokeLinecap="round"
-              strokeDasharray={`${dash} ${circumference}`}
-            />
-          )}
-        </svg>
-        <div className="absolute inset-0 flex items-center justify-center text-sm font-semibold tabular-nums">
-          {value == null ? "—" : `${Math.round(value)}%`}
-        </div>
-      </div>
-      <span className="text-center text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function OutcomeDonut({ win, loss, be }: { win: number; loss: number; be: number }) {
-  const size = 96;
-  const stroke = 12;
-  const r = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * r;
-  const gap = 3;
-  const total = win + loss + be;
-  const segments = [
-    { label: "Win", value: win, color: "var(--success)" },
-    { label: "Loss", value: loss, color: "var(--danger)" },
-    { label: "BE", value: be, color: "var(--muted-foreground)" },
-  ];
-  let offset = 0;
-  return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="relative" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="-rotate-90" aria-hidden>
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={stroke} />
-          {total > 0 &&
-            segments
-              .filter((s) => s.value > 0)
-              .map((s) => {
-                const len = (s.value / total) * circumference;
-                const visible = Math.max(len - gap, 0.001);
-                const el = (
-                  <circle
-                    key={s.label}
-                    cx={size / 2}
-                    cy={size / 2}
-                    r={r}
-                    fill="none"
-                    stroke={s.color}
-                    strokeWidth={stroke}
-                    strokeDasharray={`${visible} ${circumference - visible}`}
-                    strokeDashoffset={-offset}
-                  />
-                );
-                offset += len;
-                return el;
-              })}
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-lg font-semibold tabular-nums">{total}</span>
-          <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Trades</span>
-        </div>
-      </div>
-      <ul className="flex flex-wrap justify-center gap-x-3 gap-y-1">
-        {segments.map((s) => (
-          <li key={s.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="size-2 rounded-[2px]" style={{ background: s.color }} aria-hidden />
-            {s.label} <span className="text-foreground tabular-nums">{s.value}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
 
 function SectionHeading({ title, hint }: { title: string; hint?: string }) {
   return (
@@ -207,10 +112,21 @@ export function AnalyticsModule({
             <SectionHeading title="Performance Overview" hint="realized, from your Performance Account ledger" />
 
             <div className="glass grid grid-cols-2 items-center gap-4 rounded-xl px-4 py-5 sm:grid-cols-4 sm:px-6">
-              <Ring value={d.winRate} color="var(--chart-1)" label="Win rate" />
-              <Ring value={summary.executionEfficiencyPercent} color="var(--success)" label="Execution eff." />
-              <Ring value={summary.edgeCapturePercent} color="var(--warning)" label="Edge capture" />
-              <OutcomeDonut win={d.winningTrades} loss={d.losingTrades} be={d.breakevenTrades} />
+              <ProgressRing value={d.winRate} tone="brand" label="Win rate" />
+              <ProgressRing value={summary.executionEfficiencyPercent} tone="success" label="Execution eff." />
+              <ProgressRing value={summary.edgeCapturePercent} tone="warning" label="Edge capture" />
+              <Donut
+                size={96}
+                stroke={12}
+                segments={[
+                  { label: "Win", value: d.winningTrades, color: "var(--success)" },
+                  { label: "Loss", value: d.losingTrades, color: "var(--danger)" },
+                  { label: "BE", value: d.breakevenTrades, color: "var(--muted-foreground)" },
+                ]}
+              >
+                <span className="text-lg font-semibold tabular-nums">{d.totalTrades}</span>
+                <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Trades</span>
+              </Donut>
             </div>
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
