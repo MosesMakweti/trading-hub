@@ -1,47 +1,36 @@
 import Link from "next/link";
-import { Images } from "lucide-react";
+import { BarChart3, Images } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
 import { listNoteDateKeys } from "@/server/services/journal.service";
 import { listDailyPnl } from "@/server/services/trades.service";
-import { getAnalyticsData } from "@/server/services/analytics.service";
-import { isValidDateKey } from "@/lib/date";
-import { presetToRange, type DateRangePreset } from "@/lib/date-ranges";
 import { Button } from "@/components/ui/button";
 import { JournalCalendar } from "@/components/journal/journal-calendar";
-import { AnalyticsDashboard } from "@/components/analytics/analytics-dashboard";
 import { FadeIn } from "@/components/shared/motion";
 
-const VALID_PRESETS: DateRangePreset[] = ["week", "month", "3months", "year", "custom"];
-
-export default async function JournalPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ range?: string; from?: string; to?: string }>;
-}) {
+export default async function JournalPage() {
   const user = await requireUser();
-  const params = await searchParams;
 
-  const preset: DateRangePreset = VALID_PRESETS.includes(params.range as DateRangePreset)
-    ? (params.range as DateRangePreset)
-    : "month";
-
-  const { from, to } =
-    preset === "custom" && params.from && params.to && isValidDateKey(params.from) && isValidDateKey(params.to)
-      ? { from: params.from, to: params.to }
-      : presetToRange(preset === "custom" ? "month" : preset);
-
-  const [noteDates, dailyPnl, analyticsData] = await Promise.all([
+  const [noteDates, dailyPnl] = await Promise.all([
     listNoteDateKeys(user.id),
     listDailyPnl(user.id),
-    getAnalyticsData(user.id, from, to),
   ]);
 
   return (
-    <FadeIn className="mx-auto max-w-5xl space-y-10">
-      <div>
-        <div className="mb-6 flex items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Journal</h1>
+    <FadeIn className="mx-auto max-w-5xl space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">Journal</h1>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            nativeButton={false}
+            render={<Link href="/analytics" />}
+          >
+            <BarChart3 className="size-4" />
+            Analytics
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -53,10 +42,8 @@ export default async function JournalPage({
             Trade gallery
           </Button>
         </div>
-        <JournalCalendar noteDates={noteDates} dailyPnl={dailyPnl} />
       </div>
-
-      <AnalyticsDashboard preset={preset} from={from} to={to} data={analyticsData} />
+      <JournalCalendar noteDates={noteDates} dailyPnl={dailyPnl} />
     </FadeIn>
   );
 }

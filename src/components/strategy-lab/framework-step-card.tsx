@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { RichTextEditor } from "@/components/plan/rich-text-editor";
+import { ImageAttachments } from "@/components/media/image-attachments";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { archiveFrameworkStep, updateFrameworkStep } from "@/actions/framework.actions";
 import type { FrameworkRichField } from "@/lib/validation/framework";
@@ -145,6 +146,10 @@ export function FrameworkStepCard({
               />
             </div>
           ))}
+          <div className="space-y-1.5">
+            <Label className="text-xs">Images</Label>
+            <ImageAttachments ownerType="STRATEGY_FRAMEWORK_STEP" ownerId={step.id} max={8} />
+          </div>
         </div>
       )}
 

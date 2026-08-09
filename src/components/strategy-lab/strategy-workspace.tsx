@@ -29,6 +29,7 @@ import { ArsenalSection } from "@/components/strategy-lab/arsenal-section";
 import { FrameworkSection } from "@/components/strategy-lab/framework-section";
 import { TimeframesSection } from "@/components/strategy-lab/timeframes-section";
 import { EntryModelsSection } from "@/components/strategy-lab/entry-models-section";
+import { ImageAttachments } from "@/components/media/image-attachments";
 import { TradeManagementSection } from "@/components/strategy-lab/trade-management-section";
 import { StrategyPerformanceSection } from "@/components/strategy-lab/strategy-performance-section";
 import { StrategyVersionsSection } from "@/components/strategy-lab/strategy-versions-section";
@@ -241,8 +242,15 @@ export function StrategyWorkspace({
           </TabsList>
         </div>
 
-        <TabsContent value="settings" className="mt-4">
+        <TabsContent value="settings" className="mt-4 space-y-4">
           <StrategySettingsForm value={settings} onChange={setSettings} saveState={saveState} />
+          <div className="glass space-y-2 rounded-2xl p-4">
+            <h3 className="text-sm font-medium text-muted-foreground">Documentation images</h3>
+            <p className="text-xs text-muted-foreground/60">
+              Screenshots and diagrams that document this strategy — models, examples, references.
+            </p>
+            <ImageAttachments ownerType="STRATEGY" ownerId={strategy.id} max={12} />
+          </div>
         </TabsContent>
 
         {/* Per-strategy performance (Future integration: analytics by strategy). */}

@@ -104,13 +104,19 @@ export function TodayWorkspace({
           todayKey={day.dateKey}
         />
         {focusedTrade ? (
-          section === "idea" ? (
-            <TradeIdeaSection trade={focusedTrade} />
-          ) : section === "execution" ? (
-            <TradeExecutionSection trade={focusedTrade} />
-          ) : (
-            <TradeReviewSection trade={focusedTrade} />
-          )
+          // key = tradeId: remount the whole section when the focused trade
+          // changes, so every field's local state re-seeds from *this* trade's
+          // data. Without it, React reuses the field instances across trades and
+          // their useState carries the previous trade's values over.
+          <div key={focusedTrade.id}>
+            {section === "idea" ? (
+              <TradeIdeaSection trade={focusedTrade} />
+            ) : section === "execution" ? (
+              <TradeExecutionSection trade={focusedTrade} />
+            ) : (
+              <TradeReviewSection trade={focusedTrade} />
+            )}
+          </div>
         ) : (
           <EmptyState
             icon={CandlestickChart}

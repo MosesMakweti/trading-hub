@@ -3,6 +3,17 @@ import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { daysBetweenInclusive } from "@/lib/date-ranges";
 import { buildEquityCurve, dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import * as metrics from "@/domain/performance/metrics";
+import { maxDrawdown, pnlStats, recoveryFactor } from "@/domain/performance/pnl-stats";
+import {
+  dayOfWeekPerformance,
+  hourPerformance,
+  longShortPerformance,
+  monthlyPerformance,
+  rMultipleDistribution,
+  riskStats,
+  sessionPerformance,
+  type AnalyticsTradePoint,
+} from "@/domain/performance/breakdowns";
 import {
   summarizeAdherence,
   type AdherenceTradePoint,
@@ -130,7 +141,62 @@ export async function getStrategyPerformance(userId: string, strategyId: string)
   return summarizeStrategyPerformance(points);
 }
 
-export async function getAnalyticsData(userId: string, from: string, to: string) {
+/**
+ * Optional analytics filters. Date range stays a separate (from/to) argument; these
+ * narrow WHICH trades are aggregated. The account balance is still walked over ALL
+ * in-range trades (so each included trade's contribution % is account-correct) —
+ * only the aggregation is filtered. Absent filters = unchanged behavior.
+ */
+export interface AnalyticsFilters {
+  strategyId?: string;
+  entryModel?: string;
+  asset?: string;
+  direction?: "LONG" | "SHORT";
+  session?: string;
+  accountId?: string;
+  status?: "OPEN" | "CLOSED" | "REVIEWED";
+  winLoss?: "win" | "loss";
+}
+
+export interface AnalyticsFilterOptions {
+  strategies: { id: string; name: string }[];
+  accounts: { id: string; name: string }[];
+  assets: string[];
+  sessions: string[];
+  entryModels: string[];
+}
+
+/** Distinct values the Analytics filter bar offers — from the user's own data. */
+export async function getAnalyticsFilterOptions(userId: string): Promise<AnalyticsFilterOptions> {
+  const [trades, strategies, accounts] = await Promise.all([
+    prisma.trade.findMany({
+      where: { userId },
+      select: { assetSymbol: true, selectedSession: true, selectedEntryModel: true },
+    }),
+    prisma.strategy.findMany({ where: { userId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.tradingAccount.findMany({
+      where: { userId, kind: { not: "PERFORMANCE" } },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  const uniqSorted = (xs: (string | null)[]) =>
+    [...new Set(xs.filter((x): x is string => Boolean(x)))].sort((a, b) => a.localeCompare(b));
+  return {
+    strategies,
+    accounts,
+    assets: uniqSorted(trades.map((t) => t.assetSymbol)),
+    sessions: uniqSorted(trades.map((t) => t.selectedSession)),
+    entryModels: uniqSorted(trades.map((t) => t.selectedEntryModel)),
+  };
+}
+
+export async function getAnalyticsData(
+  userId: string,
+  from: string,
+  to: string,
+  filters?: AnalyticsFilters,
+) {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
 
   const allPerformanceAllocations = await prisma.tradeAccountAllocation.findMany({
@@ -175,19 +241,57 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   }
 
   let runningBalance = balanceBeforeRange;
+  // Filtered equity — advances only for included trades (drawdown of the subset).
+  let filteredBalance = balanceBeforeRange;
   const tradeInputs: metrics.TradeMetricInput[] = [];
   const psychologyPoints: PsychologyDataPoint[] = [];
   const adherencePoints: AdherenceTradePoint[] = [];
   const discrepancyInputs: ExecutionTradeInput[] = [];
   const deviationPrimaries: (Deviation | null)[] = [];
   const dailyPnlMap = new Map<string, number>();
+  // $ P&L per trade + the running-balance series, for the dollar summary and
+  // drawdown (Analytics module). Same allocations as everything else — no new query.
+  const tradePnls: number[] = [];
+  const balanceSeries: number[] = [balanceBeforeRange];
+  // Per-trade points for the Phase B breakdowns (day-of-week / month / direction /
+  // session / hour / risk) — built from the same rows, not a second data source.
+  const analyticsPoints: AnalyticsTradePoint[] = [];
 
   for (const alloc of inRange) {
     const t = alloc.trade;
     const dateKey = utcDateToKey(t.tradeDate);
     const pnl = alloc.closingPnlNet.toNumber();
     const contributionPercent = runningBalance !== 0 ? (pnl / runningBalance) * 100 : 0;
-    runningBalance += pnl;
+    runningBalance += pnl; // true account balance — always advances (all in-range trades)
+
+    // Aggregate only trades matching the active filters. The balance already
+    // advanced above, so a filtered-out trade still counts toward later trades'
+    // account-relative contribution %, but never enters the analytics.
+    const included =
+      (!filters?.strategyId || t.strategyId === filters.strategyId) &&
+      (!filters?.entryModel || t.selectedEntryModel === filters.entryModel) &&
+      (!filters?.asset || t.assetSymbol === filters.asset) &&
+      (!filters?.direction || t.direction === filters.direction) &&
+      (!filters?.session || (t.selectedSession ?? "") === filters.session) &&
+      (!filters?.status || t.status === filters.status) &&
+      (!filters?.accountId || t.allocations.some((a) => a.tradingAccountId === filters.accountId)) &&
+      (!filters?.winLoss || (filters.winLoss === "win" ? pnl > 0 : pnl < 0));
+    if (!included) continue;
+
+    filteredBalance += pnl;
+    tradePnls.push(pnl);
+    balanceSeries.push(filteredBalance);
+    analyticsPoints.push({
+      dateKey,
+      monthKey: dateKey.slice(0, 7),
+      weekday: t.tradeDate.getUTCDay(),
+      hour: Math.floor(t.executionMinutes / 60),
+      pnl,
+      actualR: contributionPercent,
+      direction: t.direction,
+      session: t.selectedSession ?? null,
+      riskPercent: alloc.riskInputType === "PERCENT" ? alloc.riskValue.toNumber() : null,
+    });
 
     const strategyLabel = t.strategyNameSnapshot
       ? t.strategyVersionSnapshot != null
@@ -272,6 +376,21 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
   const winningCount = tradeInputs.filter((t) => (t.actualRR ?? 0) > 0).length;
   const losingCount = tradeInputs.filter((t) => (t.actualRR ?? 0) < 0).length;
 
+  // Dollar summary + drawdown for the Analytics module (from the realized $ P&L).
+  const dollars = pnlStats(tradePnls);
+  const drawdown = maxDrawdown(balanceSeries);
+
+  // Phase B breakdowns (all from analyticsPoints — no extra query).
+  const breakdowns = {
+    dayOfWeek: dayOfWeekPerformance(analyticsPoints),
+    monthly: monthlyPerformance(analyticsPoints),
+    longShort: longShortPerformance(analyticsPoints),
+    sessions: sessionPerformance(analyticsPoints),
+    hours: hourPerformance(analyticsPoints),
+    rDistribution: rMultipleDistribution(analyticsPoints),
+    risk: riskStats(analyticsPoints.map((p) => p.riskPercent ?? NaN)),
+  };
+
   // Discrepancy Gap — Expected vs Actual equity, via the central Execution Engine.
   const discrepancy = {
     curve: buildDiscrepancyCurve(discrepancyInputs),
@@ -295,6 +414,18 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       averageLoser: metrics.averageLoser(tradeInputs),
       longestWinStreak: metrics.longestWinStreak(tradeInputs),
       longestLossStreak: metrics.longestLossStreak(tradeInputs),
+      breakevenTrades: dollars.breakevenTrades,
+      // Realized $ performance (from the Performance Account ledger).
+      netPnl: dollars.netPnl,
+      grossProfit: dollars.grossProfit,
+      grossLoss: dollars.grossLoss,
+      largestWin: dollars.largestWin,
+      largestLoss: dollars.largestLoss,
+      maxDrawdownAmount: drawdown.amount,
+      maxDrawdownPercent: drawdown.percent,
+      recoveryFactor: recoveryFactor(dollars.netPnl, drawdown.amount),
+      startingBalance: balanceBeforeRange,
+      currentBalance: runningBalance,
       mostTradedAsset: metrics.mostTradedAsset(tradeInputs),
       averageTradesPerDay: metrics.averageTradesPerDay(tradeInputs, rangeDays),
       ruleAdherenceAverage,
@@ -303,6 +434,7 @@ export async function getAnalyticsData(userId: string, from: string, to: string)
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
       discrepancy,
+      breakdowns,
       dailyPercents,
       // SOT strategy-adherence analytics (foundation): average confluence / execution /
       // trade-quality adherence, avg confluence count on winners vs losers, and a

@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { ChevronLeft, ChevronRight, ListChecks, Plus } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
-import { getDailyNote, getJournalDayRecap } from "@/server/services/journal.service";
+import { getOrCreateDailyNote, getJournalDayRecap } from "@/server/services/journal.service";
+import { ImageAttachments } from "@/components/media/image-attachments";
 import { listTradesForDay } from "@/server/services/trades.service";
 import { addDaysToKey, formatDateKeyLong, isValidDateKey, localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
@@ -30,7 +31,7 @@ export default async function JournalDayPage({
 
   const user = await requireUser();
   const [note, trades, recap] = await Promise.all([
-    getDailyNote(user.id, dateKey),
+    getOrCreateDailyNote(user.id, dateKey),
     listTradesForDay(user.id, dateKey),
     getJournalDayRecap(user.id, dateKey),
   ]);
@@ -154,6 +155,10 @@ export default async function JournalDayPage({
           initialContent={note?.content ?? null}
           editable={editable}
         />
+        <div className="space-y-2 border-t border-border pt-3">
+          <h3 className="text-xs font-medium text-muted-foreground">Day images</h3>
+          <ImageAttachments ownerType="DAILY_NOTE" ownerId={note.id} max={12} disabled={!editable} />
+        </div>
       </section>
 
       <section className="space-y-3">

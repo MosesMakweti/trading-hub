@@ -90,11 +90,6 @@ export interface TradeWorkspaceAccountDTO {
   closingPnlNet: number;
 }
 
-export interface TradeWorkspaceImageDTO {
-  id: string;
-  category: "ANALYSIS" | "BEFORE" | "AFTER";
-  url: string;
-}
 
 export interface TradeWorkspaceDTO {
   id: string;
@@ -175,7 +170,10 @@ export interface TradeWorkspaceDTO {
     grade: "A" | "B" | "C" | "D" | "F";
   } | null;
 
-  images: TradeWorkspaceImageDTO[];
+  // Optional gallery preview (a representative attached image). Populated only
+  // where the gallery needs it (see listTradePreviewImages); the mapper leaves it
+  // undefined since media lives in the universal attachment system, not on Trade.
+  previewImageUrl?: string | null;
 
   status: TradeStatus;
   createdAt: string; // ISO — trade logged

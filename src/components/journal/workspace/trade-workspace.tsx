@@ -5,7 +5,6 @@ import {
   ClipboardCheck,
   History,
   Lightbulb,
-  Paperclip,
   Pencil,
   Zap,
 } from "lucide-react";
@@ -17,7 +16,6 @@ import { TradeIdeaSection } from "@/components/journal/workspace/trade-idea-sect
 import { TradeExecutionSection } from "@/components/journal/workspace/trade-execution-section";
 import { TradeReviewSection } from "@/components/journal/workspace/trade-review-section";
 import { TradeTimeline } from "@/components/journal/workspace/trade-timeline";
-import { TradeAttachmentsSection } from "@/components/journal/workspace/trade-attachments-section";
 import { TradeSummary } from "@/components/journal/workspace/trade-summary";
 import { WorkspaceSection } from "@/components/journal/workspace/workspace-ui";
 import { WorkspaceEditableProvider } from "@/components/journal/workspace/editable-context";
@@ -95,10 +93,6 @@ export function TradeWorkspace({
 
         <WorkspaceSection icon={History} title="Timeline">
           <TradeTimeline trade={trade} />
-        </WorkspaceSection>
-
-        <WorkspaceSection icon={Paperclip} title="Attachments">
-          <TradeAttachmentsSection trade={trade} />
         </WorkspaceSection>
 
         <WorkspaceSection icon={ClipboardCheck} title="Trade Summary" isLast>

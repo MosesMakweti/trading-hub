@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BarChart3,
   BookOpenText,
   CandlestickChart,
   FlaskConical,
@@ -30,6 +31,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/today", label: "Today", icon: Sun },
   { href: "/journal", label: "Journal", icon: BookOpenText },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/edge", label: "Edge Review", icon: TrendingUp },
   { href: "/accounts", label: "My Accounts", icon: Wallet },
   { href: "/strategy-lab", label: "Strategy Lab", icon: FlaskConical },

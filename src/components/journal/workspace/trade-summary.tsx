@@ -95,13 +95,6 @@ export function TradeSummary({ trade }: { trade: TradeWorkspaceDTO }) {
           <span className="text-muted-foreground/40 italic">None</span>
         )}
       </Stat>
-      <Stat label="Images">
-        {trade.images.length > 0 ? (
-          `${trade.images.length} attached`
-        ) : (
-          <span className="text-muted-foreground/40 italic">None</span>
-        )}
-      </Stat>
     </div>
   );
 }

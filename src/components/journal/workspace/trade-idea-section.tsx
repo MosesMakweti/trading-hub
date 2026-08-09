@@ -10,6 +10,7 @@ import {
   WorkspaceNoteField,
   WorkspacePriceField,
 } from "@/components/journal/workspace/workspace-fields";
+import { TradeImageBucket } from "@/components/journal/workspace/trade-image-bucket";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
 // Section 1 — Trade Idea: what the trader planned, before the trade.
@@ -145,6 +146,12 @@ export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
           placeholder="Why did you take this trade?"
           className="sm:col-span-3"
         />
+      </div>
+
+      {/* Before-Trade images — what the trader saw/planned before entering: chart
+          setup, market structure, areas of interest, planned setup. */}
+      <div className="space-y-2 rounded-xl border border-border bg-background/30 p-3">
+        <TradeImageBucket tradeId={trade.id} category="BEFORE" label="Before-Trade Images" />
       </div>
     </div>
   );
