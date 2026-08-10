@@ -17,6 +17,18 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { archiveTrade } from "@/actions/trades.actions";
 import { GRADE_VARIANT } from "@/lib/grade-variant";
 import type { TradeListItemDTO } from "@/types/trades";
+import type { TradeClass } from "@/domain/analytics/discrepancy-model";
+
+// Per-trade classification chip styling: NORMAL_* are neutral/positive (correct
+// execution, whatever the result), PROCESS_* are flagged (a controllable deviation).
+export const DISCREPANCY_CLASS_META: Record<TradeClass, { label: string; className: string }> = {
+  NORMAL_WIN: { label: "Normal win", className: "border-success/30 bg-success/10 text-success" },
+  NORMAL_LOSS: { label: "Normal loss", className: "border-border bg-muted/40 text-muted-foreground" },
+  NORMAL_BREAKEVEN: { label: "Breakeven", className: "border-border bg-muted/40 text-muted-foreground" },
+  PROCESS_DISCREPANCY_WIN: { label: "Process gap · win", className: "border-warning/30 bg-warning/10 text-warning" },
+  PROCESS_DISCREPANCY_LOSS: { label: "Process gap · loss", className: "border-danger/30 bg-danger/10 text-danger" },
+  UNVERIFIED: { label: "Unverified", className: "border-border bg-muted/40 text-muted-foreground" },
+};
 
 function percent(n: number) {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
@@ -177,36 +189,31 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
 
       {trade.discrepancy && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-background/40 px-3 py-2 text-xs">
-          <span className="font-medium text-muted-foreground">Discrepancy</span>
-          <span className="tabular-nums">
-            Exp{" "}
-            <span className="font-medium text-foreground">{fmtR(trade.discrepancy.expectedR)}</span>{" "}
-            → Act{" "}
-            <span className="font-medium text-foreground">{fmtR(trade.discrepancy.actualR)}</span>
+          <span
+            className={cn(
+              "inline-flex items-center rounded-full border px-1.5 py-0.5 font-medium",
+              DISCREPANCY_CLASS_META[trade.discrepancy.classification].className,
+            )}
+          >
+            {DISCREPANCY_CLASS_META[trade.discrepancy.classification].label}
           </span>
-          {trade.discrepancy.gapR != null && (
-            <span
-              className={cn(
-                "font-medium tabular-nums",
-                trade.discrepancy.gapR > 0 ? "text-warning" : "text-success",
-              )}
-            >
-              Gap {trade.discrepancy.gapR >= 0 ? "+" : ""}
-              {fmtR(trade.discrepancy.gapR)}
+          {trade.discrepancy.expectedStatisticalR != null && (
+            <span className="text-muted-foreground tabular-nums">
+              Expectancy {fmtR(trade.discrepancy.expectedStatisticalR)} · Act{" "}
+              <span className="font-medium text-foreground">{fmtR(trade.discrepancy.actualR)}</span>
             </span>
           )}
-          {trade.discrepancy.executionScore != null && (
-            <span className="text-muted-foreground tabular-nums">
-              Exec {trade.discrepancy.executionScore}%
+          {trade.discrepancy.avoidableR > 0 ? (
+            <span className="font-medium text-danger tabular-nums">
+              Avoidable −{fmtR(trade.discrepancy.avoidableR)}
             </span>
-          )}
-          {trade.discrepancy.recoverableR != null && trade.discrepancy.recoverableR > 0 && (
-            <span className="text-muted-foreground tabular-nums">
-              Recoverable {fmtR(trade.discrepancy.recoverableR)}
-            </span>
+          ) : (
+            !trade.discrepancy.processDiscrepancy && (
+              <span className="text-success tabular-nums">No avoidable leakage</span>
+            )
           )}
           {trade.discrepancy.primaryDeviation && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 font-medium text-warning">
+            <span className="inline-flex items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-1.5 py-0.5 font-medium text-danger">
               {trade.discrepancy.primaryDeviation.label}
               <span className="tabular-nums opacity-70">
                 −{fmtR(trade.discrepancy.primaryDeviation.costR)}

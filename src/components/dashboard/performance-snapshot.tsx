@@ -8,7 +8,7 @@ import { ProgressRing } from "@/components/analytics/progress-ring";
 import { Donut } from "@/components/analytics/donut";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
 import { DiscrepancyGapCard } from "@/components/dashboard/discrepancy-gap-card";
-import type { DiscrepancyPoint, DiscrepancySummary } from "@/domain/analytics/execution-engine";
+import type { DiscrepancyCurvePoint, DiscrepancySummary } from "@/domain/analytics/discrepancy-model";
 
 /**
  * Performance Snapshot — the Dashboard's at-a-glance health check: headline KPIs
@@ -34,7 +34,7 @@ export function PerformanceSnapshot({
   bestAccount: { name: string; returnPercent: number } | null;
   bestAsset: { assetSymbol: string; totalReturnPercent: number } | null;
   equityCurve: ComponentProps<typeof EquityCurveChart>["data"];
-  discrepancy: { curve: DiscrepancyPoint[]; summary: DiscrepancySummary };
+  discrepancy: { curve: DiscrepancyCurvePoint[]; summary: DiscrepancySummary };
 }) {
   const signed = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
   const breakeven = Math.max(0, totalTrades - winningTrades - losingTrades);
@@ -87,16 +87,17 @@ export function PerformanceSnapshot({
 
       <div className="glass-strong grid grid-cols-2 items-center gap-4 rounded-xl px-4 py-5 sm:grid-cols-4 sm:px-6">
         <ProgressRing value={winRate} tone="brand" label="Win rate" />
-        <ProgressRing
-          value={discrepancy.summary.executionEfficiencyPercent}
-          tone="success"
-          label="Execution eff."
-        />
-        <ProgressRing
-          value={discrepancy.summary.edgeCapturePercent}
-          tone="warning"
-          label="Edge capture"
-        />
+        <ProgressRing value={discrepancy.summary.edgeCapturePercent} tone="success" label="Edge capture" />
+        <div className="flex flex-col items-center justify-center gap-1 text-center">
+          <span
+            className={`text-2xl font-semibold tabular-nums ${
+              discrepancy.summary.avoidableDiscrepancyR > 0 ? "text-danger" : "text-foreground"
+            }`}
+          >
+            {discrepancy.summary.avoidableDiscrepancyR.toFixed(1)}R
+          </span>
+          <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Avoidable</span>
+        </div>
         <Donut
           size={96}
           stroke={12}

@@ -2,6 +2,7 @@ import type { TagColor } from "@prisma/client";
 
 import type { SetupRating } from "@/domain/trades/setup-score";
 import type { Deviation } from "@/domain/analytics/deviation-engine";
+import type { TradeClass } from "@/domain/analytics/discrepancy-model";
 
 /** A selected confluence / execution tag, resolved with its color (from the trade's
  * frozen strategy snapshot) so it renders as a colored chip everywhere. */
@@ -10,15 +11,17 @@ export interface SelectedTagDTO {
   color: TagColor;
 }
 
-/** Per-trade Discrepancy-Gap breakdown (from the Execution Engine). Null when the
- * trade's strategy has no expectancy benchmark set. R-multiples. */
+/** Per-trade discrepancy breakdown (corrected model). A correctly-executed trade —
+ * win OR loss — has avoidableR 0 and a NORMAL_* classification. R-multiples. */
 export interface TradeDiscrepancyDTO {
-  executionScore: number | null;
-  strategyAdherence: number | null;
-  expectedR: number | null;
+  classification: TradeClass;
+  processDiscrepancy: boolean;
+  /** Trader-controlled leakage in R (objective deviations only). 0 for a clean trade. */
+  avoidableR: number;
+  /** The strategy's statistical expectancy R (context, not a per-trade prediction). */
+  expectedStatisticalR: number | null;
   actualR: number | null;
-  gapR: number | null;
-  recoverableR: number | null;
+  strategyAdherence: number | null;
   primaryDeviation: Deviation | null; // the biggest planned-vs-actual slip, if any
 }
 

@@ -114,8 +114,17 @@ export function AnalyticsModule({
 
             <div className="glass grid grid-cols-2 items-center gap-4 rounded-xl px-4 py-5 sm:grid-cols-4 sm:px-6">
               <ProgressRing value={d.winRate} tone="brand" label="Win rate" />
-              <ProgressRing value={summary.executionEfficiencyPercent} tone="success" label="Execution eff." />
-              <ProgressRing value={summary.edgeCapturePercent} tone="warning" label="Edge capture" />
+              <ProgressRing value={summary.edgeCapturePercent} tone="success" label="Edge capture" />
+              <div className="flex flex-col items-center justify-center gap-1 text-center">
+                <span
+                  className={`text-2xl font-semibold tabular-nums ${
+                    summary.avoidableDiscrepancyR > 0 ? "text-danger" : "text-foreground"
+                  }`}
+                >
+                  {summary.avoidableDiscrepancyR.toFixed(1)}R
+                </span>
+                <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Avoidable</span>
+              </div>
               <Donut
                 size={96}
                 stroke={12}
