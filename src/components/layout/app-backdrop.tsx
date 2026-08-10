@@ -20,6 +20,7 @@ const CHART_TOP = 245; // candle tops start well below the header (chart sits lo
 const HORIZON = 735; // reflective surface near the bottom (volume by the bottom axis)
 const CHART_BOT = HORIZON - 74; // clear strip at the base for the volume
 const AMP = 1.5; // price-move amplitude — extra-tall candle bodies/wicks
+const HEIGHT_SCALE = 3; // per-candle visual height multiplier (around each candle's centre)
 
 /** Deterministic PRNG (mulberry32) — stable output for a given seed. */
 function rng(seed: number): () => number {
@@ -116,15 +117,22 @@ function Scene({ series }: { series: OHLC[] }) {
           />
         );
       })}
-      {/* Candles. */}
+      {/* Candles. Each candle's height (body + wicks) is exaggerated ×HEIGHT_SCALE
+          around its own centre — the trend/structure (candle centres, the price
+          path) is untouched; the individual candles just read much taller. */}
       {series.map((o, i) => {
         const up = o.close >= o.open;
-        const bodyTop = vY(Math.max(o.open, o.close));
-        const bodyH = Math.max(1.4, vY(Math.min(o.open, o.close)) - bodyTop);
+        const yHigh = vY(o.high);
+        const yLow = vY(o.low);
+        const centre = (yHigh + yLow) / 2;
+        const grow = (y: number) => centre + (y - centre) * HEIGHT_SCALE;
+        const bodyTop = grow(vY(Math.max(o.open, o.close)));
+        const bodyH = Math.max(1.4, grow(vY(Math.min(o.open, o.close))) - bodyTop);
+        const wickTop = grow(yHigh);
         const cx = i * slot + slot / 2;
         return (
           <g key={`c${i}`}>
-            <rect x={cx - 0.7} y={vY(o.high)} width={1.4} height={vY(o.low) - vY(o.high)} fill="var(--candle)" opacity={0.55} />
+            <rect x={cx - 0.7} y={wickTop} width={1.4} height={grow(yLow) - wickTop} fill="var(--candle)" opacity={0.55} />
             <rect
               x={i * slot + (slot - bw) / 2}
               y={bodyTop}
