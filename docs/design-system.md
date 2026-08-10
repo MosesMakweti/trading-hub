@@ -91,9 +91,10 @@ hues. `chart-1`, links, and `brand` are all neutral graphite — never blue.
 | `sidebar*` | nav surface family | deepest surface |
 | `chart-1…5` | data series (neutral + semantic) | see §10 |
 
-> **Monochrome rule:** the UI is graphite/white/gray. Never introduce blue/purple/pink/neon as an
-> accent. The only colors are the reserved semantic set (§3.2) and the muted tag hues (§4). `primary`
-> and `brand` are neutral — a colored primary is a regression.
+> **Monochrome-chrome rule:** the UI *chrome* is graphite/white/gray — never introduce blue/purple/pink/
+> neon as a UI accent; `primary` and `brand` are neutral (a colored primary/CTA is a regression). The
+> exceptions, all deliberate: the reserved semantic set (§3.2), the muted tag hues (§4), and the
+> **chart categorical palette (§10)** — *data visualization is colorful*; the chrome around it is not.
 
 ### 3.2 PnL & status color — the most important rule
 
@@ -290,11 +291,12 @@ level of motion onto a work surface.
 
 All charts must look like one application (Recharts is the house library).
 
-- **Series colors:** `--chart-1…5` — a **neutral, monochrome-first** ramp: `chart-1` graphite ink
-  (the primary series), `chart-2`/`chart-3` mid/dark grays, and `chart-4`/`chart-5` the semantic
-  **danger**/**success** for anything win/loss. Assigned in fixed order, never cycled/recolored per
-  filter. For **P&L/equity**, use `success`/`danger` (up/down); Expected vs Actual = graphite
-  (`chart-1`) vs a lighter gray or dashed, never two hues.
+- **Series colors:** `--chart-1…5` — a **validated categorical palette** (colorblind-safe, from the
+  `dataviz` skill): blue · orange · aqua · yellow · magenta, in that **fixed order, never cycled or
+  recolored per filter**. This is the one place the UI is colorful — data visualization; the chrome
+  stays monochrome. **P&L still uses `success`/`danger`** (up/down), never a categorical hue, and status
+  colors are never reused as "series N". Text/labels stay on ink tokens; the colored mark carries
+  identity. Rings/sparklines/donuts inherit these (a `brand`-toned ring = `chart-1`).
 - **One axis** — never dual-y. Two measures of different scale → two charts or index to a common
   base.
 - **Recessive frame:** faint gridlines (`border` at low opacity), muted axis labels, no chart
