@@ -69,26 +69,29 @@
   /* Premium entrance easing (Expo.out) — fast in, long elegant settle. */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
-  /* Cool-biased monochrome neutrals (hue 255, near-zero chroma) — chosen, not defaulted */
-  --background: oklch(0.985 0.002 255);
+  /* Soft neutral-gray canvas (hue 255, near-zero chroma). The canvas is a layered
+     gray so the frosted white/light glass panels and cards visibly lift off it —
+     the reference's depth comes from surface-vs-canvas contrast, not from borders. */
+  --background: oklch(0.80 0.004 255);
   --foreground: oklch(0.17 0.008 255);
-  --card: oklch(1 0 0);
+  --card: oklch(0.995 0 0);
   --card-foreground: oklch(0.17 0.008 255);
-  --popover: oklch(1 0 0);
+  --popover: oklch(0.995 0 0);
   --popover-foreground: oklch(0.17 0.008 255);
-  /* Signal Blue — the single accent */
-  --primary: oklch(0.53 0.19 255);
+  /* Monochrome accent — near-black ink. The interface is black/white/gray; the
+     primary CTA is an inverting ink↔white pair (dark button + white text here). */
+  --primary: oklch(0.22 0.006 255);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.965 0.004 255);
+  --secondary: oklch(0.94 0.004 255);
   --secondary-foreground: oklch(0.26 0.01 255);
-  --muted: oklch(0.965 0.004 255);
-  --muted-foreground: oklch(0.48 0.012 255);
-  --accent: oklch(0.955 0.006 255);
+  --muted: oklch(0.955 0.004 255);
+  --muted-foreground: oklch(0.42 0.012 255);
+  --accent: oklch(0.935 0.005 255);
   --accent-foreground: oklch(0.26 0.01 255);
   --destructive: oklch(0.55 0.2 25);
-  --border: oklch(0.17 0.02 255 / 9%);
-  --input: oklch(0.17 0.02 255 / 13%);
-  --ring: oklch(0.53 0.19 255 / 45%);
+  --border: oklch(0.17 0.02 255 / 8%);
+  --input: oklch(0.17 0.02 255 / 12%);
+  --ring: oklch(0.22 0.01 255 / 35%);
 
   /* Semantic P&L / grade colors — reserved, restrained; numbers only */
   --success: oklch(0.52 0.12 158);
@@ -98,33 +101,46 @@
   --warning: oklch(0.62 0.12 75);
   --warning-foreground: oklch(0.99 0.01 75);
 
-  /* Brand = Signal Blue (indigo→violet gradient retired). Near-single-hue sheen. */
-  --brand: oklch(0.53 0.19 255);
-  --brand-from: oklch(0.58 0.18 255);
-  --brand-to: oklch(0.5 0.2 258);
+  /* Brand = neutral graphite (decorative chips/nodes only; white text stays legible
+     on it in both themes). Not an accent hue — the interface is monochrome. */
+  --brand: oklch(0.30 0.006 255);
+  --brand-from: oklch(0.34 0.006 255);
+  --brand-to: oklch(0.24 0.006 255);
 
-  /* Glassmorphism surfaces — neutral cool film */
-  --glass: oklch(1 0 0 / 64%);
-  --glass-border: oklch(0.17 0.02 255 / 10%);
-  --shadow-color: 240 12% 30%;
+  /* Glassmorphism surfaces — frosted light film that reads as a raised panel on the
+     gray canvas. Soft, neutral shadow color for the diffuse reference-style depth. */
+  --glass: oklch(1 0 0 / 70%);
+  --glass-border: oklch(1 0 0 / 55%);
+  --shadow-color: 240 8% 38%;
 
-  /* Charts: blue + monochrome grays + semantic (no rainbow) */
-  --chart-1: oklch(0.53 0.19 255);
+  /* Charts: graphite ink primary + monochrome grays + semantic P&L (no rainbow).
+     chart-1 is the neutral primary series; success/danger carry win/loss. */
+  --chart-1: oklch(0.34 0.008 255);
   --chart-2: oklch(0.62 0.012 255);
   --chart-3: oklch(0.44 0.01 255);
   --chart-4: oklch(0.55 0.2 25);
   --chart-5: oklch(0.52 0.12 158);
-  --radius: 0.625rem;
+  /* Softer, calmer rounding to match the reference (cards land ~15px at 2xl). */
+  --radius: 0.75rem;
   /* Matte canvas: no colored wash on light (kept flat + neutral). */
   --app-canvas-glow: transparent;
-  --sidebar: oklch(0.988 0.002 255);
+  /* Floating candlestick backdrop (decorative, behind the whole app). Candles are a
+     mid-gray so they read faintly on the light canvas; the vignette softens edges to
+     gray; a gentle top bloom adds atmosphere. All extremely low-opacity. */
+  --candle: oklch(0.42 0.004 255);
+  --backdrop-vignette: oklch(0.66 0.004 255 / 42%);
+  --backdrop-glow: oklch(1 0 0 / 45%);
+  --backdrop-strength: 0.4; /* light mode stays restrained */
+  /* Sidebar is a frosted panel lighter than the canvas; the active item is a raised
+     white pill (bg-card + soft shadow, in the sidebar primitive) that lifts off it. */
+  --sidebar: oklch(0.93 0.003 255);
   --sidebar-foreground: oklch(0.17 0.008 255);
-  --sidebar-primary: oklch(0.53 0.19 255);
+  --sidebar-primary: oklch(0.22 0.006 255);
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.955 0.006 255);
-  --sidebar-accent-foreground: oklch(0.26 0.01 255);
-  --sidebar-border: oklch(0.17 0.02 255 / 8%);
-  --sidebar-ring: oklch(0.53 0.19 255 / 45%);
+  --sidebar-accent: oklch(0.90 0.005 255);
+  --sidebar-accent-foreground: oklch(0.2 0.01 255);
+  --sidebar-border: oklch(0.17 0.02 255 / 7%);
+  --sidebar-ring: oklch(0.22 0.01 255 / 35%);
 }
 
 /* ------------------------------------------------------------------ *
@@ -140,9 +156,10 @@
   --card-foreground: oklch(0.965 0.003 265);
   --popover: oklch(0.205 0.004 265);
   --popover-foreground: oklch(0.965 0.003 265);
-  /* Signal Blue — interaction/data accent only */
-  --primary: oklch(0.62 0.16 262);
-  --primary-foreground: oklch(0.99 0 0);
+  /* Monochrome accent — off-white. The inverting CTA pair flips here: a near-white
+     button with near-black text. No blue; the interface stays graphite/white/gray. */
+  --primary: oklch(0.93 0.003 265);
+  --primary-foreground: oklch(0.2 0.004 265);
   --secondary: oklch(0.235 0.005 265);
   --secondary-foreground: oklch(0.965 0.003 265);
   --muted: oklch(0.225 0.004 265);
@@ -152,7 +169,7 @@
   --destructive: oklch(0.64 0.19 25);
   --border: oklch(1 0 0 / 8%);
   --input: oklch(1 0 0 / 11%);
-  --ring: oklch(0.62 0.16 262 / 55%);
+  --ring: oklch(0.8 0.004 265 / 40%);
 
   /* Semantic P&L / grade colors — reserved, restrained; numbers only */
   --success: oklch(0.72 0.13 158);
@@ -162,33 +179,39 @@
   --warning: oklch(0.78 0.13 80);
   --warning-foreground: oklch(0.2 0.03 80);
 
-  /* Brand = Signal Blue (used sparingly — CTAs/active only). */
-  --brand: oklch(0.62 0.16 262);
-  --brand-from: oklch(0.64 0.15 262);
-  --brand-to: oklch(0.57 0.17 268);
+  /* Brand = neutral graphite (decorative chips/nodes only; white text stays legible). */
+  --brand: oklch(0.34 0.006 265);
+  --brand-from: oklch(0.38 0.006 265);
+  --brand-to: oklch(0.30 0.006 265);
 
   /* Glass — neutral frosted film with a touch more presence (floating panel). */
   --glass: oklch(0.85 0.006 265 / 8%);
   --glass-border: oklch(1 0 0 / 11%);
   --shadow-color: 260 18% 1%;
 
-  /* Charts: blue + neutral graphite grays + semantic (no rainbow) */
-  --chart-1: oklch(0.62 0.16 262);
+  /* Charts: light graphite primary series + neutral grays + semantic P&L (no rainbow) */
+  --chart-1: oklch(0.80 0.008 265);
   --chart-2: oklch(0.7 0.008 265);
   --chart-3: oklch(0.5 0.008 265);
   --chart-4: oklch(0.66 0.19 25);
   --chart-5: oklch(0.72 0.13 158);
   --sidebar: oklch(0.125 0.003 265);
   --sidebar-foreground: oklch(0.965 0.003 265);
-  --sidebar-primary: oklch(0.62 0.16 262);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-primary: oklch(0.93 0.003 265);
+  --sidebar-primary-foreground: oklch(0.2 0.004 265);
   --sidebar-accent: oklch(0.215 0.005 265);
   --sidebar-accent-foreground: oklch(0.965 0.003 265);
   --sidebar-border: oklch(1 0 0 / 7%);
-  --sidebar-ring: oklch(0.62 0.16 262 / 55%);
+  --sidebar-ring: oklch(0.8 0.004 265 / 40%);
 
   /* Matte canvas: a barely-there top light for depth — neutral, not colored. */
   --app-canvas-glow: oklch(1 0 0 / 2.5%);
+  /* Floating candlestick backdrop — light-gray candles read as a faint glow on the
+     near-black ground; vignette deepens the edges to black; a whisper of top bloom. */
+  --candle: oklch(0.92 0.004 265); /* brighter — the candles are the light source */
+  --backdrop-vignette: oklch(0 0 0 / 62%);
+  --backdrop-glow: oklch(0.7 0.006 265 / 10%);
+  --backdrop-strength: 0.62; /* dark mode leans into the cinematic glow */
 }
 
 @layer base {
@@ -255,13 +278,14 @@
       linear-gradient(180deg, oklch(1 0 0 / 6%), transparent 42%),
       var(--glass);
     border: 1px solid var(--glass-border);
-    backdrop-filter: blur(20px) saturate(1.5) brightness(1.02);
-    -webkit-backdrop-filter: blur(20px) saturate(1.5) brightness(1.02);
+    backdrop-filter: blur(22px) saturate(1.4) brightness(1.02);
+    -webkit-backdrop-filter: blur(22px) saturate(1.4) brightness(1.02);
     box-shadow:
-      inset 0 1px 0 0 oklch(1 0 0 / 8%),
-      inset 0 -1px 0 0 oklch(0 0 0 / 7%),
-      0 1px 2px hsl(var(--shadow-color) / 0.1),
-      0 14px 34px -16px hsl(var(--shadow-color) / 0.2);
+      inset 0 1px 0 0 oklch(1 0 0 / 10%),
+      inset 0 -1px 0 0 oklch(0 0 0 / 5%),
+      0 1px 2px hsl(var(--shadow-color) / 0.08),
+      0 8px 20px -12px hsl(var(--shadow-color) / 0.16),
+      0 24px 50px -24px hsl(var(--shadow-color) / 0.22);
   }
 
   /* Heavier frosting + a stronger top reflection for hero / overlay surfaces
@@ -293,15 +317,17 @@
   /* Soft elevated shadow that adapts to theme via --shadow-color */
   .shadow-elevated {
     box-shadow:
-      0 1px 2px hsl(var(--shadow-color) / 0.15),
-      0 8px 24px -6px hsl(var(--shadow-color) / 0.2),
-      0 2px 8px -4px hsl(var(--shadow-color) / 0.12);
+      0 1px 2px hsl(var(--shadow-color) / 0.1),
+      0 10px 30px -10px hsl(var(--shadow-color) / 0.2),
+      0 4px 12px -6px hsl(var(--shadow-color) / 0.12);
   }
 
+  /* Restrained neutral elevation for the primary CTA / active node — a soft ring +
+     depth, NOT a colored glow (the interface is monochrome; glow is retired). */
   .shadow-glow {
     box-shadow:
       0 0 0 1px var(--glass-border),
-      0 10px 40px -10px color-mix(in oklch, var(--brand) 55%, transparent);
+      0 8px 24px -10px hsl(var(--shadow-color) / 0.35);
   }
 
   /* Subtle animated gradient border wrapper */
@@ -352,6 +378,25 @@
   .animate-pulse-glow {
     animation: pulse-glow 2.4s ease-in-out infinite;
   }
+
+  /* Floating candlestick backdrop — each depth plane drifts at a different, very slow
+     pace so the market feels alive without ever pulling focus (GPU transform only). */
+  .backdrop-drift-a { animation: backdrop-drift-a 80s ease-in-out infinite alternate; will-change: transform; }
+  .backdrop-drift-b { animation: backdrop-drift-b 110s ease-in-out infinite alternate; will-change: transform; }
+  .backdrop-drift-c { animation: backdrop-drift-c 64s ease-in-out infinite alternate; will-change: transform; }
+}
+
+@keyframes backdrop-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1.01); }
+  to { transform: translate3d(-1.8%, 1.1%, 0) scale(1.03); }
+}
+@keyframes backdrop-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.01); }
+  to { transform: translate3d(2%, -1%, 0) scale(1.035); }
+}
+@keyframes backdrop-drift-c {
+  from { transform: translate3d(0, 0, 0) scale(1.02); }
+  to { transform: translate3d(-1.3%, -1.6%, 0) scale(1.045); }
 }
 
 @keyframes aurora-drift {
@@ -392,7 +437,10 @@
 @media (prefers-reduced-motion: reduce) {
   .aurora-orb,
   .animate-gradient-pan,
-  .animate-pulse-glow {
+  .animate-pulse-glow,
+  .backdrop-drift-a,
+  .backdrop-drift-b,
+  .backdrop-drift-c {
     animation: none !important;
   }
 }
