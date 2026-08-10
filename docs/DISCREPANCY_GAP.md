@@ -1,8 +1,41 @@
 # Discrepancy Gap — flagship analytics engine (tracker)
 
-**Resumable master tracker.** Read first. A platform-wide engine that measures the gap between a
-trader's **expected** performance (strategy edge × execution quality) and their **actual** performance,
-as two cumulative equity curves. Auto-generated after every completed trade, like the Equity Curve.
+> ## ⚠️ CORRECTED MODEL (supersedes the "expected − actual" framing below)
+>
+> The original engine computed `expectedR − actualR` per trade (`expectedR = strategyExpectancy ×
+> execScore/100`) and called it "discrepancy". **That was wrong**: a correctly-executed loss produced a
+> positive gap, penalising normal strategy variance as if it were trader error. The model is now split
+> into two systems (`src/domain/analytics/discrepancy-model.ts`, fully tested):
+>
+> **A. Performance Variance** — `Expected Statistical Equity` (Σ the strategy's *pure* expectancy over
+> qualified trades — NOT scaled by execution, NOT the planned target) vs `Actual Equity`. The band
+> between them is **Performance Variance**, which is *mostly normal variance*. Expectancy is resolved
+> per strategy: **LIVE** (computed from that strategy's own qualifying realized R once the sample ≥ 20,
+> `domain/performance/expectancy.ts`) → **BACKTESTED** (the user's number) → **INSUFFICIENT_SAMPLE**
+> (unbenchmarked; no fabricated line).
+>
+> **B. Avoidable Discrepancy** — trader-controlled leakage only: the **objective** R-cost of deviations
+> (entry/exit/risk slips, from the deviation-engine) **+ validated missed-winner cost**. A perfectly
+> executed trade contributes **0** here, win *or* loss. Rule-only violations (invalid setup taken /
+> missing mandatory confluence) flag a process discrepancy but their outcome R is **UNDETERMINED** (0 —
+> never fabricated). **Normal Variance = Performance Variance − Avoidable Discrepancy** (the residual).
+>
+> **Per-trade classification** (`classifyTrade`): `NORMAL_WIN/LOSS/BREAKEVEN` (clean execution) vs
+> `PROCESS_DISCREPANCY_WIN/LOSS` (a controllable deviation) vs `UNVERIFIED`. **Win ≠ good execution;
+> loss ≠ bad execution.**
+>
+> The invariant, proven in tests: `expectancy +0.65, actual −1R, perfect execution → actual −1R,
+> **avoidable 0R**` (the old model wrongly gave ~+1.65). No stored discrepancy records exist (all
+> live-computed), so history recomputes correctly — no migration. Surfaces corrected: Dashboard card,
+> Analytics "Discrepancy — variance vs avoidable" section, per-trade Journal cards, the Opportunity
+> section (execution "variance" not "leakage"), and Strategy Lab (Live vs Backtested expectancy).
+> Phases P1 (model+tests) · P2 (analytics+UI) · P3 (opportunity) · P4 (Strategy Lab live expectancy).
+
+---
+
+**Resumable master tracker (original — kept for history; superseded by the box above).** A platform-wide
+engine that measures the gap between a trader's **expected** performance (strategy edge × execution
+quality) and their **actual** performance, as two cumulative equity curves.
 
 ## Core concept
 Every completed trade yields **Expected R** and **Actual R**:
