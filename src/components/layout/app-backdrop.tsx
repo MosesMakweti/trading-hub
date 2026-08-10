@@ -16,9 +16,10 @@
 const W = 1600;
 const H = 900;
 const N = 96; // candle count — dense enough to flow like a real chart
-const CHART_TOP = 215;
-const HORIZON = 555; // the reflective surface; candles above, reflection below
-const CHART_BOT = HORIZON - 24;
+const CHART_TOP = 245; // candle tops start well below the header (chart sits low on the page)
+const HORIZON = 735; // reflective surface near the bottom (volume by the bottom axis)
+const CHART_BOT = HORIZON - 74; // clear strip at the base for the volume
+const AMP = 1.5; // price-move amplitude — extra-tall candle bodies/wicks
 
 /** Deterministic PRNG (mulberry32) — stable output for a given seed. */
 function rng(seed: number): () => number {
@@ -76,16 +77,16 @@ function makeSeries(seed: number): OHLC[] {
     }
     left -= 1;
     const open = v;
-    const disp = r() < 0.07 ? 2.4 : 1; // occasional strong displacement candle
-    v = Math.max(0.06, Math.min(0.95, open + reg.drift + gauss(r) * reg.vol * disp));
+    const disp = r() < 0.08 ? 2.6 : 1; // occasional strong displacement candle
+    v = Math.max(0.05, Math.min(0.95, open + reg.drift + gauss(r) * reg.vol * AMP * disp));
     const close = v;
     const hi = Math.max(open, close);
     const lo = Math.min(open, close);
     out.push({
       open,
       close,
-      high: Math.min(0.99, hi + Math.abs(gauss(r)) * reg.vol + 0.006),
-      low: Math.max(0.01, lo - Math.abs(gauss(r)) * reg.vol - 0.006),
+      high: Math.min(0.99, hi + Math.abs(gauss(r)) * reg.vol * AMP + 0.01),
+      low: Math.max(0.01, lo - Math.abs(gauss(r)) * reg.vol * AMP - 0.01),
     });
   }
   return out;
@@ -96,28 +97,13 @@ function Scene({ series }: { series: OHLC[] }) {
   const slot = W / N;
   const bw = slot * 0.62;
   const vY = (val: number) => CHART_TOP + (1 - val) * (CHART_BOT - CHART_TOP);
-  const mid = (o: OHLC) => (o.open + o.close) / 2;
-
-  // Moving-average polyline through the candle mids.
-  const win = 8;
-  const ma: string[] = [];
-  for (let i = 0; i < series.length; i += 1) {
-    let sum = 0;
-    let n = 0;
-    for (let k = Math.max(0, i - win + 1); k <= i; k += 1) {
-      sum += mid(series[k]);
-      n += 1;
-    }
-    const x = i * slot + slot / 2;
-    ma.push(`${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${vY(sum / n).toFixed(1)}`);
-  }
 
   return (
     <g id="scene">
-      {/* Faint volume bars at the base. */}
+      {/* Faint volume bars — a low, compact strip at the base by the horizon. */}
       {series.map((o, i) => {
         const vol = Math.abs(o.close - o.open) * 2.4 + Math.abs(o.high - o.low) * 0.6;
-        const volH = Math.min(70, 10 + vol * 260);
+        const volH = Math.min(54, 8 + vol * 165);
         return (
           <rect
             key={`v${i}`}
@@ -151,8 +137,6 @@ function Scene({ series }: { series: OHLC[] }) {
           </g>
         );
       })}
-      {/* Moving-average line. */}
-      <path d={ma.join(" ")} fill="none" stroke="var(--candle)" strokeWidth={1.6} strokeOpacity={0.4} strokeLinejoin="round" />
     </g>
   );
 }
@@ -163,7 +147,7 @@ export function AppBackdrop() {
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
       <div
         className="backdrop-drift-a absolute inset-0"
-        style={{ filter: "blur(1.7px)", opacity: "var(--backdrop-strength)" }}
+        style={{ filter: "blur(2.8px)", opacity: "var(--backdrop-strength)" }}
       >
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full">
           <defs>
