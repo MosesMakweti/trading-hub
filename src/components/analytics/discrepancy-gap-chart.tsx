@@ -12,29 +12,28 @@ import {
   YAxis,
 } from "recharts";
 
-import type { DiscrepancyPoint } from "@/domain/analytics/execution-engine";
+import type { DiscrepancyCurvePoint } from "@/domain/analytics/discrepancy-model";
 
 const R = (n: number | null, sign = false) =>
   n == null ? "—" : `${sign && n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
 
-function GapTooltip({
+function VarianceTooltip({
   active,
   payload,
 }: {
   active?: boolean;
-  payload?: { payload: DiscrepancyPoint }[];
+  payload?: { payload: DiscrepancyCurvePoint }[];
 }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
   const rows: [string, string][] = [
-    ["Expected", R(p.expectedEquity)],
+    ["Expected (statistical)", R(p.expectedStatisticalEquity)],
     ["Actual", R(p.actualEquity)],
-    ["Gap", R(p.gap, true)],
-    ["Execution", p.executionScore == null ? "—" : `${p.executionScore}%`],
+    ["Performance variance", R(p.performanceVariance, true)],
   ];
   return (
     <div className="rounded-lg border border-border bg-popover p-2.5 text-xs text-popover-foreground shadow-elevated">
-      <div className="mb-1 font-medium">Trade #{p.tradeNumber}</div>
+      <div className="mb-1 font-medium">Trade #{p.sequence}</div>
       <div className="space-y-0.5">
         {rows.map(([k, v]) => (
           <div key={k} className="flex justify-between gap-4 tabular-nums">
@@ -48,28 +47,28 @@ function GapTooltip({
 }
 
 /**
- * The Discrepancy-Gap dual-line chart — Expected (muted dashed) vs Actual (brand)
- * cumulative R, with the gap between them shaded. Shared by the Dashboard card and
- * the Analytics section. Identity is carried by the legend + line style (single
- * design-system chart pair), per the dataviz method.
+ * Expected Statistical vs Actual cumulative R. The shaded band between the lines is
+ * PERFORMANCE VARIANCE (mostly normal strategy variance) — NOT execution error. The
+ * avoidable portion is surfaced separately as a metric, never as the whole band.
  */
 export function DiscrepancyGapChart({
   curve,
   height = 216,
 }: {
-  curve: DiscrepancyPoint[];
+  curve: DiscrepancyCurvePoint[];
   height?: number;
 }) {
   if (curve.length === 0) {
     return (
       <p className="py-16 text-center text-sm text-muted-foreground">
-        No benchmarked trades yet — set a strategy&apos;s Expected expectancy in Strategy Lab.
+        No benchmarked trades yet — a strategy needs a sufficient sample (or a backtested expectancy) to
+        draw its statistical benchmark.
       </p>
     );
   }
   const data = curve.map((p) => ({
     ...p,
-    gapBand: [p.actualEquity, p.expectedEquity] as [number, number],
+    varianceBand: [p.actualEquity, p.expectedStatisticalEquity] as [number, number],
   }));
 
   return (
@@ -77,7 +76,7 @@ export function DiscrepancyGapChart({
       <ComposedChart data={data} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
         <XAxis
-          dataKey="tradeNumber"
+          dataKey="sequence"
           tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
           axisLine={{ stroke: "var(--border)" }}
           tickLine={false}
@@ -91,13 +90,13 @@ export function DiscrepancyGapChart({
           width={40}
           tickFormatter={(v: number) => `${v.toFixed(0)}R`}
         />
-        <Tooltip content={<GapTooltip />} />
+        <Tooltip content={<VarianceTooltip />} />
         <Legend iconType="plainline" wrapperStyle={{ fontSize: 11, color: "var(--muted-foreground)" }} />
         <Area
-          dataKey="gapBand"
-          name="Gap"
+          dataKey="varianceBand"
+          name="Performance variance"
           stroke="none"
-          fill="var(--danger)"
+          fill="var(--chart-3)"
           fillOpacity={0.12}
           activeDot={false}
           legendType="none"
@@ -105,8 +104,8 @@ export function DiscrepancyGapChart({
         />
         <Line
           type="monotone"
-          dataKey="expectedEquity"
-          name="Expected"
+          dataKey="expectedStatisticalEquity"
+          name="Expected (statistical)"
           stroke="var(--chart-2)"
           strokeWidth={2}
           strokeDasharray="5 4"

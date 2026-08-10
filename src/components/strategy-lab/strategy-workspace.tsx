@@ -44,6 +44,7 @@ import {
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { updateStrategySettings } from "@/actions/strategies.actions";
 import type { StrategyPerformanceSummary } from "@/domain/performance/strategy-performance";
+import type { ExpectancyStats } from "@/domain/performance/expectancy";
 import type {
   ArsenalConceptDTO,
   EntryModelDTO,
@@ -152,6 +153,7 @@ export function StrategyWorkspace({
   entryModels,
   tradeManagement,
   performance,
+  liveExpectancy,
   versions,
   sessions,
   confluences,
@@ -164,6 +166,7 @@ export function StrategyWorkspace({
   entryModels: EntryModelDTO[];
   tradeManagement: TradeManagementDTO;
   performance: StrategyPerformanceSummary;
+  liveExpectancy: ExpectancyStats;
   versions: StrategyVersionDTO[];
   sessions: StrategySessionDTO[];
   confluences: StrategyChecklistItemDTO[];
@@ -289,7 +292,11 @@ export function StrategyWorkspace({
 
         {/* Section 5 — Trade Management is live (Phase 6). */}
         <TabsContent value="trade-management" className="mt-4">
-          <TradeManagementSection strategyId={strategy.id} tradeManagement={tradeManagement} />
+          <TradeManagementSection
+            strategyId={strategy.id}
+            tradeManagement={tradeManagement}
+            liveExpectancy={liveExpectancy}
+          />
         </TabsContent>
 
         {/* SOT refactor — sessions / confluences / execution now live inside the strategy. */}

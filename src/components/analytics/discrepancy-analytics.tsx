@@ -1,21 +1,16 @@
 import { DiscrepancyGapChart } from "@/components/analytics/discrepancy-gap-chart";
-import type { DiscrepancyPoint, DiscrepancySummary } from "@/domain/analytics/execution-engine";
+import type { DiscrepancyCurvePoint, DiscrepancySummary } from "@/domain/analytics/discrepancy-model";
 import type { DeviationCauseStat } from "@/domain/analytics/deviation-engine";
 
 const R = (n: number | null, sign = false) =>
   n == null ? "—" : `${sign && n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
 const PCT = (n: number | null) => (n == null ? "—" : `${n.toFixed(1)}%`);
 
-const TREND_META: Record<DiscrepancySummary["gapTrend"], { label: string; className: string }> = {
-  shrinking: { label: "Gap shrinking", className: "text-success" },
-  stable: { label: "Gap stable", className: "text-muted-foreground" },
-  growing: { label: "Gap growing", className: "text-danger" },
-};
-
 /**
- * The dedicated Discrepancy-Gap analytics section — Expected vs Actual over the
- * range, grouped into Overall / Execution / Recoverable Edge, with the gap trend
- * and the dual-line chart. A discipline lens, not a market prediction.
+ * The corrected Discrepancy section. It separates the two things the old model
+ * conflated: NORMAL strategy variance (not the trader's fault) from AVOIDABLE
+ * trader-controlled leakage. The dual-line chart shows Expected Statistical vs
+ * Actual; the drill-down attributes the avoidable part to concrete causes.
  */
 export function DiscrepancyAnalytics({
   curve,
@@ -24,77 +19,61 @@ export function DiscrepancyAnalytics({
   avgStrategyAdherence,
   avgRuleAdherence,
 }: {
-  curve: DiscrepancyPoint[];
+  curve: DiscrepancyCurvePoint[];
   summary: DiscrepancySummary;
   causes: DeviationCauseStat[];
   avgStrategyAdherence: number | null;
   avgRuleAdherence: number | null;
 }) {
-  const trend = TREND_META[summary.gapTrend];
-  const recoverablePercent =
-    summary.fullPotentialEquity !== 0
-      ? (summary.recoverableR / summary.fullPotentialEquity) * 100
-      : null;
-
   return (
     <div className="glass space-y-4 rounded-2xl p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-medium text-muted-foreground">Discrepancy Gap</h3>
+          <h3 className="text-sm font-medium text-muted-foreground">Discrepancy — variance vs avoidable</h3>
           <p className="text-xs text-muted-foreground/60">
-            Expected edge vs what execution actually captured — a discipline measure, not a prediction.
+            How much of the gap to your strategy&apos;s expectancy is normal variance vs things you could
+            control. A losing trade with correct execution is variance, not error.
           </p>
         </div>
-        <span className={`shrink-0 text-xs font-medium ${trend.className}`}>{trend.label}</span>
+        {!summary.hasBenchmark && (
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">Insufficient sample</span>
+        )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <Group title="Overall">
-          <Stat label="Expected equity" value={R(summary.expectedEquity)} />
-          <Stat label="Actual equity" value={R(summary.actualEquity)} />
+        <Group title="Performance (System A)">
+          <Stat label="Expected statistical" value={R(summary.expectedStatisticalEquity)} />
+          <Stat label="Actual" value={R(summary.actualEquity)} />
           <Stat
-            label="Lifetime gap"
-            value={R(summary.currentGap, true)}
-            tone={summary.currentGap > 0 ? "danger" : "success"}
+            label="Performance variance"
+            value={R(summary.performanceVariance, true)}
+            tone={summary.performanceVariance > 0 ? "danger" : "success"}
           />
         </Group>
-        <Group title="Execution">
-          <Stat label="Avg execution score" value={PCT(summary.averageExecutionScore)} />
-          <Stat label="Avg strategy adherence" value={PCT(avgStrategyAdherence)} />
-          <Stat label="Avg rule adherence" value={PCT(avgRuleAdherence)} />
-        </Group>
-        <Group title="Recoverable edge">
-          <Stat label="Recoverable" value={R(summary.recoverableR)} tone="warning" />
-          <Stat label="Recoverable %" value={PCT(recoverablePercent)} tone="warning" />
+        <Group title="Attribution">
+          <Stat
+            label="Avoidable discrepancy"
+            value={R(summary.avoidableDiscrepancyR)}
+            tone={summary.avoidableDiscrepancyR > 0 ? "danger" : "success"}
+          />
+          <Stat label="Normal variance" value={R(summary.normalVarianceR, true)} />
           <Stat label="Edge capture" value={PCT(summary.edgeCapturePercent)} />
         </Group>
-      </div>
-
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span>
-          Execution efficiency{" "}
-          <span className="font-medium text-foreground tabular-nums">
-            {PCT(summary.executionEfficiencyPercent)}
-          </span>
-        </span>
-        <span>
-          Best execution streak{" "}
-          <span className="font-medium text-success tabular-nums">{summary.bestExecutionStreak}</span>
-        </span>
-        <span>
-          Worst execution streak{" "}
-          <span className="font-medium text-danger tabular-nums">{summary.worstExecutionStreak}</span>
-        </span>
+        <Group title="Process adherence">
+          <Stat label="Avg strategy adherence" value={PCT(avgStrategyAdherence)} />
+          <Stat label="Avg rule adherence" value={PCT(avgRuleAdherence)} />
+          <Stat label="Benchmarked trades" value={String(summary.benchmarkedTrades)} />
+        </Group>
       </div>
 
       <DiscrepancyGapChart curve={curve} height={240} />
 
-      {causes.length > 0 && (
+      {causes.length > 0 ? (
         <div className="space-y-2">
           <div className="text-xs font-medium text-muted-foreground">
-            What execution is costing you
+            Avoidable gap — where the leakage comes from
             <span className="ml-1 font-normal text-muted-foreground/50">
-              biggest deviation per trade, aggregated
+              objective per-trade deviations, aggregated
             </span>
           </div>
           <div className="overflow-x-auto">
@@ -109,21 +88,16 @@ export function DiscrepancyAnalytics({
               </thead>
               <tbody>
                 {causes.map((c) => (
-                  <tr
-                    key={c.cause}
-                    className="border-t border-border/60 transition-colors hover:bg-accent/50"
-                  >
+                  <tr key={c.cause} className="border-t border-border/60 transition-colors hover:bg-accent/50">
                     <td className="py-1.5">
                       <span className="inline-flex items-center gap-1.5">
-                        <span className="size-1.5 rounded-full bg-warning" />
+                        <span className="size-1.5 rounded-full bg-danger" />
                         {c.label}
                       </span>
                     </td>
                     <td className="py-1.5 text-right tabular-nums">{c.occurrences}</td>
-                    <td className="py-1.5 text-right tabular-nums text-warning">
-                      −{c.avgCostR.toFixed(2)}R
-                    </td>
-                    <td className="py-1.5 text-right font-medium tabular-nums text-warning">
+                    <td className="py-1.5 text-right tabular-nums text-danger">−{c.avgCostR.toFixed(2)}R</td>
+                    <td className="py-1.5 text-right font-medium tabular-nums text-danger">
                       −{c.totalCostR.toFixed(2)}R
                     </td>
                   </tr>
@@ -132,6 +106,10 @@ export function DiscrepancyAnalytics({
             </table>
           </div>
         </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          No avoidable execution deviations detected — your gap to expectancy is currently normal variance.
+        </p>
       )}
     </div>
   );
@@ -140,9 +118,7 @@ export function DiscrepancyAnalytics({
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-2 rounded-xl border border-border bg-background/40 p-3">
-      <div className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-        {title}
-      </div>
+      <div className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{title}</div>
       <div className="space-y-1.5">{children}</div>
     </div>
   );
