@@ -19,6 +19,7 @@ import {
 } from "@/actions/strategy-trade-management.actions";
 import type { TradeManagementRichField } from "@/lib/validation/strategy-trade-management";
 import type { TradeManagementDTO } from "@/types/strategies";
+import { MIN_EXPECTANCY_SAMPLE, type ExpectancyStats } from "@/domain/performance/expectancy";
 
 const FIELDS: { key: TradeManagementRichField; label: string; placeholder: string }[] = [
   { key: "takeProfitPhilosophy", label: "Overall take-profit philosophy", placeholder: "How do you think about taking profit?" },
@@ -34,9 +35,11 @@ type RichFields = Record<TradeManagementRichField, unknown>;
 export function TradeManagementSection({
   strategyId,
   tradeManagement,
+  liveExpectancy,
 }: {
   strategyId: string;
   tradeManagement: TradeManagementDTO;
+  liveExpectancy: ExpectancyStats;
 }) {
   const tm = tradeManagement;
 
@@ -179,11 +182,12 @@ export function TradeManagementSection({
       <div className="glass space-y-4 rounded-2xl p-5">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h3 className="text-sm font-medium">Expected performance (benchmark)</h3>
+            <h3 className="text-sm font-medium">Expected performance (statistical benchmark)</h3>
             <p className="text-xs text-muted-foreground">
-              Your strategy&apos;s proven edge. Powers the Discrepancy Gap — Expected R ={" "}
-              <span className="tabular-nums">expectancy × execution score</span> — so you can see how
-              much of this edge your execution actually captures.
+              Your strategy&apos;s statistical edge — the benchmark for the Expected Statistical
+              Equity line. It is a per-trade average over a large sample, never the predicted result
+              of the next trade. TradeOS uses your <strong>Live</strong> expectancy once the sample is
+              large enough, and falls back to these <strong>Backtested</strong> numbers otherwise.
             </p>
           </div>
           <span className="w-5 shrink-0 pt-0.5">
@@ -191,6 +195,8 @@ export function TradeManagementSection({
             {benchmarksSave === "saved" && <Check className="size-3.5 text-success" />}
           </span>
         </div>
+
+        <LivePerformance stats={liveExpectancy} backtestedExpectancy={tm.expectedExpectancy} />
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div className="space-y-1.5">
             <Label htmlFor="bm-wr" className="text-xs">Expected win rate</Label>
@@ -292,6 +298,65 @@ export function TradeManagementSection({
           itemLabel="rule"
         />
       </div>
+    </div>
+  );
+}
+
+/** Live statistical performance computed from this strategy's own qualifying trades.
+ *  Shows which source (Live vs Backtested) is currently driving the benchmark. */
+function LivePerformance({
+  stats,
+  backtestedExpectancy,
+}: {
+  stats: ExpectancyStats;
+  backtestedExpectancy: number | null;
+}) {
+  const usingLive = stats.sufficient && stats.expectancyR != null;
+  const active = usingLive
+    ? { label: "Live", className: "border-success/30 bg-success/10 text-success" }
+    : backtestedExpectancy != null
+      ? { label: "Backtested", className: "border-warning/30 bg-warning/10 text-warning" }
+      : { label: "Insufficient sample", className: "border-border bg-muted/40 text-muted-foreground" };
+
+  const R = (n: number | null) => (n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`);
+  const PCT = (n: number | null) => (n == null ? "—" : `${n.toFixed(0)}%`);
+
+  return (
+    <div className="rounded-xl border border-border bg-background/40 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">
+          Live performance
+          <span className="ml-1.5 font-normal text-muted-foreground/60 tabular-nums">
+            {stats.sampleSize} trade{stats.sampleSize === 1 ? "" : "s"}
+          </span>
+        </span>
+        <span
+          className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase ${active.className}`}
+        >
+          {active.label} benchmark
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+        <LiveStat label="Win rate" value={PCT(stats.winRate)} />
+        <LiveStat label="Avg winner" value={R(stats.avgWinR)} />
+        <LiveStat label="Avg loser" value={R(stats.avgLossR)} />
+        <LiveStat label="Expectancy" value={R(stats.expectancyR)} />
+      </div>
+      {!stats.sufficient && (
+        <p className="mt-1.5 text-[11px] text-muted-foreground/70">
+          Needs {MIN_EXPECTANCY_SAMPLE}+ trades for a reliable live expectancy — using the backtested
+          number until then (no fabricated benchmark).
+        </p>
+      )}
+    </div>
+  );
+}
+
+function LiveStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-start sm:gap-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-semibold text-foreground tabular-nums">{value}</span>
     </div>
   );
 }

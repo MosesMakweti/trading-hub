@@ -7,7 +7,7 @@ import { listFrameworkSteps } from "@/server/services/framework.service";
 import { listTimeframes } from "@/server/services/timeframes.service";
 import { listEntryModels } from "@/server/services/strategy-entry-models.service";
 import { getOrCreateTradeManagement } from "@/server/services/strategy-trade-management.service";
-import { getStrategyPerformance } from "@/server/services/analytics.service";
+import { getStrategyExpectancy, getStrategyPerformance } from "@/server/services/analytics.service";
 import { listStrategyChecklist, listStrategySessions } from "@/server/services/strategy-sot.service";
 import { FadeIn } from "@/components/shared/motion";
 import { StrategyWorkspace } from "@/components/strategy-lab/strategy-workspace";
@@ -39,6 +39,7 @@ export default async function StrategyWorkspacePage({
     entryModels,
     tradeManagement,
     performance,
+    liveExpectancy,
     versions,
     sessionRows,
     confluenceRows,
@@ -50,6 +51,7 @@ export default async function StrategyWorkspacePage({
     listEntryModels(user.id, strategyId),
     getOrCreateTradeManagement(user.id, strategyId),
     getStrategyPerformance(user.id, strategyId),
+    getStrategyExpectancy(user.id, strategyId),
     listStrategyVersions(user.id, strategyId),
     listStrategySessions(user.id, strategyId),
     listStrategyChecklist(user.id, strategyId, "CONFLUENCE"),
@@ -165,6 +167,7 @@ export default async function StrategyWorkspacePage({
         entryModels={entryModelDtos}
         tradeManagement={tradeManagementDto}
         performance={performance}
+        liveExpectancy={liveExpectancy}
         versions={versions}
         sessions={sessions}
         confluences={confluences}

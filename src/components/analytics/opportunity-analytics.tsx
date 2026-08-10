@@ -49,33 +49,31 @@ export function OpportunityAnalytics({
 
   return (
     <div className="space-y-4">
-      {/* The decomposition, front and center: Total = Leakage + Missed. */}
+      {/* Opportunity funnel metrics. Execution VARIANCE (expectancy vs realized on
+          trades taken) is normal variance, not error — the trader-controlled leakage
+          lives in the Discrepancy section. Missed-winner cost IS avoidable. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           label="Edge capture"
           value={pct(s.edgeCapturePercent)}
-          tone={
-            s.edgeCapturePercent != null && s.edgeCapturePercent >= 60 ? "success" : "neutral"
-          }
+          tone={s.edgeCapturePercent != null && s.edgeCapturePercent >= 60 ? "success" : "neutral"}
           sublabel="of available edge banked"
         />
         <KpiCard
-          label="Execution leakage"
-          value={rr(s.executionLeakageR)}
-          tone={s.executionLeakageR > 0 ? "danger" : "neutral"}
-          sublabel="edge lost on trades taken"
+          label="Execution rate"
+          value={pct(s.executionRatePercent)}
+          sublabel={`${s.executed} of ${s.validOpportunities} valid setups taken`}
         />
         <KpiCard
           label="Missed opportunity"
           value={rr(s.missedOpportunityCostR)}
           tone={s.missedOpportunityCostR > 0 ? "danger" : "neutral"}
-          sublabel="forgone on valid setups skipped"
+          sublabel="forgone on valid setups skipped (avoidable)"
         />
         <KpiCard
-          label="Total discrepancy"
-          value={rr(s.totalDiscrepancyR)}
-          tone={s.totalDiscrepancyR > 0 ? "danger" : "neutral"}
-          sublabel="leakage + missed"
+          label="Execution variance"
+          value={rr(s.executionLeakageR)}
+          sublabel="vs expectancy on trades taken — normal variance"
         />
       </div>
 

@@ -151,6 +151,22 @@ export async function getStrategyPerformance(userId: string, strategyId: string)
 }
 
 /**
+ * LIVE statistical expectancy for one strategy, computed from its own qualifying
+ * realized R (self-reported actualRR) — the honest benchmark for Expected Statistical
+ * Equity, and what Strategy Lab shows as "Live" alongside the user's backtested
+ * numbers. `sufficient` is false below MIN_EXPECTANCY_SAMPLE; callers must not treat
+ * an insufficient sample as a proven edge.
+ */
+export async function getStrategyExpectancy(userId: string, strategyId: string) {
+  const trades = await prisma.trade.findMany({
+    where: { userId, strategyId, actualRR: { not: null } },
+    select: { actualRR: true },
+  });
+  const rs = trades.map((t) => (t.actualRR ? t.actualRR.toNumber() : 0));
+  return computeExpectancy(rs);
+}
+
+/**
  * Optional analytics filters. Date range stays a separate (from/to) argument; these
  * narrow WHICH trades are aggregated. The account balance is still walked over ALL
  * in-range trades (so each included trade's contribution % is account-correct) —
