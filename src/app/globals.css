@@ -124,6 +124,12 @@
   --radius: 0.75rem;
   /* Matte canvas: no colored wash on light (kept flat + neutral). */
   --app-canvas-glow: transparent;
+  /* Floating candlestick backdrop (decorative, behind the whole app). Candles are a
+     mid-gray so they read faintly on the light canvas; the vignette softens edges to
+     gray; a gentle top bloom adds atmosphere. All extremely low-opacity. */
+  --candle: oklch(0.42 0.004 255);
+  --backdrop-vignette: oklch(0.66 0.004 255 / 42%);
+  --backdrop-glow: oklch(1 0 0 / 45%);
   /* Sidebar is a frosted panel lighter than the canvas; the active item is a raised
      white pill (bg-card + soft shadow, in the sidebar primitive) that lifts off it. */
   --sidebar: oklch(0.93 0.003 255);
@@ -199,6 +205,11 @@
 
   /* Matte canvas: a barely-there top light for depth — neutral, not colored. */
   --app-canvas-glow: oklch(1 0 0 / 2.5%);
+  /* Floating candlestick backdrop — light-gray candles read as a faint glow on the
+     near-black ground; vignette deepens the edges to black; a whisper of top bloom. */
+  --candle: oklch(0.82 0.004 265);
+  --backdrop-vignette: oklch(0 0 0 / 58%);
+  --backdrop-glow: oklch(0.6 0.006 265 / 9%);
 }
 
 @layer base {
@@ -365,6 +376,25 @@
   .animate-pulse-glow {
     animation: pulse-glow 2.4s ease-in-out infinite;
   }
+
+  /* Floating candlestick backdrop — each depth plane drifts at a different, very slow
+     pace so the market feels alive without ever pulling focus (GPU transform only). */
+  .backdrop-drift-a { animation: backdrop-drift-a 80s ease-in-out infinite alternate; will-change: transform; }
+  .backdrop-drift-b { animation: backdrop-drift-b 110s ease-in-out infinite alternate; will-change: transform; }
+  .backdrop-drift-c { animation: backdrop-drift-c 64s ease-in-out infinite alternate; will-change: transform; }
+}
+
+@keyframes backdrop-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1.04); }
+  to { transform: translate3d(-2.2%, 1.4%, 0) scale(1.08); }
+}
+@keyframes backdrop-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.06); }
+  to { transform: translate3d(2.6%, -1.2%, 0) scale(1.1); }
+}
+@keyframes backdrop-drift-c {
+  from { transform: translate3d(0, 0, 0) scale(1.08); }
+  to { transform: translate3d(-1.6%, -2%, 0) scale(1.12); }
 }
 
 @keyframes aurora-drift {
@@ -405,7 +435,10 @@
 @media (prefers-reduced-motion: reduce) {
   .aurora-orb,
   .animate-gradient-pan,
-  .animate-pulse-glow {
+  .animate-pulse-glow,
+  .backdrop-drift-a,
+  .backdrop-drift-b,
+  .backdrop-drift-c {
     animation: none !important;
   }
 }
