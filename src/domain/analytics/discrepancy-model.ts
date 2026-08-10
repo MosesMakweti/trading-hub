@@ -24,9 +24,10 @@
 //
 // Pure + framework-free; fully tested.
 
-import type { Deviation } from "./deviation-engine";
-
 const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/** Avoidable R charged to a trade the trader would NOT take again. */
+export const WOULD_NOT_REPEAT_COST_R = 1;
 
 // ── Per-trade classification ─────────────────────────────────────────────────
 
@@ -36,62 +37,47 @@ export type TradeClass =
   | "NORMAL_BREAKEVEN"
   | "PROCESS_DISCREPANCY_WIN"
   | "PROCESS_DISCREPANCY_LOSS"
-  | "UNVERIFIED"; // not enough process info to judge execution
+  | "UNVERIFIED"; // "Would I take this again?" not answered → can't judge
 
 export interface TradeProcessInput {
   /** Realized R multiple of the trade (null = open/unrecorded). */
   actualR: number | null;
-  /** Objective planned-vs-actual deviations (from computeDeviations). Their costs
-   *  are measurable R (a price slip), so they are legitimate avoidable R. */
-  deviations: Deviation[];
-  /** Did the trade follow its mandatory process? true = yes, false = a rule was
-   *  broken (e.g. invalid setup taken / missing mandatory confluence), null = no
-   *  strategy/adherence data. A false here is a process discrepancy even with no
-   *  price-level evidence — but it adds NO fabricated R (outcome UNDETERMINED). */
-  adherenceFollowed: boolean | null;
-  /** Whether planned+actual price data exists to judge execution deviations. */
-  hasExecutionData: boolean;
+  /** The trader's retrospective judgment: "Would I take this trade again?" — the
+   *  signal for avoidable discrepancy. A trade you would NOT repeat was an avoidable
+   *  process error (worth WOULD_NOT_REPEAT_COST_R), whatever its result.
+   *  true = worth repeating, false = would not repeat, null = not answered. */
+  wouldTakeAgain: boolean | null;
 }
 
 export interface TradeProcess {
   classification: TradeClass;
-  /** Trader-controlled leakage in R — OBJECTIVE deviation costs only (≥ 0). Rule-only
-   *  violations don't inflate this (their outcome R is UNDETERMINED). */
+  /** Trader-controlled leakage in R: WOULD_NOT_REPEAT_COST_R when the trader would
+   *  not take the trade again, else 0. The trade's win/loss is irrelevant. */
   avoidableR: number;
-  /** Whether the trader deviated from process at all (price slip OR rule break). */
   processDiscrepancy: boolean;
-  /** Sum of objective deviation costs (== avoidableR; surfaced for clarity). */
-  deviationCostR: number;
 }
 
 /**
- * Classify one trade. The invariant that must hold: a trade with NO deviations and
- * followed process is NORMAL (win/loss/breakeven) with avoidableR = 0 — regardless
- * of whether it won or lost.
+ * Classify one trade from "Would I take this trade again?".
+ *   • No  → PROCESS_DISCREPANCY_* + avoidableR = 1R (an avoidable mistake).
+ *   • Yes → NORMAL_* + avoidableR = 0 (correct process — a losing "Yes" is a NORMAL
+ *           loss, never penalised).
+ *   • unanswered → UNVERIFIED + 0 (nothing to judge; no fabricated discrepancy).
  */
-export function classifyTrade(input: TradeProcessInput): TradeProcess {
-  const deviationCostR = round2(input.deviations.reduce((s, d) => s + d.costR, 0));
-
-  // Can we judge process at all? Need either execution data or an adherence signal.
-  const canJudge = input.hasExecutionData || input.adherenceFollowed != null;
-  if (!canJudge) {
-    return { classification: "UNVERIFIED", avoidableR: 0, processDiscrepancy: false, deviationCostR: 0 };
+export function classifyTrade({ actualR, wouldTakeAgain }: TradeProcessInput): TradeProcess {
+  if (wouldTakeAgain == null) {
+    return { classification: "UNVERIFIED", avoidableR: 0, processDiscrepancy: false };
   }
-
-  const ruleBroken = input.adherenceFollowed === false;
-  const processDiscrepancy = deviationCostR > 0 || ruleBroken;
-
-  const r = input.actualR;
-  let classification: TradeClass;
-  if (processDiscrepancy) {
-    classification = r != null && r > 0 ? "PROCESS_DISCREPANCY_WIN" : "PROCESS_DISCREPANCY_LOSS";
-  } else if (r == null || r === 0) {
-    classification = "NORMAL_BREAKEVEN";
-  } else {
-    classification = r > 0 ? "NORMAL_WIN" : "NORMAL_LOSS";
+  if (wouldTakeAgain === false) {
+    return {
+      classification: actualR != null && actualR > 0 ? "PROCESS_DISCREPANCY_WIN" : "PROCESS_DISCREPANCY_LOSS",
+      avoidableR: WOULD_NOT_REPEAT_COST_R,
+      processDiscrepancy: true,
+    };
   }
-
-  return { classification, avoidableR: deviationCostR, processDiscrepancy, deviationCostR };
+  const classification: TradeClass =
+    actualR == null || actualR === 0 ? "NORMAL_BREAKEVEN" : actualR > 0 ? "NORMAL_WIN" : "NORMAL_LOSS";
+  return { classification, avoidableR: 0, processDiscrepancy: false };
 }
 
 // ── Portfolio summary: the two systems ───────────────────────────────────────
@@ -112,6 +98,11 @@ export interface DiscrepancyCurvePoint {
   sequence: number;
   dateKey: string;
   actualEquity: number; // cumulative actual R
+  /** Cumulative avoidable discrepancy (Σ 1R per "would not take again" trade). */
+  avoidableEquity: number;
+  /** actualEquity + avoidableEquity — where equity would be without the avoidable
+   *  trades. The GAP between this and Actual is the avoidable discrepancy (the graph). */
+  discrepancyFreeEquity: number;
   expectedStatisticalEquity: number; // cumulative pure expectancy (benchmarked trades)
   performanceVariance: number; // expected − actual
 }
@@ -136,9 +127,11 @@ export interface DiscrepancySummary {
 export function buildDiscrepancyCurve(inputs: DiscrepancyTradeInput[]): DiscrepancyCurvePoint[] {
   const ordered = [...inputs].sort((a, b) => a.sequence - b.sequence);
   let actualEquity = 0;
+  let avoidableEquity = 0;
   let expectedStatisticalEquity = 0;
   return ordered.map((i) => {
     if (i.actualR != null) actualEquity = round2(actualEquity + i.actualR);
+    avoidableEquity = round2(avoidableEquity + i.avoidableR);
     if (i.strategyExpectancyR != null) {
       expectedStatisticalEquity = round2(expectedStatisticalEquity + i.strategyExpectancyR);
     }
@@ -146,6 +139,8 @@ export function buildDiscrepancyCurve(inputs: DiscrepancyTradeInput[]): Discrepa
       sequence: i.sequence,
       dateKey: i.dateKey,
       actualEquity,
+      avoidableEquity,
+      discrepancyFreeEquity: round2(actualEquity + avoidableEquity),
       expectedStatisticalEquity,
       performanceVariance: round2(expectedStatisticalEquity - actualEquity),
     };

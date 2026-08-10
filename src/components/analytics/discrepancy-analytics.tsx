@@ -71,9 +71,9 @@ export function DiscrepancyAnalytics({
       {causes.length > 0 ? (
         <div className="space-y-2">
           <div className="text-xs font-medium text-muted-foreground">
-            Avoidable gap — where the leakage comes from
+            Execution deviations detected
             <span className="ml-1 font-normal text-muted-foreground/50">
-              objective per-trade deviations, aggregated
+              planned-vs-actual slips, aggregated (context for the avoidable trades)
             </span>
           </div>
           <div className="overflow-x-auto">
@@ -108,7 +108,7 @@ export function DiscrepancyAnalytics({
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">
-          No avoidable execution deviations detected — your gap to expectancy is currently normal variance.
+          No planned-vs-actual execution deviations detected in this range.
         </p>
       )}
     </div>
