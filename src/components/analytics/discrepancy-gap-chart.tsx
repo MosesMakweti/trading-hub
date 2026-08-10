@@ -27,9 +27,9 @@ function VarianceTooltip({
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
   const rows: [string, string][] = [
-    ["Expected (statistical)", R(p.expectedStatisticalEquity)],
+    ["Discrepancy-free", R(p.discrepancyFreeEquity)],
     ["Actual", R(p.actualEquity)],
-    ["Performance variance", R(p.performanceVariance, true)],
+    ["Avoidable discrepancy", R(p.avoidableEquity)],
   ];
   return (
     <div className="rounded-lg border border-border bg-popover p-2.5 text-xs text-popover-foreground shadow-elevated">
@@ -47,9 +47,10 @@ function VarianceTooltip({
 }
 
 /**
- * Expected Statistical vs Actual cumulative R. The shaded band between the lines is
- * PERFORMANCE VARIANCE (mostly normal strategy variance) — NOT execution error. The
- * avoidable portion is surfaced separately as a metric, never as the whole band.
+ * Actual vs Discrepancy-free cumulative R. The shaded band between them is the
+ * AVOIDABLE DISCREPANCY — 1R for every trade the trader would not take again — i.e.
+ * where equity would be without the avoidable trades. A losing trade you'd still
+ * take adds nothing to the gap.
  */
 export function DiscrepancyGapChart({
   curve,
@@ -61,14 +62,14 @@ export function DiscrepancyGapChart({
   if (curve.length === 0) {
     return (
       <p className="py-16 text-center text-sm text-muted-foreground">
-        No benchmarked trades yet — a strategy needs a sufficient sample (or a backtested expectancy) to
-        draw its statistical benchmark.
+        No trades yet — the avoidable-discrepancy gap builds as you answer “Would I take this trade
+        again?” on each trade.
       </p>
     );
   }
   const data = curve.map((p) => ({
     ...p,
-    varianceBand: [p.actualEquity, p.expectedStatisticalEquity] as [number, number],
+    avoidableBand: [p.actualEquity, p.discrepancyFreeEquity] as [number, number],
   }));
 
   return (
@@ -93,10 +94,10 @@ export function DiscrepancyGapChart({
         <Tooltip content={<VarianceTooltip />} />
         <Legend iconType="plainline" wrapperStyle={{ fontSize: 11, color: "var(--muted-foreground)" }} />
         <Area
-          dataKey="varianceBand"
-          name="Performance variance"
+          dataKey="avoidableBand"
+          name="Avoidable discrepancy"
           stroke="none"
-          fill="var(--chart-3)"
+          fill="var(--danger)"
           fillOpacity={0.12}
           activeDot={false}
           legendType="none"
@@ -104,8 +105,8 @@ export function DiscrepancyGapChart({
         />
         <Line
           type="monotone"
-          dataKey="expectedStatisticalEquity"
-          name="Expected (statistical)"
+          dataKey="discrepancyFreeEquity"
+          name="Discrepancy-free"
           stroke="var(--chart-2)"
           strokeWidth={2}
           strokeDasharray="5 4"

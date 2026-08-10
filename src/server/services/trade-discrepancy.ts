@@ -9,7 +9,7 @@ type Dec = { toNumber(): number } | null; // Prisma Decimal | null
 interface TradeLike {
   tradeNumber: number | null;
   tradeQualityPercent: number | null;
-  setupValid: boolean | null;
+  wouldTakeAgain: boolean | null;
   actualRR: Dec;
   direction: "LONG" | "SHORT";
   plannedEntry: Dec;
@@ -22,13 +22,14 @@ interface TradeLike {
 
 const num = (d: Dec): number | null => (d ? d.toNumber() : null);
 
-/** Per-trade classification + avoidable R + primary deviation. Null only when there
- *  is nothing to say (no process signal AND no expectancy context). */
+/** Per-trade classification + avoidable R (from "Would I take this again?") + the
+ *  primary planned-vs-actual deviation (context). Null only when there's nothing to
+ *  say (unanswered AND no expectancy context). */
 export function toTradeDiscrepancy(trade: TradeLike): TradeDiscrepancyDTO | null {
   const expectancy = trade.strategy?.tradeManagement?.expectedExpectancy ?? null;
   const actualR = num(trade.actualRR);
 
-  const { deviations, primary } = computeDeviations({
+  const { primary } = computeDeviations({
     direction: trade.direction,
     plannedEntry: num(trade.plannedEntry),
     plannedStopLoss: num(trade.plannedStopLoss),
@@ -38,14 +39,9 @@ export function toTradeDiscrepancy(trade: TradeLike): TradeDiscrepancyDTO | null
     actualRR: actualR,
   });
 
-  const proc = classifyTrade({
-    actualR,
-    deviations,
-    adherenceFollowed: trade.setupValid,
-    hasExecutionData: trade.plannedEntry != null && trade.actualEntry != null,
-  });
+  const proc = classifyTrade({ actualR, wouldTakeAgain: trade.wouldTakeAgain });
 
-  // Nothing to show: can't judge process and no expectancy benchmark either.
+  // Nothing to show: not judged and no expectancy benchmark either.
   if (proc.classification === "UNVERIFIED" && expectancy == null) return null;
 
   return {

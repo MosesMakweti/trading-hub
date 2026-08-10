@@ -367,7 +367,7 @@ export async function getAnalyticsData(
     // Deviation engine: the OBJECTIVE trader-controlled R-costs (entry/exit/risk
     // slip). This — NOT expected−actual — is the avoidable discrepancy.
     const tradeActualR = t.actualRR ? t.actualRR.toNumber() : null;
-    const { deviations, primary } = computeDeviations({
+    const { primary } = computeDeviations({
       direction: t.direction,
       plannedEntry: t.plannedEntry ? t.plannedEntry.toNumber() : null,
       plannedStopLoss: t.plannedStopLoss ? t.plannedStopLoss.toNumber() : null,
@@ -383,14 +383,9 @@ export async function getAnalyticsData(
     deviationPrimaries.push(primary);
 
     // Corrected discrepancy input: Expected Statistical R = the strategy's resolved
-    // expectancy (System A); avoidable R = objective deviations only. A correctly
-    // executed trade contributes 0 avoidable R whether it won or lost.
-    const proc = classifyTrade({
-      actualR: tradeActualR,
-      deviations,
-      adherenceFollowed: t.setupValid, // true = followed, false = invalid setup taken, null = no strategy
-      hasExecutionData: t.plannedEntry != null && t.actualEntry != null,
-    });
+    // expectancy (System A); avoidable R = 1R when the trader would NOT take this
+    // trade again, else 0. A losing trade you'd still take is NORMAL, not a discrepancy.
+    const proc = classifyTrade({ actualR: tradeActualR, wouldTakeAgain: t.wouldTakeAgain });
     correctedInputs.push({
       sequence: t.tradeNumber ?? correctedInputs.length + 1,
       dateKey,

@@ -5,70 +5,42 @@ import {
   classifyTrade,
   summarizeDiscrepancy,
   type DiscrepancyTradeInput,
-  type TradeProcessInput,
 } from "./discrepancy-model";
-import type { Deviation } from "./deviation-engine";
 
-const dev = (costR: number): Deviation => ({ cause: "late-entry", label: "Late / chased entry", costR });
-
-const proc = (over: Partial<TradeProcessInput>): TradeProcessInput => ({
-  actualR: 1,
-  deviations: [],
-  adherenceFollowed: true,
-  hasExecutionData: true,
-  ...over,
-});
-
-describe("classifyTrade — loss ≠ discrepancy (the core invariant)", () => {
-  it("perfect execution + WIN → NORMAL_WIN, avoidable 0", () => {
-    const r = classifyTrade(proc({ actualR: 2 }));
+describe('classifyTrade — driven by "Would I take this trade again?"', () => {
+  it("Yes + WIN → NORMAL_WIN, avoidable 0", () => {
+    const r = classifyTrade({ actualR: 2, wouldTakeAgain: true });
     expect(r.classification).toBe("NORMAL_WIN");
     expect(r.avoidableR).toBe(0);
     expect(r.processDiscrepancy).toBe(false);
   });
 
-  it("perfect execution + LOSS → NORMAL_LOSS, avoidable 0 (never penalise a correct loss)", () => {
-    const r = classifyTrade(proc({ actualR: -1 }));
+  it("Yes + LOSS → NORMAL_LOSS, avoidable 0 (a losing trade you'd repeat is NOT a discrepancy)", () => {
+    const r = classifyTrade({ actualR: -1, wouldTakeAgain: true });
     expect(r.classification).toBe("NORMAL_LOSS");
     expect(r.avoidableR).toBe(0);
     expect(r.processDiscrepancy).toBe(false);
   });
 
-  it("perfect execution + BREAKEVEN → NORMAL_BREAKEVEN, avoidable 0", () => {
-    expect(classifyTrade(proc({ actualR: 0 })).classification).toBe("NORMAL_BREAKEVEN");
-    expect(classifyTrade(proc({ actualR: 0 })).avoidableR).toBe(0);
-  });
-});
-
-describe("classifyTrade — win ≠ good execution", () => {
-  it("rule-broken + WIN → PROCESS_DISCREPANCY_WIN (rewarding a broken process is wrong)", () => {
-    const r = classifyTrade(proc({ actualR: 2, adherenceFollowed: false }));
-    expect(r.classification).toBe("PROCESS_DISCREPANCY_WIN");
-    expect(r.processDiscrepancy).toBe(true);
+  it("Yes + BREAKEVEN → NORMAL_BREAKEVEN, avoidable 0", () => {
+    expect(classifyTrade({ actualR: 0, wouldTakeAgain: true }).classification).toBe("NORMAL_BREAKEVEN");
   });
 
-  it("rule-broken + LOSS → PROCESS_DISCREPANCY_LOSS", () => {
-    expect(classifyTrade(proc({ actualR: -1, adherenceFollowed: false })).classification).toBe(
-      "PROCESS_DISCREPANCY_LOSS",
-    );
-  });
-
-  it("objective price deviation → avoidable = the deviation cost", () => {
-    const r = classifyTrade(proc({ actualR: -1, deviations: [dev(0.4), dev(0.2)] }));
+  it("No + LOSS → PROCESS_DISCREPANCY_LOSS, avoidable 1R", () => {
+    const r = classifyTrade({ actualR: -1, wouldTakeAgain: false });
     expect(r.classification).toBe("PROCESS_DISCREPANCY_LOSS");
-    expect(r.avoidableR).toBe(0.6);
-  });
-
-  it("rule-only violation (no price evidence) → process discrepancy but avoidable R stays 0 (UNDETERMINED)", () => {
-    const r = classifyTrade(proc({ actualR: -1, adherenceFollowed: false, deviations: [] }));
+    expect(r.avoidableR).toBe(1);
     expect(r.processDiscrepancy).toBe(true);
-    expect(r.avoidableR).toBe(0); // no fabricated counterfactual R
   });
-});
 
-describe("classifyTrade — insufficient info", () => {
-  it("no execution data and no adherence signal → UNVERIFIED", () => {
-    const r = classifyTrade({ actualR: -1, deviations: [], adherenceFollowed: null, hasExecutionData: false });
+  it("No + WIN → PROCESS_DISCREPANCY_WIN, avoidable 1R (a winning trade you'd NOT repeat still leaks)", () => {
+    const r = classifyTrade({ actualR: 3, wouldTakeAgain: false });
+    expect(r.classification).toBe("PROCESS_DISCREPANCY_WIN");
+    expect(r.avoidableR).toBe(1);
+  });
+
+  it("unanswered → UNVERIFIED, avoidable 0 (no fabricated discrepancy)", () => {
+    const r = classifyTrade({ actualR: -1, wouldTakeAgain: null });
     expect(r.classification).toBe("UNVERIFIED");
     expect(r.avoidableR).toBe(0);
   });
@@ -112,11 +84,16 @@ describe("summarizeDiscrepancy — Performance Variance vs Avoidable Discrepancy
 });
 
 describe("buildDiscrepancyCurve", () => {
-  it("cumulates expected-statistical vs actual and their variance", () => {
+  it("cumulates actual, avoidable, and the discrepancy-free line (actual + avoidable)", () => {
     const curve = buildDiscrepancyCurve([
-      { sequence: 1, dateKey: "d", strategyExpectancyR: 0.5, actualR: -1, avoidableR: 0 },
-      { sequence: 2, dateKey: "d", strategyExpectancyR: 0.5, actualR: 2, avoidableR: 0 },
+      { sequence: 1, dateKey: "d", strategyExpectancyR: 0.5, actualR: -1, avoidableR: 1 }, // would-not-repeat
+      { sequence: 2, dateKey: "d", strategyExpectancyR: 0.5, actualR: 2, avoidableR: 0 }, // would-repeat
     ]);
-    expect(curve[1]).toMatchObject({ expectedStatisticalEquity: 1, actualEquity: 1, performanceVariance: 0 });
+    expect(curve[1]).toMatchObject({
+      actualEquity: 1,
+      avoidableEquity: 1,
+      discrepancyFreeEquity: 2, // 1 actual + 1 avoidable
+      expectedStatisticalEquity: 1,
+    });
   });
 });
