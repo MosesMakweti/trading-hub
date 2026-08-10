@@ -130,6 +130,7 @@
   --candle: oklch(0.42 0.004 255);
   --backdrop-vignette: oklch(0.66 0.004 255 / 42%);
   --backdrop-glow: oklch(1 0 0 / 45%);
+  --backdrop-strength: 0.4; /* light mode stays restrained */
   /* Sidebar is a frosted panel lighter than the canvas; the active item is a raised
      white pill (bg-card + soft shadow, in the sidebar primitive) that lifts off it. */
   --sidebar: oklch(0.93 0.003 255);
@@ -207,9 +208,10 @@
   --app-canvas-glow: oklch(1 0 0 / 2.5%);
   /* Floating candlestick backdrop — light-gray candles read as a faint glow on the
      near-black ground; vignette deepens the edges to black; a whisper of top bloom. */
-  --candle: oklch(0.82 0.004 265);
-  --backdrop-vignette: oklch(0 0 0 / 58%);
-  --backdrop-glow: oklch(0.6 0.006 265 / 9%);
+  --candle: oklch(0.92 0.004 265); /* brighter — the candles are the light source */
+  --backdrop-vignette: oklch(0 0 0 / 62%);
+  --backdrop-glow: oklch(0.7 0.006 265 / 10%);
+  --backdrop-strength: 0.62; /* dark mode leans into the cinematic glow */
 }
 
 @layer base {

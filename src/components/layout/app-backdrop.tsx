@@ -1,23 +1,24 @@
 // Floating candlestick backdrop — a non-interactive decorative layer behind the
-// whole app (fixed, -z-10, pointer-events-none, aria-hidden). It is a single,
-// continuous OHLC price path — tight sequential candles that collectively form real
-// market structure (impulses, pullbacks, consolidations, breakouts, a reversal) —
-// then stylized for depth: an aligned soft glow behind, a tight dark contact shadow
-// beneath, and a light atmospheric blur + vignette over the top. It reads as the
-// STRUCTURE of a real chart with the DEPTH of a 3D background, never a readable
-// TradingView chart and never competing with content. Foreground glass cards
-// (translucent) naturally soften the candles beneath them.
+// whole app (fixed, -z-10, pointer-events-none, aria-hidden). It renders a single,
+// continuous OHLC price path (tight sequential candles forming real market
+// structure) rising off a reflective horizon, mirrored below like a glossy desk —
+// with a soft bloom, a moving-average line and faint volume bars — then softened
+// with blur + a top fade + a vignette. Cinematic in dark mode (the candles are the
+// light source), restrained in light. It reads as the STRUCTURE of a real chart
+// with the DEPTH of a 3D scene, never a readable TradingView chart and never
+// competing with content; foreground glass cards soften whatever sits beneath them.
 //
 // Pure SVG + CSS (a few KB, no image download). Geometry is generated
 // deterministically (seeded) so server and client render identically; candle color
-// comes from a token (`--candle`) so it flips with the theme. The only motion is a
-// very slow GPU drift, disabled under prefers-reduced-motion.
+// + intensity come from tokens (`--candle`, `--backdrop-strength`) so it flips with
+// the theme. The only motion is a very slow GPU drift, disabled under reduced-motion.
 
 const W = 1600;
 const H = 900;
-const N = 120; // candle count — dense enough to flow like a real chart
-const PAD_T = 0.16;
-const PAD_B = 0.16;
+const N = 96; // candle count — dense enough to flow like a real chart
+const CHART_TOP = 215;
+const HORIZON = 555; // the reflective surface; candles above, reflection below
+const CHART_BOT = HORIZON - 24;
 
 /** Deterministic PRNG (mulberry32) — stable output for a given seed. */
 function rng(seed: number): () => number {
@@ -30,7 +31,7 @@ function rng(seed: number): () => number {
   };
 }
 
-/** Standard normal via Box–Muller — gives natural, non-uniform candle variation. */
+/** Standard normal via Box–Muller — natural, non-uniform candle variation. */
 function gauss(r: () => number): number {
   let u = 0;
   let v = 0;
@@ -39,46 +40,34 @@ function gauss(r: () => number): number {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
-interface Bar {
-  bx: number;
-  bw: number;
-  bodyTop: number;
-  bodyH: number;
-  wickX: number;
-  wickTop: number;
-  wickBot: number;
-  up: boolean;
+interface OHLC {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
 }
 
-// Regime script: a believable sequence of market phases. Each phase has a drift
-// (per-bar trend), volatility, and a length range. Walking these in order yields
-// impulses → pullbacks → consolidation → breakout → reversal with real swing
-// highs/lows — not random placement.
+// Regime script: a believable market — impulses, pullbacks, consolidation, a
+// breakout, a reversal. Walking it yields real swing highs/lows, not random candles.
 const REGIMES: { drift: number; vol: number; len: [number, number] }[] = [
-  { drift: 0.0, vol: 0.009, len: [9, 15] }, // base consolidation
-  { drift: 0.02, vol: 0.014, len: [7, 12] }, // impulse up
-  { drift: -0.009, vol: 0.01, len: [5, 9] }, // pullback
-  { drift: 0.0, vol: 0.008, len: [9, 16] }, // consolidation
-  { drift: 0.024, vol: 0.017, len: [7, 12] }, // breakout up
-  { drift: -0.007, vol: 0.009, len: [4, 8] }, // shallow pullback
-  { drift: 0.012, vol: 0.013, len: [6, 10] }, // continuation
-  { drift: -0.023, vol: 0.017, len: [8, 13] }, // reversal down
-  { drift: 0.008, vol: 0.011, len: [6, 11] }, // recovery
+  { drift: 0.0, vol: 0.009, len: [8, 13] },
+  { drift: 0.021, vol: 0.014, len: [7, 11] },
+  { drift: -0.009, vol: 0.01, len: [4, 8] },
+  { drift: 0.0, vol: 0.008, len: [8, 14] },
+  { drift: 0.027, vol: 0.018, len: [6, 11] }, // breakout — tends to spike
+  { drift: -0.008, vol: 0.009, len: [4, 7] },
+  { drift: 0.013, vol: 0.013, len: [6, 10] },
+  { drift: -0.024, vol: 0.017, len: [8, 12] }, // reversal down
+  { drift: 0.007, vol: 0.011, len: [6, 10] },
 ];
 
-function makeSeries(seed: number): Bar[] {
+function makeSeries(seed: number): OHLC[] {
   const r = rng(seed);
-  const slot = W / N;
-  const bw = slot * 0.66; // body width; gap = 0.34·slot < body → tight, continuous
-  const innerH = H * (1 - PAD_T - PAD_B);
-  const vY = (val: number) => H * PAD_T + (1 - val) * innerH; // value 0..1 → y
-
-  const bars: Bar[] = [];
-  let v = 0.42; // starting price (value space, higher = higher on screen)
+  const out: OHLC[] = [];
+  let v = 0.4;
   let ri = 0;
-  let left = Math.round(REGIMES[0].len[0] + r() * (REGIMES[0].len[1] - REGIMES[0].len[0]));
   let reg = REGIMES[0];
-
+  let left = Math.round(reg.len[0] + r() * (reg.len[1] - reg.len[0]));
   for (let i = 0; i < N; i += 1) {
     if (left <= 0) {
       ri += 1;
@@ -86,117 +75,146 @@ function makeSeries(seed: number): Bar[] {
       left = Math.round(reg.len[0] + r() * (reg.len[1] - reg.len[0]));
     }
     left -= 1;
-
     const open = v;
-    const displacement = r() < 0.06 ? 2.3 : 1; // occasional strong displacement candle
-    const step = reg.drift + gauss(r) * reg.vol * displacement;
-    v = Math.max(0.06, Math.min(0.94, open + step));
+    const disp = r() < 0.07 ? 2.4 : 1; // occasional strong displacement candle
+    v = Math.max(0.06, Math.min(0.95, open + reg.drift + gauss(r) * reg.vol * disp));
     const close = v;
-
     const hi = Math.max(open, close);
     const lo = Math.min(open, close);
-    const wickUp = Math.abs(gauss(r)) * reg.vol * 0.9 + 0.004;
-    const wickDn = Math.abs(gauss(r)) * reg.vol * 0.9 + 0.004;
-    const high = Math.min(0.99, hi + wickUp);
-    const low = Math.max(0.01, lo - wickDn);
-
-    const yHi = vY(hi);
-    const yLo = vY(lo);
-    const bx = i * slot + (slot - bw) / 2;
-    bars.push({
-      bx,
-      bw,
-      bodyTop: yHi,
-      bodyH: Math.max(1.3, yLo - yHi),
-      wickX: i * slot + slot / 2,
-      wickTop: vY(high),
-      wickBot: vY(low),
-      up: close >= open,
+    out.push({
+      open,
+      close,
+      high: Math.min(0.99, hi + Math.abs(gauss(r)) * reg.vol + 0.006),
+      low: Math.max(0.01, lo - Math.abs(gauss(r)) * reg.vol - 0.006),
     });
   }
-  return bars;
+  return out;
 }
 
-/** One rendering of the shared bar geometry. `mode` styles the same candles as the
- *  glow (behind), the contact shadow (beneath), or the main candles (front). */
-function CandleSvg({ bars, mode }: { bars: Bar[]; mode: "glow" | "shadow" | "main" }) {
-  const shadow = mode === "shadow";
-  const fill = shadow ? "#000" : "var(--candle)";
+/** The scene group (candles + wicks + volume + moving-average), in viewBox space. */
+function Scene({ series }: { series: OHLC[] }) {
+  const slot = W / N;
+  const bw = slot * 0.62;
+  const vY = (val: number) => CHART_TOP + (1 - val) * (CHART_BOT - CHART_TOP);
+  const mid = (o: OHLC) => (o.open + o.close) / 2;
+
+  // Moving-average polyline through the candle mids.
+  const win = 8;
+  const ma: string[] = [];
+  for (let i = 0; i < series.length; i += 1) {
+    let sum = 0;
+    let n = 0;
+    for (let k = Math.max(0, i - win + 1); k <= i; k += 1) {
+      sum += mid(series[k]);
+      n += 1;
+    }
+    const x = i * slot + slot / 2;
+    ma.push(`${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${vY(sum / n).toFixed(1)}`);
+  }
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full">
-      {mode === "main" && (
-        <defs>
-          <linearGradient id="cbody" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--candle)" stopOpacity="0.98" />
-            <stop offset="60%" stopColor="var(--candle)" stopOpacity="0.74" />
-            <stop offset="100%" stopColor="var(--candle)" stopOpacity="0.55" />
-          </linearGradient>
-        </defs>
-      )}
-      {bars.map((b, i) => {
-        // Glow = bodies only (a soft aligned halo); shadow/main = wick + body.
-        const bodyFill = mode === "main" ? (b.up ? "url(#cbody)" : "var(--candle)") : fill;
-        const bodyOpacity = mode === "main" ? (b.up ? 1 : 0.82) : 1;
+    <g id="scene">
+      {/* Faint volume bars at the base. */}
+      {series.map((o, i) => {
+        const vol = Math.abs(o.close - o.open) * 2.4 + Math.abs(o.high - o.low) * 0.6;
+        const volH = Math.min(70, 10 + vol * 260);
         return (
-          <g key={i}>
-            {mode !== "glow" && (
-              <rect
-                x={b.wickX - 0.7}
-                y={b.wickTop}
-                width={1.4}
-                height={b.wickBot - b.wickTop}
-                fill={fill}
-                opacity={shadow ? 1 : 0.55}
-              />
-            )}
+          <rect
+            key={`v${i}`}
+            x={i * slot + (slot - bw) / 2}
+            y={HORIZON - volH}
+            width={bw}
+            height={volH}
+            fill="var(--candle)"
+            opacity={0.12}
+          />
+        );
+      })}
+      {/* Candles. */}
+      {series.map((o, i) => {
+        const up = o.close >= o.open;
+        const bodyTop = vY(Math.max(o.open, o.close));
+        const bodyH = Math.max(1.4, vY(Math.min(o.open, o.close)) - bodyTop);
+        const cx = i * slot + slot / 2;
+        return (
+          <g key={`c${i}`}>
+            <rect x={cx - 0.7} y={vY(o.high)} width={1.4} height={vY(o.low) - vY(o.high)} fill="var(--candle)" opacity={0.55} />
             <rect
-              x={b.bx}
-              y={b.bodyTop}
-              width={b.bw}
-              height={b.bodyH}
+              x={i * slot + (slot - bw) / 2}
+              y={bodyTop}
+              width={bw}
+              height={bodyH}
               rx={1.5}
-              fill={bodyFill}
-              opacity={bodyOpacity}
+              fill={up ? "url(#cbody)" : "var(--candle)"}
+              opacity={up ? 1 : 0.82}
             />
           </g>
         );
       })}
-    </svg>
+      {/* Moving-average line. */}
+      <path d={ma.join(" ")} fill="none" stroke="var(--candle)" strokeWidth={1.6} strokeOpacity={0.4} strokeLinejoin="round" />
+    </g>
   );
 }
 
 export function AppBackdrop() {
-  const bars = makeSeries(20260810);
+  const series = makeSeries(20260810);
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-      {/* All three planes share ONE drift so they stay perfectly aligned — a single
-          chart with depth, not offset copies. */}
-      <div className="backdrop-drift-a absolute inset-0">
-        {/* Depth glow — the same path, heavily blurred + very faint, aligned behind. */}
-        <div className="absolute inset-0" style={{ filter: "blur(13px)", opacity: 0.05 }}>
-          <CandleSvg bars={bars} mode="glow" />
-        </div>
-        {/* Contact shadow — the same path in black, nudged down 1.4px, tightly
-            blurred + faint. Grounds the candles (ambient depth), never a copy. */}
-        <div className="absolute inset-0" style={{ filter: "blur(3px)", opacity: 0.22 }}>
-          <div style={{ transform: "translateY(1.4px)" }}>
-            <CandleSvg bars={bars} mode="shadow" />
-          </div>
-        </div>
-        {/* Main candles — lightly blurred so the structure reads, but soft. */}
-        <div className="absolute inset-0" style={{ filter: "blur(1.8px)", opacity: 0.16 }}>
-          <CandleSvg bars={bars} mode="main" />
-        </div>
+      <div
+        className="backdrop-drift-a absolute inset-0"
+        style={{ filter: "blur(1.7px)", opacity: "var(--backdrop-strength)" }}
+      >
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full">
+          <defs>
+            <linearGradient id="cbody" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--candle)" stopOpacity="1" />
+              <stop offset="60%" stopColor="var(--candle)" stopOpacity="0.78" />
+              <stop offset="100%" stopColor="var(--candle)" stopOpacity="0.6" />
+            </linearGradient>
+            {/* Bloom = a heavily-blurred copy of the scene → the glow. */}
+            <filter id="bloom" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="7" />
+            </filter>
+            {/* Reflection fade — brightest at the horizon, gone by the bottom. */}
+            <linearGradient id="reflGrad" x1="0" y1={HORIZON} x2="0" y2={H} gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#fff" stopOpacity="0.5" />
+              <stop offset="100%" stopColor="#fff" stopOpacity="0" />
+            </linearGradient>
+            <mask id="reflMask">
+              <rect x="0" y={HORIZON} width={W} height={H - HORIZON} fill="url(#reflGrad)" />
+            </mask>
+            <Scene series={series} />
+          </defs>
+
+          {/* Bloom behind, then the crisp scene, then the mirrored reflection. */}
+          <use href="#scene" filter="url(#bloom)" opacity={0.55} />
+          <use href="#scene" />
+          <use
+            href="#scene"
+            transform={`translate(0 ${2 * HORIZON}) scale(1 -1)`}
+            mask="url(#reflMask)"
+            opacity={0.5}
+          />
+          {/* Reflective surface highlight — a soft streak of light on the horizon. */}
+          <ellipse cx={W * 0.44} cy={HORIZON} rx={W * 0.42} ry={7} fill="var(--candle)" opacity={0.14} />
+        </svg>
       </div>
+
+      {/* Keep the header band clean: fade the canvas colour over the top. */}
+      <div
+        className="absolute inset-0"
+        style={{ background: "linear-gradient(to bottom, var(--background) 1%, transparent 22%)" }}
+      />
       {/* Atmospheric top bloom. */}
       <div
         className="absolute inset-0"
-        style={{ background: "radial-gradient(ellipse 90% 60% at 50% -12%, var(--backdrop-glow), transparent 60%)" }}
+        style={{ background: "radial-gradient(ellipse 90% 55% at 50% 8%, var(--backdrop-glow), transparent 60%)" }}
       />
       {/* Vignette — fade the edges so the market feels integrated, not pasted on. */}
       <div
         className="absolute inset-0"
-        style={{ background: "radial-gradient(ellipse 130% 125% at 50% 42%, transparent 50%, var(--backdrop-vignette) 100%)" }}
+        style={{ background: "radial-gradient(ellipse 135% 130% at 50% 46%, transparent 46%, var(--backdrop-vignette) 100%)" }}
       />
     </div>
   );
