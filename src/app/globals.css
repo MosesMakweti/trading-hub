@@ -113,13 +113,14 @@
   --glass-border: oklch(1 0 0 / 55%);
   --shadow-color: 240 8% 38%;
 
-  /* Charts: graphite ink primary + monochrome grays + semantic P&L (no rainbow).
-     chart-1 is the neutral primary series; success/danger carry win/loss. */
-  --chart-1: oklch(0.34 0.008 255);
-  --chart-2: oklch(0.62 0.012 255);
-  --chart-3: oklch(0.44 0.01 255);
-  --chart-4: oklch(0.55 0.2 25);
-  --chart-5: oklch(0.52 0.12 158);
+  /* Charts: a validated categorical palette (dataviz skill — colorblind-safe, fixed
+     order: blue · orange · aqua · yellow · magenta). Data viz is colorful; the UI
+     chrome stays monochrome. P&L still uses success/danger, not these. */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
   /* Softer, calmer rounding to match the reference (cards land ~15px at 2xl). */
   --radius: 0.75rem;
   /* Matte canvas: no colored wash on light (kept flat + neutral). */
@@ -189,12 +190,13 @@
   --glass-border: oklch(1 0 0 / 11%);
   --shadow-color: 260 18% 1%;
 
-  /* Charts: light graphite primary series + neutral grays + semantic P&L (no rainbow) */
-  --chart-1: oklch(0.80 0.008 265);
-  --chart-2: oklch(0.7 0.008 265);
-  --chart-3: oklch(0.5 0.008 265);
-  --chart-4: oklch(0.66 0.19 25);
-  --chart-5: oklch(0.72 0.13 158);
+  /* Charts: the validated categorical palette, dark-surface steps (dataviz skill).
+     Colorful data viz; monochrome chrome. P&L uses success/danger, not these. */
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
   --sidebar: oklch(0.125 0.003 265);
   --sidebar-foreground: oklch(0.965 0.003 265);
   --sidebar-primary: oklch(0.93 0.003 265);
