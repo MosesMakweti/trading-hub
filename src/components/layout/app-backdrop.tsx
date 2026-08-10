@@ -1,27 +1,23 @@
-// Floating candlestick backdrop — a non-interactive decorative layer that sits
-// behind the entire app (fixed, -z-10, pointer-events-none, aria-hidden). Three
-// depth planes of candles form a market TRENDING across the viewport, viewed from a
-// comfortable distance: clearly candlesticks, small and numerous, softly blurred and
-// at extremely low opacity so they read as atmosphere floating behind the workspace —
-// never a chart, never competing with content. Foreground glass cards (translucent)
-// naturally soften the candles beneath them.
+// Floating candlestick backdrop — a non-interactive decorative layer behind the
+// whole app (fixed, -z-10, pointer-events-none, aria-hidden). It is a single,
+// continuous OHLC price path — tight sequential candles that collectively form real
+// market structure (impulses, pullbacks, consolidations, breakouts, a reversal) —
+// then stylized for depth: an aligned soft glow behind, a tight dark contact shadow
+// beneath, and a light atmospheric blur + vignette over the top. It reads as the
+// STRUCTURE of a real chart with the DEPTH of a 3D background, never a readable
+// TradingView chart and never competing with content. Foreground glass cards
+// (translucent) naturally soften the candles beneath them.
 //
-// Pure SVG + CSS (a few KB, no image download). Candle geometry is generated
-// deterministically (seeded) so server and client render identically, and colors
-// come from tokens (`--candle`) so it flips with the theme. The only motion is a
+// Pure SVG + CSS (a few KB, no image download). Geometry is generated
+// deterministically (seeded) so server and client render identically; candle color
+// comes from a token (`--candle`) so it flips with the theme. The only motion is a
 // very slow GPU drift, disabled under prefers-reduced-motion.
 
 const W = 1600;
 const H = 900;
-
-interface Candle {
-  x: number;
-  w: number;
-  bodyY: number;
-  bodyH: number;
-  wickTop: number;
-  wickBot: number;
-}
+const N = 120; // candle count — dense enough to flow like a real chart
+const PAD_T = 0.16;
+const PAD_B = 0.16;
 
 /** Deterministic PRNG (mulberry32) — stable output for a given seed. */
 function rng(seed: number): () => number {
@@ -34,100 +30,163 @@ function rng(seed: number): () => number {
   };
 }
 
-/**
- * A dense-ish series of small candles following a directional TREND from startFrac
- * (left) to endFrac (right) — smaller/larger Y = higher/lower on screen — with
- * volatility noise + slow swings for realistic pullbacks. Small `scale` keeps the
- * candles "seen from afar": recognizable, not zoomed in.
- */
-function makeCandles(
-  seed: number,
-  count: number,
-  scale: number,
-  startFrac: number,
-  endFrac: number,
-  phase: number,
-): Candle[] {
-  const r = rng(seed);
-  const out: Candle[] = [];
-  const gap = W / count;
-  for (let i = 0; i < count; i += 1) {
-    const t = count > 1 ? i / (count - 1) : 0;
-    const trendY = H * (startFrac + (endFrac - startFrac) * t); // the trend line
-    const noise = (r() - 0.5) * H * 0.1; // candle-to-candle volatility
-    const swing = Math.sin(t * Math.PI * 3 + phase) * H * 0.05; // gentle pullbacks
-    const baseline = Math.max(H * 0.12, Math.min(H * 0.88, trendY + noise + swing));
-    const w = (13 + r() * 14) * scale;
-    const bodyH = (24 + r() * 66) * scale;
-    const bodyY = baseline - bodyH / 2;
-    const wickUp = (14 + r() * 44) * scale;
-    const wickDn = (14 + r() * 44) * scale;
-    const x = i * gap + (gap - w) / 2 + (r() - 0.5) * gap * 0.2;
-    out.push({ x, w, bodyY, bodyH, wickTop: bodyY - wickUp, wickBot: bodyY + bodyH + wickDn });
-  }
-  return out;
+/** Standard normal via Box–Muller — gives natural, non-uniform candle variation. */
+function gauss(r: () => number): number {
+  let u = 0;
+  let v = 0;
+  while (u === 0) u = r();
+  while (v === 0) v = r();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
-function CandleLayer({ candles, idKey }: { candles: Candle[]; idKey: string }) {
-  const gid = `cbody-${idKey}`;
+interface Bar {
+  bx: number;
+  bw: number;
+  bodyTop: number;
+  bodyH: number;
+  wickX: number;
+  wickTop: number;
+  wickBot: number;
+  up: boolean;
+}
+
+// Regime script: a believable sequence of market phases. Each phase has a drift
+// (per-bar trend), volatility, and a length range. Walking these in order yields
+// impulses → pullbacks → consolidation → breakout → reversal with real swing
+// highs/lows — not random placement.
+const REGIMES: { drift: number; vol: number; len: [number, number] }[] = [
+  { drift: 0.0, vol: 0.009, len: [9, 15] }, // base consolidation
+  { drift: 0.02, vol: 0.014, len: [7, 12] }, // impulse up
+  { drift: -0.009, vol: 0.01, len: [5, 9] }, // pullback
+  { drift: 0.0, vol: 0.008, len: [9, 16] }, // consolidation
+  { drift: 0.024, vol: 0.017, len: [7, 12] }, // breakout up
+  { drift: -0.007, vol: 0.009, len: [4, 8] }, // shallow pullback
+  { drift: 0.012, vol: 0.013, len: [6, 10] }, // continuation
+  { drift: -0.023, vol: 0.017, len: [8, 13] }, // reversal down
+  { drift: 0.008, vol: 0.011, len: [6, 11] }, // recovery
+];
+
+function makeSeries(seed: number): Bar[] {
+  const r = rng(seed);
+  const slot = W / N;
+  const bw = slot * 0.66; // body width; gap = 0.34·slot < body → tight, continuous
+  const innerH = H * (1 - PAD_T - PAD_B);
+  const vY = (val: number) => H * PAD_T + (1 - val) * innerH; // value 0..1 → y
+
+  const bars: Bar[] = [];
+  let v = 0.42; // starting price (value space, higher = higher on screen)
+  let ri = 0;
+  let left = Math.round(REGIMES[0].len[0] + r() * (REGIMES[0].len[1] - REGIMES[0].len[0]));
+  let reg = REGIMES[0];
+
+  for (let i = 0; i < N; i += 1) {
+    if (left <= 0) {
+      ri += 1;
+      reg = REGIMES[ri % REGIMES.length];
+      left = Math.round(reg.len[0] + r() * (reg.len[1] - reg.len[0]));
+    }
+    left -= 1;
+
+    const open = v;
+    const displacement = r() < 0.06 ? 2.3 : 1; // occasional strong displacement candle
+    const step = reg.drift + gauss(r) * reg.vol * displacement;
+    v = Math.max(0.06, Math.min(0.94, open + step));
+    const close = v;
+
+    const hi = Math.max(open, close);
+    const lo = Math.min(open, close);
+    const wickUp = Math.abs(gauss(r)) * reg.vol * 0.9 + 0.004;
+    const wickDn = Math.abs(gauss(r)) * reg.vol * 0.9 + 0.004;
+    const high = Math.min(0.99, hi + wickUp);
+    const low = Math.max(0.01, lo - wickDn);
+
+    const yHi = vY(hi);
+    const yLo = vY(lo);
+    const bx = i * slot + (slot - bw) / 2;
+    bars.push({
+      bx,
+      bw,
+      bodyTop: yHi,
+      bodyH: Math.max(1.3, yLo - yHi),
+      wickX: i * slot + slot / 2,
+      wickTop: vY(high),
+      wickBot: vY(low),
+      up: close >= open,
+    });
+  }
+  return bars;
+}
+
+/** One rendering of the shared bar geometry. `mode` styles the same candles as the
+ *  glow (behind), the contact shadow (beneath), or the main candles (front). */
+function CandleSvg({ bars, mode }: { bars: Bar[]; mode: "glow" | "shadow" | "main" }) {
+  const shadow = mode === "shadow";
+  const fill = shadow ? "#000" : "var(--candle)";
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="xMidYMid slice"
-      className="absolute inset-0 h-full w-full"
-    >
-      <defs>
-        {/* Vertical light→dark fill gives each candle a subtle dimensional read. */}
-        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--candle)" stopOpacity="0.95" />
-          <stop offset="55%" stopColor="var(--candle)" stopOpacity="0.72" />
-          <stop offset="100%" stopColor="var(--candle)" stopOpacity="0.5" />
-        </linearGradient>
-      </defs>
-      {candles.map((c, i) => (
-        <g key={i}>
-          <rect
-            x={c.x + c.w / 2 - 0.75}
-            y={c.wickTop}
-            width={1.5}
-            height={c.wickBot - c.wickTop}
-            rx={0.75}
-            fill="var(--candle)"
-            opacity={0.5}
-          />
-          <rect x={c.x} y={c.bodyY} width={c.w} height={c.bodyH} rx={2} fill={`url(#${gid})`} />
-          {/* thin top highlight = a soft lit edge */}
-          <rect
-            x={c.x}
-            y={c.bodyY}
-            width={c.w}
-            height={Math.min(2, c.bodyH)}
-            rx={2}
-            fill="var(--candle)"
-            opacity={0.9}
-          />
-        </g>
-      ))}
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full">
+      {mode === "main" && (
+        <defs>
+          <linearGradient id="cbody" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--candle)" stopOpacity="0.98" />
+            <stop offset="60%" stopColor="var(--candle)" stopOpacity="0.74" />
+            <stop offset="100%" stopColor="var(--candle)" stopOpacity="0.55" />
+          </linearGradient>
+        </defs>
+      )}
+      {bars.map((b, i) => {
+        // Glow = bodies only (a soft aligned halo); shadow/main = wick + body.
+        const bodyFill = mode === "main" ? (b.up ? "url(#cbody)" : "var(--candle)") : fill;
+        const bodyOpacity = mode === "main" ? (b.up ? 1 : 0.82) : 1;
+        return (
+          <g key={i}>
+            {mode !== "glow" && (
+              <rect
+                x={b.wickX - 0.7}
+                y={b.wickTop}
+                width={1.4}
+                height={b.wickBot - b.wickTop}
+                fill={fill}
+                opacity={shadow ? 1 : 0.55}
+              />
+            )}
+            <rect
+              x={b.bx}
+              y={b.bodyTop}
+              width={b.bw}
+              height={b.bodyH}
+              rx={1.5}
+              fill={bodyFill}
+              opacity={bodyOpacity}
+            />
+          </g>
+        );
+      })}
     </svg>
   );
 }
 
 export function AppBackdrop() {
-  // One coherent uptrend across all planes (low-left → high-right), each plane a
-  // little different for parallax depth. Far = many/small/most blurred/faintest.
-  const far = makeCandles(1337, 44, 0.42, 0.74, 0.4, 0);
-  const mid = makeCandles(4242, 32, 0.56, 0.72, 0.34, 1.1);
-  const near = makeCandles(9001, 22, 0.74, 0.7, 0.3, 2.2);
+  const bars = makeSeries(20260810);
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-      <div className="backdrop-drift-a absolute inset-0" style={{ filter: "blur(6px)", opacity: 0.1 }}>
-        <CandleLayer candles={far} idKey="far" />
-      </div>
-      <div className="backdrop-drift-b absolute inset-0" style={{ filter: "blur(3.5px)", opacity: 0.13 }}>
-        <CandleLayer candles={mid} idKey="mid" />
-      </div>
-      <div className="backdrop-drift-c absolute inset-0" style={{ filter: "blur(2px)", opacity: 0.1 }}>
-        <CandleLayer candles={near} idKey="near" />
+      {/* All three planes share ONE drift so they stay perfectly aligned — a single
+          chart with depth, not offset copies. */}
+      <div className="backdrop-drift-a absolute inset-0">
+        {/* Depth glow — the same path, heavily blurred + very faint, aligned behind. */}
+        <div className="absolute inset-0" style={{ filter: "blur(13px)", opacity: 0.05 }}>
+          <CandleSvg bars={bars} mode="glow" />
+        </div>
+        {/* Contact shadow — the same path in black, nudged down 1.4px, tightly
+            blurred + faint. Grounds the candles (ambient depth), never a copy. */}
+        <div className="absolute inset-0" style={{ filter: "blur(3px)", opacity: 0.22 }}>
+          <div style={{ transform: "translateY(1.4px)" }}>
+            <CandleSvg bars={bars} mode="shadow" />
+          </div>
+        </div>
+        {/* Main candles — lightly blurred so the structure reads, but soft. */}
+        <div className="absolute inset-0" style={{ filter: "blur(1.8px)", opacity: 0.16 }}>
+          <CandleSvg bars={bars} mode="main" />
+        </div>
       </div>
       {/* Atmospheric top bloom. */}
       <div
