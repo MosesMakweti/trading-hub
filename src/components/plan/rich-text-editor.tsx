@@ -1,72 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { EditorContent, useEditor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import Placeholder from "@tiptap/extension-placeholder";
+import dynamic from "next/dynamic";
 
-import { cn } from "@/lib/utils";
+import type { RichTextEditorProps } from "./rich-text-editor-impl";
 
-const AUTOSAVE_DELAY_MS = 1200;
-
-type SaveResult = { success: boolean; error?: string };
-
-export function RichTextEditor({
-  initialContent,
-  placeholder,
-  onSave,
-  className,
-  editable = true,
-}: {
-  initialContent: unknown;
-  placeholder?: string;
-  onSave: (content: object) => Promise<SaveResult>;
-  className?: string;
-  editable?: boolean;
-}) {
-  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const editor = useEditor({
-    editable,
-    extensions: [
-      StarterKit,
-      Placeholder.configure({ placeholder: placeholder ?? "Start writing..." }),
-    ],
-    content: (initialContent as object) ?? "",
-    immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        class:
-          "prose prose-invert prose-sm max-w-none focus:outline-none min-h-[120px] text-foreground",
-      },
-    },
-    onUpdate: ({ editor }) => {
-      setStatus("saving");
-      if (saveTimeout.current) clearTimeout(saveTimeout.current);
-      saveTimeout.current = setTimeout(async () => {
-        const result = await onSave(editor.getJSON());
-        setStatus(result.success ? "saved" : "error");
-      }, AUTOSAVE_DELAY_MS);
-    },
-  });
-
-  useEffect(() => {
-    return () => {
-      if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    };
-  }, []);
-
-  return (
-    <div className={cn("space-y-2", className)}>
-      <div className="rounded-lg border border-border bg-background/40 px-3 py-2">
-        <EditorContent editor={editor} />
+// Tiptap (the editor runtime + StarterKit) is heavy and never renders on the
+// server (`immediatelyRender: false`), so it's lazy-loaded here — kept off the
+// initial JS of every route that embeds an editor (journal, edge, strategy-lab,
+// today). The skeleton mirrors the editor's own frame so there is no layout shift.
+const RichTextEditorImpl = dynamic(
+  () => import("./rich-text-editor-impl").then((m) => m.RichTextEditorImpl),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="space-y-2">
+        <div className="rounded-lg border border-border bg-background/40 px-3 py-2">
+          <div className="min-h-[120px] animate-pulse rounded bg-muted/20" aria-hidden />
+        </div>
+        <p className="h-4" />
       </div>
-      <p className="h-4 text-xs text-muted-foreground">
-        {status === "saving" && "Saving…"}
-        {status === "saved" && "Saved"}
-        {status === "error" && <span className="text-danger">Failed to save</span>}
-      </p>
-    </div>
-  );
+    ),
+  },
+);
+
+export function RichTextEditor(props: RichTextEditorProps) {
+  return <RichTextEditorImpl {...props} />;
 }

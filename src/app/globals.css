@@ -269,17 +269,18 @@
 }
 
 @layer utilities {
-  /* Frosted floating panel: a top reflection sheen layered over the tint, a
-   * crisp thin border, real backdrop frosting, and dual inset edges (lit top +
-   * shaded bottom = the glass's thickness) over a gentle resting shadow so the
-   * card reads as floating. Kept readable — the tint is a light film, not a veil. */
+  /* Floating panel: a top reflection sheen layered over an OPAQUE card fill, a
+   * crisp thin border, and dual inset edges (lit top + shaded bottom = the glass's
+   * thickness) over a gentle resting shadow so the card reads as floating.
+   * Perf: static content cards use an opaque background — no backdrop-filter —
+   * so they never trigger the expensive full-region re-rasterization that a live
+   * blur forces on scroll/paint. Live frosting is reserved for `.glass-strong`
+   * (overlays only: dialogs, popovers, the dashboard vitals strip). */
   .glass {
     background:
       linear-gradient(180deg, oklch(1 0 0 / 6%), transparent 42%),
-      var(--glass);
+      var(--card);
     border: 1px solid var(--glass-border);
-    backdrop-filter: blur(22px) saturate(1.4) brightness(1.02);
-    -webkit-backdrop-filter: blur(22px) saturate(1.4) brightness(1.02);
     box-shadow:
       inset 0 1px 0 0 oklch(1 0 0 / 10%),
       inset 0 -1px 0 0 oklch(0 0 0 / 5%),
@@ -384,6 +385,26 @@
   .backdrop-drift-a { animation: backdrop-drift-a 80s ease-in-out infinite alternate; will-change: transform; }
   .backdrop-drift-b { animation: backdrop-drift-b 110s ease-in-out infinite alternate; will-change: transform; }
   .backdrop-drift-c { animation: backdrop-drift-c 64s ease-in-out infinite alternate; will-change: transform; }
+
+  /* Entrance animations — pure CSS replacements for the old Framer Motion
+   * FadeIn / StaggerList / StaggerItem. Keeps `motion/react` out of every
+   * authenticated route bundle; a one-shot GPU (opacity+transform) animation. */
+  .animate-fade-in { animation: fade-in-up 0.25s ease-out both; }
+  .stagger-item { animation: fade-in-up 0.2s ease-out both; }
+  .stagger-children > .stagger-item:nth-child(1) { animation-delay: 0ms; }
+  .stagger-children > .stagger-item:nth-child(2) { animation-delay: 50ms; }
+  .stagger-children > .stagger-item:nth-child(3) { animation-delay: 100ms; }
+  .stagger-children > .stagger-item:nth-child(4) { animation-delay: 150ms; }
+  .stagger-children > .stagger-item:nth-child(5) { animation-delay: 200ms; }
+  .stagger-children > .stagger-item:nth-child(6) { animation-delay: 250ms; }
+  .stagger-children > .stagger-item:nth-child(7) { animation-delay: 300ms; }
+  .stagger-children > .stagger-item:nth-child(8) { animation-delay: 350ms; }
+  .stagger-children > .stagger-item:nth-child(n + 9) { animation-delay: 400ms; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes backdrop-drift-a {
@@ -438,6 +459,8 @@
   .aurora-orb,
   .animate-gradient-pan,
   .animate-pulse-glow,
+  .animate-fade-in,
+  .stagger-item,
   .backdrop-drift-a,
   .backdrop-drift-b,
   .backdrop-drift-c {

@@ -154,7 +154,7 @@ export function AppBackdrop() {
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
       <div
-        className="backdrop-drift-a absolute inset-0"
+        className="absolute inset-0"
         style={{ filter: "blur(2.8px)", opacity: "var(--backdrop-strength)" }}
       >
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full">

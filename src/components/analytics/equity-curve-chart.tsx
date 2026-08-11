@@ -1,18 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import dynamic from "next/dynamic";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { EquityCurvePoint } from "@/domain/performance/rr";
+import { ChartSkeleton } from "./chart-skeleton";
+
+// Recharts lives in a lazy chunk loaded only after the card chrome paints, so it
+// never sits in the route's initial JS. The skeleton reserves the plot height.
+const EquityCurvePlot = dynamic(
+  () => import("./charts-lazy-bundle").then((m) => m.EquityCurvePlot),
+  { ssr: false, loading: () => <ChartSkeleton height={280} /> },
+);
 
 export function EquityCurveChart({ data }: { data: EquityCurvePoint[] }) {
   const [mode, setMode] = useState<"compounding" | "additive">("compounding");
@@ -38,50 +38,7 @@ export function EquityCurveChart({ data }: { data: EquityCurvePoint[] }) {
           No closed trades in this range yet.
         </p>
       ) : (
-        <ResponsiveContainer width="100%" height={280}>
-          <AreaChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
-            <defs>
-              <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.25} />
-                <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis
-              dataKey="date"
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-              axisLine={{ stroke: "var(--border)" }}
-              tickLine={false}
-              minTickGap={40}
-            />
-            <YAxis
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              width={44}
-              tickFormatter={(v: number) => `${v.toFixed(0)}%`}
-            />
-            <Tooltip
-              contentStyle={{
-                background: "var(--popover)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                fontSize: 12,
-                color: "var(--popover-foreground)",
-              }}
-              formatter={(value) => [`${Number(value).toFixed(2)}%`, "Return"]}
-            />
-            <Area
-              type="monotone"
-              dataKey="value"
-              stroke="var(--chart-1)"
-              strokeWidth={2}
-              fill="url(#equityFill)"
-              dot={false}
-              activeDot={{ r: 4 }}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+        <EquityCurvePlot chartData={chartData} />
       )}
     </div>
   );

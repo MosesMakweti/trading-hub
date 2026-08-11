@@ -1,10 +1,14 @@
-"use client";
-
-import { motion, useReducedMotion, type Variants } from "motion/react";
+import { cn } from "@/lib/utils";
 
 /**
- * Shared entrance animations. All respect `prefers-reduced-motion`: when the
- * viewer opts out, content renders at its final state with no transform/stagger.
+ * Shared entrance animations — pure CSS, no client JS.
+ *
+ * These were previously Framer Motion (`motion/react`) components, which pulled
+ * the whole animation runtime into every authenticated route bundle. They are
+ * now plain server components backed by CSS keyframes in `globals.css`
+ * (`.animate-fade-in`, `.stagger-children` / `.stagger-item`). Behaviour is
+ * unchanged: a short fade-up on mount, staggered for lists, and both respect
+ * `prefers-reduced-motion` (the keyframes are disabled under that query).
  */
 export function FadeIn({
   children,
@@ -13,17 +17,7 @@ export function FadeIn({
   children: React.ReactNode;
   className?: string;
 }) {
-  const reduce = useReducedMotion();
-  return (
-    <motion.div
-      className={className}
-      initial={reduce ? false : { opacity: 0, y: 8 }}
-      animate={reduce ? undefined : { opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, ease: "easeOut" }}
-    >
-      {children}
-    </motion.div>
-  );
+  return <div className={cn("animate-fade-in", className)}>{children}</div>;
 }
 
 export function StaggerList({
@@ -33,21 +27,7 @@ export function StaggerList({
   children: React.ReactNode;
   className?: string;
 }) {
-  const reduce = useReducedMotion();
-  const listVariants: Variants = {
-    hidden: {},
-    show: { transition: { staggerChildren: reduce ? 0 : 0.05 } },
-  };
-  return (
-    <motion.div
-      className={className}
-      initial={reduce ? false : "hidden"}
-      animate="show"
-      variants={listVariants}
-    >
-      {children}
-    </motion.div>
-  );
+  return <div className={cn("stagger-children", className)}>{children}</div>;
 }
 
 export function StaggerItem({
@@ -57,14 +37,5 @@ export function StaggerItem({
   children: React.ReactNode;
   className?: string;
 }) {
-  const reduce = useReducedMotion();
-  const itemVariants: Variants = {
-    hidden: reduce ? { opacity: 1 } : { opacity: 0, y: 8 },
-    show: { opacity: 1, y: 0, transition: { duration: reduce ? 0 : 0.2, ease: "easeOut" } },
-  };
-  return (
-    <motion.div className={className} variants={itemVariants}>
-      {children}
-    </motion.div>
-  );
+  return <div className={cn("stagger-item", className)}>{children}</div>;
 }

@@ -229,8 +229,18 @@ export async function getAnalyticsData(
     include: {
       trade: {
         include: {
-          psychology: true,
-          allocations: { include: { tradingAccount: true } },
+          // Only the two psychology scalars this analytics pass reads — not the
+          // full row (avoids hauling every psychology field across the account's
+          // entire trade history on every analytics/dashboard load).
+          psychology: { select: { psychologyPercent: true, rawScore: true } },
+          // We only need each allocation's account id (for the account filter) and
+          // the linked account's kind + name (to label the non-performance account).
+          allocations: {
+            select: {
+              tradingAccountId: true,
+              tradingAccount: { select: { kind: true, name: true } },
+            },
+          },
           // The strategy's live benchmark (proven edge) + risk budget → Discrepancy Gap.
           strategy: {
             select: { tradeManagement: { select: { expectedExpectancy: true, maxRiskPercent: true } } },
