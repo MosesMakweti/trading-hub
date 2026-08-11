@@ -24,6 +24,11 @@ import {
   summarizeDiscrepancy,
   type DiscrepancyTradeInput,
 } from "@/domain/analytics/discrepancy-model";
+import {
+  buildCounterfactualCurve,
+  summarizeAttribution,
+  type CounterfactualInput,
+} from "@/domain/analytics/counterfactual-engine";
 import { computeExpectancy, resolveExpectancy } from "@/domain/performance/expectancy";
 import {
   aggregateDeviationCauses,
@@ -231,9 +236,19 @@ export async function getAnalyticsData(
         include: {
           psychology: true,
           allocations: { include: { tradingAccount: true } },
-          // The strategy's live benchmark (proven edge) + risk budget → Discrepancy Gap.
+          // The strategy's live benchmark (proven edge) + risk budget + counterfactual
+          // day-limits → Discrepancy Gap.
           strategy: {
-            select: { tradeManagement: { select: { expectedExpectancy: true, maxRiskPercent: true } } },
+            select: {
+              tradeManagement: {
+                select: {
+                  expectedExpectancy: true,
+                  maxRiskPercent: true,
+                  maxDailyRiskPercent: true,
+                  maxTradesPerDay: true,
+                },
+              },
+            },
           },
         },
       },
@@ -303,6 +318,22 @@ export async function getAnalyticsData(
   // Per-trade points for the Phase B breakdowns (day-of-week / month / direction /
   // session / hour / risk) — built from the same rows, not a second data source.
   const analyticsPoints: AnalyticsTradePoint[] = [];
+
+  // Day-level aggregates (over ALL in-range trades — a day's over-risk / overtrading
+  // is real regardless of the active filters) for the counterfactual's day flags.
+  const dayRisk = new Map<string, number>();
+  const dayCount = new Map<string, number>();
+  for (const a of inRange) {
+    const dk = utcDateToKey(a.trade.tradeDate);
+    dayCount.set(dk, (dayCount.get(dk) ?? 0) + 1);
+    if (a.riskInputType === "PERCENT") {
+      dayRisk.set(dk, (dayRisk.get(dk) ?? 0) + a.riskValue.toNumber());
+    }
+  }
+
+  // Counterfactual (Process-Perfect) events, collected with a chronological key so
+  // executed trades and missed opportunities interleave correctly before the curve.
+  const cfEvents: { chronoKey: number; input: CounterfactualInput }[] = [];
 
   for (const alloc of inRange) {
     const t = alloc.trade;
@@ -399,6 +430,29 @@ export async function getAnalyticsData(
       avoidableR: proc.avoidableR,
     });
 
+    // Counterfactual (Process-Perfect) executed event — reuses the same deviations.
+    const dailyRiskLimit = t.strategy?.tradeManagement?.maxDailyRiskPercent ?? null;
+    const maxPerDay = t.strategy?.tradeManagement?.maxTradesPerDay ?? null;
+    cfEvents.push({
+      chronoKey: t.tradeDate.getTime() + (t.executionMinutes ?? 0) * 60000,
+      input: {
+        kind: "EXECUTED",
+        eventId: t.id,
+        sequence: 0, // reassigned after the chronological merge below
+        dateKey,
+        actualR: tradeActualR,
+        validSetup: t.setupValid,
+        missingConfluences: (t.missingConfluences as string[] | null) ?? [],
+        deviations,
+        wouldTakeAgain: t.wouldTakeAgain,
+        behaviorTag: t.tradeIntent,
+        psychologyPercent: t.psychology?.psychologyPercent ?? null,
+        missingExecutionConfirmations: t.executionPercent != null && t.executionPercent < 100 ? 1 : 0,
+        exceededDailyRisk: dailyRiskLimit != null && (dayRisk.get(dateKey) ?? 0) > dailyRiskLimit,
+        overtrade: maxPerDay != null && (dayCount.get(dateKey) ?? 0) > maxPerDay,
+      },
+    });
+
     if (t.psychology) {
       const otherAccount = t.allocations.find((a) => a.tradingAccount.kind !== "PERFORMANCE");
       psychologyPoints.push({
@@ -475,6 +529,31 @@ export async function getAnalyticsData(
     causes: aggregateDeviationCauses(deviationPrimaries),
   };
 
+  // Counterfactual (Process-Perfect) Discrepancy Gap — the rebuilt model. Executed
+  // events (from the loop) interleave with MISSED valid opportunities by chronology;
+  // sequence is reassigned so the cumulative curve is truly chronological.
+  const missedCfEvents = opportunityInputs
+    .filter((o) => o.outcome === "MISSED")
+    .map((o) => ({
+      chronoKey: dateKeyToUtcDate(o.dateKey).getTime() + 12 * 60 * 60 * 1000,
+      input: {
+        kind: "MISSED" as const,
+        eventId: o.opportunityId,
+        sequence: 0,
+        dateKey: o.dateKey,
+        validSetup: o.valid,
+        missedRealizedR: o.missedRealizedR ?? null,
+      } satisfies CounterfactualInput,
+    }));
+  const counterfactualInputs: CounterfactualInput[] = [...cfEvents, ...missedCfEvents]
+    .sort((a, b) => a.chronoKey - b.chronoKey)
+    .map((e, i) => ({ ...e.input, sequence: i + 1 }));
+  const counterfactual = {
+    hasData: counterfactualInputs.length > 0,
+    curve: buildCounterfactualCurve(counterfactualInputs),
+    summary: summarizeAttribution(counterfactualInputs),
+  };
+
   return {
     trading: {
       totalTrades: tradeInputs.length,
@@ -510,6 +589,7 @@ export async function getAnalyticsData(
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
       discrepancy,
+      counterfactual,
       opportunity,
       breakdowns,
       dailyPercents,
