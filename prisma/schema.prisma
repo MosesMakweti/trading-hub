@@ -298,6 +298,10 @@ model Trade {
   whatWentWrong            String?
   whatSurprisedMe          String?
   wouldTakeAgain           Boolean?
+  // Behavioral intent tag for the Counterfactual (Discrepancy Gap) engine. Null on
+  // historical rows → the engine infers behavior from other signals. FOMO/REVENGE/
+  // IMPULSE/BOREDOM mark a trade a disciplined process would not have taken.
+  tradeIntent              TradeIntent?
   // Trade Timeline lifecycle stamps (Phase 3) — captured when the trade first
   // transitions into each state (see domain/trades/lifecycle.ts). createdAt is
   // "logged", the in-market "executed" moment is derived (tradeDate +
@@ -375,6 +379,18 @@ enum TradeStatus {
   OPEN
   CLOSED
   REVIEWED
+}
+
+// Behavioral intent behind an executed trade (Counterfactual engine). PLANNED is
+// the disciplined default; the rest are process breaches of decreasing "should not
+// have taken this" severity. Null = unspecified (historical / not tagged).
+enum TradeIntent {
+  PLANNED
+  FOMO
+  REVENGE
+  BOREDOM
+  IMPULSE
+  MANUAL_OVERRIDE
 }
 
 // ── Trade Opportunity architecture ───────────────────────────────────────────
@@ -844,6 +860,12 @@ model StrategyTradeManagement {
 
   maxHoldingTime String? // free text, e.g. "2 hours", "1 session"
   maxRiskPercent Decimal? @db.Decimal(6, 2)
+
+  // Counterfactual engine limits (optional). A day whose realized risk exceeds
+  // maxDailyRiskPercent, or whose trade count exceeds maxTradesPerDay, raises a
+  // FLAGGED risk/behavioral breach on the offending trades (no fabricated R).
+  maxDailyRiskPercent Float?
+  maxTradesPerDay     Int?
 
   // Discrepancy-Gap benchmarks (D2): the strategy's PROVEN edge, used by the
   // Execution Engine as the "expected" baseline. expectedExpectancy (R per trade at

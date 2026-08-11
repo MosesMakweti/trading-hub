@@ -54,6 +54,8 @@ export function TradeManagementSection({
   const [limits, setLimits] = useState({
     maxHoldingTime: tm.maxHoldingTime ?? "",
     maxRiskPercent: tm.maxRiskPercent?.toString() ?? "",
+    maxDailyRiskPercent: tm.maxDailyRiskPercent?.toString() ?? "",
+    maxTradesPerDay: tm.maxTradesPerDay?.toString() ?? "",
   });
   const [benchmarks, setBenchmarks] = useState({
     expectedWinRate: tm.expectedWinRate?.toString() ?? "",
@@ -64,16 +66,34 @@ export function TradeManagementSection({
 
   const limitsSave = useDebouncedAutosave({
     value: limits,
-    serialize: (v) => JSON.stringify([v.maxHoldingTime.trim(), v.maxRiskPercent.trim()]),
+    serialize: (v) =>
+      JSON.stringify([
+        v.maxHoldingTime.trim(),
+        v.maxRiskPercent.trim(),
+        v.maxDailyRiskPercent.trim(),
+        v.maxTradesPerDay.trim(),
+      ]),
     save: async (v) => {
-      const pct = v.maxRiskPercent.trim();
-      const num = pct === "" ? null : Number(pct);
-      if (num !== null && (Number.isNaN(num) || num < 0 || num > 100)) {
-        return { success: false, error: "Max risk must be 0–100%." };
+      const parseNum = (raw: string, max: number, integer = false) => {
+        const t = raw.trim();
+        if (t === "") return { ok: true as const, value: null };
+        const n = Number(t);
+        if (Number.isNaN(n) || n < 0 || n > max || (integer && !Number.isInteger(n))) {
+          return { ok: false as const };
+        }
+        return { ok: true as const, value: n };
+      };
+      const risk = parseNum(v.maxRiskPercent, 100);
+      const dailyRisk = parseNum(v.maxDailyRiskPercent, 100);
+      const perDay = parseNum(v.maxTradesPerDay, 100, true);
+      if (!risk.ok || !dailyRisk.ok || !perDay.ok) {
+        return { success: false, error: "Check the limit values (0–100)." };
       }
       return updateTradeManagement(strategyId, tm.id, {
         maxHoldingTime: v.maxHoldingTime.trim() === "" ? null : v.maxHoldingTime.trim(),
-        maxRiskPercent: num,
+        maxRiskPercent: risk.value,
+        maxDailyRiskPercent: dailyRisk.value,
+        maxTradesPerDay: perDay.value,
       });
     },
     onError: (m) => {
@@ -174,6 +194,41 @@ export function TradeManagementSection({
               {limitsSave === "saving" && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
               {limitsSave === "saved" && <Check className="size-3.5 text-success" />}
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="tm-max-daily-risk" className="text-xs">
+              Daily risk limit (%)
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="tm-max-daily-risk"
+                type="number"
+                min={0}
+                max={100}
+                step="0.1"
+                value={limits.maxDailyRiskPercent}
+                onChange={(e) => setLimits((l) => ({ ...l, maxDailyRiskPercent: e.target.value }))}
+                placeholder="e.g. 3"
+                className="max-w-32"
+              />
+              <span className="text-sm text-muted-foreground">%</span>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="tm-max-trades-day" className="text-xs">
+              Max trades per day
+            </Label>
+            <Input
+              id="tm-max-trades-day"
+              type="number"
+              min={0}
+              max={100}
+              step="1"
+              value={limits.maxTradesPerDay}
+              onChange={(e) => setLimits((l) => ({ ...l, maxTradesPerDay: e.target.value }))}
+              placeholder="e.g. 3"
+              className="max-w-32"
+            />
           </div>
         </div>
       </div>

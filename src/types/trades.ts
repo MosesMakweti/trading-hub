@@ -162,6 +162,7 @@ export interface TradeWorkspaceDTO {
   whatWentWrong: string | null;
   whatSurprisedMe: string | null;
   wouldTakeAgain: boolean | null;
+  tradeIntent: "PLANNED" | "FOMO" | "REVENGE" | "BOREDOM" | "IMPULSE" | "MANUAL_OVERRIDE" | null;
 
   // Phase 5 — strategy-adherence self-score (answers keyed by ADHERENCE_QUESTIONS).
   adherenceAnswers: Record<string, boolean>;

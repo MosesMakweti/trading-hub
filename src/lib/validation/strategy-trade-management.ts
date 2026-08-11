@@ -31,6 +31,9 @@ export const tradeManagementUpdateSchema = z.object({
   expectedAvgRr: z.number().min(-100).max(100).nullable().optional(),
   expectedExpectancy: z.number().min(-100).max(100).nullable().optional(),
   minExecutionScore: z.number().int().min(0).max(100).nullable().optional(),
+  // Counterfactual (Discrepancy Gap) limits — flag over-risk / overtrading days.
+  maxDailyRiskPercent: z.number().min(0).max(100).nullable().optional(),
+  maxTradesPerDay: z.number().int().min(0).max(100).nullable().optional(),
 });
 
 // ── Partial take-profit levels ───────────────────────────────────────────────

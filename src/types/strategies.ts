@@ -104,6 +104,9 @@ export interface TradeManagementDTO {
   expectedAvgRr: number | null;
   expectedExpectancy: number | null;
   minExecutionScore: number | null;
+  // Counterfactual (Discrepancy Gap) limits — flag over-risk / overtrading days.
+  maxDailyRiskPercent: number | null;
+  maxTradesPerDay: number | null;
   partialTakeProfits: PartialTakeProfitDTO[];
   customRules: CustomRuleDTO[];
 }

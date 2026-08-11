@@ -148,6 +148,8 @@ export default async function StrategyWorkspacePage({
     expectedAvgRr: tradeManagement.expectedAvgRr,
     expectedExpectancy: tradeManagement.expectedExpectancy,
     minExecutionScore: tradeManagement.minExecutionScore,
+    maxDailyRiskPercent: tradeManagement.maxDailyRiskPercent,
+    maxTradesPerDay: tradeManagement.maxTradesPerDay,
     partialTakeProfits: tradeManagement.partialTakeProfits.map((p) => ({
       id: p.id,
       trigger: p.trigger,

@@ -79,6 +79,7 @@ describe("diffStrategyVersions", () => {
       trailingStopRules: null, scalingInRules: null, scalingOutRules: null,
       maxHoldingTime: null, maxRiskPercent: null,
       expectedWinRate: null, expectedAvgRr: null, expectedExpectancy: null, minExecutionScore: null,
+      maxDailyRiskPercent: null, maxTradesPerDay: null,
       partialTakeProfits: [], customRules: [],
       ...over,
     });

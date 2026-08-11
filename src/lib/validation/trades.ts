@@ -103,6 +103,10 @@ export const tradeWorkspaceSectionSchema = z
     whatWentWrong: workspaceNote,
     whatSurprisedMe: workspaceNote,
     wouldTakeAgain: z.boolean().nullable(),
+    // Behavioral intent tag for the Counterfactual (Discrepancy Gap) engine.
+    tradeIntent: z
+      .enum(["PLANNED", "FOMO", "REVENGE", "BOREDOM", "IMPULSE", "MANUAL_OVERRIDE"])
+      .nullable(),
     // Strategy-adherence answers: a map of question key -> yes/no. Unknown keys
     // are dropped and the percent is recomputed server-side (service layer).
     adherenceAnswers: z.record(z.string(), z.boolean()),

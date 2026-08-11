@@ -3,6 +3,7 @@ import { GRADE_VARIANT } from "@/lib/grade-variant";
 import { NoteBlock } from "@/components/journal/workspace/workspace-ui";
 import {
   WorkspaceDecisionField,
+  WorkspaceIntentField,
   WorkspaceNoteField,
 } from "@/components/journal/workspace/workspace-fields";
 import { StrategyAdherencePanel } from "@/components/journal/workspace/strategy-adherence-panel";
@@ -79,6 +80,12 @@ export function TradeReviewSection({ trade }: { trade: TradeWorkspaceDTO }) {
             tradeId={trade.id}
             label="Would I take this trade again?"
             initialValue={trade.wouldTakeAgain}
+          />
+          <WorkspaceIntentField
+            dateKey={trade.dateKey}
+            tradeId={trade.id}
+            label="Trade intent (behavioral)"
+            initialValue={trade.tradeIntent}
           />
         </div>
       </div>

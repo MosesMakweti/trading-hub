@@ -100,6 +100,8 @@ function buildSnapshot(s: StrategyTree): StrategyVersionSnapshot {
           expectedAvgRr: s.tradeManagement.expectedAvgRr,
           expectedExpectancy: s.tradeManagement.expectedExpectancy,
           minExecutionScore: s.tradeManagement.minExecutionScore,
+          maxDailyRiskPercent: s.tradeManagement.maxDailyRiskPercent,
+          maxTradesPerDay: s.tradeManagement.maxTradesPerDay,
           partialTakeProfits: s.tradeManagement.partialTakeProfits.map((p) => ({
             id: p.id,
             trigger: p.trigger,

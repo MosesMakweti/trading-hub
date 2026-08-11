@@ -90,6 +90,7 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     whatWentWrong: trade.whatWentWrong,
     whatSurprisedMe: trade.whatSurprisedMe,
     wouldTakeAgain: trade.wouldTakeAgain,
+    tradeIntent: trade.tradeIntent,
     psychology: trade.psychology
       ? {
           rawScore: trade.psychology.rawScore,
