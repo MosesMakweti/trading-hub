@@ -2,17 +2,26 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ImageOff, Loader2, Trash2, UploadCloud, ZoomIn } from "lucide-react";
+import { ImageOff, Loader2, RotateCcw, Trash2, UploadCloud, XIcon, ZoomIn, ZoomOut } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { deleteMediaAction, loadMediaAction } from "@/actions/media.actions";
 import type { MediaItemDTO } from "@/server/services/media.service";
 import type { MediaOwnerType } from "@prisma/client";
 
 const DEFAULT_MAX = 12;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 0.5;
+const DOUBLE_CLICK_ZOOM = 2.5;
+
+interface Point {
+  x: number;
+  y: number;
+}
 
 /**
  * ImageAttachments — the universal, reusable image uploader for TradeOS. Drop it
@@ -284,20 +293,10 @@ export function ImageAttachments({
         </p>
       )}
 
-      {/* Full-size zoom. */}
+      {/* Full-size, zoomable lightbox. Keyed by image id so switching images (or
+          closing) remounts it — zoom/pan state resets for free, no effect needed. */}
       <Dialog open={zoomed != null} onOpenChange={(open) => !open && setZoomed(null)}>
-        <DialogContent className="max-w-3xl">
-          <DialogTitle className="sr-only">{zoomed?.fileName ?? "Image"}</DialogTitle>
-          <DialogDescription className="sr-only">Full-size view of the attachment.</DialogDescription>
-          {zoomed && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={zoomed.url}
-              alt={zoomed.fileName}
-              className="max-h-[80vh] w-full rounded-lg object-contain"
-            />
-          )}
-        </DialogContent>
+        {zoomed && <ImageLightbox key={zoomed.id} item={zoomed} />}
       </Dialog>
 
       <ConfirmDialog
@@ -311,5 +310,154 @@ export function ImageAttachments({
         onConfirm={confirmDelete}
       />
     </div>
+  );
+}
+
+/**
+ * Near-full-viewport, zoomable/pannable image preview. `scale` is the only
+ * source of truth for "how zoomed in"; `pan` is a screen-pixel offset from
+ * center. Both live purely as CSS transforms (no library) — mouse wheel and
+ * double-click zoom anchored at the cursor, drag-to-pan once zoomed past 1x.
+ */
+function ImageLightbox({ item }: { item: MediaItemDTO }) {
+  const [scale, setScale] = useState(1);
+  const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef<{ startX: number; startY: number; startPan: Point } | null>(null);
+
+  /** Zoom to `nextScale`, keeping the point under `anchor` (relative to the
+   *  viewport's center) visually fixed. */
+  function zoomTo(nextScale: number, anchor: Point) {
+    const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextScale));
+    if (clamped === scale) return;
+    if (clamped === MIN_ZOOM) {
+      setScale(MIN_ZOOM);
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+    const localX = (anchor.x - pan.x) / scale;
+    const localY = (anchor.y - pan.y) / scale;
+    setPan({ x: anchor.x - localX * clamped, y: anchor.y - localY * clamped });
+    setScale(clamped);
+  }
+
+  function anchorFromEvent(e: { clientX: number; clientY: number; currentTarget: EventTarget }) {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: e.clientX - rect.left - rect.width / 2, y: e.clientY - rect.top - rect.height / 2 };
+  }
+
+  function handleWheel(e: React.WheelEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const direction = e.deltaY < 0 ? 1 : -1;
+    zoomTo(scale + direction * ZOOM_STEP, anchorFromEvent(e));
+  }
+
+  function handleDoubleClick(e: React.MouseEvent<HTMLDivElement>) {
+    zoomTo(scale > MIN_ZOOM ? MIN_ZOOM : DOUBLE_CLICK_ZOOM, anchorFromEvent(e));
+  }
+
+  function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (scale <= MIN_ZOOM) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startPan: pan };
+    setIsDragging(true);
+  }
+
+  function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragRef.current) return;
+    const { startX, startY, startPan } = dragRef.current;
+    setPan({ x: startPan.x + (e.clientX - startX), y: startPan.y + (e.clientY - startY) });
+  }
+
+  function endDrag(e: React.PointerEvent<HTMLDivElement>) {
+    if (dragRef.current && e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    dragRef.current = null;
+    setIsDragging(false);
+  }
+
+  const zoomedIn = scale > MIN_ZOOM;
+
+  return (
+    <DialogContent
+      showCloseButton={false}
+      className="flex h-[92vh] max-h-[92vh] w-[96vw] max-w-[96vw] flex-col gap-0 overflow-hidden bg-popover/95 p-0 sm:max-w-[96vw]"
+    >
+      <DialogTitle className="sr-only">{item.fileName}</DialogTitle>
+      <DialogDescription className="sr-only">
+        Full-size view of the attachment. Scroll or double-click to zoom, drag to pan once zoomed.
+      </DialogDescription>
+
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <span className="truncate text-xs text-muted-foreground">{item.fileName}</span>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Zoom out"
+            disabled={scale <= MIN_ZOOM}
+            onClick={() => zoomTo(scale - ZOOM_STEP, { x: 0, y: 0 })}
+          >
+            <ZoomOut />
+          </Button>
+          <span className="w-10 text-center text-xs text-muted-foreground tabular-nums">
+            {Math.round(scale * 100)}%
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Zoom in"
+            disabled={scale >= MAX_ZOOM}
+            onClick={() => zoomTo(scale + ZOOM_STEP, { x: 0, y: 0 })}
+          >
+            <ZoomIn />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Reset zoom"
+            disabled={!zoomedIn}
+            onClick={() => {
+              setScale(MIN_ZOOM);
+              setPan({ x: 0, y: 0 });
+            }}
+          >
+            <RotateCcw />
+          </Button>
+          <DialogClose render={<Button type="button" variant="ghost" size="icon-sm" aria-label="Close" />}>
+            <XIcon />
+          </DialogClose>
+        </div>
+      </div>
+
+      <div
+        className="relative min-h-0 flex-1 touch-none overflow-hidden select-none"
+        onWheel={handleWheel}
+        onDoubleClick={handleDoubleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={item.url}
+          alt={item.fileName}
+          draggable={false}
+          className={cn(
+            "absolute top-1/2 left-1/2 max-h-full max-w-full object-contain",
+            zoomedIn ? (isDragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in",
+          )}
+          style={{
+            transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${scale})`,
+            transition: isDragging ? "none" : "transform 150ms ease-out",
+          }}
+        />
+      </div>
+    </DialogContent>
   );
 }
