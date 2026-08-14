@@ -1,8 +1,7 @@
 import type { TagColor } from "@prisma/client";
 
 import type { SetupRating } from "@/domain/trades/setup-score";
-import type { Deviation } from "@/domain/analytics/deviation-engine";
-import type { TradeClass } from "@/domain/analytics/discrepancy-model";
+import type { LeakageEvent } from "@/domain/analytics/counterfactual-engine";
 
 /** A selected confluence / execution tag, resolved with its color (from the trade's
  * frozen strategy snapshot) so it renders as a colored chip everywhere. */
@@ -11,18 +10,21 @@ export interface SelectedTagDTO {
   color: TagColor;
 }
 
-/** Per-trade discrepancy breakdown (corrected model). A correctly-executed trade —
- * win OR loss — has avoidableR 0 and a NORMAL_* classification. R-multiples. */
+/** Per-trade discrepancy breakdown (Counterfactual model). A correctly-executed
+ * trade — win OR loss — has avoidableR 0 and no leakages. R-multiples. */
 export interface TradeDiscrepancyDTO {
-  classification: TradeClass;
-  processDiscrepancy: boolean;
-  /** Trader-controlled leakage in R (objective deviations only). 0 for a clean trade. */
-  avoidableR: number;
-  /** The strategy's statistical expectancy R (context, not a per-trade prediction). */
-  expectedStatisticalR: number | null;
   actualR: number | null;
-  strategyAdherence: number | null;
-  primaryDeviation: Deviation | null; // the biggest planned-vs-actual slip, if any
+  /** What a disciplined execution of this trade would have produced. */
+  processPerfectR: number;
+  /** Measurable recoverable R (≥ 0). 0 for a clean trade. */
+  avoidableR: number;
+  /** R won by breaching process (a lucky breach) — surfaced, never rewarded. */
+  unearnedR: number;
+  processBreach: boolean;
+  validSetup: boolean;
+  leakages: LeakageEvent[];
+  /** The most material leakage (largest measured, else first flagged) for the badge. */
+  primary: LeakageEvent | null;
 }
 
 /** Strategy-adherence / trade-quality scores. Null when the strategy defined no
