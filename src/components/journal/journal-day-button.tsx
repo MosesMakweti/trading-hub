@@ -40,7 +40,7 @@ export function JournalDayButton({
       variant="ghost"
       size="icon"
       className={cn(
-        "relative flex aspect-square size-auto w-full flex-col items-center justify-center gap-0.5 border-0 font-normal",
+        "relative flex aspect-square size-auto w-full flex-col items-center justify-center gap-0.5 border border-foreground/10 font-normal transition-colors hover:border-foreground/25",
         modifiers.today && "ring-1 ring-inset ring-primary/50",
         modifiers.outside && "text-muted-foreground opacity-40",
         color === "green" && "bg-success/10 hover:bg-success/15",

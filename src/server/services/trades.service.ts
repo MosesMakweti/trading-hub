@@ -519,20 +519,33 @@ export async function archiveTrade(userId: string, tradeId: string) {
   });
 }
 
+export interface DailyPnlEntry {
+  dateKey: string;
+  percent: number;
+  pnl: number;
+  tradeCount: number;
+  wins: number;
+  losses: number;
+}
+
 /**
- * Backs the journal calendar's daily P&L badges — derived entirely from the
- * Performance Account's real dollar track record (the single source of
- * truth for all analytics), not from any self-reported RR.
+ * Backs the journal calendar (day badges, weekly totals, the year-view
+ * activity map) — derived entirely from the Performance Account's real
+ * dollar track record (the single source of truth for all analytics), not
+ * from any self-reported RR. `wins`/`losses` are per-trade `pnl` sign, so a
+ * day's totals stay consistent with Analytics/Dashboard/Equity Curve.
  */
-export async function listDailyPnl(userId: string) {
+export async function listDailyPnl(userId: string): Promise<DailyPnlEntry[]> {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
   const { entries } = await getAccountTrackRecord(performanceAccount.id);
 
-  const byDay = new Map<string, { pnl: number; count: number }>();
+  const byDay = new Map<string, { pnl: number; count: number; wins: number; losses: number }>();
   for (const e of entries) {
-    const existing = byDay.get(e.dateKey) ?? { pnl: 0, count: 0 };
+    const existing = byDay.get(e.dateKey) ?? { pnl: 0, count: 0, wins: 0, losses: 0 };
     existing.pnl += e.pnl;
     existing.count += 1;
+    if (e.pnl > 0) existing.wins += 1;
+    else if (e.pnl < 0) existing.losses += 1;
     byDay.set(e.dateKey, existing);
   }
 
@@ -542,9 +555,12 @@ export async function listDailyPnl(userId: string) {
   );
   const percentByDay = new Map(dailyPercents.map((d) => [d.dateKey, d.percent]));
 
-  return Array.from(byDay.entries()).map(([dateKey, { count }]) => ({
+  return Array.from(byDay.entries()).map(([dateKey, { pnl, count, wins, losses }]) => ({
     dateKey,
     percent: percentByDay.get(dateKey) ?? 0,
+    pnl,
     tradeCount: count,
+    wins,
+    losses,
   }));
 }
