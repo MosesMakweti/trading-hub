@@ -19,22 +19,12 @@ import {
   type AdherenceTradePoint,
 } from "@/domain/performance/adherence-analytics";
 import {
-  buildDiscrepancyCurve,
-  classifyTrade,
-  summarizeDiscrepancy,
-  type DiscrepancyTradeInput,
-} from "@/domain/analytics/discrepancy-model";
-import {
   buildCounterfactualCurve,
   summarizeAttribution,
   type CounterfactualInput,
 } from "@/domain/analytics/counterfactual-engine";
-import { computeExpectancy, resolveExpectancy } from "@/domain/performance/expectancy";
-import {
-  aggregateDeviationCauses,
-  computeDeviations,
-  type Deviation,
-} from "@/domain/analytics/deviation-engine";
+import { computeExpectancy } from "@/domain/performance/expectancy";
+import { computeDeviations } from "@/domain/analytics/deviation-engine";
 import {
   buildOpportunityCurve,
   summarizeOpportunities,
@@ -273,28 +263,6 @@ export async function getAnalyticsData(
     }
   }
 
-  // Per-strategy statistical expectancy for the Expected Statistical Equity line
-  // (System A of the corrected discrepancy model). Computed LIVE from each strategy's
-  // own qualifying realized R over ALL-TIME history; when the sample is too small it
-  // falls back to the user's backtested number, else the trade is unbenchmarked
-  // (INSUFFICIENT_SAMPLE — no fabricated benchmark). NOT the planned target RR.
-  const strategyRs = new Map<string, number[]>();
-  const strategyBacktest = new Map<string, number | null>();
-  for (const alloc of allPerformanceAllocations) {
-    const t = alloc.trade;
-    if (!t.strategyId) continue;
-    strategyBacktest.set(t.strategyId, t.strategy?.tradeManagement?.expectedExpectancy ?? null);
-    if (t.actualRR != null) {
-      const arr = strategyRs.get(t.strategyId) ?? [];
-      arr.push(t.actualRR.toNumber());
-      strategyRs.set(t.strategyId, arr);
-    }
-  }
-  const resolvedExpectancy = new Map<string, number | null>();
-  for (const [sid, backtest] of strategyBacktest) {
-    resolvedExpectancy.set(sid, resolveExpectancy(computeExpectancy(strategyRs.get(sid) ?? []), backtest).expectancyR);
-  }
-
   // SOT: rule adherence is now the strategy-execution adherence frozen on the
   // trade (selected vs the strategy's expected execution set) — no longer derived
   // from the removed global checklist. Null for pre-SOT trades (excluded from avgs).
@@ -308,8 +276,6 @@ export async function getAnalyticsData(
   const tradeInputs: metrics.TradeMetricInput[] = [];
   const psychologyPoints: PsychologyDataPoint[] = [];
   const adherencePoints: AdherenceTradePoint[] = [];
-  const correctedInputs: DiscrepancyTradeInput[] = [];
-  const deviationPrimaries: (Deviation | null)[] = [];
   const dailyPnlMap = new Map<string, number>();
   // $ P&L per trade + the running-balance series, for the dollar summary and
   // drawdown (Analytics module). Same allocations as everything else — no new query.
@@ -398,7 +364,7 @@ export async function getAnalyticsData(
     // Deviation engine: the OBJECTIVE trader-controlled R-costs (entry/exit/risk
     // slip). This — NOT expected−actual — is the avoidable discrepancy.
     const tradeActualR = t.actualRR ? t.actualRR.toNumber() : null;
-    const { deviations, primary } = computeDeviations({
+    const { deviations } = computeDeviations({
       direction: t.direction,
       plannedEntry: t.plannedEntry ? t.plannedEntry.toNumber() : null,
       plannedStopLoss: t.plannedStopLoss ? t.plannedStopLoss.toNumber() : null,
@@ -410,24 +376,6 @@ export async function getAnalyticsData(
         ? t.strategy.tradeManagement.maxRiskPercent.toNumber()
         : null,
       actualRiskPercent: alloc.riskInputType === "PERCENT" ? alloc.riskValue.toNumber() : null,
-    });
-    deviationPrimaries.push(primary);
-
-    // Corrected discrepancy input: Expected Statistical R = the strategy's resolved
-    // expectancy (System A); avoidable R = objective deviations only. A correctly
-    // executed trade contributes 0 avoidable R whether it won or lost.
-    const proc = classifyTrade({
-      actualR: tradeActualR,
-      deviations,
-      adherenceFollowed: t.setupValid, // true = followed, false = invalid setup taken, null = no strategy
-      hasExecutionData: t.plannedEntry != null && t.actualEntry != null,
-    });
-    correctedInputs.push({
-      sequence: t.tradeNumber ?? correctedInputs.length + 1,
-      dateKey,
-      strategyExpectancyR: t.strategyId ? (resolvedExpectancy.get(t.strategyId) ?? null) : null,
-      actualR: tradeActualR,
-      avoidableR: proc.avoidableR,
     });
 
     // Counterfactual (Process-Perfect) executed event — reuses the same deviations.
@@ -517,18 +465,6 @@ export async function getAnalyticsData(
     missReasons,
   };
 
-  // Corrected Discrepancy model — the two systems (see domain/analytics/discrepancy-model):
-  //  A. Performance Variance = Expected Statistical Equity (Σ strategy expectancy) − Actual.
-  //     This is mostly NORMAL variance; a correctly-executed loss lands here, not in error.
-  //  B. Avoidable Discrepancy = Σ objective deviation costs + validated missed-winner cost —
-  //     trader-controlled leakage only. Normal Variance = A − B (the residual).
-  const discrepancy = {
-    curve: buildDiscrepancyCurve(correctedInputs),
-    summary: summarizeDiscrepancy(correctedInputs, opportunity.summary.missedOpportunityCostR),
-    // Objective avoidable causes (entry/exit/risk), for the drill-down + Psychology Lab.
-    causes: aggregateDeviationCauses(deviationPrimaries),
-  };
-
   // Counterfactual (Process-Perfect) Discrepancy Gap — the rebuilt model. Executed
   // events (from the loop) interleave with MISSED valid opportunities by chronology;
   // sequence is reassigned so the cumulative curve is truly chronological.
@@ -588,7 +524,6 @@ export async function getAnalyticsData(
       statsByStrategy: metrics.statsByStrategy(tradeInputs),
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
-      discrepancy,
       counterfactual,
       opportunity,
       breakdowns,
