@@ -30,8 +30,9 @@ Five operating principles:
 2. **Calm by default, signal on change.** A resting screen is quiet — neutral ink, generous
    whitespace, one accent. Color and motion are spent only where they mean something
    (positive/negative, current step, saved).
-3. **Depth through glass, sparingly.** Frosted surfaces establish hierarchy (what floats
-   above what), not novelty. Most pixels are opaque.
+3. **Depth through shadow, sparingly.** Opaque surfaces + resting shadows establish hierarchy
+   (what floats above what), not novelty. Glassmorphism (frosted/translucent panels) was
+   removed app-wide — see §7.
 4. **One system, everywhere.** Same tokens, same components, same spacing rhythm on every
    page. Consistency is the premium signal.
 5. **Accessible is non-negotiable.** 4.5:1 text contrast, visible focus, keyboard paths,
@@ -64,9 +65,9 @@ gradients on content · large distracting animation · emoji as icons · raw hex
 
 ### 3.1 Semantic tokens (each has a `-foreground` pair where text sits on it)
 
-**Identity: monochromatic graphite glassmorphism.** The interface is **black / white / gray** —
-a layered *neutral* graphite ground (chroma ≈ 0, not blue-black) with frosted translucent surfaces.
-There is **no color accent**: the primary CTA/active state is an **inverting ink↔white pair**
+**Identity: monochromatic graphite, opaque surfaces.** The interface is **black / white / gray** —
+a layered *neutral* graphite ground (chroma ≈ 0, not blue-black) with solid, opaque raised
+surfaces (glassmorphism was removed app-wide — see §7). There is **no color accent**: the primary CTA/active state is an **inverting ink↔white pair**
 (`primary` = near-black in light → near-white in dark; `primary-foreground` inverts with it), giving
 a premium near-black button in light mode and a near-white button in dark. Color appears **only**
 where it is semantic: `success`/`danger`/`warning` for P&L & state, and the muted confluence tag
@@ -86,7 +87,7 @@ hues. `chart-1`, links, and `brand` are all neutral graphite — never blue.
 | `success` | **profit / good** | `oklch(0.72 0.13 158)` (green) |
 | `danger` | **loss / destructive** | `oklch(0.66 0.19 25)` (red) |
 | `warning` | caution | `oklch(0.78 0.13 80)` (amber) |
-| `glass` / `glass-border` | frosted surface + its edge | see §7 |
+| `glass` / `glass-border` | opaque `.glass`/`.glass-strong` surface + its edge (mirrors `card`/`border`) | see §7 |
 | `brand` / `brand-from` / `brand-to` | **neutral graphite** (decorative chips/nodes only) | `~0.34 0.006 265` |
 | `sidebar*` | nav surface family | deepest surface |
 | `chart-1…5` | data series (neutral + semantic) | see §10 |
@@ -175,39 +176,41 @@ An 8px-based scale (Tailwind step = 4px). Use it for **all** padding, gaps, and 
 
 ## 6. Border radius
 
-Sharp, institutional scale from `--radius: 0.625rem` (10px). Reduced roundness is a core part of
+Sharp, institutional scale from `--radius: 0.5rem` (8px). Reduced roundness is a core part of
 the trading-desk read — surfaces feel precise, not soft. Consistency here is a big premium signal.
 
 | Utility | ~value | Use |
 |---|---|---|
-| `rounded-md` | ~8px | **inputs**, select triggers |
-| `rounded-lg` | 10px | **buttons**, menu items, small tiles |
-| `rounded-xl` | ~11px | inner tiles inside a card |
-| `rounded-2xl` | ~13px | **cards, panels, sections** (the default surface radius) |
+| `rounded-md` | ~6px | **inputs**, select triggers |
+| `rounded-lg` | 8px | **buttons**, menu items, small tiles |
+| `rounded-xl` | ~9px | inner tiles inside a card |
+| `rounded-2xl` | ~10px | **cards, panels, sections** (the default surface radius) |
 | `rounded-full` | — | badges, pills, avatars, icon dots, toggles |
 
-Cards/panels = `rounded-2xl` (~13px). Badges/status pills = `rounded-full`. Avoid pill shapes on
+Cards/panels = `rounded-2xl` (~10px). Badges/status pills = `rounded-full`. Avoid pill shapes on
 non-status surfaces. Never mix radii within one component family.
 
 ---
 
-## 7. Glassmorphism & elevation
+## 7. Elevation (glassmorphism removed)
 
-Glass is **structural depth**, not decoration. Research (glassmorphism is *best for financial
-dashboards* but demands ≥4.5:1 contrast and selective use): frosted surfaces say "this floats
-above that." Most of the app is **opaque**; glass marks the layers that lift.
+The app was originally glassmorphic (frosted, translucent panels). That's been **removed
+app-wide**: `.glass` and `.glass-strong` are now plain **opaque** surfaces — no backdrop blur, no
+tint, no reflection sheen. Elevation is carried entirely by a solid `var(--card)`-matching
+background, a crisp `1px solid var(--glass-border)` border (mirrors `var(--border)`), and a resting
+shadow. The two classes exist only so the ~60 components that already reference them keep working;
+they're visually equivalent to an opaque `card` now.
 
-**The `.glass` primitive** — a frosted **floating panel**: a top **reflection sheen** (a
-`linear-gradient(180deg, oklch(1 0 0 / 6%), transparent 42%)` layered *over* `var(--glass)`) + a
-crisp `1px solid var(--glass-border)` + real frosting (`backdrop-filter: blur(20px) saturate(1.5)
-brightness(1.02)`) + **dual inset edges** (lit top `inset 0 1px 0 oklch(1 0 0 / 8%)` and shaded
-bottom `inset 0 -1px 0 oklch(0 0 0 / 7%)` = the glass's thickness) over a **gentle resting shadow**
-(`0 14px 34px -16px`) so every card reads as floating without a heavy drop. Dark glass is a
-low-opacity light film (`oklch(0.85 0.006 265 / 8%)`) — kept readable, a film not a veil.
+**`.glass`** — solid background + border + a **gentle resting shadow** (`0 8px 20px -12px` /
+`0 24px 50px -24px`) so the card still reads as slightly raised off the canvas.
 
-**`.glass-strong`** — heavier frosting (`blur(28px)`) + a stronger top reflection + a deeper
-floating shadow, for hero / overlay surfaces that should sit **above** cards: the dashboard vitals
-strip, dialogs, popovers. One `.glass-strong` layer above a field of `.glass` cards — never stacked.
+**`.glass-strong`** — same opaque background, a **deeper resting shadow** (`0 24px 56px -22px`)
+only — for hero / overlay surfaces that should sit **above** cards: the dashboard vitals strip,
+dialogs, popovers. One `.glass-strong` layer above a field of `.glass` cards — never stacked.
+
+New code should reach for the standard opaque `Card` component (`bg-card` + `ring-foreground/10` +
+`shadow-elevated`) rather than `.glass`/`.glass-strong` — they're kept for backward compatibility,
+not as the preferred surface primitive going forward.
 
 ### Depth hierarchy (bottom → top)
 

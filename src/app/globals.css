@@ -51,8 +51,8 @@
   --color-brand: var(--brand);
   --color-brand-from: var(--brand-from);
   --color-brand-to: var(--brand-to);
-  /* Sharper, institutional radius scale (base --radius = 10px):
-     inputs 8 · buttons 10 · inner tiles 11 · cards 13 — no soft pills on surfaces. */
+  /* Sharper, institutional radius scale (base --radius = 8px):
+     inputs 6 · buttons 8 · inner tiles 9 · cards 10 — no soft pills on surfaces. */
   --radius-sm: calc(var(--radius) * 0.55);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -107,10 +107,11 @@
   --brand-from: oklch(0.34 0.006 255);
   --brand-to: oklch(0.24 0.006 255);
 
-  /* Glassmorphism surfaces — frosted light film that reads as a raised panel on the
-     gray canvas. Soft, neutral shadow color for the diffuse reference-style depth. */
-  --glass: oklch(1 0 0 / 70%);
-  --glass-border: oklch(1 0 0 / 55%);
+  /* `.glass`/`.glass-strong` are now plain opaque surfaces (glassmorphism removed
+     app-wide) — these tokens just mirror the card/border tokens so every existing
+     `.glass` usage renders as a normal solid card with no further changes needed. */
+  --glass: var(--card);
+  --glass-border: var(--border);
   --shadow-color: 240 8% 38%;
 
   /* Charts: graphite ink primary + monochrome grays + semantic P&L (no rainbow).
@@ -120,17 +121,18 @@
   --chart-3: oklch(0.44 0.01 255);
   --chart-4: oklch(0.55 0.2 25);
   --chart-5: oklch(0.52 0.12 158);
-  /* Softer, calmer rounding to match the reference (cards land ~15px at 2xl). */
-  --radius: 0.75rem;
+  /* Sharp, institutional rounding — deliberately restrained (cards land ~10px at 2xl). */
+  --radius: 0.5rem;
   /* Matte canvas: no colored wash on light (kept flat + neutral). */
   --app-canvas-glow: transparent;
-  /* Floating candlestick backdrop (decorative, behind the whole app). Candles are a
-     mid-gray so they read faintly on the light canvas; the vignette softens edges to
-     gray; a gentle top bloom adds atmosphere. All extremely low-opacity. */
-  --candle: oklch(0.42 0.004 255);
-  --backdrop-vignette: oklch(0.66 0.004 255 / 42%);
-  --backdrop-glow: oklch(1 0 0 / 45%);
-  --backdrop-strength: 0.4; /* light mode stays restrained */
+  /* Photo backdrop (decorative, behind the whole app) — a dedicated light-theme
+     candlestick-market image (see `AppBackdrop`; dark mode swaps in its own
+     image, not a filtered copy of this one). The vignette fades toward the
+     near-white canvas so it recedes behind content instead of fighting
+     light-mode text. */
+  --backdrop-vignette: oklch(0.97 0.002 255 / 55%);
+  --backdrop-glow: oklch(1 0 0 / 55%);
+  --backdrop-strength: 0.75;
   /* Sidebar is a frosted panel lighter than the canvas; the active item is a raised
      white pill (bg-card + soft shadow, in the sidebar primitive) that lifts off it. */
   --sidebar: oklch(0.93 0.003 255);
@@ -184,9 +186,11 @@
   --brand-from: oklch(0.38 0.006 265);
   --brand-to: oklch(0.30 0.006 265);
 
-  /* Glass — neutral frosted film with a touch more presence (floating panel). */
-  --glass: oklch(0.85 0.006 265 / 8%);
-  --glass-border: oklch(1 0 0 / 11%);
+  /* `.glass`/`.glass-strong` are now plain opaque surfaces (glassmorphism removed
+     app-wide) — these tokens just mirror the card/border tokens so every existing
+     `.glass` usage renders as a normal solid card with no further changes needed. */
+  --glass: var(--card);
+  --glass-border: var(--border);
   --shadow-color: 260 18% 1%;
 
   /* Charts: light graphite primary series + neutral grays + semantic P&L (no rainbow) */
@@ -206,12 +210,12 @@
 
   /* Matte canvas: a barely-there top light for depth — neutral, not colored. */
   --app-canvas-glow: oklch(1 0 0 / 2.5%);
-  /* Floating candlestick backdrop — light-gray candles read as a faint glow on the
-     near-black ground; vignette deepens the edges to black; a whisper of top bloom. */
-  --candle: oklch(0.92 0.004 265); /* brighter — the candles are the light source */
+  /* Photo backdrop — the dedicated dark-theme candlestick-market image runs
+     near-full-strength; the vignette deepens the edges to black for the
+     cinematic, institutional-terminal feel. */
   --backdrop-vignette: oklch(0 0 0 / 62%);
   --backdrop-glow: oklch(0.7 0.006 265 / 10%);
-  --backdrop-strength: 0.62; /* dark mode leans into the cinematic glow */
+  --backdrop-strength: 0.9;
 }
 
 @layer base {
@@ -269,37 +273,25 @@
 }
 
 @layer utilities {
-  /* Frosted floating panel: a top reflection sheen layered over the tint, a
-   * crisp thin border, real backdrop frosting, and dual inset edges (lit top +
-   * shaded bottom = the glass's thickness) over a gentle resting shadow so the
-   * card reads as floating. Kept readable — the tint is a light film, not a veil. */
+  /* Plain opaque floating panel (glassmorphism removed): a solid `--card`-matching
+   * background, a crisp thin border, and a gentle resting shadow so the card still
+   * reads as raised off the canvas — no tint, no sheen, no backdrop blur. */
   .glass {
-    background:
-      linear-gradient(180deg, oklch(1 0 0 / 6%), transparent 42%),
-      var(--glass);
+    background: var(--glass);
     border: 1px solid var(--glass-border);
-    backdrop-filter: blur(22px) saturate(1.4) brightness(1.02);
-    -webkit-backdrop-filter: blur(22px) saturate(1.4) brightness(1.02);
     box-shadow:
-      inset 0 1px 0 0 oklch(1 0 0 / 10%),
-      inset 0 -1px 0 0 oklch(0 0 0 / 5%),
       0 1px 2px hsl(var(--shadow-color) / 0.08),
       0 8px 20px -12px hsl(var(--shadow-color) / 0.16),
       0 24px 50px -24px hsl(var(--shadow-color) / 0.22);
   }
 
-  /* Heavier frosting + a stronger top reflection for hero / overlay surfaces
-   * (dialogs, popovers, the dashboard vitals strip) that should float above cards. */
+  /* A deeper resting shadow only, for hero / overlay surfaces (dialogs, popovers,
+   * the dashboard vitals strip) that should float above cards. Same opaque
+   * background as `.glass` — no blur, no tint. */
   .glass-strong {
-    background:
-      linear-gradient(180deg, oklch(1 0 0 / 9%), transparent 38%),
-      var(--glass);
+    background: var(--glass);
     border: 1px solid var(--glass-border);
-    backdrop-filter: blur(28px) saturate(1.6) brightness(1.03);
-    -webkit-backdrop-filter: blur(28px) saturate(1.6) brightness(1.03);
     box-shadow:
-      inset 0 1px 0 0 oklch(1 0 0 / 11%),
-      inset 0 -1px 0 0 oklch(0 0 0 / 8%),
       0 2px 4px hsl(var(--shadow-color) / 0.12),
       0 24px 56px -22px hsl(var(--shadow-color) / 0.3);
   }
