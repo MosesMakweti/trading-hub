@@ -117,7 +117,7 @@ export default async function DashboardPage() {
         bestAccount={data.bestAccount}
         bestAsset={data.bestAsset}
         equityCurve={data.equityCurve}
-        discrepancy={data.discrepancy}
+        counterfactual={data.counterfactual}
       />
 
       {data.opportunity.hasData && (

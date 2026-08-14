@@ -1,75 +1,104 @@
-import { DiscrepancyGapChart } from "@/components/analytics/discrepancy-gap-chart";
-import type { DiscrepancyCurvePoint, DiscrepancySummary } from "@/domain/analytics/discrepancy-model";
+import { CounterfactualGapChart } from "@/components/analytics/counterfactual-gap-chart";
+import { WhyGapPanel } from "@/components/analytics/why-gap-panel";
+import { CATEGORY_LABEL, LEAKAGE_TONE } from "@/components/analytics/leakage-meta";
+import type {
+  AttributionSummary,
+  CounterfactualPoint,
+  LeakageCategory,
+} from "@/domain/analytics/counterfactual-engine";
 
-const R = (n: number | null, sign = false) =>
-  n == null ? "—" : `${sign && n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
+const CARD_ORDER: LeakageCategory[] = [
+  "EXECUTION",
+  "BEHAVIORAL",
+  "RISK",
+  "STRATEGY_ADHERENCE",
+  "OPPORTUNITY",
+];
 
 /**
- * Expected vs Actual — the corrected model. The band between the lines is
- * Performance Variance, split into Normal Variance (not your fault) and Avoidable
- * Discrepancy (trader-controlled). A correctly-executed loss adds to variance, never
- * to avoidable. See domain/analytics/discrepancy-model.
+ * Discrepancy Gap — the Counterfactual model. Actual Equity vs Process-Perfect
+ * Equity; the shaded band is ONLY the avoidable discrepancy (deviations from a valid
+ * process), never normal strategy variance. A correctly-executed win or loss adds
+ * nothing here. See domain/analytics/counterfactual-engine.
  */
 export function DiscrepancyGapCard({
   curve,
   summary,
 }: {
-  curve: DiscrepancyCurvePoint[];
-  summary: DiscrepancySummary;
+  curve: CounterfactualPoint[];
+  summary: AttributionSummary;
 }) {
+  const measuredByCat = new Map(summary.byCategory.map((c) => [c.category, c] as const));
+
   return (
     <div className="glass space-y-3 rounded-2xl p-4">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-medium text-muted-foreground">Expected vs Actual</h3>
-        {!summary.hasBenchmark && (
-          <span className="text-xs font-medium text-muted-foreground">Insufficient sample</span>
+        <h3 className="text-sm font-medium text-muted-foreground">Discrepancy Gap</h3>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          {summary.processEfficiencyPercent != null && (
+            <span>
+              Process eff.{" "}
+              <span className="font-semibold text-foreground tabular-nums">
+                {summary.processEfficiencyPercent}%
+              </span>
+            </span>
+          )}
+          {summary.dataConfidencePercent != null && (
+            <span title="Share of events with fully measurable attribution">
+              Confidence{" "}
+              <span className="font-semibold text-foreground tabular-nums">
+                {summary.dataConfidencePercent}%
+              </span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Headline: Total Avoidable Gap */}
+      <div className="flex items-baseline gap-2">
+        <span
+          className={`text-3xl font-semibold tabular-nums ${
+            summary.totalAvoidableGapR > 0 ? "text-danger" : "text-foreground"
+          }`}
+        >
+          {summary.totalAvoidableGapR.toFixed(2)}R
+        </span>
+        <span className="text-xs text-muted-foreground">total avoidable gap</span>
+        {summary.unearnedR > 0 && (
+          <span className="ml-auto text-[11px] text-warning" title="R won by breaking process — not rewarded">
+            {summary.unearnedR.toFixed(2)}R unearned
+          </span>
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <Metric
-          label="Performance variance"
-          value={R(summary.performanceVariance, true)}
-          tone={summary.performanceVariance > 0 ? "danger" : "success"}
-        />
-        <Metric
-          label="Avoidable discrepancy"
-          value={R(summary.avoidableDiscrepancyR)}
-          tone={summary.avoidableDiscrepancyR > 0 ? "danger" : "neutral"}
-        />
-        <Metric label="Normal variance" value={R(summary.normalVarianceR, true)} tone="neutral" />
+      {/* Per-category leakage tiles */}
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+        {CARD_ORDER.map((category) => {
+          const c = measuredByCat.get(category);
+          const value = c?.measuredR ?? 0;
+          const flagged = c?.flaggedCount ?? 0;
+          return (
+            <div key={category} className="rounded-xl border border-border bg-background/40 p-2">
+              <div className="flex items-center gap-1 text-[10px] leading-tight text-muted-foreground">
+                <span className="size-1.5 rounded-full" style={{ background: LEAKAGE_TONE[category] }} />
+                {CATEGORY_LABEL[category]}
+              </div>
+              <div className="text-sm font-semibold tabular-nums">
+                {value > 0 ? `${value.toFixed(2)}R` : flagged > 0 ? `${flagged}⚑` : "—"}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      <DiscrepancyGapChart curve={curve} />
-      <p className="text-[11px] leading-snug text-muted-foreground/70">
-        Only <span className="font-medium text-foreground">avoidable discrepancy</span> is
-        trader-controlled — normal variance is the strategy&apos;s own noise, not an execution error.
-      </p>
-    </div>
-  );
-}
+      <CounterfactualGapChart curve={curve} />
 
-function Metric({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "success" | "danger" | "warning" | "neutral";
-}) {
-  const toneClass =
-    tone === "success"
-      ? "text-success"
-      : tone === "danger"
-        ? "text-danger"
-        : tone === "warning"
-          ? "text-warning"
-          : "text-foreground";
-  return (
-    <div className="rounded-xl border border-border bg-background/40 p-2.5">
-      <div className="text-[11px] leading-tight text-muted-foreground">{label}</div>
-      <div className={`text-base font-semibold tabular-nums ${toneClass}`}>{value}</div>
+      <WhyGapPanel summary={summary} />
+
+      <p className="text-[11px] leading-snug text-muted-foreground/70">
+        The gap is only what a <span className="font-medium text-foreground">deviation from your valid process</span>{" "}
+        cost — a correctly-executed win or loss is normal variance and never counted.
+      </p>
     </div>
   );
 }

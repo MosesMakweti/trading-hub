@@ -77,6 +77,7 @@ export async function getDashboardData(userId: string) {
     losingTrades: analytics.trading.losingTrades,
     equityCurve: analytics.trading.equityCurve,
     discrepancy: analytics.trading.discrepancy,
+    counterfactual: analytics.trading.counterfactual,
     opportunity: analytics.trading.opportunity,
     totalTrades: analytics.trading.totalTrades,
     tradingDay,
