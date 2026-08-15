@@ -190,6 +190,7 @@ type ExecutionRow = {
   riskEntryMode: string;
   riskBasis: string;
   riskInputValue: { toNumber(): number };
+  riskBaseSnapshot: { toNumber(): number };
   plannedRiskAmount: { toNumber(): number };
   plannedPositionSize: { toNumber(): number } | null;
   positionSizeMissingReason: string | null;
@@ -208,23 +209,33 @@ type ExecutionRow = {
   status: string;
   executionNotes: string | null;
   closedAt: Date | null;
-  trade: { id: string; tradeDate: Date; assetSymbol: string; direction: string };
+  trade: { id: string; tradeDate: Date; assetSymbol: string; direction: string; strategyNameSnapshot?: string | null; selectedEntryModel?: string | null };
   accountStage: { name: string };
+  /** Ledger-derived — only populated by listExecutionsForAccount (the
+   *  account Trade Track Record), null everywhere else (trade-idea views
+   *  don't need it). */
+  balanceBefore?: { toNumber(): number } | null;
+  balanceAfter?: { toNumber(): number } | null;
 };
 
 export function toExecutionDTO(row: ExecutionRow): ExecutionDTO {
+  const riskBaseSnapshot = row.riskBaseSnapshot.toNumber();
   return {
     id: row.id,
     tradeId: row.trade.id,
     tradeDate: row.trade.tradeDate.toISOString().slice(0, 10),
     assetSymbol: row.trade.assetSymbol,
     direction: row.trade.direction,
+    strategyName: row.trade.strategyNameSnapshot ?? null,
+    entryModelName: row.trade.selectedEntryModel ?? null,
     propFirmAccountId: row.propFirmAccountId,
     accountStageId: row.accountStageId,
     stageName: row.accountStage.name,
     riskEntryMode: row.riskEntryMode,
     riskBasis: row.riskBasis,
     riskInputValue: row.riskInputValue.toNumber(),
+    riskBaseSnapshot,
+    riskPercentOfBase: riskBaseSnapshot > 0 ? (row.plannedRiskAmount.toNumber() / riskBaseSnapshot) * 100 : null,
     plannedRiskAmount: row.plannedRiskAmount.toNumber(),
     plannedPositionSize: row.plannedPositionSize?.toNumber() ?? null,
     positionSizeMissingReason: row.positionSizeMissingReason,
@@ -243,6 +254,8 @@ export function toExecutionDTO(row: ExecutionRow): ExecutionDTO {
     status: row.status,
     executionNotes: row.executionNotes,
     closedAt: row.closedAt?.toISOString() ?? null,
+    balanceBefore: row.balanceBefore?.toNumber() ?? null,
+    balanceAfter: row.balanceAfter?.toNumber() ?? null,
   };
 }
 
@@ -252,6 +265,7 @@ type SelectorAccountRow = {
   marketCategory: "CFD" | "FUTURES";
   status: string;
   startingBalance: { toNumber(): number };
+  accountCurrency: string;
   userPropFirm: {
     customCompanyName: string | null;
     customLogoUrl: string | null;
@@ -272,6 +286,7 @@ export function toAccountAllocationSelectorDTO(row: SelectorAccountRow): Account
     marketCategory: row.marketCategory,
     status: row.status,
     startingBalance: row.startingBalance.toNumber(),
+    accountCurrency: row.accountCurrency,
     currentStageName: currentStage?.name ?? null,
     currentStageId: currentStage?.id ?? null,
     currentStageType: currentStage?.type ?? null,
@@ -320,17 +335,22 @@ export function toTrackRecordDTO(summary: TrackRecordSummary): TrackRecordDTO {
     grossPnl: summary.grossPnl.toNumber(),
     netPnl: summary.netPnl.toNumber(),
     roiPercent: summary.roiPercent,
+    totalParticipatingTrades: summary.totalParticipatingTrades,
+    executedTrades: summary.executedTrades,
+    missedOrCancelledTrades: summary.missedOrCancelledTrades,
     totalTrades: summary.totalTrades,
     wins: summary.wins,
     losses: summary.losses,
     breakeven: summary.breakeven,
     winRatePercent: summary.winRatePercent,
     avgR: summary.avgR,
+    totalR: summary.totalR,
     avgRiskPercent: summary.avgRiskPercent,
     largestWin: summary.largestWin?.toNumber() ?? null,
     largestLoss: summary.largestLoss?.toNumber() ?? null,
     longestWinStreak: summary.longestWinStreak,
     longestLossStreak: summary.longestLossStreak,
+    currentStreak: summary.currentStreak,
     profitFactor: summary.profitFactor,
     maxRealizedDrawdown: summary.maxRealizedDrawdown.toNumber(),
     currentDrawdown: summary.currentDrawdown.toNumber(),

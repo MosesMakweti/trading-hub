@@ -103,6 +103,7 @@ export const tradeWorkspaceSectionSchema = z
     reasonForTrade: workspaceNote,
     actualEntry: workspacePrice,
     actualExit: workspacePrice,
+    actualStopLoss: workspacePrice,
     executionNotes: workspaceNote,
     whatWentWell: workspaceNote,
     whatWentWrong: workspaceNote,

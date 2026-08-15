@@ -12,6 +12,7 @@ import {
 } from "@/components/journal/workspace/workspace-fields";
 import { TradeImageBucket } from "@/components/journal/workspace/trade-image-bucket";
 import { AccountAllocationSection } from "@/components/journal/workspace/account-allocation-section";
+import { TradePlanSection } from "@/components/journal/workspace/trade-plan/trade-plan-section";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
 
@@ -158,8 +159,18 @@ export function TradeIdeaSection({
         />
       </div>
 
+      <TradePlanSection
+        dateKey={trade.dateKey}
+        tradeId={trade.id}
+        assetSymbol={trade.assetSymbol}
+        initialDirection={trade.direction}
+        tradeUpdatedAt={trade.updatedAt}
+      />
+
       {/* Before-Trade images — what the trader saw/planned before entering: chart
-          setup, market structure, areas of interest, planned setup. */}
+          setup, market structure, areas of interest, planned setup. The plan
+          screenshot above (once attached) also appears here automatically —
+          both stay connected to the same Trade Idea. */}
       <div className="space-y-2 rounded-xl border border-border bg-background/30 p-3">
         <TradeImageBucket tradeId={trade.id} category="BEFORE" label="Before-Trade Images" />
       </div>

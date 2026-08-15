@@ -85,6 +85,7 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     reasonForTrade: trade.reasonForTrade,
     actualEntry: trade.actualEntry ? trade.actualEntry.toNumber() : null,
     actualExit: trade.actualExit ? trade.actualExit.toNumber() : null,
+    actualStopLoss: trade.actualStopLoss ? trade.actualStopLoss.toNumber() : null,
     executionNotes: trade.executionNotes,
     whatWentWell: trade.whatWentWell,
     whatWentWrong: trade.whatWentWrong,

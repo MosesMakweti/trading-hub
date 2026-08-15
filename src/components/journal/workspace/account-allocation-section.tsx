@@ -6,6 +6,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AccountAllocationRow } from "@/components/journal/workspace/account-allocation-row";
+import { AccountPerformanceBreakdown } from "@/components/journal/workspace/account-performance-breakdown";
 import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
 import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
 
@@ -26,8 +27,18 @@ export function AccountAllocationSection({
   const visibleAccountIds = [...new Set([...savedAccountIds, ...addedAccountIds])];
   const availableToAdd = propFirmAccounts.filter((a) => !visibleAccountIds.includes(a.id));
 
+  // Spec §8: a compact, read-only Account/Stage/Risk/Risk-Amount/Realized-R/
+  // Net-PnL breakdown for accounts with a resolved result — kept visually
+  // distinct from the shared Trade Idea's own market result and from the
+  // full editable rows below (which stay for entering/adjusting actuals).
+  const resolvedExecutions = executions.filter((e) => e.netPnl != null);
+
   return (
     <div className="space-y-3 rounded-xl border border-border bg-background/30 p-3">
+      {resolvedExecutions.length > 0 && (
+        <AccountPerformanceBreakdown executions={resolvedExecutions} propFirmAccounts={propFirmAccounts} />
+      )}
+
       <div className="flex items-center justify-between">
         <div className="text-xs font-medium text-muted-foreground">Account Allocations</div>
         {editable && availableToAdd.length > 0 && (

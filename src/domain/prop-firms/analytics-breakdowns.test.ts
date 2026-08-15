@@ -53,7 +53,7 @@ describe("performanceByFirm / performanceByAccount — anti-double-count", () =>
   it("excludes non-closed or PnL-unresolved executions from win rate/netPnl", () => {
     const points: ExecutionAnalyticsPoint[] = [
       point({ status: "CLOSED", netPnl: 100 }),
-      point({ status: "OPEN", netPnl: null }),
+      point({ status: "EXECUTED", netPnl: null }),
       point({ status: "PLANNED", netPnl: null }),
     ];
     const byFirm = performanceByFirm(points);

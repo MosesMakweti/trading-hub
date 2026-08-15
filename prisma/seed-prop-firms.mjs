@@ -24,6 +24,7 @@ async function main() {
         companyName: entry.companyName,
         markets: entry.markets,
         website: entry.website,
+        logoUrl: entry.logoUrl,
         sortOrder: entry.sortOrder,
       },
       create: {
@@ -31,6 +32,7 @@ async function main() {
         slug: entry.slug,
         markets: entry.markets,
         website: entry.website,
+        logoUrl: entry.logoUrl,
         sortOrder: entry.sortOrder,
       },
     });

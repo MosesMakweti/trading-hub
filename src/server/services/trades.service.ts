@@ -24,6 +24,7 @@ import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 import { scoreSetup } from "@/domain/trades/setup-score";
 import { syncExecutionsWithinTx } from "@/server/services/trade-executions.service";
 import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
+import { lockPlanIfConfirmedAndUnlocked } from "@/server/services/trade-plan.service";
 
 // Composes the reference data the trade form needs (accounts/assets/
 // sessions/entry-models/checklists), reusing each feature's own service
@@ -433,8 +434,19 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
     await tx.tradeAccountAllocation.deleteMany({ where: { tradeId } });
     // Prop Firms module (System B) — diffed (upsert-or-remove per account),
     // never delete-and-recreate, so an edit preserves each execution's
-    // ledger idempotency (see trade-executions.service.ts).
-    await syncExecutionsWithinTx(tx, userId, tradeId, data.propFirmExecutions);
+    // ledger idempotency (see trade-executions.service.ts). Guarded the same
+    // way as createTrade: the Edit Trade form (trade-form.tsx) has no field
+    // for propFirmExecutions at all, so it always submits `[]` — calling
+    // syncExecutionsWithinTx unconditionally would treat that as "the trader
+    // removed every account allocation" and silently delete each execution
+    // (reversing its ledger PnL) on every unrelated edit. Account
+    // allocations are managed exclusively through their own dedicated
+    // actions (upsertExecutionAction/removeExecutionAction in
+    // trade-executions.actions.ts), never through this form, so an empty
+    // list here means "not provided," not "clear them all."
+    if (data.propFirmExecutions.length > 0) {
+      await syncExecutionsWithinTx(tx, userId, tradeId, data.propFirmExecutions);
+    }
 
     const now = new Date();
     // The form owns the psychology reflections; the workspace review prompts
@@ -503,7 +515,7 @@ export async function updateTradeSections(
         })()
       : {};
 
-  return prisma.trade.update({
+  const updated = await prisma.trade.update({
     where: { id: tradeId },
     data: {
       ...patch,
@@ -513,6 +525,16 @@ export async function updateTradeSections(
     },
     include: tradeInclude,
   });
+
+  // TradingView Screenshot Trade Plan (spec §13): the first time an actual
+  // entry is recorded, whatever plan is currently confirmed gets locked —
+  // later edits become revisions with a required reason, never silent
+  // rewrites of what the trader actually planned before executing.
+  if ("actualEntry" in patchRecord && patch.actualEntry != null && existing.actualEntry == null) {
+    await lockPlanIfConfirmedAndUnlocked(userId, tradeId);
+  }
+
+  return updated;
 }
 
 export async function archiveTrade(userId: string, tradeId: string) {

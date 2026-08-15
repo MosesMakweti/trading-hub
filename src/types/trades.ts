@@ -159,6 +159,7 @@ export interface TradeWorkspaceDTO {
   reasonForTrade: string | null;
   actualEntry: number | null;
   actualExit: number | null;
+  actualStopLoss: number | null;
   executionNotes: string | null;
   whatWentWell: string | null;
   whatWentWrong: string | null;

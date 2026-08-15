@@ -23,7 +23,7 @@ export interface ExecutionAnalyticsPoint {
   actualR: number | null;
   plannedRiskAmount: number;
   riskPercentOfBase: number | null;
-  status: "PLANNED" | "OPEN" | "CLOSED" | "CANCELLED";
+  status: "PLANNED" | "ALLOCATED" | "EXECUTED" | "PARTIALLY_CLOSED" | "CLOSED" | "CANCELLED" | "MISSED" | "NOT_TAKEN";
   closedAt: string | null;
 }
 
@@ -36,7 +36,7 @@ export interface LabeledPerf {
 }
 
 function closedOnly(points: ExecutionAnalyticsPoint[]): ExecutionAnalyticsPoint[] {
-  return points.filter((p) => p.status === "CLOSED" && p.netPnl != null);
+  return points.filter((p) => (p.status === "CLOSED" || p.status === "PARTIALLY_CLOSED") && p.netPnl != null);
 }
 
 function mean(xs: number[]): number | null {

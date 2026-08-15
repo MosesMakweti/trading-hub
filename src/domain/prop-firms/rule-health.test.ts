@@ -167,7 +167,7 @@ describe("MIN_TRADING_DAYS / MAX_TRADING_DAYS", () => {
   const executions: RuleHealthExecution[] = [
     { netPnl: 100, riskPercentOfBase: 1, actualLotSize: null, actualContractQty: null, status: "CLOSED", closedAt: d("2026-01-02"), plannedAt: d("2026-01-02") },
     { netPnl: -50, riskPercentOfBase: 1, actualLotSize: null, actualContractQty: null, status: "CLOSED", closedAt: d("2026-01-03"), plannedAt: d("2026-01-03") },
-    { netPnl: null, riskPercentOfBase: 1, actualLotSize: null, actualContractQty: null, status: "OPEN", closedAt: null, plannedAt: d("2026-01-04") }, // not closed — excluded
+    { netPnl: null, riskPercentOfBase: 1, actualLotSize: null, actualContractQty: null, status: "EXECUTED", closedAt: null, plannedAt: d("2026-01-04") }, // not closed — excluded
   ];
 
   it("MIN_TRADING_DAYS reaches TARGET_REACHED once the requirement is met (never BREACHED — this is a target, not a limit)", () => {
@@ -216,8 +216,8 @@ describe("CONSISTENCY_RULE", () => {
 describe("MAX_RISK_PER_TRADE / MAX_RISK_PER_DAY", () => {
   it("MAX_RISK_PER_TRADE uses the highest single execution's risk %", () => {
     const executions: RuleHealthExecution[] = [
-      { netPnl: null, riskPercentOfBase: 0.5, actualLotSize: null, actualContractQty: null, status: "OPEN", closedAt: null, plannedAt: d("2026-01-05") },
-      { netPnl: null, riskPercentOfBase: 1.5, actualLotSize: null, actualContractQty: null, status: "OPEN", closedAt: null, plannedAt: d("2026-01-06") },
+      { netPnl: null, riskPercentOfBase: 0.5, actualLotSize: null, actualContractQty: null, status: "EXECUTED", closedAt: null, plannedAt: d("2026-01-05") },
+      { netPnl: null, riskPercentOfBase: 1.5, actualLotSize: null, actualContractQty: null, status: "EXECUTED", closedAt: null, plannedAt: d("2026-01-06") },
     ];
     const ctx = makeContext({ rule: makeRule({ ruleKey: "MAX_RISK_PER_TRADE", numericValue: 1, valueType: "PERCENTAGE" }), executions });
     const result = evaluateRule(ctx);
@@ -227,8 +227,8 @@ describe("MAX_RISK_PER_TRADE / MAX_RISK_PER_DAY", () => {
 
   it("MAX_RISK_PER_DAY uses the highest COMBINED same-day risk %", () => {
     const executions: RuleHealthExecution[] = [
-      { netPnl: null, riskPercentOfBase: 1, actualLotSize: null, actualContractQty: null, status: "OPEN", closedAt: null, plannedAt: d("2026-01-05T09:00:00Z") },
-      { netPnl: null, riskPercentOfBase: 1, actualLotSize: null, actualContractQty: null, status: "OPEN", closedAt: null, plannedAt: d("2026-01-05T11:00:00Z") },
+      { netPnl: null, riskPercentOfBase: 1, actualLotSize: null, actualContractQty: null, status: "EXECUTED", closedAt: null, plannedAt: d("2026-01-05T09:00:00Z") },
+      { netPnl: null, riskPercentOfBase: 1, actualLotSize: null, actualContractQty: null, status: "EXECUTED", closedAt: null, plannedAt: d("2026-01-05T11:00:00Z") },
     ];
     const ctx = makeContext({ rule: makeRule({ ruleKey: "MAX_RISK_PER_DAY", numericValue: 3, valueType: "PERCENTAGE" }), executions });
     const result = evaluateRule(ctx);

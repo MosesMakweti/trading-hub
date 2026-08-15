@@ -12,7 +12,7 @@ import {
 } from "@/server/services/prop-firms.mapper";
 import { listExecutionsForAccount } from "@/server/services/trade-executions.service";
 import { getAccountLedger, getLedgerDerivedBalances } from "@/server/services/account-ledger.service";
-import { getAccountTrackRecord, getStageRuleHealth } from "@/server/services/prop-firms-health.service";
+import { getAccountTrackRecord, getStageRuleHealth, getStageTrackRecord } from "@/server/services/prop-firms-health.service";
 import { FadeIn } from "@/components/shared/motion";
 import { AccountWorkspace } from "@/components/prop-firms/account-workspace/account-workspace";
 
@@ -49,6 +49,14 @@ export default async function AccountDetailPage({
   const ledger = ledgerRaw.map(toLedgerEntryDTO);
   const trackRecord = toTrackRecordDTO(trackRecordRaw);
 
+  // Per-stage track records (spec §7: "switch between current stage /
+  // previous stages / lifetime") — same computeTrackRecord math as the
+  // lifetime summary above, just scoped to one stage's own ledger/executions.
+  const stageTrackRecordEntries = await Promise.all(
+    accountRaw.stages.map(async (stage) => [stage.id, toTrackRecordDTO(await getStageTrackRecord(user.id, stage.id))] as const),
+  );
+  const stageTrackRecords = Object.fromEntries(stageTrackRecordEntries);
+
   const ruleHealthByRuleId = new Map(
     ruleHealthByStage.flatMap(([stageId, results]) => {
       const stage = accountRaw.stages.find((s) => s.id === stageId);
@@ -75,6 +83,7 @@ export default async function AccountDetailPage({
         executions={executions}
         ledger={ledger}
         trackRecord={trackRecord}
+        stageTrackRecords={stageTrackRecords}
         ruleHealthByRuleId={Object.fromEntries(ruleHealthByRuleId)}
       />
     </FadeIn>

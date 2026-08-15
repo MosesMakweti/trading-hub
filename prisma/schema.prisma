@@ -40,6 +40,8 @@ model User {
   userPropFirms          UserPropFirm[]
   propFirmAccounts       PropFirmAccount[]
   tradeAccountExecutions TradeAccountExecution[]
+  tradePlanScreenshots   TradePlanScreenshot[]
+  tradeActualPartialExits TradeActualPartialExit[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -299,11 +301,22 @@ model Trade {
   plannedEntry             Decimal?     @db.Decimal(18, 8)
   plannedStopLoss          Decimal?     @db.Decimal(18, 8)
   plannedTarget            Decimal?     @db.Decimal(18, 8)
+  // TradingView Screenshot Trade Plan — chart timeframe of the plan (e.g. "15m").
+  // Sits alongside the plannedEntry/StopLoss/Target trio above; kept as a plain
+  // string (not an enum) since TradingView's own timeframe labels vary by asset
+  // class and the trader may type one recognition doesn't cover.
+  timeframe                String?
   marketContext            String?
   areasOfInterest          String?
   reasonForTrade           String?
   actualEntry              Decimal?     @db.Decimal(18, 8)
   actualExit               Decimal?     @db.Decimal(18, 8)
+  // The stop actually in place at execution, entered explicitly by the
+  // trader — never inferred from actualExit (checkpoint 2 §4: "do not infer
+  // an actual stop from the final exit unless the execution explicitly
+  // confirms it was a stop-loss exit"). Null = not recorded, which the
+  // comparison service must report as missing data, not guess at.
+  actualStopLoss            Decimal?     @db.Decimal(18, 8)
   executionNotes           String?
   whatWentWell             String?
   whatWentWrong            String?
@@ -381,6 +394,15 @@ model Trade {
   allocations        TradeAccountAllocation[]
   propFirmExecutions TradeAccountExecution[]
   psychology         PsychologyQuestionnaireResponse?
+
+  // TradingView Screenshot Trade Plan — one screenshot-derived plan per trade
+  // (at most; a manually-planned trade has none), its live target list, and
+  // the append-only history of confirmed-plan snapshots. See the model group
+  // below Trade for the full doc comment on how these fit together.
+  planScreenshot     TradePlanScreenshot?
+  plannedTargets     PlannedTarget[]
+  planVersions       TradePlanVersion[]
+  actualPartialExits TradeActualPartialExit[]
 
   @@unique([userId, tradeNumber])
   @@index([userId, tradeDate])
@@ -587,11 +609,20 @@ enum RiskBasis {
   STAGE_STARTING_BALANCE
 }
 
+// PLANNED = risk not yet confirmed. ALLOCATED = risk/account confirmed but
+// not yet in the market. EXECUTED = position open. PARTIALLY_CLOSED = some
+// size closed, some still open. CLOSED = fully settled (realized PnL final).
+// CANCELLED/MISSED/NOT_TAKEN never affect the account's balance but stay
+// visible for review (spec §3).
 enum ExecutionStatus {
   PLANNED
-  OPEN
+  ALLOCATED
+  EXECUTED
+  PARTIALLY_CLOSED
   CLOSED
   CANCELLED
+  MISSED
+  NOT_TAKEN
 }
 
 model TradeAccountExecution {
@@ -618,6 +649,15 @@ model TradeAccountExecution {
   riskBasis      RiskBasis
   riskInputValue Decimal       @db.Decimal(14, 4) // the raw %, $, or lot/contract count entered
 
+  // The resolved risk base (account balance/equity/stage-starting balance,
+  // per riskBasis) at the moment this allocation was FIRST confirmed. Frozen
+  // — never recomputed on a later edit unless the trader explicitly changes
+  // riskEntryMode/riskBasis/riskInputValue (see upsertExecutionWithinTx).
+  // This is what makes plannedRiskAmount an immutable snapshot rather than a
+  // value that silently drifts when the account's balance later moves from
+  // unrelated trades (spec §1: "do not recalculate the original risk amount
+  // from a future account balance").
+  riskBaseSnapshot          Decimal  @db.Decimal(14, 2)
   plannedRiskAmount         Decimal  @db.Decimal(14, 2) // frozen at save: Base × %/100, or the $ entered
   plannedPositionSize       Decimal? @db.Decimal(14, 4) // lots/contracts — null when instrument data was insufficient (never guessed)
   positionSizeMissingReason String? // explains what's needed when plannedPositionSize is null
@@ -655,6 +695,8 @@ model TradeAccountExecution {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  actualPartialExits TradeActualPartialExit[]
+
   @@unique([tradeId, propFirmAccountId])
   @@index([userId, propFirmAccountId, deletedAt])
   @@index([accountStageId])
@@ -677,6 +719,15 @@ model MediaAsset {
   createdAt  DateTime @default(now())
 
   attachments MediaAttachment[]
+
+  // TradingView Screenshot Trade Plan reuses this same asset table for its
+  // original upload and (optional) annotated preview render — no parallel
+  // file-storage system. Named relations since one screenshot can reference
+  // two distinct assets. The original also gets a normal MediaAttachment
+  // (TRADE, category "BEFORE") so it keeps appearing in the existing
+  // Journal/Trades Album galleries exactly like any other before-trade image.
+  planScreenshotOriginalOf TradePlanScreenshot? @relation("TradePlanScreenshotOriginal")
+  planScreenshotPreviewOf  TradePlanScreenshot? @relation("TradePlanScreenshotPreview")
 
   @@index([userId, createdAt])
 }
@@ -1551,4 +1602,363 @@ model AccountLedgerEntry {
   @@unique([sourceType, sourceId, eventType])
   @@index([accountId, occurredAt])
   @@index([stageId])
+}
+
+// ── TradingView Screenshot Trade Plan ────────────────────────────────────────
+// Lets a trader upload a TradingView chart screenshot as the visual source of
+// a Trade Idea's PLANNED execution (direction/entry/stop/targets/R:R) — never
+// the actual execution (Trade.actualEntry/actualExit and TradeAccountExecution
+// stay exactly as they are, entered separately). Additive: nothing on Trade's
+// existing plannedEntry/plannedStopLoss/plannedTarget columns is removed —
+// those stay as the simple single-target legacy fields (kept in sync with
+// PlannedTarget #1 on confirm, for every existing reader of them); this model
+// group is the richer multi-target, screenshot-backed source of truth for
+// trades planned through this feature.
+//
+// One screenshot per trade (TradePlanScreenshot.tradeId is unique) —
+// "replacing the screenshot before confirmation" mutates this same row's file
+// reference and resets its recognition state rather than creating a new row.
+// The trader can also point a fresh Trade Idea at an image already uploaded
+// as a before-trade attachment (spec: "select an already uploaded before-
+// trade screenshot") — same underlying MediaAsset, wrapped by this row.
+//
+// Recognition is provider-agnostic (see domain/trade-plan/recognition.ts) and
+// OPTIONAL: with no vision provider configured, every screenshot resolves
+// straight to MANUALLY_CONFIGURED and the trader annotates by hand — the
+// recognition failure path is a first-class, always-exercised state, not an
+// edge case.
+enum ScreenshotPlanStatus {
+  UPLOADED
+  QUEUED
+  PROCESSING
+  RECOGNITION_COMPLETE
+  NEEDS_CONFIRMATION
+  CONFIRMED
+  RECOGNITION_FAILED
+  MANUALLY_CONFIGURED
+  LOCKED
+}
+
+enum AssetClass {
+  FOREX
+  METALS
+  INDEX
+  FUTURES
+  CRYPTO
+  STOCK
+  OTHER
+}
+
+// The unit a planned distance/annotation is expressed in — deliberately NOT
+// forced to pips for every instrument (spec §6/§17: "do not combine pips,
+// points and ticks into a misleading universal average").
+enum DistanceUnit {
+  PIP
+  POINT
+  TICK
+  PRICE
+  PERCENT
+}
+
+model TradePlanScreenshot {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tradeId String @unique
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  // The uploaded chart image (reuses the universal media system — see
+  // MediaAsset's planScreenshotOriginalOf/planScreenshotPreviewOf). previewMediaAssetId
+  // is an OPTIONAL separately-rendered image with the confirmed annotations
+  // burned in for quick sharing/review — the original above is never
+  // overwritten, per spec §8 ("do not permanently draw annotations onto the
+  // only copy of the screenshot").
+  mediaAssetId        String     @unique
+  mediaAsset          MediaAsset @relation("TradePlanScreenshotOriginal", fields: [mediaAssetId], references: [id])
+  previewMediaAssetId String?    @unique
+  previewMediaAsset   MediaAsset? @relation("TradePlanScreenshotPreview", fields: [previewMediaAssetId], references: [id])
+
+  width  Int?
+  height Int?
+
+  status            ScreenshotPlanStatus @default(UPLOADED)
+  recognitionProvider String? // e.g. "anthropic-vision" — null when no provider ran (manual path)
+  recognitionVersion  String? // provider/prompt/model version, for reproducibility of past results
+  recognitionError    String? // trader-facing reason when status = RECOGNITION_FAILED
+
+  // Best-effort top-line detections, denormalized here for quick display
+  // (the full per-field detail — confidence, bounding box, raw text — lives
+  // in ScreenshotRecognitionField below, one row per detected field).
+  detectedSymbol            String?
+  canonicalInstrumentSymbol String? // resolved via domain/trade-plan/instrument-catalog.ts
+  detectedTimeframe         String?
+  detectedDirection         Direction?
+  recognitionMetadata       Json? // raw provider response, for debugging/re-processing — never logged verbatim (see privacy notes)
+
+  uploadedAt  DateTime  @default(now())
+  processedAt DateTime?
+  confirmedAt DateTime?
+  lockedAt    DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  recognitionFields ScreenshotRecognitionField[]
+  annotations       TradePlanAnnotation[]
+
+  @@index([userId, tradeId])
+  @@index([status])
+}
+
+// What a screenshot annotation/plan field represents — mirrors the Trade
+// Idea's own planned vocabulary so a detected field maps 1:1 onto a plan input.
+enum RecognitionFieldType {
+  SYMBOL
+  ASSET_CLASS
+  TIMEFRAME
+  DIRECTION
+  ENTRY
+  STOP_LOSS
+  TARGET
+  RISK_REWARD
+  STOP_DISTANCE
+  TARGET_DISTANCE
+  CHART_TIMESTAMP
+}
+
+enum RecognitionSource {
+  AI_VISION
+  OCR
+  MANUAL
+}
+
+enum RecognitionConfirmationStatus {
+  PENDING
+  ACCEPTED
+  CORRECTED
+  REJECTED
+}
+
+// One row per detected (or manually-entered-in-its-place) field on a
+// screenshot — the structured result the spec requires instead of
+// unstructured text, each with its own confidence/bounding box/raw text so
+// the confirmation screen can render "Detected from screenshot · High
+// confidence" per field rather than one blended verdict for the whole image.
+model ScreenshotRecognitionField {
+  id           String               @id @default(cuid())
+  screenshotId String
+  screenshot   TradePlanScreenshot  @relation(fields: [screenshotId], references: [id], onDelete: Cascade)
+
+  fieldType      RecognitionFieldType
+  targetOrder    Int? // disambiguates TARGET rows (TP1/TP2/TP3/…) when fieldType = TARGET
+  rawExtractedText String?
+  detectedValue    String? // stored as text — a price, a symbol, "LONG", "15m", etc.; parsed by the caller per fieldType
+  confidence       Float? // 0–1, null when not provided by the recognition source
+  boundingBox      Json? // { x, y, width, height } normalized 0–1 within the image, when available
+  recognitionSource RecognitionSource @default(MANUAL)
+  warning          String? // e.g. "Overlapping price labels — low confidence"
+
+  confirmationStatus RecognitionConfirmationStatus @default(PENDING)
+  confirmedValue     String? // what the trader actually accepted/corrected it to
+  confirmedByUserId  String?
+  confirmedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([screenshotId, fieldType])
+}
+
+// A horizontal (or point-to-point) level drawn on the screenshot — entry,
+// stop, a target, or a free-form level. Coordinates are NORMALIZED (0–1) so
+// they stay aligned regardless of how large the image renders; per spec §7,
+// the `confirmedPrice` — never the pixel position — is the source of truth
+// for every calculation. A dragged line only ever updates its own
+// coordinates, not confirmedPrice, unless the trader also edits the price.
+enum AnnotationType {
+  ENTRY
+  STOP_LOSS
+  TARGET
+  INVALIDATION
+  BREAK_EVEN
+  CUSTOM
+}
+
+enum AnnotationSource {
+  DETECTED
+  MANUAL
+}
+
+model TradePlanAnnotation {
+  id           String              @id @default(cuid())
+  screenshotId String
+  screenshot   TradePlanScreenshot @relation(fields: [screenshotId], references: [id], onDelete: Cascade)
+
+  type  AnnotationType
+  label String // e.g. "Entry", "TP2", or a custom name the trader gave it
+
+  confirmedPrice Decimal? @db.Decimal(18, 8) // null until the trader confirms/enters a price for this line
+
+  // Normalized 0–1 coordinates within the screenshot. A simple horizontal
+  // line only needs y; startX/endX/endY support a non-horizontal or
+  // point-to-point annotation (e.g. a trend-aligned stop) when the trader
+  // draws one.
+  y     Float
+  startX Float?
+  endX   Float?
+  endY   Float?
+
+  color   String // semantic hex/token — see domain/trade-plan/annotation-colors.ts
+  visible Boolean @default(true)
+
+  targetOrder Int? // ordering among TARGET-type annotations (TP1 = 1, TP2 = 2, …)
+  confidence  Float? // carried over from the recognition field that produced this, when DETECTED
+  source      AnnotationSource @default(MANUAL)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([screenshotId, type])
+}
+
+// A single planned profit target on a Trade Idea — the live, editable set.
+// Trade.plannedTarget (the original single-target column) is kept in sync
+// with target #1 on every confirm, so existing readers of that field (older
+// trades, other UI) keep working unchanged; PlannedTarget[] is the richer
+// source of truth for anything built against this feature.
+model PlannedTarget {
+  id      String @id @default(cuid())
+  tradeId String
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  targetOrder Int // 1 = TP1, 2 = TP2, …
+  label       String // defaults to "TP{targetOrder}", renameable
+
+  targetPrice Decimal @db.Decimal(18, 8)
+
+  // Frozen at confirm time from domain/trade-plan/distance.ts — never
+  // recomputed from a later-edited instrument catalog entry.
+  unitDistance Decimal?      @db.Decimal(18, 8)
+  unitType     DistanceUnit?
+  rMultiple    Decimal?      @db.Decimal(8, 4)
+
+  plannedClosePercent Decimal? @db.Decimal(5, 2) // 0–100; null/unset = trader hasn't planned a partial split
+  managementInstruction String? // free text, e.g. "Move stop to break-even after this fills"
+  moveToBreakEven        Boolean @default(false)
+  notes                  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  actualPartialExits TradeActualPartialExit[]
+
+  @@unique([tradeId, targetOrder])
+}
+
+// An append-only, immutable snapshot of the confirmed plan — one row created
+// on first confirmation (version 1) and one more each time a LOCKED plan is
+// edited (spec §13: "create a new revision, preserve the previous version,
+// require an edit reason"). Never updated after creation.
+model TradePlanVersion {
+  id      String @id @default(cuid())
+  tradeId String
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  versionNumber Int
+
+  // The exact MediaAsset in effect at this version, if any — MediaAsset rows
+  // are never deleted by the trade-plan replace flow (only the
+  // TradePlanScreenshot *wrapper* row is), so this stays resolvable forever,
+  // even after the live screenshot is later replaced. This is what makes a
+  // version's screenshot immutable without needing a separate versioned
+  // screenshot table (spec checkpoint 2 §2).
+  screenshotMediaAssetId String?
+
+  assetSymbol String?
+  direction   Direction?
+  timeframe   String?
+
+  entry    Decimal? @db.Decimal(18, 8)
+  stopLoss Decimal? @db.Decimal(18, 8)
+  // Frozen copy of every target at this version — [{ targetOrder, label,
+  // targetPrice, unitDistance, unitType, rMultiple, plannedClosePercent }].
+  // Json (not a relation) because a version must never change even if the
+  // live PlannedTarget rows are later edited or deleted.
+  targetsSnapshot Json?
+  // Frozen copy of every TradePlanAnnotation visible on the screenshot at
+  // save time — [{ type, label, confirmedPrice, y, startX, endX, endY,
+  // color, targetOrder, source }]. Replacing the screenshot later deletes
+  // the live TradePlanAnnotation rows (they belong to that screenshot
+  // wrapper), so without this snapshot a historical version would lose its
+  // original annotations the moment the screenshot was replaced — this is
+  // the fix for exactly that gap (checkpoint 2 §2).
+  annotationsSnapshot Json?
+
+  stopDistance     Decimal?      @db.Decimal(18, 8)
+  stopDistanceUnit DistanceUnit?
+  weightedPlannedR Decimal?      @db.Decimal(8, 4)
+
+  editReason      String? // required by the service for every version after #1
+  createdByUserId String
+  locked          Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([tradeId, versionNumber])
+  @@index([tradeId])
+}
+
+// ── Actual partial exits (checkpoint 2 §13) ──────────────────────────────────
+// The structured, normalized record of what actually closed and when —
+// sibling to PlannedTarget (the plan side), never conflated with it. A
+// partial's `plannedTargetId` is the trader's (or an unambiguous automatic)
+// mapping to a specific planned target, never assumed from exit order alone
+// (spec: "do not assume that an actual partial corresponds to TP1 merely
+// because it is the first recorded exit" — see domain/trade-plan/
+// partial-matching.ts).
+enum PartialExitSource {
+  CONFIRMED
+  MANUAL
+  IMPORTED
+}
+
+model TradeActualPartialExit {
+  id      String @id @default(cuid())
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeId String
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  // Optional — set when this trade has multiple Prop Firms account
+  // allocations and this partial belongs to one specific account's
+  // execution rather than the trade's own base actualEntry/actualExit.
+  accountExecutionId String?
+  accountExecution   TradeAccountExecution? @relation(fields: [accountExecutionId], references: [id], onDelete: SetNull)
+
+  plannedTargetId String?
+  plannedTarget   PlannedTarget? @relation(fields: [plannedTargetId], references: [id], onDelete: SetNull)
+
+  exitOrder      Int
+  exitPrice      Decimal   @db.Decimal(18, 8)
+  percentClosed  Decimal?  @db.Decimal(5, 2) // 0–100
+  quantityClosed Decimal?  @db.Decimal(14, 4) // lots/contracts/units, when tracked instead of/alongside percent
+  exitedAt       DateTime
+
+  grossPnl  Decimal? @db.Decimal(14, 2)
+  fees      Decimal? @db.Decimal(14, 2)
+  netPnl    Decimal? @db.Decimal(14, 2)
+  realizedR Decimal? @db.Decimal(8, 4)
+
+  notes  String?
+  source PartialExitSource @default(MANUAL)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tradeId, exitOrder])
+  @@index([tradeId])
+  @@index([accountExecutionId])
+  @@index([plannedTargetId])
 }

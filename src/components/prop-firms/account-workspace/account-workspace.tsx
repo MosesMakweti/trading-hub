@@ -40,6 +40,7 @@ export function AccountWorkspace({
   executions,
   ledger,
   trackRecord,
+  stageTrackRecords,
   ruleHealthByRuleId,
 }: {
   account: PropFirmAccountDTO;
@@ -47,6 +48,7 @@ export function AccountWorkspace({
   executions: ExecutionDTO[];
   ledger: LedgerEntryDTO[];
   trackRecord: TrackRecordDTO;
+  stageTrackRecords: Record<string, TrackRecordDTO>;
   ruleHealthByRuleId: Record<string, RuleHealthDTO>;
 }) {
   return (
@@ -110,7 +112,7 @@ export function AccountWorkspace({
           <RulesTab account={account} ruleHealthByRuleId={ruleHealthByRuleId} />
         </TabsContent>
         <TabsContent value="trades" className="mt-4">
-          <TradesTab executions={executions} />
+          <TradesTab account={account} executions={executions} lifetimeTrackRecord={trackRecord} stageTrackRecords={stageTrackRecords} />
         </TabsContent>
         <TabsContent value="ledger" className="mt-4">
           <LedgerTab account={account} ledger={ledger} />

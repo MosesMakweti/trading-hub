@@ -234,7 +234,16 @@ export const updatePayoutSchema = z.object({
 
 export const riskEntryModeSchema = z.enum(["PERCENT", "AMOUNT", "FIXED_SIZE"]);
 export const riskBasisSchema = z.enum(["CURRENT_BALANCE", "CURRENT_EQUITY", "STAGE_STARTING_BALANCE"]);
-export const executionStatusSchema = z.enum(["PLANNED", "OPEN", "CLOSED", "CANCELLED"]);
+export const executionStatusSchema = z.enum([
+  "PLANNED",
+  "ALLOCATED",
+  "EXECUTED",
+  "PARTIALLY_CLOSED",
+  "CLOSED",
+  "CANCELLED",
+  "MISSED",
+  "NOT_TAKEN",
+]);
 
 export const instrumentSizingSchema = z.object({
   stopDistance: z.coerce.number().positive().optional(),

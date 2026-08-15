@@ -48,7 +48,7 @@ function makeExecutions(): TrackRecordExecution[] {
       plannedRiskAmount: 500,
       riskPercentOfBase: 0.5,
       actualR: null,
-      status: "OPEN",
+      status: "EXECUTED",
       closedAt: null,
       dateKey: "2026-01-06",
     },
@@ -72,6 +72,10 @@ describe("computeTrackRecord", () => {
     expect(summary.payoutsReceived.toNumber()).toBe(500);
     expect(summary.netReturnAfterCosts.toNumber()).toBe(950); // 1000 - 50 fees
     expect(summary.tradingDaysCompleted).toBe(2);
+    expect(summary.totalR).toBe(1); // 2 + -1
+    expect(summary.totalParticipatingTrades).toBe(3); // includes the still-open EXECUTED one
+    expect(summary.executedTrades).toBe(3); // 2 CLOSED + 1 EXECUTED
+    expect(summary.missedOrCancelledTrades).toBe(0);
   });
 
   it("computes max realized drawdown and current drawdown from the balance curve's peak", () => {
@@ -126,5 +130,32 @@ describe("computeTrackRecord", () => {
     const summary = computeTrackRecord([], executions, 10_000);
     expect(summary.longestWinStreak).toBe(2);
     expect(summary.longestLossStreak).toBe(3);
+    // The account's current run, right now, is 3 losses in a row.
+    expect(summary.currentStreak).toBe(-3);
+  });
+
+  it("current streak flips sign when the most recent trade breaks the prior run", () => {
+    const executions: TrackRecordExecution[] = [
+      { grossPnl: -10, netPnl: -10, plannedRiskAmount: 10, riskPercentOfBase: 0.1, actualR: -1, status: "CLOSED", closedAt: d("2026-01-01"), dateKey: "2026-01-01" },
+      { grossPnl: -10, netPnl: -10, plannedRiskAmount: 10, riskPercentOfBase: 0.1, actualR: -1, status: "CLOSED", closedAt: d("2026-01-02"), dateKey: "2026-01-02" },
+      { grossPnl: 10, netPnl: 10, plannedRiskAmount: 10, riskPercentOfBase: 0.1, actualR: 1, status: "CLOSED", closedAt: d("2026-01-03"), dateKey: "2026-01-03" },
+    ];
+    const summary = computeTrackRecord([], executions, 10_000);
+    expect(summary.currentStreak).toBe(1);
+  });
+
+  it("counts MISSED/CANCELLED/NOT_TAKEN participations without letting them affect wins/losses/PnL", () => {
+    const executions: TrackRecordExecution[] = [
+      { grossPnl: 10, netPnl: 10, plannedRiskAmount: 10, riskPercentOfBase: 0.1, actualR: 1, status: "CLOSED", closedAt: d("2026-01-01"), dateKey: "2026-01-01" },
+      { grossPnl: null, netPnl: null, plannedRiskAmount: 10, riskPercentOfBase: 0.1, actualR: null, status: "MISSED", closedAt: null, dateKey: "2026-01-02" },
+      { grossPnl: null, netPnl: null, plannedRiskAmount: 10, riskPercentOfBase: 0.1, actualR: null, status: "CANCELLED", closedAt: null, dateKey: "2026-01-03" },
+      { grossPnl: null, netPnl: null, plannedRiskAmount: 10, riskPercentOfBase: 0.1, actualR: null, status: "NOT_TAKEN", closedAt: null, dateKey: "2026-01-04" },
+    ];
+    const summary = computeTrackRecord([], executions, 10_000);
+    expect(summary.totalParticipatingTrades).toBe(4);
+    expect(summary.executedTrades).toBe(1);
+    expect(summary.missedOrCancelledTrades).toBe(3);
+    expect(summary.wins).toBe(1);
+    expect(summary.netPnl.toNumber()).toBe(10);
   });
 });

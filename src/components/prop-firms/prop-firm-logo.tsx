@@ -1,10 +1,15 @@
 import { cn } from "@/lib/utils";
 
 /**
- * Company mark: the real logo when one is set (`logoUrl` — never hotlinked,
- * only a locally-hosted/licensed asset ever lands there), otherwise a
- * generated initials placeholder so every firm still reads as a distinct
- * brand in the directory/firm list before real assets are added.
+ * Company mark: the real logo when one is set (`logoUrl` — a locally-hosted
+ * copy of the firm's own official asset under public/prop-firm-logos/, never
+ * a live third-party hotlink), otherwise a generated initials placeholder so
+ * every firm still reads as a distinct brand before a real asset is added.
+ *
+ * Real-world brand marks assume a white/light backdrop (most are dark-on-
+ * transparent, some are white-on-transparent) and this app is dark-by-
+ * default, so the image sits on a fixed light chip regardless of the
+ * active theme — otherwise half these logos would vanish in dark mode.
  */
 export function PropFirmLogo({
   name,
@@ -19,12 +24,10 @@ export function PropFirmLogo({
 }) {
   if (logoUrl) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={logoUrl}
-        alt={`${name} logo`}
-        className={cn("size-9 shrink-0 rounded-lg object-contain", className)}
-      />
+      <div className={cn("flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white p-1", className)}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={logoUrl} alt={`${name} logo`} className="size-full object-contain" />
+      </div>
     );
   }
 

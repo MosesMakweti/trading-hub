@@ -245,6 +245,139 @@ describe("actual PnL, estimated PnL, and idempotent ledger posting", () => {
   });
 });
 
+describe("risk amount is frozen at first confirmation (spec §1)", () => {
+  let userId: string;
+  let tradeAId: string;
+  let tradeBId: string;
+  let accountId: string;
+
+  beforeAll(async () => {
+    const user = await makeUser("freeze");
+    userId = user.id;
+    const [tradeA, tradeB] = await Promise.all([makeTrade(userId, { assetSymbol: "XAUUSD" }), makeTrade(userId, { assetSymbol: "US30" })]);
+    tradeAId = tradeA.id;
+    tradeBId = tradeB.id;
+    const account = await makeAccount(userId, "Freeze Test Account");
+    accountId = account.id;
+  });
+
+  afterAll(() => cleanupUsers(userId));
+
+  it("does not recompute plannedRiskAmount from a since-changed balance when an unrelated field is edited", async () => {
+    const created = await upsertExecution(userId, tradeAId, {
+      propFirmAccountId: accountId,
+      riskEntryMode: "PERCENT",
+      riskBasis: "CURRENT_BALANCE",
+      riskInputValue: 1, // 1% of 100,000 = 1,000
+    });
+    expect(created.plannedRiskAmount.toNumber()).toBe(1_000);
+    expect(created.riskBaseSnapshot.toNumber()).toBe(100_000);
+
+    // Another trade on the SAME account closes and moves the ledger balance
+    // to 110,000 — a future save of tradeA's allocation must not silently
+    // re-price its already-confirmed risk off this new balance.
+    await upsertExecution(userId, tradeBId, {
+      propFirmAccountId: accountId,
+      riskEntryMode: "AMOUNT",
+      riskBasis: "CURRENT_BALANCE",
+      riskInputValue: 1_000,
+      grossPnl: 10_000,
+      status: "CLOSED",
+    });
+
+    const edited = await upsertExecution(userId, tradeAId, {
+      propFirmAccountId: accountId,
+      riskEntryMode: "PERCENT",
+      riskBasis: "CURRENT_BALANCE",
+      riskInputValue: 1, // same inputs as before — no explicit re-risk
+      executionNotes: "just adding a note",
+    });
+    expect(edited.plannedRiskAmount.toNumber()).toBe(1_000); // unchanged, NOT 1,100 (1% of the new 110,000 balance)
+    expect(edited.riskBaseSnapshot.toNumber()).toBe(100_000);
+  });
+
+  it("does recompute when the trader explicitly changes the risk input value", async () => {
+    const reRisked = await upsertExecution(userId, tradeAId, {
+      propFirmAccountId: accountId,
+      riskEntryMode: "PERCENT",
+      riskBasis: "CURRENT_BALANCE",
+      riskInputValue: 2, // explicit change from 1% to 2%
+    });
+    expect(reRisked.riskBaseSnapshot.toNumber()).toBe(110_000); // now resolved against the current balance
+    expect(reRisked.plannedRiskAmount.toNumber()).toBe(2_200); // 2% of 110,000
+  });
+});
+
+describe("the new Account Trade Participation status vocabulary (spec §3)", () => {
+  let userId: string;
+  let tradeId: string;
+  let accountId: string;
+
+  beforeAll(async () => {
+    const user = await makeUser("status-vocab");
+    userId = user.id;
+    const trade = await makeTrade(userId);
+    tradeId = trade.id;
+    const account = await makeAccount(userId, "Status Vocab Account");
+    accountId = account.id;
+  });
+
+  afterAll(() => cleanupUsers(userId));
+
+  it("refuses to save a CLOSED execution with no gross PnL and no actual R", async () => {
+    await expect(
+      upsertExecution(userId, tradeId, {
+        propFirmAccountId: accountId,
+        riskEntryMode: "PERCENT",
+        riskBasis: "CURRENT_BALANCE",
+        riskInputValue: 1,
+        status: "CLOSED",
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("PARTIALLY_CLOSED with a gross PnL posts to the ledger just like CLOSED does", async () => {
+    const execution = await upsertExecution(userId, tradeId, {
+      propFirmAccountId: accountId,
+      riskEntryMode: "AMOUNT",
+      riskBasis: "CURRENT_BALANCE",
+      riskInputValue: 1_000,
+      grossPnl: 400,
+      status: "PARTIALLY_CLOSED",
+    });
+    expect(execution.netPnl?.toNumber()).toBe(400);
+    const entries = await getAccountLedger(userId, accountId);
+    expect(entries.some((e) => e.sourceId === execution.id && e.eventType === "TRADE_PNL")).toBe(true);
+  });
+
+  it("MISSED never posts a ledger entry and clears any prior one", async () => {
+    const trade2 = await makeTrade(userId, { assetSymbol: "AUDUSD" });
+    const closed = await upsertExecution(userId, trade2.id, {
+      propFirmAccountId: accountId,
+      riskEntryMode: "AMOUNT",
+      riskBasis: "CURRENT_BALANCE",
+      riskInputValue: 500,
+      grossPnl: 250,
+      status: "CLOSED",
+    });
+    let entries = await getAccountLedger(userId, accountId);
+    expect(entries.some((e) => e.sourceId === closed.id)).toBe(true);
+
+    // Reopened as MISSED (e.g. corrected after a data-entry mistake) — the
+    // account's balance must no longer reflect this participation.
+    const missed = await upsertExecution(userId, trade2.id, {
+      propFirmAccountId: accountId,
+      riskEntryMode: "AMOUNT",
+      riskBasis: "CURRENT_BALANCE",
+      riskInputValue: 500,
+      status: "MISSED",
+    });
+    expect(missed.netPnl).toBeNull();
+    entries = await getAccountLedger(userId, accountId);
+    expect(entries.some((e) => e.sourceId === missed.id)).toBe(false);
+  });
+});
+
 describe("restrictions on archived, breached, or failed accounts", () => {
   let userId: string;
   let tradeId: string;

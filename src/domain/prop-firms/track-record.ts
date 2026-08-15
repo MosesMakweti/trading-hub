@@ -25,7 +25,9 @@ export type LedgerEventTypeLike =
   | "STAGE_STARTING_BALANCE_RESET"
   | "CUSTOM_ADJUSTMENT";
 
-export type ExecutionStatusLike = "PLANNED" | "OPEN" | "CLOSED" | "CANCELLED";
+export type ExecutionStatusLike = "PLANNED" | "ALLOCATED" | "EXECUTED" | "PARTIALLY_CLOSED" | "CLOSED" | "CANCELLED" | "MISSED" | "NOT_TAKEN";
+
+const NEVER_AFFECTS_BALANCE: ExecutionStatusLike[] = ["CANCELLED", "MISSED", "NOT_TAKEN"];
 
 export interface TrackRecordLedgerEntry {
   amount: Decimal.Value;
@@ -54,18 +56,28 @@ export interface TrackRecordSummary {
   grossPnl: Decimal;
   netPnl: Decimal;
   roiPercent: number | null;
+  /** Every participation regardless of status (spec §7 "Total participating trades"). */
+  totalParticipatingTrades: number;
+  /** EXECUTED/PARTIALLY_CLOSED/CLOSED — actually taken on this account, whether or not settled yet. */
+  executedTrades: number;
+  /** CANCELLED/MISSED/NOT_TAKEN — visible for review, never affecting balance. */
+  missedOrCancelledTrades: number;
   totalTrades: number;
   wins: number;
   losses: number;
   breakeven: number;
   winRatePercent: number | null;
   avgR: number | null;
+  /** Sum of realized R across every closed, R-resolved execution. */
+  totalR: number | null;
   avgRiskPercent: number | null;
   largestWin: Decimal | null;
   largestLoss: Decimal | null;
   /** Longest winning/losing streak across closed, PnL-resolved executions in chronological order. */
   longestWinStreak: number;
   longestLossStreak: number;
+  /** The still-open streak as of the most recent closed trade — positive = current run of wins, negative = current run of losses, 0 = none/last was breakeven. */
+  currentStreak: number;
   profitFactor: number | null;
   maxRealizedDrawdown: Decimal;
   currentDrawdown: Decimal;
@@ -121,8 +133,11 @@ export function computeTrackRecord(
   }
   const currentDrawdown = Decimal.max(0, peak.minus(currentBalance));
 
+  // Both CLOSED and PARTIALLY_CLOSED can carry a realized netPnl (a partial
+  // close books the realized slice while the rest stays open) — same set
+  // trade-executions.service.ts treats as "affects the account balance".
   const closedResolved = executions
-    .filter((e) => e.status === "CLOSED" && e.netPnl != null)
+    .filter((e) => (e.status === "CLOSED" || e.status === "PARTIALLY_CLOSED") && e.netPnl != null)
     .sort((a, b) => (a.closedAt?.getTime() ?? 0) - (b.closedAt?.getTime() ?? 0));
 
   let grossPnl = new Decimal(0);
@@ -134,8 +149,9 @@ export function computeTrackRecord(
   let largestLoss: Decimal | null = null;
   let sumWins = new Decimal(0);
   let sumLosses = new Decimal(0);
-  const winSequence: boolean[] = [];
-  const lossSequence: boolean[] = [];
+  // 1 = win, -1 = loss, 0 = breakeven, in chronological order — the single
+  // source both longest- and current-streak are derived from below.
+  const resultSequence: (1 | -1 | 0)[] = [];
 
   for (const execution of closedResolved) {
     const pnl = new Decimal(execution.netPnl!);
@@ -146,18 +162,15 @@ export function computeTrackRecord(
       wins += 1;
       sumWins = sumWins.plus(pnl);
       if (largestWin == null || pnl.greaterThan(largestWin)) largestWin = pnl;
-      winSequence.push(true);
-      lossSequence.push(false);
+      resultSequence.push(1);
     } else if (pnl.lessThan(0)) {
       losses += 1;
       sumLosses = sumLosses.plus(pnl.abs());
       if (largestLoss == null || pnl.lessThan(largestLoss)) largestLoss = pnl;
-      winSequence.push(false);
-      lossSequence.push(true);
+      resultSequence.push(-1);
     } else {
       breakeven += 1;
-      winSequence.push(false);
-      lossSequence.push(false);
+      resultSequence.push(0);
     }
   }
 
@@ -165,9 +178,28 @@ export function computeTrackRecord(
   const avgR = average(
     executions.filter((e) => e.actualR != null).map((e) => new Decimal(e.actualR!).toNumber()),
   );
+  const totalRValues = closedResolved.filter((e) => e.actualR != null).map((e) => new Decimal(e.actualR!));
+  const totalR = totalRValues.length > 0 ? totalRValues.reduce((sum, r) => sum.plus(r), new Decimal(0)).toNumber() : null;
   const avgRiskPercent = average(
     executions.filter((e) => e.riskPercentOfBase != null).map((e) => e.riskPercentOfBase!),
   );
+
+  // Current streak: the still-open run as of the most recent resolved
+  // trade — positive N = N wins in a row right now, negative N = N losses,
+  // 0 when there's no history yet or the last trade was breakeven.
+  let currentStreak = 0;
+  if (resultSequence.length > 0) {
+    const last = resultSequence[resultSequence.length - 1];
+    if (last !== 0) {
+      let count = 0;
+      for (let i = resultSequence.length - 1; i >= 0 && resultSequence[i] === last; i--) count += 1;
+      currentStreak = last * count;
+    }
+  }
+
+  const totalParticipatingTrades = executions.length;
+  const executedTrades = executions.filter((e) => e.status === "EXECUTED" || e.status === "PARTIALLY_CLOSED" || e.status === "CLOSED").length;
+  const missedOrCancelledTrades = executions.filter((e) => NEVER_AFFECTS_BALANCE.includes(e.status)).length;
 
   const tradingDayKeys = new Set(closedResolved.map((e) => e.dateKey));
 
@@ -184,17 +216,22 @@ export function computeTrackRecord(
     grossPnl,
     netPnl,
     roiPercent: starting.greaterThan(0) ? netPnl.dividedBy(starting).times(100).toNumber() : null,
+    totalParticipatingTrades,
+    executedTrades,
+    missedOrCancelledTrades,
     totalTrades: closedResolved.length,
     wins,
     losses,
     breakeven,
     winRatePercent: decided > 0 ? (wins / decided) * 100 : null,
     avgR,
+    totalR,
     avgRiskPercent,
     largestWin,
     largestLoss,
-    longestWinStreak: longestStreak(winSequence),
-    longestLossStreak: longestStreak(lossSequence),
+    longestWinStreak: longestStreak(resultSequence.map((s) => s === 1)),
+    longestLossStreak: longestStreak(resultSequence.map((s) => s === -1)),
+    currentStreak,
     profitFactor: sumLosses.greaterThan(0) ? sumWins.dividedBy(sumLosses).toNumber() : null,
     maxRealizedDrawdown,
     currentDrawdown,

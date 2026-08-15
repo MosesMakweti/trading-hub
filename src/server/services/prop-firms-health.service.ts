@@ -4,19 +4,14 @@ import { prisma } from "@/server/db";
 import { evaluateRule, type RuleEvaluationResult } from "@/domain/prop-firms/rule-health";
 import { computeTrackRecord, type TrackRecordSummary } from "@/domain/prop-firms/track-record";
 
-/** Best-effort risk % of base for a persisted execution. When the execution
- *  was entered as PERCENT, riskInputValue already IS that percent — exact.
- *  For AMOUNT/FIXED_SIZE entries there's no stored point-in-time balance to
- *  divide by (the ledger balance moves after the fact), so this falls back
- *  to the account's starting balance as a stable denominator — an
- *  approximation, not a fabrication of data that doesn't exist. */
-function deriveRiskPercentOfBase(
-  execution: { riskEntryMode: string; riskInputValue: { toNumber(): number }; plannedRiskAmount: { toNumber(): number } },
-  accountStartingBalance: Decimal,
-): number | null {
-  if (execution.riskEntryMode === "PERCENT") return execution.riskInputValue.toNumber();
-  if (!accountStartingBalance.greaterThan(0)) return null;
-  return new Decimal(execution.plannedRiskAmount.toNumber()).dividedBy(accountStartingBalance).times(100).toNumber();
+/** Exact risk % of base for a persisted execution — plannedRiskAmount /
+ *  riskBaseSnapshot, both frozen at allocation-confirm time (see schema
+ *  comment on TradeAccountExecution.riskBaseSnapshot), so this is precise
+ *  for every riskEntryMode/riskBasis combination, not an approximation. */
+function deriveRiskPercentOfBase(execution: { riskBaseSnapshot: { toNumber(): number }; plannedRiskAmount: { toNumber(): number } }): number | null {
+  const base = execution.riskBaseSnapshot.toNumber();
+  if (base <= 0) return null;
+  return (execution.plannedRiskAmount.toNumber() / base) * 100;
 }
 
 async function loadAccountForHealth(userId: string, accountId: string) {
@@ -48,12 +43,11 @@ export async function getStageRuleHealth(userId: string, stageId: string): Promi
   ]);
 
   const currentBalance = latestLedgerEntry ? new Decimal(latestLedgerEntry.balanceAfter.toString()) : new Decimal(stage.account.startingBalance.toString());
-  const accountStartingBalance = new Decimal(stage.account.startingBalance.toString());
 
   const ledgerCtx = ledgerEntries.map((e) => ({ amount: e.amount.toString(), balanceAfter: e.balanceAfter.toString(), eventType: e.eventType, occurredAt: e.occurredAt }));
   const executionCtx = executions.map((e) => ({
     netPnl: e.netPnl?.toString() ?? null,
-    riskPercentOfBase: deriveRiskPercentOfBase(e, accountStartingBalance),
+    riskPercentOfBase: deriveRiskPercentOfBase(e),
     actualLotSize: e.actualLotSize?.toString() ?? null,
     actualContractQty: e.actualContractQty?.toString() ?? null,
     status: e.status,
@@ -118,13 +112,13 @@ export async function getCurrentStageRuleHealth(userId: string, accountId: strin
   return getStageRuleHealth(userId, stage.id);
 }
 
-async function trackRecordExecutionRows(where: { accountStageId: string } | { propFirmAccountId: string }, accountStartingBalance: Decimal) {
+async function trackRecordExecutionRows(where: { accountStageId: string } | { propFirmAccountId: string }) {
   const executions = await prisma.tradeAccountExecution.findMany({ where });
   return executions.map((e) => ({
     grossPnl: e.grossPnl?.toString() ?? null,
     netPnl: e.netPnl?.toString() ?? null,
     plannedRiskAmount: e.plannedRiskAmount.toString(),
-    riskPercentOfBase: deriveRiskPercentOfBase(e, accountStartingBalance),
+    riskPercentOfBase: deriveRiskPercentOfBase(e),
     actualR: e.actualR?.toString() ?? null,
     status: e.status,
     closedAt: e.closedAt,
@@ -138,7 +132,7 @@ export async function getAccountTrackRecord(userId: string, accountId: string): 
   const account = await loadAccountForHealth(userId, accountId);
   const [ledgerEntries, executions] = await Promise.all([
     prisma.accountLedgerEntry.findMany({ where: { accountId }, orderBy: { occurredAt: "asc" } }),
-    trackRecordExecutionRows({ propFirmAccountId: accountId }, new Decimal(account.startingBalance.toString())),
+    trackRecordExecutionRows({ propFirmAccountId: accountId }),
   ]);
 
   return computeTrackRecord(
@@ -154,10 +148,9 @@ export async function getStageTrackRecord(userId: string, stageId: string): Prom
   const stage = await prisma.accountStage.findFirst({ where: { id: stageId, account: { userId } }, include: { account: true } });
   if (!stage) throw new Error("Stage not found.");
 
-  const accountStartingBalance = new Decimal(stage.account.startingBalance.toString());
   const [ledgerEntries, executions] = await Promise.all([
     prisma.accountLedgerEntry.findMany({ where: { stageId }, orderBy: { occurredAt: "asc" } }),
-    trackRecordExecutionRows({ accountStageId: stageId }, accountStartingBalance),
+    trackRecordExecutionRows({ accountStageId: stageId }),
   ]);
 
   return computeTrackRecord(

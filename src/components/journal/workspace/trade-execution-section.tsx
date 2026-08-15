@@ -162,6 +162,14 @@ export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
           label="Actual exit"
           initialValue={trade.actualExit}
         />
+        <WorkspacePriceField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="actualStopLoss"
+          label="Actual stop used"
+          initialValue={trade.actualStopLoss}
+          className="sm:col-span-2"
+        />
         <WorkspaceNoteField
           dateKey={trade.dateKey}
           tradeId={trade.id}

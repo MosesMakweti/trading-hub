@@ -34,7 +34,7 @@ export type LedgerEventTypeLike =
   | "ACCOUNT_BREACHED"
   | "STAGE_STARTING_BALANCE_RESET"
   | "CUSTOM_ADJUSTMENT";
-export type ExecutionStatusLike = "PLANNED" | "OPEN" | "CLOSED" | "CANCELLED";
+export type ExecutionStatusLike = "PLANNED" | "ALLOCATED" | "EXECUTED" | "PARTIALLY_CLOSED" | "CLOSED" | "CANCELLED" | "MISSED" | "NOT_TAKEN";
 
 export type RuleState =
   | "SAFE"
@@ -262,7 +262,7 @@ function evaluateEodTrailingDrawdown(ctx: RuleEvaluationContext): RuleEvaluation
 function evaluateMaxTradingDays(ctx: RuleEvaluationContext): RuleEvaluationResult {
   if (ctx.rule.numericValue == null) return notEnoughData(ctx.rule.id, "No trading-day deadline configured on this stage.");
   const limit = new Decimal(ctx.rule.numericValue);
-  const closed = ctx.executions.filter((e) => e.status === "CLOSED");
+  const closed = ctx.executions.filter((e) => e.status === "CLOSED" || e.status === "PARTIALLY_CLOSED");
   const daysUsed = groupByTradingDay(closed, (e) => e.closedAt ?? e.plannedAt, ctx.account.dailyResetTimezone, ctx.account.dailyResetHour).size;
   const used = new Decimal(daysUsed);
   return {
@@ -410,7 +410,7 @@ function evaluateProfitTarget(ctx: RuleEvaluationContext): RuleEvaluationResult 
 function evaluateMinTradingDays(ctx: RuleEvaluationContext): RuleEvaluationResult {
   if (ctx.rule.numericValue == null) return notEnoughData(ctx.rule.id, "No minimum trading-days requirement configured on this stage.");
   const required = new Decimal(ctx.rule.numericValue);
-  const closed = ctx.executions.filter((e) => e.status === "CLOSED");
+  const closed = ctx.executions.filter((e) => e.status === "CLOSED" || e.status === "PARTIALLY_CLOSED");
   const completed = groupByTradingDay(closed, (e) => e.closedAt ?? e.plannedAt, ctx.account.dailyResetTimezone, ctx.account.dailyResetHour).size;
   const completedDecimal = new Decimal(completed);
   const percentConsumed = Decimal.min(100, completedDecimal.dividedBy(required).times(100));

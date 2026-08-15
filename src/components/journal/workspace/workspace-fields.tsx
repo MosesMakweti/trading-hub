@@ -34,7 +34,7 @@ type NoteField = Extract<
 
 type PriceField = Extract<
   keyof TradeWorkspaceSectionInput,
-  "plannedEntry" | "plannedStopLoss" | "plannedTarget" | "actualEntry" | "actualExit"
+  "plannedEntry" | "plannedStopLoss" | "plannedTarget" | "actualEntry" | "actualExit" | "actualStopLoss"
 >;
 
 // A tiny "saving / saved" indicator shared by every editable field.

@@ -120,12 +120,21 @@ export interface ExecutionDTO {
   tradeDate: string;
   assetSymbol: string;
   direction: string;
+  strategyName: string | null;
+  entryModelName: string | null;
   propFirmAccountId: string;
   accountStageId: string;
   stageName: string;
   riskEntryMode: string;
   riskBasis: string;
   riskInputValue: number;
+  /** The resolved risk base (balance/equity/stage-starting), frozen at the
+   *  moment this allocation was first confirmed — see schema comment on
+   *  TradeAccountExecution.riskBaseSnapshot. */
+  riskBaseSnapshot: number;
+  /** plannedRiskAmount / riskBaseSnapshot × 100 — always exact now that the
+   *  base itself is snapshotted, regardless of riskEntryMode. */
+  riskPercentOfBase: number | null;
   plannedRiskAmount: number;
   plannedPositionSize: number | null;
   positionSizeMissingReason: string | null;
@@ -144,6 +153,10 @@ export interface ExecutionDTO {
   status: string;
   executionNotes: string | null;
   closedAt: string | null;
+  /** Ledger-derived; only populated on the account Trade Track Record (spec
+   *  §6) — null on trade-idea-scoped executions. */
+  balanceBefore: number | null;
+  balanceAfter: number | null;
 }
 
 export interface AccountAllocationSelectorDTO {
@@ -155,6 +168,7 @@ export interface AccountAllocationSelectorDTO {
   marketCategory: "CFD" | "FUTURES";
   status: string;
   startingBalance: number;
+  accountCurrency: string;
   currentStageName: string | null;
   currentStageId: string | null;
   currentStageType: string | null;
@@ -187,17 +201,22 @@ export interface TrackRecordDTO {
   grossPnl: number;
   netPnl: number;
   roiPercent: number | null;
+  totalParticipatingTrades: number;
+  executedTrades: number;
+  missedOrCancelledTrades: number;
   totalTrades: number;
   wins: number;
   losses: number;
   breakeven: number;
   winRatePercent: number | null;
   avgR: number | null;
+  totalR: number | null;
   avgRiskPercent: number | null;
   largestWin: number | null;
   largestLoss: number | null;
   longestWinStreak: number;
   longestLossStreak: number;
+  currentStreak: number;
   profitFactor: number | null;
   maxRealizedDrawdown: number;
   currentDrawdown: number;

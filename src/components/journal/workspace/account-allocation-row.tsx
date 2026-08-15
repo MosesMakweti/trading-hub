@@ -23,7 +23,20 @@ import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-fi
 
 const RISK_ENTRY_MODES = { PERCENT: "% Risk", AMOUNT: "$ Amount", FIXED_SIZE: "Fixed size" };
 const RISK_BASES = { CURRENT_BALANCE: "Current balance", CURRENT_EQUITY: "Current equity", STAGE_STARTING_BALANCE: "Stage starting balance" };
-const STATUSES = { PLANNED: "Planned", OPEN: "Open", CLOSED: "Closed", CANCELLED: "Cancelled" };
+const STATUSES = {
+  PLANNED: "Planned",
+  ALLOCATED: "Allocated",
+  EXECUTED: "Executed",
+  PARTIALLY_CLOSED: "Partially closed",
+  CLOSED: "Closed",
+  CANCELLED: "Cancelled",
+  MISSED: "Missed",
+  NOT_TAKEN: "Not taken",
+};
+
+// Statuses where actuals/PnL are meaningless — the account never took (or
+// never will take) a position, so the entry fields collapse to reduce noise.
+const NO_ACTUALS_STATUSES = new Set(["PLANNED", "ALLOCATED", "CANCELLED", "MISSED", "NOT_TAKEN"]);
 
 type Draft = {
   riskEntryMode: string;
@@ -216,6 +229,14 @@ export function AccountAllocationRow({
         </div>
       </div>
 
+      {execution && (
+        <div className="rounded-lg border border-border/60 bg-background/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+          Locked at allocation: <span className="font-medium text-foreground">{formatCurrency(execution.plannedRiskAmount)}</span> risk against a{" "}
+          <span className="font-medium text-foreground">{formatCurrency(execution.riskBaseSnapshot)}</span> balance — frozen; changing the risk
+          value/basis below re-confirms it against the account&apos;s current balance instead.
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground">
         {previewLoading ? (
           <span className="flex items-center gap-1"><Loader2 className="size-3 animate-spin" /> Calculating…</span>
@@ -256,53 +277,63 @@ export function AccountAllocationRow({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground">Actual entry</label>
-          <Input type="number" step="any" value={draft.actualEntry} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, actualEntry: e.target.value }))} />
-        </div>
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground">Actual exit</label>
-          <Input type="number" step="any" value={draft.actualExit} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, actualExit: e.target.value }))} />
-        </div>
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground">{account.marketCategory === "FUTURES" ? "Contracts" : "Lot size"}</label>
-          <Input
-            type="number"
-            step="any"
-            value={account.marketCategory === "FUTURES" ? draft.actualContractQty : draft.actualLotSize}
-            disabled={!editable}
-            onChange={(e) =>
-              setDraft((d) => (account.marketCategory === "FUTURES" ? { ...d, actualContractQty: e.target.value } : { ...d, actualLotSize: e.target.value }))
-            }
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground">Gross PnL</label>
-          <Input type="number" step="0.01" value={draft.grossPnl} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, grossPnl: e.target.value }))} />
-        </div>
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground">Commission</label>
-          <Input type="number" step="0.01" value={draft.commission} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, commission: e.target.value }))} />
-        </div>
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground">Swap/financing</label>
-          <Input type="number" step="0.01" value={draft.swapFinancing} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, swapFinancing: e.target.value }))} />
-        </div>
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground">Other fees</label>
-          <Input type="number" step="0.01" value={draft.otherFees} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, otherFees: e.target.value }))} />
-        </div>
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground">Actual R (if gross PnL unknown)</label>
-          <Input type="number" step="0.01" value={draft.actualR} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, actualR: e.target.value }))} />
-        </div>
-      </div>
+      {NO_ACTUALS_STATUSES.has(draft.status) ? (
+        <p className="text-xs text-muted-foreground italic">
+          {draft.status === "MISSED" || draft.status === "NOT_TAKEN" || draft.status === "CANCELLED"
+            ? "This account didn't take the trade — it stays visible for review but won't affect the balance."
+            : "Actuals become available once this account executes the trade."}
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">Actual entry</label>
+              <Input type="number" step="any" value={draft.actualEntry} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, actualEntry: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">Actual exit</label>
+              <Input type="number" step="any" value={draft.actualExit} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, actualExit: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">{account.marketCategory === "FUTURES" ? "Contracts" : "Lot size"}</label>
+              <Input
+                type="number"
+                step="any"
+                value={account.marketCategory === "FUTURES" ? draft.actualContractQty : draft.actualLotSize}
+                disabled={!editable}
+                onChange={(e) =>
+                  setDraft((d) => (account.marketCategory === "FUTURES" ? { ...d, actualContractQty: e.target.value } : { ...d, actualLotSize: e.target.value }))
+                }
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">Gross PnL</label>
+              <Input type="number" step="0.01" value={draft.grossPnl} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, grossPnl: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">Commission</label>
+              <Input type="number" step="0.01" value={draft.commission} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, commission: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">Swap/financing</label>
+              <Input type="number" step="0.01" value={draft.swapFinancing} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, swapFinancing: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">Other fees</label>
+              <Input type="number" step="0.01" value={draft.otherFees} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, otherFees: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">Actual R (if gross PnL unknown)</label>
+              <Input type="number" step="0.01" value={draft.actualR} disabled={!editable} onChange={(e) => setDraft((d) => ({ ...d, actualR: e.target.value }))} />
+            </div>
+          </div>
 
-      {execution?.isPnlEstimated && (
-        <div className="text-[11px] text-muted-foreground italic">
-          Net PnL is estimated from actual R × planned risk — enter gross PnL once confirmed to replace it.
-        </div>
+          {execution?.isPnlEstimated && (
+            <div className="text-[11px] text-muted-foreground italic">
+              Net PnL is estimated from actual R × planned risk — enter gross PnL once confirmed to replace it.
+            </div>
+          )}
+        </>
       )}
 
       <Textarea

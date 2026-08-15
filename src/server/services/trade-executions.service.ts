@@ -71,7 +71,7 @@ async function loadAllocationContext(userId: string, propFirmAccountId: string, 
   const otherOpenExecutions = await prisma.tradeAccountExecution.findMany({
     where: {
       propFirmAccountId,
-      status: { in: ["PLANNED", "OPEN"] },
+      status: { in: ["PLANNED", "ALLOCATED", "EXECUTED", "PARTIALLY_CLOSED"] },
       ...(excludeExecutionId ? { id: { not: excludeExecutionId } } : {}),
     },
     select: { plannedRiskAmount: true },
@@ -197,27 +197,58 @@ async function upsertExecutionWithinTx(
     throw new Error("This account has no active stage to allocate against.");
   }
 
-  const base = resolveRiskBase(input.riskBasis, {
+  // Current resolved base — always fresh, used for the live warning preview
+  // below (e.g. "your frozen $ risk is now a bigger % of a since-shrunk
+  // balance"). It is NOT what gets persisted as the risk amount unless this
+  // is a new allocation or the trader explicitly changed the risk inputs —
+  // see riskInputsChanged below.
+  const currentBase = resolveRiskBase(input.riskBasis, {
     currentBalance,
     currentEquity: account.currentEquity?.toString() ?? null,
     stageStartingBalance: stage.startingBalance.toString(),
   });
 
+  // Spec §1: "Do not recalculate the original risk amount from a future
+  // account balance. Historical records must remain accurate after the
+  // account balance changes." So plannedRiskAmount/riskBaseSnapshot are only
+  // (re)computed on a brand-new allocation or when the trader explicitly
+  // changes riskEntryMode/riskBasis/riskInputValue — never as a side effect
+  // of saving an unrelated field (execution notes, actuals, status, …).
+  const riskInputsChanged =
+    !existing ||
+    existing.riskEntryMode !== input.riskEntryMode ||
+    existing.riskBasis !== input.riskBasis ||
+    !new Decimal(existing.riskInputValue.toString()).equals(input.riskInputValue);
+
   let riskAmount: Decimal;
+  let riskBaseSnapshot: Decimal;
   let positionSize: PositionSizeResult;
-  if (input.riskEntryMode === "FIXED_SIZE") {
-    const sized = sizePosition(account.marketCategory, new Decimal(1), input.instrumentSizing); // probe: is instrument data present at all?
-    if (sized.kind === "insufficient_data") {
-      throw new FixedSizeRiskAmountError();
-    }
-    const perUnitRisk = account.marketCategory === "FUTURES"
-      ? new Decimal(input.instrumentSizing!.stopDistanceTicks!).times(input.instrumentSizing!.tickValue!)
-      : new Decimal(input.instrumentSizing!.stopDistance!).times(input.instrumentSizing!.pipOrTickValue!).times(input.instrumentSizing!.conversionRate ?? 1);
-    riskAmount = perUnitRisk.times(input.riskInputValue);
-    positionSize = { kind: "computed", positionSize: new Decimal(input.riskInputValue), unit: account.marketCategory === "FUTURES" ? "CONTRACTS" : "LOTS" };
+
+  if (!riskInputsChanged && existing) {
+    riskBaseSnapshot = new Decimal(existing.riskBaseSnapshot.toString());
+    riskAmount = new Decimal(existing.plannedRiskAmount.toString());
+    // Position size may still be refined from newly entered instrument data
+    // without perturbing the frozen risk dollar amount.
+    positionSize =
+      input.riskEntryMode === "FIXED_SIZE"
+        ? { kind: "computed", positionSize: new Decimal(input.riskInputValue), unit: account.marketCategory === "FUTURES" ? "CONTRACTS" : "LOTS" }
+        : sizePosition(account.marketCategory, riskAmount, input.instrumentSizing);
   } else {
-    riskAmount = computePlannedRiskAmount(input.riskEntryMode, input.riskInputValue, base);
-    positionSize = sizePosition(account.marketCategory, riskAmount, input.instrumentSizing);
+    riskBaseSnapshot = currentBase;
+    if (input.riskEntryMode === "FIXED_SIZE") {
+      const sized = sizePosition(account.marketCategory, new Decimal(1), input.instrumentSizing); // probe: is instrument data present at all?
+      if (sized.kind === "insufficient_data") {
+        throw new FixedSizeRiskAmountError();
+      }
+      const perUnitRisk = account.marketCategory === "FUTURES"
+        ? new Decimal(input.instrumentSizing!.stopDistanceTicks!).times(input.instrumentSizing!.tickValue!)
+        : new Decimal(input.instrumentSizing!.stopDistance!).times(input.instrumentSizing!.pipOrTickValue!).times(input.instrumentSizing!.conversionRate ?? 1);
+      riskAmount = perUnitRisk.times(input.riskInputValue);
+      positionSize = { kind: "computed", positionSize: new Decimal(input.riskInputValue), unit: account.marketCategory === "FUTURES" ? "CONTRACTS" : "LOTS" };
+    } else {
+      riskAmount = computePlannedRiskAmount(input.riskEntryMode, input.riskInputValue, currentBase);
+      positionSize = sizePosition(account.marketCategory, riskAmount, input.instrumentSizing);
+    }
   }
 
   const rules = stage.rules ?? [];
@@ -225,7 +256,7 @@ async function upsertExecutionWithinTx(
     accountStatus: account.status,
     stageStatus: stage.status,
     plannedRiskAmount: riskAmount,
-    riskBase: base,
+    riskBase: currentBase,
     maxRiskPerTradeRule: ruleByKey(rules, "MAX_RISK_PER_TRADE"),
     combinedOpenRisk,
     maxRiskPerDayRule: ruleByKey(rules, "MAX_RISK_PER_DAY"),
@@ -261,8 +292,22 @@ async function upsertExecutionWithinTx(
   }
 
   const status = input.status ?? existing?.status ?? "PLANNED";
+  // Only a full CLOSED marks the participation as settled; PARTIALLY_CLOSED
+  // can already carry a realized netPnl (the closed slice) while the
+  // position is still open, so closedAt stays null until the whole thing is
+  // done. CANCELLED/MISSED/NOT_TAKEN never touch either timestamp.
   const closedAt = status === "CLOSED" ? (existing?.closedAt ?? new Date()) : existing?.closedAt ?? null;
-  const openedAt = status === "OPEN" || status === "CLOSED" ? (existing?.openedAt ?? new Date()) : existing?.openedAt ?? null;
+  const openedAt =
+    status === "EXECUTED" || status === "PARTIALLY_CLOSED" || status === "CLOSED"
+      ? (existing?.openedAt ?? new Date())
+      : existing?.openedAt ?? null;
+
+  // Spec §9: a closed (or partially closed) participation with no way to
+  // know its result — no gross PnL entered and no actual R entered either —
+  // is an inconsistent state, not a silently-zeroed one.
+  if ((status === "CLOSED" || status === "PARTIALLY_CLOSED") && netPnl == null) {
+    throw new Error("A closed execution needs either a gross PnL or an actual R to compute its realized result.");
+  }
 
   const data = {
     userId,
@@ -272,6 +317,7 @@ async function upsertExecutionWithinTx(
     riskEntryMode: input.riskEntryMode,
     riskBasis: input.riskBasis,
     riskInputValue: input.riskInputValue,
+    riskBaseSnapshot: riskBaseSnapshot.toString(),
     plannedRiskAmount: riskAmount.toString(),
     plannedPositionSize: positionSize.kind === "computed" ? positionSize.positionSize.toString() : null,
     positionSizeMissingReason: positionSize.kind === "insufficient_data" ? positionSize.explanation : null,
@@ -304,7 +350,10 @@ async function upsertExecutionWithinTx(
   // execution's current resolved PnL — an edit that changes/removes PnL
   // updates the SAME ledger row via postLedgerEntry's idempotency, never
   // duplicating; an edit that removes PnL entirely (e.g. reopened) clears it.
-  if (status === "CLOSED" && netPnl != null) {
+  // Only CLOSED/PARTIALLY_CLOSED ever affect the account balance (spec §3) —
+  // PLANNED/ALLOCATED/EXECUTED (still open, unrealized) and
+  // CANCELLED/MISSED/NOT_TAKEN never do.
+  if ((status === "CLOSED" || status === "PARTIALLY_CLOSED") && netPnl != null) {
     await postLedgerEntry(tx, {
       accountId: input.propFirmAccountId,
       stageId: stage.id,
@@ -387,12 +436,35 @@ export async function listExecutionsForTrades(userId: string, tradeIds: string[]
   });
 }
 
+/** Account Trade Track Record (spec §6) — every execution for this account,
+ *  enriched with the shared idea's strategy/entry-model (for filtering/
+ *  display) and the ledger-derived balance before/after this execution's own
+ *  TRADE_PNL event (when it has one). Balance before/after is only knowable
+ *  from the ledger — TradeAccountExecution itself only snapshots the RISK
+ *  base, not the full account balance — so it's computed here rather than
+ *  stored redundantly. */
 export async function listExecutionsForAccount(userId: string, propFirmAccountId: string) {
   const owned = await prisma.propFirmAccount.findFirst({ where: { id: propFirmAccountId, userId }, select: { id: true } });
   if (!owned) throw new Error("Account not found.");
-  return prisma.tradeAccountExecution.findMany({
+  const executions = await prisma.tradeAccountExecution.findMany({
     where: { propFirmAccountId },
-    include: { trade: { select: { id: true, tradeDate: true, assetSymbol: true, direction: true } }, accountStage: true },
+    include: {
+      trade: { select: { id: true, tradeDate: true, assetSymbol: true, direction: true, strategyNameSnapshot: true, selectedEntryModel: true } },
+      accountStage: true,
+    },
     orderBy: { createdAt: "desc" },
+  });
+
+  const ledgerEntries = await prisma.accountLedgerEntry.findMany({
+    where: { accountId: propFirmAccountId, sourceType: "TRADE_EXECUTION", eventType: "TRADE_PNL", sourceId: { in: executions.map((e) => e.id) } },
+    select: { sourceId: true, amount: true, balanceAfter: true },
+  });
+  const ledgerBySourceId = new Map(ledgerEntries.map((e) => [e.sourceId as string, e]));
+
+  return executions.map((execution) => {
+    const entry = ledgerBySourceId.get(execution.id);
+    const balanceAfter = entry ? new Decimal(entry.balanceAfter.toString()) : null;
+    const balanceBefore = entry ? balanceAfter!.minus(entry.amount.toString()) : null;
+    return { ...execution, balanceBefore, balanceAfter };
   });
 }
