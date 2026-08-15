@@ -4,6 +4,7 @@ import {
   getAnalyticsFilterOptions,
   type AnalyticsFilters,
 } from "@/server/services/analytics.service";
+import { getPropFirmAnalyticsSummary } from "@/server/services/prop-firms-analytics.service";
 import { isValidDateKey } from "@/lib/date";
 import { presetToRange, type DateRangePreset } from "@/lib/date-ranges";
 import { AnalyticsModule } from "@/components/analytics/analytics-module";
@@ -58,9 +59,13 @@ export default async function AnalyticsPage({
 
   const filters = parseFilters(params);
 
-  const [data, filterOptions] = await Promise.all([
+  const [data, filterOptions, propFirmAnalytics] = await Promise.all([
     getAnalyticsData(user.id, from, to, filters),
     getAnalyticsFilterOptions(user.id),
+    getPropFirmAnalyticsSummary(user.id, {
+      from: isValidDateKey(from) ? new Date(from) : undefined,
+      to: isValidDateKey(to) ? new Date(to) : undefined,
+    }),
   ]);
 
   return (
@@ -72,6 +77,7 @@ export default async function AnalyticsPage({
         trading={data.trading}
         psychology={data.psychology}
         filterOptions={filterOptions}
+        propFirmAnalytics={propFirmAnalytics}
       />
     </FadeIn>
   );

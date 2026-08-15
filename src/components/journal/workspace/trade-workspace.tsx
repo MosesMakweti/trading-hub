@@ -21,13 +21,18 @@ import { WorkspaceSection } from "@/components/journal/workspace/workspace-ui";
 import { WorkspaceEditableProvider } from "@/components/journal/workspace/editable-context";
 import { ReadOnlyDayBanner } from "@/components/journal/read-only-day-banner";
 import type { TradeWorkspaceDTO } from "@/types/trades";
+import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
 
 export function TradeWorkspace({
   trade,
   editable = true,
+  propFirmAccounts = [],
+  executions = [],
 }: {
   trade: TradeWorkspaceDTO;
   editable?: boolean;
+  propFirmAccounts?: AccountAllocationSelectorDTO[];
+  executions?: ExecutionDTO[];
 }) {
   const dateKey = trade.dateKey;
 
@@ -72,7 +77,7 @@ export function TradeWorkspace({
           title="Trade Idea"
           description="What I planned — before the trade."
         >
-          <TradeIdeaSection trade={trade} />
+          <TradeIdeaSection trade={trade} propFirmAccounts={propFirmAccounts} executions={executions} />
         </WorkspaceSection>
 
         <WorkspaceSection

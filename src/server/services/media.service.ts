@@ -2,24 +2,16 @@ import { prisma } from "@/server/db";
 import { deleteMediaFile } from "@/lib/media-storage";
 import type { MediaOwnerType } from "@prisma/client";
 
-/** Per-owner (and per-category) attachment cap, so no single record grows an
- * unbounded gallery. Mirrored in the client uploader. */
-export const MAX_ATTACHMENTS_PER_OWNER = 12;
-
-/** Max upload size (bytes) — validated server-side in the upload route. */
-export const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8MB
-
-/** The browser-safe image formats we accept (validated server-side in the upload
- * route; listed here for the client `accept` + messaging). */
-export const ACCEPTED_IMAGE_MIME = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-  "image/svg+xml",
-  "image/avif",
-  "image/bmp",
-] as const;
+// Re-exported for backward compatibility (existing server-side importers) —
+// the actual values live in lib/media-constants.ts, which is also safe to
+// import as a VALUE from client components (this file isn't, since it pulls
+// in Prisma; a client component may only ever `import type` from here).
+export {
+  ACCEPTED_DOCUMENT_MIME,
+  ACCEPTED_IMAGE_MIME,
+  MAX_ATTACHMENTS_PER_OWNER,
+  MAX_FILE_SIZE,
+} from "@/lib/media-constants";
 
 /** Public (auth-scoped) URL a stored asset is served from. */
 export function mediaUrl(assetId: string): string {
@@ -34,6 +26,7 @@ export interface MediaItemDTO {
   mimeType: string;
   fileSize: number;
   category: string | null;
+  caption: string | null;
 }
 
 /** Local filesystem storage is always available, so uploads are always enabled. */
@@ -103,6 +96,19 @@ export async function assertOwnsMediaTarget(
           select: { id: true },
         }),
       );
+    case "PROP_FIRM_MILESTONE":
+      // ownerId is either an AccountMilestone or a Payout id — both are
+      // evidence targets scoped through their PropFirmAccount's userId.
+      return Boolean(
+        (await prisma.accountMilestone.findFirst({
+          where: { id: ownerId, account: { userId } },
+          select: { id: true },
+        })) ??
+          (await prisma.payout.findFirst({
+            where: { id: ownerId, account: { userId } },
+            select: { id: true },
+          })),
+      );
     default: {
       // Exhaustiveness guard — a new MediaOwnerType must add a case above.
       const _never: never = ownerType;
@@ -126,6 +132,7 @@ export async function attachMedia(args: {
   fileName: string;
   mimeType: string;
   fileSize: number;
+  caption?: string | null;
 }): Promise<MediaItemDTO> {
   const owns = await assertOwnsMediaTarget(args.userId, args.ownerType, args.ownerId);
   if (!owns) throw new Error("Not found or access denied.");
@@ -153,6 +160,7 @@ export async function attachMedia(args: {
       ownerType: args.ownerType,
       ownerId: args.ownerId,
       category: args.category,
+      caption: args.caption ?? null,
       sortOrder: count,
     },
   });
@@ -164,7 +172,17 @@ export async function attachMedia(args: {
     mimeType: args.mimeType,
     fileSize: args.fileSize,
     category: args.category,
+    caption: attachment.caption,
   };
+}
+
+export async function updateMediaCaption(userId: string, attachmentId: string, caption: string | null) {
+  const attachment = await prisma.mediaAttachment.findFirst({
+    where: { id: attachmentId, media: { userId } },
+    select: { id: true },
+  });
+  if (!attachment) throw new Error("Media not found.");
+  return prisma.mediaAttachment.update({ where: { id: attachmentId }, data: { caption } });
 }
 
 /**
@@ -189,6 +207,7 @@ export async function listMedia(
     mimeType: a.media.mimeType,
     fileSize: a.media.fileSize,
     category: a.category,
+    caption: a.caption,
   }));
 }
 
@@ -219,6 +238,79 @@ export async function listTradePreviewImages(
     previews.set(tradeId, (before ?? list[0]).url);
   }
   return previews;
+}
+
+/**
+ * Batched full-gallery lookup for the Trades Album: every image for every given
+ * trade (not just one preview), in a single query — scoped to the user via the
+ * asset. Ordered Before-Trade first then After-Trade (an Entry -> Exit review
+ * flow), preserving upload order within each category.
+ */
+export async function listTradeMediaForTrades(
+  userId: string,
+  tradeIds: string[],
+): Promise<Map<string, MediaItemDTO[]>> {
+  if (tradeIds.length === 0) return new Map();
+  const attachments = await prisma.mediaAttachment.findMany({
+    where: { ownerType: "TRADE", ownerId: { in: tradeIds }, media: { userId } },
+    include: { media: true },
+    orderBy: { sortOrder: "asc" },
+  });
+
+  const categoryRank = (category: string | null) =>
+    category === "BEFORE" ? 0 : category === "AFTER" ? 1 : 2;
+
+  const byTrade = new Map<string, MediaItemDTO[]>();
+  for (const a of attachments) {
+    const list = byTrade.get(a.ownerId) ?? [];
+    list.push({
+      id: a.id,
+      url: a.media.url,
+      fileName: a.media.fileName,
+      mimeType: a.media.mimeType,
+      fileSize: a.media.fileSize,
+      category: a.category,
+      caption: a.caption,
+    });
+    byTrade.set(a.ownerId, list);
+  }
+  for (const list of byTrade.values()) {
+    list.sort((x, y) => categoryRank(x.category) - categoryRank(y.category));
+  }
+  return byTrade;
+}
+
+/**
+ * Generic batched lookup — every attachment for many owners of the SAME
+ * ownerType, in one query, grouped by ownerId. Used by the Prop Firms
+ * milestone/payout evidence lists (each milestone/payout is its own owner).
+ */
+export async function listMediaForOwners(
+  userId: string,
+  ownerType: MediaOwnerType,
+  ownerIds: string[],
+): Promise<Map<string, MediaItemDTO[]>> {
+  if (ownerIds.length === 0) return new Map();
+  const attachments = await prisma.mediaAttachment.findMany({
+    where: { ownerType, ownerId: { in: ownerIds }, media: { userId } },
+    include: { media: true },
+    orderBy: [{ category: "asc" }, { sortOrder: "asc" }],
+  });
+  const byOwner = new Map<string, MediaItemDTO[]>();
+  for (const a of attachments) {
+    const list = byOwner.get(a.ownerId) ?? [];
+    list.push({
+      id: a.id,
+      url: a.media.url,
+      fileName: a.media.fileName,
+      mimeType: a.media.mimeType,
+      fileSize: a.media.fileSize,
+      category: a.category,
+      caption: a.caption,
+    });
+    byOwner.set(a.ownerId, list);
+  }
+  return byOwner;
 }
 
 /**

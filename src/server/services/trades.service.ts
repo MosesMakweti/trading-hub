@@ -22,6 +22,8 @@ import {
 import { getStrategyReference, listStrategies } from "@/server/services/strategies.service";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 import { scoreSetup } from "@/domain/trades/setup-score";
+import { syncExecutionsWithinTx } from "@/server/services/trade-executions.service";
+import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
 
 // Composes the reference data the trade form needs (accounts/assets/
 // sessions/entry-models/checklists), reusing each feature's own service
@@ -30,9 +32,10 @@ export async function getTradeFormOptions(userId: string) {
   // SOT: a trade's strategy is the gateway — its markets, sessions, confluences,
   // execution AND entry models are loaded client-side from the selected strategy's
   // reference. The form only needs the account list and the strategy picker.
-  const [accounts, strategies] = await Promise.all([
+  const [accounts, strategies, propFirmAccounts] = await Promise.all([
     listTradingAccounts(userId),
     listStrategies(userId),
+    listActivePropFirmAccountsForSelector(userId),
   ]);
 
   // Only offer non-archived strategies for a new selection; the edit page adds
@@ -42,6 +45,7 @@ export async function getTradeFormOptions(userId: string) {
   return {
     accounts,
     strategies: selectableStrategies,
+    propFirmAccounts,
   };
 }
 
@@ -376,22 +380,33 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
   const closedAt = nextClosedAt(null, data.actualRR != null, now);
   const reviewedAt = nextReviewedAt(null, hasReview, now);
 
-  return prisma.trade.create({
-    data: {
-      userId,
-      tradeDate: dateKeyToUtcDate(dateKey),
-      ...tradeScalarData(data),
-      ...assetLink,
-      ...snapshots,
-      tradeNumber,
-      closedAt,
-      reviewedAt,
-      status: deriveStatus(closedAt, reviewedAt),
-      ...strategyExec,
-      allocations: { create: allocations },
-      psychology: { create: psychology },
-    },
-    include: tradeInclude,
+  return prisma.$transaction(async (tx) => {
+    const trade = await tx.trade.create({
+      data: {
+        userId,
+        tradeDate: dateKeyToUtcDate(dateKey),
+        ...tradeScalarData(data),
+        ...assetLink,
+        ...snapshots,
+        tradeNumber,
+        closedAt,
+        reviewedAt,
+        status: deriveStatus(closedAt, reviewedAt),
+        ...strategyExec,
+        allocations: { create: allocations },
+        psychology: { create: psychology },
+      },
+      include: tradeInclude,
+    });
+
+    // Prop Firms module (System B) — sibling to `allocations` above, never
+    // merged with System A. Zero, one, or many independent account
+    // executions of this same shared idea.
+    if (data.propFirmExecutions.length > 0) {
+      await syncExecutionsWithinTx(tx, userId, trade.id, data.propFirmExecutions);
+    }
+
+    return trade;
   });
 }
 
@@ -416,6 +431,10 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
     });
 
     await tx.tradeAccountAllocation.deleteMany({ where: { tradeId } });
+    // Prop Firms module (System B) — diffed (upsert-or-remove per account),
+    // never delete-and-recreate, so an edit preserves each execution's
+    // ledger idempotency (see trade-executions.service.ts).
+    await syncExecutionsWithinTx(tx, userId, tradeId, data.propFirmExecutions);
 
     const now = new Date();
     // The form owns the psychology reflections; the workspace review prompts

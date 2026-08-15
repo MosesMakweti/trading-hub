@@ -43,6 +43,7 @@ import {
 import type { WorkflowStepKey, WorkflowStepStatus } from "@/domain/today/workflow";
 import type { DailyAnalyticsDTO, TodaysPlanDTO, TradingDayDTO } from "@/types/today";
 import type { TradeWorkspaceDTO } from "@/types/trades";
+import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
 
 // The Today workflow section tabs. The Pre-Session Routine is first; the rest stay
 // locked until the "I am ready to trade" gate is confirmed.
@@ -63,6 +64,8 @@ export function TodayWorkspace({
   todaysPlan,
   trades,
   dailyAnalytics,
+  propFirmAccounts,
+  executionsByTradeId,
 }: {
   day: TradingDayDTO;
   // Only serializable data crosses the server→client boundary; the icon-bearing
@@ -72,6 +75,8 @@ export function TodayWorkspace({
   todaysPlan: TodaysPlanDTO;
   trades: TradeWorkspaceDTO[];
   dailyAnalytics: DailyAnalyticsDTO;
+  propFirmAccounts: AccountAllocationSelectorDTO[];
+  executionsByTradeId: Record<string, ExecutionDTO[]>;
 }) {
   const router = useRouter();
   // The Pre-Session Routine gates the rest of the day: the trader must have confirmed
@@ -113,7 +118,11 @@ export function TodayWorkspace({
           // their useState carries the previous trade's values over.
           <div key={focusedTrade.id}>
             {section === "idea" ? (
-              <TradeIdeaSection trade={focusedTrade} />
+              <TradeIdeaSection
+                trade={focusedTrade}
+                propFirmAccounts={propFirmAccounts}
+                executions={executionsByTradeId[focusedTrade.id] ?? []}
+              />
             ) : section === "execution" ? (
               <TradeExecutionSection trade={focusedTrade} />
             ) : (

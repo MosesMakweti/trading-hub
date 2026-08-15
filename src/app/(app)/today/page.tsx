@@ -8,6 +8,9 @@ import { listTradesForDay } from "@/server/services/trades.service";
 import { toTradeWorkspaceDTO } from "@/server/services/trade-workspace.mapper";
 import { getOrCreateDayRoutine } from "@/server/services/today-routine.service";
 import { getDailyAnalytics } from "@/server/services/analytics.service";
+import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
+import { listExecutionsForTrades } from "@/server/services/trade-executions.service";
+import { toAccountAllocationSelectorDTO, toExecutionDTO } from "@/server/services/prop-firms.mapper";
 import { localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 import { FadeIn } from "@/components/shared/motion";
@@ -25,11 +28,18 @@ export default async function TodayPage() {
   // Create the day once, THEN load everything else — passing the day into the
   // routine service avoids a second concurrent upsert racing the (userId, date) unique.
   const day = await getOrCreateTradingDay(user.id, todayKey);
-  const [trades, routine, dailyPerf] = await Promise.all([
+  const [trades, routine, dailyPerf, propFirmAccountsRaw] = await Promise.all([
     listTradesForDay(user.id, todayKey),
     getOrCreateDayRoutine(user.id, day),
     getDailyAnalytics(user.id, todayKey),
+    listActivePropFirmAccountsForSelector(user.id),
   ]);
+  const executionsRaw = await listExecutionsForTrades(user.id, trades.map((t) => t.id));
+  const executionsByTradeId: Record<string, ReturnType<typeof toExecutionDTO>[]> = {};
+  for (const row of executionsRaw) {
+    const dto = toExecutionDTO(row);
+    (executionsByTradeId[dto.tradeId] ??= []).push(dto);
+  }
 
   const dailyAnalytics: DailyAnalyticsDTO = { ...dailyPerf, analyzed: day.analyzedAt != null };
 
@@ -64,6 +74,8 @@ export default async function TodayPage() {
         todaysPlan={todaysPlan}
         trades={trades.map(toTradeWorkspaceDTO)}
         dailyAnalytics={dailyAnalytics}
+        propFirmAccounts={propFirmAccountsRaw.map(toAccountAllocationSelectorDTO)}
+        executionsByTradeId={executionsByTradeId}
       />
     </FadeIn>
   );

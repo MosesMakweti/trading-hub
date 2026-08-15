@@ -8,6 +8,7 @@ import {
   CandlestickChart,
   FlaskConical,
   LayoutDashboard,
+  PlaySquare,
   Settings,
   Sun,
   TrendingUp,
@@ -31,9 +32,10 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/today", label: "Today", icon: Sun },
   { href: "/journal", label: "Journal", icon: BookOpenText },
+  { href: "/trades-album", label: "Trades Album", icon: PlaySquare },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/edge", label: "Edge Review", icon: TrendingUp },
-  { href: "/accounts", label: "My Accounts", icon: Wallet },
+  { href: "/prop-firms", label: "Prop Firms", icon: Wallet },
   { href: "/strategy-lab", label: "Strategy Lab", icon: FlaskConical },
 ];
 

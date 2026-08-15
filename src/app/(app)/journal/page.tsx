@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, Images } from "lucide-react";
+import { BarChart3, Images, PlaySquare } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
 import { listNoteDateKeys } from "@/server/services/journal.service";
@@ -40,6 +40,16 @@ export default async function JournalPage() {
           >
             <Images className="size-4" />
             Trade gallery
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            nativeButton={false}
+            render={<Link href="/trades-album" />}
+          >
+            <PlaySquare className="size-4" />
+            Trades Album
           </Button>
         </div>
       </div>

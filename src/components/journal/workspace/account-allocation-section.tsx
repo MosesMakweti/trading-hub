@@ -1,0 +1,89 @@
+"use client";
+
+import { useState } from "react";
+import { Plus } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AccountAllocationRow } from "@/components/journal/workspace/account-allocation-row";
+import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
+import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
+
+export function AccountAllocationSection({
+  tradeId,
+  propFirmAccounts,
+  executions,
+}: {
+  tradeId: string;
+  propFirmAccounts: AccountAllocationSelectorDTO[];
+  executions: ExecutionDTO[];
+}) {
+  const editable = useWorkspaceEditable();
+  const [addedAccountIds, setAddedAccountIds] = useState<string[]>([]);
+  const [pickerValue, setPickerValue] = useState<string>("");
+
+  const savedAccountIds = executions.map((e) => e.propFirmAccountId);
+  const visibleAccountIds = [...new Set([...savedAccountIds, ...addedAccountIds])];
+  const availableToAdd = propFirmAccounts.filter((a) => !visibleAccountIds.includes(a.id));
+
+  return (
+    <div className="space-y-3 rounded-xl border border-border bg-background/30 p-3">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-medium text-muted-foreground">Account Allocations</div>
+        {editable && availableToAdd.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Select
+              items={Object.fromEntries(availableToAdd.map((a) => [a.id, `${a.displayName} (${a.companyName})`]))}
+              value={pickerValue}
+              onValueChange={(v) => v && setPickerValue(v)}
+            >
+              <SelectTrigger className="h-8 w-56 text-xs"><SelectValue placeholder="Select account…" /></SelectTrigger>
+              <SelectContent>
+                {availableToAdd.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>{a.displayName} ({a.companyName})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1"
+              disabled={!pickerValue}
+              onClick={() => {
+                if (pickerValue) {
+                  setAddedAccountIds((ids) => [...ids, pickerValue]);
+                  setPickerValue("");
+                }
+              }}
+            >
+              <Plus className="size-3.5" />
+              Add
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {visibleAccountIds.length === 0 ? (
+        <p className="text-xs text-muted-foreground italic">No accounts allocated to this idea yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {visibleAccountIds.map((accountId) => {
+            const account = propFirmAccounts.find((a) => a.id === accountId);
+            if (!account) return null;
+            const execution = executions.find((e) => e.propFirmAccountId === accountId);
+            return (
+              <AccountAllocationRow
+                key={accountId}
+                tradeId={tradeId}
+                account={account}
+                execution={execution}
+                onRemoved={() => setAddedAccountIds((ids) => ids.filter((id) => id !== accountId))}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

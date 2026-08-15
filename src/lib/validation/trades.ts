@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { psychologyAnswersSchema } from "@/lib/validation/psychology";
+import { propFirmExecutionsSchema } from "@/lib/validation/prop-firms";
 
 export const directionSchema = z.enum(["LONG", "SHORT"]);
 export const biasSchema = z.enum(["BULLISH", "BEARISH"]);
@@ -44,6 +45,10 @@ export const tradeSchema = z
     // Additional participating accounts beyond the Performance Account —
     // may be empty (a trade can affect only the Performance Account).
     allocations: z.array(tradeAllocationSchema).default([]),
+    // Prop Firms module (System B) — sibling to `allocations` (System A),
+    // never merged with it. Zero, one, or many independent account
+    // executions of this same shared Trade Idea (spec §1).
+    propFirmExecutions: propFirmExecutionsSchema,
     // SOT: confluences + execution confirmations selected from the chosen strategy,
     // by name. The save layer freezes the strategy's expected set and scores adherence.
     selectedConfluences: z.array(z.string()).default([]),

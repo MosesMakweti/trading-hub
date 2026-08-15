@@ -14,11 +14,13 @@ import { AnalyticsBreakdowns } from "@/components/analytics/analytics-breakdowns
 import { PsychologyAnalytics } from "@/components/analytics/psychology-analytics";
 import { BestAssetTable } from "@/components/analytics/best-asset-table";
 import { Heatmap, pnlHeatColor } from "@/components/analytics/heatmap";
+import { PropFirmsAnalyticsSection } from "@/components/analytics/prop-firms-analytics-section";
 import { EmptyState } from "@/components/shared/empty-state";
 import type {
   AnalyticsFilterOptions,
   getAnalyticsData,
 } from "@/server/services/analytics.service";
+import type { PropFirmAnalyticsSummary } from "@/server/services/prop-firms-analytics.service";
 import type { DateRangePreset } from "@/lib/date-ranges";
 
 type Data = Awaited<ReturnType<typeof getAnalyticsData>>;
@@ -74,6 +76,7 @@ export function AnalyticsModule({
   trading,
   psychology,
   filterOptions,
+  propFirmAnalytics,
 }: {
   preset: DateRangePreset;
   from: string;
@@ -81,6 +84,7 @@ export function AnalyticsModule({
   trading: TradingData;
   psychology: PsychologyData;
   filterOptions: AnalyticsFilterOptions;
+  propFirmAnalytics: PropFirmAnalyticsSummary;
 }) {
   const d = trading;
   const summary = d.counterfactual.summary;
@@ -99,6 +103,11 @@ export function AnalyticsModule({
         </div>
         <AnalyticsFilterBar options={filterOptions} />
       </div>
+
+      {/* Prop Firms module (System B) — a separate data source from the
+          Performance Account below, so it renders even when there are no
+          closed System-A trades in range. */}
+      <PropFirmsAnalyticsSection data={propFirmAnalytics} />
 
       {d.totalTrades === 0 ? (
         <EmptyState

@@ -2,17 +2,29 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ImageOff, Loader2, RotateCcw, Trash2, UploadCloud, XIcon, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  FileText,
+  ImageOff,
+  Loader2,
+  RotateCcw,
+  Trash2,
+  UploadCloud,
+  XIcon,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { deleteMediaAction, loadMediaAction } from "@/actions/media.actions";
+import { ACCEPTED_DOCUMENT_MIME, ACCEPTED_IMAGE_MIME } from "@/lib/media-constants";
 import type { MediaItemDTO } from "@/server/services/media.service";
 import type { MediaOwnerType } from "@prisma/client";
 
 const DEFAULT_MAX = 12;
+const isPdf = (mimeType: string) => mimeType === "application/pdf";
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.5;
@@ -43,6 +55,7 @@ export function ImageAttachments({
   initial,
   uploadsEnabled: uploadsEnabledProp,
   className,
+  acceptDocuments = false,
 }: {
   ownerType: MediaOwnerType;
   ownerId: string;
@@ -54,7 +67,11 @@ export function ImageAttachments({
   initial?: MediaItemDTO[];
   uploadsEnabled?: boolean;
   className?: string;
+  /** Accept PDFs alongside images (certificates/evidence). Default image-only. */
+  acceptDocuments?: boolean;
 }) {
+  const acceptedMime = acceptDocuments ? ACCEPTED_DOCUMENT_MIME : ACCEPTED_IMAGE_MIME;
+  const acceptedSet = new Set<string>(acceptedMime);
   const [items, setItems] = useState<MediaItemDTO[]>(initial ?? []);
   const [uploadsEnabled, setUploadsEnabled] = useState(uploadsEnabledProp ?? true);
   const [loading, setLoading] = useState(initial === undefined);
@@ -123,17 +140,17 @@ export function ImageAttachments({
   }
 
   function beginUpload(files: File[]) {
-    const images = files.filter((file) => file.type.startsWith("image/"));
-    if (images.length === 0) {
-      toast.error("Only image files can be uploaded.");
+    const accepted = files.filter((file) => acceptedSet.has(file.type));
+    if (accepted.length === 0) {
+      toast.error(acceptDocuments ? "Only image or PDF files can be uploaded." : "Only image files can be uploaded.");
       return;
     }
-    if (images.length < files.length) {
-      toast.warning("Skipped non-image files.");
+    if (accepted.length < files.length) {
+      toast.warning(acceptDocuments ? "Skipped unsupported files." : "Skipped non-image files.");
     }
-    const picked = images.slice(0, remaining);
-    if (images.length > remaining) {
-      toast.warning(`Only ${remaining} more image${remaining === 1 ? "" : "s"} allowed here.`);
+    const picked = accepted.slice(0, remaining);
+    if (accepted.length > remaining) {
+      toast.warning(`Only ${remaining} more file${remaining === 1 ? "" : "s"} allowed here.`);
     }
     if (picked.length === 0) return;
 
@@ -143,7 +160,7 @@ export function ImageAttachments({
       .then((created) => {
         const relevant = category ? created.filter((i) => i.category === category) : created;
         setItems((prev) => [...prev, ...relevant]);
-        toast.success(`Image${picked.length === 1 ? "" : "s"} uploaded.`);
+        toast.success(`File${picked.length === 1 ? "" : "s"} uploaded.`);
       })
       .catch((e: unknown) => {
         toast.error(e instanceof Error ? e.message : "Upload failed.");
@@ -201,19 +218,30 @@ export function ImageAttachments({
             <div key={img.id} className="group/img relative">
               <button
                 type="button"
-                onClick={() => setZoomed(img)}
+                onClick={() => (isPdf(img.mimeType) ? window.open(img.url, "_blank", "noopener") : setZoomed(img))}
                 className="glass block w-full overflow-hidden rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                aria-label={`View ${img.fileName}`}
+                aria-label={isPdf(img.mimeType) ? `Open ${img.fileName}` : `View ${img.fileName}`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={img.url}
-                  alt={img.fileName}
-                  className="aspect-video w-full object-cover transition-transform group-hover/img:scale-[1.03]"
-                />
-                <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover/img:bg-black/30 group-hover/img:opacity-100">
-                  <ZoomIn className="size-4 text-white" />
-                </span>
+                {isPdf(img.mimeType) ? (
+                  <div className="flex aspect-video w-full flex-col items-center justify-center gap-1 bg-muted/50 p-2 transition-transform group-hover/img:scale-[1.03]">
+                    <FileText className="size-6 text-muted-foreground" />
+                    <span className="line-clamp-2 w-full px-1 text-center text-[10px] text-muted-foreground">
+                      {img.fileName}
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={img.url}
+                      alt={img.fileName}
+                      className="aspect-video w-full object-cover transition-transform group-hover/img:scale-[1.03]"
+                    />
+                    <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-opacity group-hover/img:bg-black/30 group-hover/img:opacity-100">
+                      <ZoomIn className="size-4 text-white" />
+                    </span>
+                  </>
+                )}
               </button>
               {canManage && (
                 <Button
@@ -238,7 +266,7 @@ export function ImageAttachments({
           <input
             ref={inputRef}
             type="file"
-            accept="image/*"
+            accept={acceptedMime.join(",")}
             multiple
             className="hidden"
             onChange={(e) => onFilesPicked(e.target.files)}
@@ -276,7 +304,8 @@ export function ImageAttachments({
               <>
                 <UploadCloud className="size-4 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">
-                  Drop images or <span className="text-primary">click to upload</span>
+                  Drop {acceptDocuments ? "images or PDFs" : "images"} or{" "}
+                  <span className="text-primary">click to upload</span>
                 </span>
               </>
             ) : (

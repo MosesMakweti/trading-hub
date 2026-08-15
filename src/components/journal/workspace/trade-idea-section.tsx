@@ -11,10 +11,20 @@ import {
   WorkspacePriceField,
 } from "@/components/journal/workspace/workspace-fields";
 import { TradeImageBucket } from "@/components/journal/workspace/trade-image-bucket";
+import { AccountAllocationSection } from "@/components/journal/workspace/account-allocation-section";
 import type { TradeWorkspaceDTO } from "@/types/trades";
+import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
 
 // Section 1 — Trade Idea: what the trader planned, before the trade.
-export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
+export function TradeIdeaSection({
+  trade,
+  propFirmAccounts,
+  executions,
+}: {
+  trade: TradeWorkspaceDTO;
+  propFirmAccounts: AccountAllocationSelectorDTO[];
+  executions: ExecutionDTO[];
+}) {
   const performance = trade.accounts.find((a) => a.kind === "PERFORMANCE");
   const referenceRisk = performance
     ? `${performance.riskValue}% (Performance Account)`
@@ -153,6 +163,8 @@ export function TradeIdeaSection({ trade }: { trade: TradeWorkspaceDTO }) {
       <div className="space-y-2 rounded-xl border border-border bg-background/30 p-3">
         <TradeImageBucket tradeId={trade.id} category="BEFORE" label="Before-Trade Images" />
       </div>
+
+      <AccountAllocationSection tradeId={trade.id} propFirmAccounts={propFirmAccounts} executions={executions} />
     </div>
   );
 }

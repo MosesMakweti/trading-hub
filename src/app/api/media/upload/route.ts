@@ -7,6 +7,7 @@ import { getTrade } from "@/server/services/trades.service";
 import { assertDayEditable, DayArchivedError } from "@/server/services/trading-day.service";
 import { saveMediaFile, deleteMediaFile } from "@/lib/media-storage";
 import {
+  ACCEPTED_DOCUMENT_MIME,
   ACCEPTED_IMAGE_MIME,
   assertOwnsMediaTarget,
   attachMedia,
@@ -26,9 +27,16 @@ const OWNER_TYPES: MediaOwnerType[] = [
   "STRATEGY_CHECKLIST_ITEM",
   "STRATEGY_FRAMEWORK_STEP",
   "ARSENAL_CONCEPT",
+  "PROP_FIRM_MILESTONE",
 ];
 
-const ACCEPTED = new Set<string>(ACCEPTED_IMAGE_MIME);
+// Certificates/confirmation evidence accept PDFs too; every other owner type
+// stays image-only.
+const IMAGE_ONLY = new Set<string>(ACCEPTED_IMAGE_MIME);
+const IMAGE_AND_PDF = new Set<string>(ACCEPTED_DOCUMENT_MIME);
+function acceptedMimeFor(ownerType: MediaOwnerType): Set<string> {
+  return ownerType === "PROP_FIRM_MILESTONE" ? IMAGE_AND_PDF : IMAGE_ONLY;
+}
 
 function bad(error: string, status = 400) {
   return NextResponse.json({ error }, { status });
@@ -57,6 +65,8 @@ export async function POST(request: Request) {
   const ownerId = String(form.get("ownerId") ?? "");
   const rawCategory = form.get("category");
   const category = typeof rawCategory === "string" && rawCategory.length > 0 ? rawCategory : null;
+  const rawCaption = form.get("caption");
+  const caption = typeof rawCaption === "string" && rawCaption.length > 0 ? rawCaption : null;
 
   if (!OWNER_TYPES.includes(ownerType) || !ownerId) return bad("Invalid target.");
 
@@ -89,9 +99,10 @@ export async function POST(request: Request) {
     }
   }
 
+  const accepted = acceptedMimeFor(ownerType);
   const created: MediaItemDTO[] = [];
   for (const file of files) {
-    if (!ACCEPTED.has(file.type)) return bad(`Unsupported file type: ${file.type || "unknown"}.`);
+    if (!accepted.has(file.type)) return bad(`Unsupported file type: ${file.type || "unknown"}.`);
     if (file.size > MAX_FILE_SIZE) return bad("Image is larger than the 8MB limit.");
 
     const bytes = Buffer.from(await file.arrayBuffer());
@@ -107,6 +118,7 @@ export async function POST(request: Request) {
           fileName: file.name || "image",
           mimeType: file.type,
           fileSize: file.size,
+          caption,
         }),
       );
     } catch (e) {

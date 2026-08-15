@@ -18,6 +18,9 @@ const SOFT_DELETE_MODELS = new Set([
   "PartialTakeProfit",
   "TradeManagementRule",
   "TradeOpportunity",
+  "UserPropFirm",
+  "PropFirmAccount",
+  "TradeAccountExecution",
 ]);
 
 function withSoftDelete(client: PrismaClient) {
@@ -61,3 +64,10 @@ export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
 }
+
+/** The exact `tx` type prisma.$transaction(async (tx) => ...) infers on THIS
+ *  extended client — not the plain `Prisma.TransactionClient`, which doesn't
+ *  know about the soft-delete extension and is therefore a structurally
+ *  different (incompatible) type. Use this whenever a `tx` param needs to be
+ *  threaded across a function boundary (e.g. account-ledger.service.ts). */
+export type TransactionClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];

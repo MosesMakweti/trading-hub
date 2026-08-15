@@ -100,6 +100,9 @@ export async function importTrades(
           riskInputType: a.riskInputType,
           riskValue: a.riskValue,
         })),
+        // CSV import is System-A-only (legacy TradingAccount allocations) —
+        // imported trades never carry Prop Firms module executions.
+        propFirmExecutions: [],
         selectedConfluences: record.confluenceLabels,
         selectedExecution: record.executionLabels,
         selectedEntryModel: record.entryModelNames[0] ?? null,
