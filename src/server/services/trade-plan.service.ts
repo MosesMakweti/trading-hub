@@ -282,6 +282,9 @@ export interface SavePlanResult {
  *    - Trade.plannedEntry/plannedStopLoss/plannedTarget/timeframe/direction
  *      (the legacy single-target trio stays in sync with target #1 for every
  *      existing reader of those columns)
+ *    - Trade.expectedRR (the weighted planned R across all targets — the
+ *      trade's Expected RR is no longer manually entered anywhere; this is
+ *      its only source, null until a plan is first confirmed)
  *    - PlannedTarget[] (full replace — the live, editable set)
  *    - TradePlanVersion (append-only snapshot history)
  *    - TradePlanScreenshot.status -> CONFIRMED, when a screenshot exists
@@ -389,6 +392,7 @@ export async function savePlan(
         plannedEntry: input.entry.toString(),
         plannedStopLoss: input.stopLoss.toString(),
         plannedTarget: firstTarget.targetPrice.toString(),
+        expectedRR: weighted.weightedR?.toString() ?? null,
         timeframe: input.timeframe ?? null,
       },
     });

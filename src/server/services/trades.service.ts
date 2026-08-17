@@ -3,17 +3,11 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate } from "@/lib/date";
 import { dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
-import { effectiveRiskPercent, scalePnlByRisk, PERFORMANCE_ACCOUNT_RISK_PERCENT } from "@/domain/performance/allocation";
 import { scorePsychology, type PsychologyAnswer } from "@/domain/psychology/scoring";
 import { deriveStatus, nextClosedAt, nextReviewedAt } from "@/domain/trades/lifecycle";
 import { sanitizeAdherenceAnswers, scoreAdherence } from "@/domain/trades/adherence";
-import type {
-  RiskInputType,
-  TradeInput,
-  TradeWorkspaceSectionInput,
-} from "@/lib/validation/trades";
+import type { TradeInput, TradeWorkspaceSectionInput } from "@/lib/validation/trades";
 import {
-  getAccountBalance,
   getAccountTrackRecord,
   getOrCreatePerformanceAccount,
   listTradingAccounts,
@@ -25,6 +19,11 @@ import { scoreSetup } from "@/domain/trades/setup-score";
 import { syncExecutionsWithinTx } from "@/server/services/trade-executions.service";
 import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
 import { lockPlanIfConfirmedAndUnlocked } from "@/server/services/trade-plan.service";
+import {
+  getPerformanceConfig,
+  lockPerformanceRiskSnapshot,
+  settlePerformanceTrade,
+} from "@/server/services/performance-account.service";
 
 // Composes the reference data the trade form needs (accounts/assets/
 // sessions/entry-models/checklists), reusing each feature's own service
@@ -132,49 +131,46 @@ function tradeMarketData(data: TradeInput) {
 
 /**
  * Builds every allocation row for a trade: the Performance Account's own
- * (user-entered, fixed 1% risk) allocation, plus one auto-calculated
- * allocation per additional participating account, scaled from the
- * Performance Account's PnL by that account's relative risk%. When editing
- * an existing trade, `excludeTradeId` excludes the trade's own prior
- * allocations from each account's balance lookup, so risk% is computed
- * against the balance as it stood before this trade — not double-counted.
+ * automatic allocation (spec §3/§4 — created every time, PnL always 0/0 at
+ * save time; the ONLY writer of its PnL going forward is
+ * performance-account.service.ts's settlePerformanceTrade, driven by the
+ * trade's actual execution data, never this form), plus one row per
+ * additional REAL participating account, each with its own independently
+ * entered risk% and PnL (spec §1/§17 — never derived/scaled from the
+ * Performance Account's result).
+ *
+ * The Performance allocation's `riskValue` is the pre-execution risk%
+ * override surface (spec §5): the trade's explicit override when given,
+ * else the account's configured default. On an EDIT, once the risk
+ * snapshot is already locked this incoming value is ignored — the locked
+ * snapshot's own frozen riskPercent is what settlement actually uses, so a
+ * later form re-save can never silently change historical risk.
  */
 async function buildAllocations(userId: string, data: TradeInput, excludeTradeId?: string) {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
+  const performanceConfig = await getPerformanceConfig(userId);
+  const performanceRiskPercent = data.performanceRiskPercentOverride ?? performanceConfig.defaultRiskPercent.toNumber();
 
-  const participatingAccounts = data.allocations.length
-    ? await prisma.tradingAccount.findMany({
-        where: { userId, id: { in: data.allocations.map((a) => a.tradingAccountId) } },
-      })
-    : [];
+  const alreadyLocked = excludeTradeId
+    ? await prisma.performanceRiskSnapshot.findUnique({ where: { tradeId: excludeTradeId }, select: { riskPercent: true } })
+    : null;
 
-  const participating = await Promise.all(
-    data.allocations.map(async (a) => {
-      const account = participatingAccounts.find((acc) => acc.id === a.tradingAccountId);
-      if (!account) throw new Error("Selected account not found.");
-      const balance = await getAccountBalance(account.id, excludeTradeId);
-      const riskPercent = effectiveRiskPercent(
-        a.riskInputType as RiskInputType,
-        a.riskValue,
-        balance,
-      );
-      return {
-        tradingAccountId: a.tradingAccountId,
-        riskInputType: a.riskInputType,
-        riskValue: a.riskValue,
-        closingPnlGross: scalePnlByRisk(data.performanceClosingPnlGross, riskPercent),
-        closingPnlNet: scalePnlByRisk(data.performanceClosingPnlNet, riskPercent),
-      };
-    }),
-  );
+  const participating = data.allocations.map((a) => ({
+    tradingAccountId: a.tradingAccountId,
+    riskInputType: a.riskInputType,
+    riskValue: a.riskValue,
+    closingPnlGross: a.closingPnlGross,
+    closingPnlNet: a.closingPnlNet,
+  }));
 
   return [
     {
       tradingAccountId: performanceAccount.id,
       riskInputType: "PERCENT" as const,
-      riskValue: PERFORMANCE_ACCOUNT_RISK_PERCENT,
-      closingPnlGross: data.performanceClosingPnlGross,
-      closingPnlNet: data.performanceClosingPnlNet,
+      riskValue: alreadyLocked ? alreadyLocked.riskPercent.toNumber() : performanceRiskPercent,
+      // Never written here — see the doc comment above.
+      closingPnlGross: 0,
+      closingPnlNet: 0,
     },
     ...participating,
   ];
@@ -477,6 +473,15 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
       },
       include: tradeInclude,
     });
+  }).then(async () => {
+    // The allocation rebuild above always re-creates the Performance row at
+    // 0/0 (see buildAllocations) — if this trade's risk was already locked,
+    // restore its calculated PnL immediately so an unrelated edit (e.g.
+    // changing the asset) never blanks out a settled result. A no-op when
+    // the trade isn't locked yet. Re-fetched fresh so the returned trade
+    // reflects the corrected allocation, not the pre-settlement 0/0 write.
+    await settlePerformanceTrade(userId, tradeId);
+    return prisma.trade.findFirstOrThrow({ where: { id: tradeId, userId }, include: tradeInclude });
   });
 }
 
@@ -530,8 +535,20 @@ export async function updateTradeSections(
   // entry is recorded, whatever plan is currently confirmed gets locked —
   // later edits become revisions with a required reason, never silent
   // rewrites of what the trader actually planned before executing.
-  if ("actualEntry" in patchRecord && patch.actualEntry != null && existing.actualEntry == null) {
+  const firstActualEntry = "actualEntry" in patchRecord && patch.actualEntry != null && existing.actualEntry == null;
+  if (firstActualEntry) {
     await lockPlanIfConfirmedAndUnlocked(userId, tradeId);
+  }
+
+  // Performance Account automatic benchmark: lock the immutable risk
+  // snapshot the moment actualEntry first appears (spec §4), then recompute
+  // realized R / PnL whenever any of the canonical actual-execution fields
+  // change (spec §13) — a no-op until the trade is fully closed.
+  if (firstActualEntry) {
+    await lockPerformanceRiskSnapshot(userId, tradeId);
+  }
+  if ("actualEntry" in patchRecord || "actualStopLoss" in patchRecord || "actualExit" in patchRecord) {
+    await settlePerformanceTrade(userId, tradeId);
   }
 
   return updated;

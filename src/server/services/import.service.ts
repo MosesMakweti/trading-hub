@@ -85,8 +85,11 @@ export async function importTrades(
         selectedSession: record.sessionName ?? null,
         expectedRR: record.expectedRR,
         actualRR: record.actualRR,
-        performanceClosingPnlGross: record.performanceClosingPnlGross,
-        performanceClosingPnlNet: record.performanceClosingPnlNet,
+        // Performance Account PnL is never written on import — it's system-
+        // calculated from actual execution data going forward (spec; see
+        // trade-export.ts). A re-imported trade's Performance PnL stays 0
+        // until real entry/stop/exit data is entered for it in the workspace.
+        performanceRiskPercentOverride: null,
         hitTP1: record.hitTP1,
         hitTP2: record.hitTP2,
         hitTP3: record.hitTP3,
@@ -99,6 +102,8 @@ export async function importTrades(
           tradingAccountId: accountByName.get(a.accountName.trim().toUpperCase())!.id,
           riskInputType: a.riskInputType,
           riskValue: a.riskValue,
+          closingPnlGross: a.closingPnlGross,
+          closingPnlNet: a.closingPnlNet,
         })),
         // CSV import is System-A-only (legacy TradingAccount allocations) —
         // imported trades never carry Prop Firms module executions.

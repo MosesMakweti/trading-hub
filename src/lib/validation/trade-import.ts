@@ -7,6 +7,10 @@ const allocationSchema = z.object({
   accountName: z.string().min(1),
   riskInputType: riskInputTypeSchema,
   riskValue: z.number().min(0),
+  // Optional for backward compatibility with export files predating
+  // independent real-account PnL — defaults to 0 (unset) when absent.
+  closingPnlGross: z.number().default(0),
+  closingPnlNet: z.number().default(0),
 });
 
 export const tradeExportRecordSchema = z.object({
@@ -16,7 +20,7 @@ export const tradeExportRecordSchema = z.object({
   direction: directionSchema,
   higherTimeframeBias: biasSchema,
   biasConfidencePercent: z.number().int().min(0).max(100),
-  expectedRR: z.number(),
+  expectedRR: z.number().nullable(),
   actualRR: z.number().nullable(),
   performanceClosingPnlGross: z.number(),
   performanceClosingPnlNet: z.number(),

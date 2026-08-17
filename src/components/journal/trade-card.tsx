@@ -98,7 +98,7 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
         <div className="text-right">
           <div className="text-xs text-muted-foreground">Expected / Actual RR</div>
           <div className="font-medium">
-            {trade.expectedRR.toFixed(2)}R /{" "}
+            {trade.expectedRR != null ? `${trade.expectedRR.toFixed(2)}R` : "—"} /{" "}
             <span
               className={cn(
                 trade.actualRR == null

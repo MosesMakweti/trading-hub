@@ -57,10 +57,9 @@ export default async function EditTradePage({
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
     selectedSession: trade.selectedSession ?? null,
-    expectedRR: trade.expectedRR.toNumber(),
+    expectedRR: trade.expectedRR ? trade.expectedRR.toNumber() : null,
     actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
-    performanceClosingPnlGross: performanceAllocation?.closingPnlGross.toNumber() ?? 0,
-    performanceClosingPnlNet: performanceAllocation?.closingPnlNet.toNumber() ?? 0,
+    performanceRiskPercentOverride: performanceAllocation ? performanceAllocation.riskValue.toNumber() : null,
     hitTP1: trade.hitTP1,
     hitTP2: trade.hitTP2,
     hitTP3: trade.hitTP3,
@@ -73,6 +72,8 @@ export default async function EditTradePage({
       tradingAccountId: a.tradingAccountId,
       riskInputType: a.riskInputType,
       riskValue: a.riskValue.toNumber(),
+      closingPnlGross: a.closingPnlGross.toNumber(),
+      closingPnlNet: a.closingPnlNet.toNumber(),
     })),
     // SOT: selections are stored by name (from the chosen strategy). Old trades
     // predating the strategy-scoped model have no names yet — start empty; the
@@ -107,6 +108,7 @@ export default async function EditTradePage({
         accounts={accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind }))}
         strategies={formStrategies}
         defaultValues={defaultValues}
+        performanceRiskLocked={trade.actualEntry != null}
       />
     </div>
   );

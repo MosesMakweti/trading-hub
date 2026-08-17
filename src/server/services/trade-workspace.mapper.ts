@@ -42,7 +42,7 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     sessionColor,
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
-    expectedRR: trade.expectedRR.toNumber(),
+    expectedRR: trade.expectedRR ? trade.expectedRR.toNumber() : null,
     actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
     hitTP1: trade.hitTP1,
     hitTP2: trade.hitTP2,

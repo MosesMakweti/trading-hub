@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db";
 import { computeNetPnl } from "@/domain/prop-firms/risk";
+import { settlePerformanceTrade } from "@/server/services/performance-account.service";
 import type { PartialExitUpsertInput } from "@/lib/validation/trade-plan";
 
 /**
@@ -72,21 +73,28 @@ export async function upsertPartialExit(userId: string, tradeId: string, input: 
     source: input.source ?? ("MANUAL" as const),
   };
 
+  let result;
   if (input.id) {
     const existing = await prisma.tradeActualPartialExit.findFirst({ where: { id: input.id, tradeId, userId } });
     if (!existing) throw new Error("Partial exit not found.");
-    return prisma.tradeActualPartialExit.update({ where: { id: input.id }, data });
+    result = await prisma.tradeActualPartialExit.update({ where: { id: input.id }, data });
+  } else {
+    const duplicateOrder = await prisma.tradeActualPartialExit.findFirst({ where: { tradeId, exitOrder: input.exitOrder } });
+    if (duplicateOrder) throw new Error(`Exit #${input.exitOrder} already exists for this trade.`);
+    result = await prisma.tradeActualPartialExit.create({ data });
   }
 
-  const duplicateOrder = await prisma.tradeActualPartialExit.findFirst({ where: { tradeId, exitOrder: input.exitOrder } });
-  if (duplicateOrder) throw new Error(`Exit #${input.exitOrder} already exists for this trade.`);
-
-  return prisma.tradeActualPartialExit.create({ data });
+  // Performance Account automatic benchmark (spec §9/§13): a partial exit is
+  // part of the canonical actual-execution result, so it must recompute
+  // realized R / settlement the same way changing actualExit does.
+  await settlePerformanceTrade(userId, tradeId);
+  return result;
 }
 
 export async function deletePartialExit(userId: string, tradeId: string, partialExitId: string): Promise<void> {
   await assertOwnsTrade(userId, tradeId);
   await prisma.tradeActualPartialExit.deleteMany({ where: { id: partialExitId, tradeId, userId } });
+  await settlePerformanceTrade(userId, tradeId);
 }
 
 /** Sets a partial's planned-target mapping explicitly — the trader's own

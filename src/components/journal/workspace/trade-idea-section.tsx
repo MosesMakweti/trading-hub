@@ -6,10 +6,7 @@ import {
   StrategyRef,
   WorkspaceField,
 } from "@/components/journal/workspace/workspace-ui";
-import {
-  WorkspaceNoteField,
-  WorkspacePriceField,
-} from "@/components/journal/workspace/workspace-fields";
+import { WorkspaceNoteField } from "@/components/journal/workspace/workspace-fields";
 import { TradeImageBucket } from "@/components/journal/workspace/trade-image-bucket";
 import { AccountAllocationSection } from "@/components/journal/workspace/account-allocation-section";
 import { TradePlanSection } from "@/components/journal/workspace/trade-plan/trade-plan-section";
@@ -71,7 +68,11 @@ export function TradeIdeaSection({
           label="Higher-timeframe bias"
           value={`${trade.higherTimeframeBias === "BULLISH" ? "Bullish" : "Bearish"} · ${trade.biasConfidencePercent}%`}
         />
-        <WorkspaceField label="Expected RR" value={`${trade.expectedRR.toFixed(2)}R`} />
+        <WorkspaceField
+          label="Expected RR"
+          value={trade.expectedRR != null ? `${trade.expectedRR.toFixed(2)}R` : undefined}
+          placeholder="Not planned yet"
+        />
         <WorkspaceField label="Reference risk" value={referenceRisk} />
       </div>
 
@@ -104,32 +105,13 @@ export function TradeIdeaSection({
 
       <NoteBlock label="Pre-trade notes" text={trade.preTradeNotes} />
 
-      {/* Trade plan details — editable inline (Phase 2). */}
+      {/* Trade plan details — entry/stop-loss/target now live solely in the
+          TradingView Trade Plan below (screenshot + annotations); this block
+          only holds narrative context that isn't part of that architecture. */}
       <div className="grid grid-cols-1 gap-3 rounded-xl border border-border bg-background/30 p-3 sm:grid-cols-3">
         <div className="text-xs font-medium text-muted-foreground sm:col-span-3">
           Trade plan details
         </div>
-        <WorkspacePriceField
-          dateKey={trade.dateKey}
-          tradeId={trade.id}
-          field="plannedEntry"
-          label="Planned entry"
-          initialValue={trade.plannedEntry}
-        />
-        <WorkspacePriceField
-          dateKey={trade.dateKey}
-          tradeId={trade.id}
-          field="plannedStopLoss"
-          label="Planned stop-loss"
-          initialValue={trade.plannedStopLoss}
-        />
-        <WorkspacePriceField
-          dateKey={trade.dateKey}
-          tradeId={trade.id}
-          field="plannedTarget"
-          label="Planned target"
-          initialValue={trade.plannedTarget}
-        />
         <WorkspaceNoteField
           dateKey={trade.dateKey}
           tradeId={trade.id}

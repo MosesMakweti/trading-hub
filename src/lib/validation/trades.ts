@@ -7,13 +7,18 @@ export const directionSchema = z.enum(["LONG", "SHORT"]);
 export const biasSchema = z.enum(["BULLISH", "BEARISH"]);
 export const riskInputTypeSchema = z.enum(["PERCENT", "AMOUNT"]);
 
-// Participating (non-Performance) accounts only ever specify risk — their
-// PnL is always auto-calculated from the Performance Account's entered PnL,
-// scaled by relative risk% (see domain/performance/allocation.ts).
+// Participating REAL accounts (prop-firm/brokerage TradingAccounts, never
+// the Performance benchmark) — independent of the Performance Account and
+// of each other: their own risk% and their own manually-entered/imported
+// PnL (spec: "real trading accounts must remain optional allocations with
+// independent risk percentages, executions and PnL" — never derived by
+// scaling the Performance Account's result).
 export const tradeAllocationSchema = z.object({
   tradingAccountId: z.string().min(1),
   riskInputType: riskInputTypeSchema,
   riskValue: z.coerce.number().min(0),
+  closingPnlGross: z.coerce.number().default(0),
+  closingPnlNet: z.coerce.number().default(0),
 });
 
 export const tradeSchema = z
@@ -28,12 +33,20 @@ export const tradeSchema = z
     higherTimeframeBias: biasSchema,
     biasConfidencePercent: z.coerce.number().int().min(0).max(100),
     selectedSession: z.string().nullable().default(null),
-    expectedRR: z.coerce.number(),
+    // Not entered on the create/edit form — derived from the TradingView Trade
+    // Plan's weighted planned R once that plan is confirmed (trade-plan.service.ts).
+    expectedRR: z.coerce.number().nullable().default(null),
     actualRR: z.coerce.number().nullable().default(null),
-    // The one Closing PnL the trader manually enters — always the
-    // Performance Account's real dollar result for this trade.
-    performanceClosingPnlGross: z.coerce.number(),
-    performanceClosingPnlNet: z.coerce.number(),
+    // Pre-execution override of the Performance Account's default risk% for
+    // this trade only (spec §5) — null = use the account's configured
+    // default. Locked once the trade has an actual entry; the save layer
+    // rejects a change after that point (performance-account.service.ts).
+    // Preprocessed so a blank/cleared form field means "no override" (null)
+    // rather than coercing "" to 0 and failing .positive().
+    performanceRiskPercentOverride: z.preprocess(
+      (v) => (v === "" || v == null ? null : v),
+      z.coerce.number().positive().nullable(),
+    ).default(null),
     hitTP1: z.boolean().default(false),
     hitTP2: z.boolean().default(false),
     hitTP3: z.boolean().default(false),

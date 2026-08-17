@@ -61,7 +61,7 @@ export default async function JournalDayPage({
     direction: t.direction,
     higherTimeframeBias: t.higherTimeframeBias,
     biasConfidencePercent: t.biasConfidencePercent,
-    expectedRR: t.expectedRR.toNumber(),
+    expectedRR: t.expectedRR ? t.expectedRR.toNumber() : null,
     actualRR: t.actualRR ? t.actualRR.toNumber() : null,
     hitTP1: t.hitTP1,
     hitTP2: t.hitTP2,

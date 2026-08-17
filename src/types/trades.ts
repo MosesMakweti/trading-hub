@@ -42,7 +42,7 @@ export interface TradeListItemDTO {
   direction: "LONG" | "SHORT";
   higherTimeframeBias: "BULLISH" | "BEARISH";
   biasConfidencePercent: number;
-  expectedRR: number;
+  expectedRR: number | null;
   actualRR: number | null;
   hitTP1: boolean;
   hitTP2: boolean;
@@ -110,7 +110,7 @@ export interface TradeWorkspaceDTO {
   higherTimeframeBias: "BULLISH" | "BEARISH";
   biasConfidencePercent: number;
 
-  expectedRR: number;
+  expectedRR: number | null;
   actualRR: number | null;
   hitTP1: boolean;
   hitTP2: boolean;

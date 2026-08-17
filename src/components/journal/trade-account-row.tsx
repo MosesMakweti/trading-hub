@@ -27,10 +27,10 @@ export function TradeAccountRow({
 }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-background/40 p-3">
-      <div className="grid flex-1 grid-cols-2 items-end gap-3 sm:grid-cols-3">
-        <div>
+      <div className="grid flex-1 grid-cols-2 items-end gap-3 sm:grid-cols-5">
+        <div className="sm:col-span-1">
           <span className="text-xs font-medium">{accountName}</span>
-          <p className="text-[11px] text-muted-foreground">PnL auto-calculated from Performance Account</p>
+          <p className="text-[11px] text-muted-foreground">Independent risk &amp; PnL</p>
         </div>
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Risk type</label>
@@ -59,6 +59,38 @@ export function TradeAccountRow({
           <Controller
             control={control}
             name={`allocations.${index}.riskValue`}
+            render={({ field }) => (
+              <Input
+                type="number"
+                step="0.01"
+                name={field.name}
+                value={field.value as number}
+                onChange={(e) => field.onChange(e.target.valueAsNumber)}
+              />
+            )}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Gross PnL ($)</label>
+          <Controller
+            control={control}
+            name={`allocations.${index}.closingPnlGross`}
+            render={({ field }) => (
+              <Input
+                type="number"
+                step="0.01"
+                name={field.name}
+                value={field.value as number}
+                onChange={(e) => field.onChange(e.target.valueAsNumber)}
+              />
+            )}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Net PnL ($)</label>
+          <Controller
+            control={control}
+            name={`allocations.${index}.closingPnlNet`}
             render={({ field }) => (
               <Input
                 type="number"

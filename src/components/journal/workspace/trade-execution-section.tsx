@@ -60,7 +60,14 @@ export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
       <div className="flex items-center gap-3 rounded-xl border border-border bg-background/40 p-3">
         <div className="flex-1">
           <div className="text-xs text-muted-foreground">Expected RR</div>
-          <div className="text-lg font-semibold tabular-nums">{trade.expectedRR.toFixed(2)}R</div>
+          <div
+            className={cn(
+              "text-lg font-semibold tabular-nums",
+              trade.expectedRR == null && "text-muted-foreground",
+            )}
+          >
+            {trade.expectedRR != null ? `${trade.expectedRR.toFixed(2)}R` : "Not planned yet"}
+          </div>
         </div>
         <div className="text-muted-foreground">→</div>
         <div className="flex-1 text-right">
