@@ -95,6 +95,28 @@ export async function archivePropFirmAccountAction(id: string): Promise<ActionRe
   return { success: true };
 }
 
+export async function deletePropFirmAccountAction(id: string): Promise<ActionResult> {
+  const user = await requireUser();
+  try {
+    await propFirmsService.deletePropFirmAccount(user.id, id);
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Failed to delete account." };
+  }
+  revalidatePath("/prop-firms");
+  return { success: true };
+}
+
+export async function deleteUserPropFirmAction(id: string): Promise<ActionResult> {
+  const user = await requireUser();
+  try {
+    await propFirmsService.deleteUserPropFirm(user.id, id);
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Failed to delete firm." };
+  }
+  revalidatePath("/prop-firms");
+  return { success: true };
+}
+
 export async function advanceAccountStageAction(accountId: string, input: unknown): Promise<AdvanceStageResult> {
   const user = await requireUser();
   const parsed = advanceStageSchema.safeParse(input);

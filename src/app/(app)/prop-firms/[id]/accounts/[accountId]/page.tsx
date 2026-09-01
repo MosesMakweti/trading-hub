@@ -5,13 +5,17 @@ import { getAccountDetail } from "@/server/services/prop-firms.service";
 import { listMediaForOwners } from "@/server/services/media.service";
 import {
   toExecutionDTO,
+  toImportBatchDTO,
   toLedgerEntryDTO,
+  toMappingTemplateDTO,
   toPropFirmAccountDTO,
   toRuleHealthDTO,
   toTrackRecordDTO,
 } from "@/server/services/prop-firms.mapper";
 import { listExecutionsForAccount } from "@/server/services/trade-executions.service";
 import { getAccountLedger, getLedgerDerivedBalances } from "@/server/services/account-ledger.service";
+import { listImportBatches } from "@/server/services/prop-firm-import.service";
+import { listMappingTemplates } from "@/server/services/prop-firm-import-mapping.service";
 import { getAccountTrackRecord, getStageRuleHealth, getStageTrackRecord } from "@/server/services/prop-firms-health.service";
 import { FadeIn } from "@/components/shared/motion";
 import { AccountWorkspace } from "@/components/prop-firms/account-workspace/account-workspace";
@@ -44,10 +48,16 @@ export default async function AccountDetailPage({
   ]);
 
   const ledgerBalanceByAccountId = await getLedgerDerivedBalances([accountId]);
+  const [importBatchesRaw, mappingTemplatesRaw] = await Promise.all([
+    listImportBatches(user.id, accountId),
+    listMappingTemplates(user.id),
+  ]);
   const account = toPropFirmAccountDTO(accountRaw, mediaByOwnerId, ledgerBalanceByAccountId);
   const executions = executionsRaw.map(toExecutionDTO);
   const ledger = ledgerRaw.map(toLedgerEntryDTO);
   const trackRecord = toTrackRecordDTO(trackRecordRaw);
+  const importBatches = importBatchesRaw.map(toImportBatchDTO);
+  const mappingTemplates = mappingTemplatesRaw.map(toMappingTemplateDTO);
 
   // Per-stage track records (spec §7: "switch between current stage /
   // previous stages / lifetime") — same computeTrackRecord math as the
@@ -85,6 +95,8 @@ export default async function AccountDetailPage({
         trackRecord={trackRecord}
         stageTrackRecords={stageTrackRecords}
         ruleHealthByRuleId={Object.fromEntries(ruleHealthByRuleId)}
+        importBatches={importBatches}
+        mappingTemplates={mappingTemplates}
       />
     </FadeIn>
   );

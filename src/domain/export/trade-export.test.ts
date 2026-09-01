@@ -13,10 +13,6 @@ const RECORD: TradeExportRecord = {
   actualRR: 2.5,
   performanceClosingPnlGross: 2500,
   performanceClosingPnlNet: 2450,
-  hitTP1: true,
-  hitTP2: true,
-  hitTP3: false,
-  hitFullTP: false,
   psychPreTradeMindset: null,
   psychPostTradeReflection: null,
   psychLessonsLearned: null,
@@ -39,8 +35,6 @@ describe("toExportRow", () => {
     expect(row["Actual RR"]).toBe("2.5");
     expect(row["Performance PnL (Net)"]).toBe(2450);
     expect(row["Psychology Grade"]).toBe("B");
-    expect(row["TP1 Hit"]).toBe("Yes");
-    expect(row["TP3 Hit"]).toBe("No");
   });
 
   it("renders a blank Actual RR for still-open trades", () => {

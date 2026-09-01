@@ -31,12 +31,24 @@ export interface PostLedgerEntryInput {
 async function recomputeRunningBalances(tx: TransactionClient, accountId: string): Promise<void> {
   const entries = await tx.accountLedgerEntry.findMany({
     where: { accountId },
-    orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }],
-    select: { id: true, amount: true, balanceAfter: true },
+    orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, amount: true, balanceAfter: true, sourceType: true, eventType: true },
+  });
+
+  // The account's opening entry seeds the balance and must fold in first
+  // regardless of its `occurredAt` — a CSV import of back-dated trades can
+  // otherwise leave `ACCOUNT_INITIALIZED` sorting *after* activity it should
+  // precede, which corrupts every balanceAfter after it. Array.sort is stable
+  // in this runtime, so the (occurredAt, createdAt, id) order above is kept
+  // within each group.
+  const ordered = [...entries].sort((a, b) => {
+    const aOpen = a.sourceType === "ACCOUNT_INIT" || a.eventType === "ACCOUNT_INITIALIZED" ? 0 : 1;
+    const bOpen = b.sourceType === "ACCOUNT_INIT" || b.eventType === "ACCOUNT_INITIALIZED" ? 0 : 1;
+    return aOpen - bOpen;
   });
 
   let running = new Decimal(0);
-  for (const entry of entries) {
+  for (const entry of ordered) {
     running = running.plus(entry.amount.toString());
     if (!running.equals(entry.balanceAfter.toString())) {
       await tx.accountLedgerEntry.update({ where: { id: entry.id }, data: { balanceAfter: running.toString() } });
@@ -137,17 +149,20 @@ export async function getAccountLedger(userId: string, accountId: string) {
   });
 }
 
-/** The account's balance as of its most recent ledger entry — null when the
- *  account has no ledger history yet (never a fabricated 0). */
+/** The account's current balance = Σ of every ledger entry's signed amount —
+ *  order-independent, so it stays correct even when the opening
+ *  `ACCOUNT_INITIALIZED` entry carries a later `occurredAt` than back-dated
+ *  imported activity. Null when the account has no ledger history yet (never a
+ *  fabricated 0). */
 export async function getLedgerDerivedBalance(userId: string, accountId: string): Promise<Decimal | null> {
   const owned = await prisma.propFirmAccount.findFirst({ where: { id: accountId, userId }, select: { id: true } });
   if (!owned) throw new Error("Account not found.");
-  const latest = await prisma.accountLedgerEntry.findFirst({
+  const agg = await prisma.accountLedgerEntry.aggregate({
     where: { accountId },
-    orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
-    select: { balanceAfter: true },
+    _sum: { amount: true },
+    _count: { _all: true },
   });
-  return latest ? new Decimal(latest.balanceAfter.toString()) : null;
+  return agg._count._all > 0 ? new Decimal((agg._sum.amount ?? 0).toString()) : null;
 }
 
 /** Bulk variant for list/rollup surfaces (market overview, company
@@ -156,13 +171,54 @@ export async function getLedgerDerivedBalance(userId: string, accountId: string)
  *  `accountIds` to the caller's own accounts via their existing query). */
 export async function getLedgerDerivedBalances(accountIds: string[]): Promise<Map<string, Decimal>> {
   if (accountIds.length === 0) return new Map();
-  const rows = await prisma.$queryRaw<{ accountId: string; balanceAfter: unknown }[]>`
-    SELECT DISTINCT ON ("accountId") "accountId", "balanceAfter"
+  const rows = await prisma.$queryRaw<{ accountId: string; balance: unknown }[]>`
+    SELECT "accountId", SUM("amount") AS balance
     FROM "AccountLedgerEntry"
     WHERE "accountId" = ANY(${accountIds})
-    ORDER BY "accountId", "occurredAt" DESC, "createdAt" DESC
+    GROUP BY "accountId"
   `;
-  return new Map(rows.map((r) => [r.accountId, new Decimal(r.balanceAfter as string)]));
+  return new Map(rows.map((r) => [r.accountId, new Decimal((r.balance as string) ?? 0)]));
+}
+
+export interface LedgerEventRow {
+  id: string;
+  eventType: LedgerEventType;
+  /** Signed amount as a decimal string (no float drift). */
+  amount: string;
+  occurredAt: string;
+  sourceType: LedgerSourceType | null;
+}
+
+/** Raw signed ledger events for many accounts at once — one query, grouped by
+ *  account. The consumer (domain/prop-firms/balance-curve.ts,
+ *  overview-series.ts) re-derives running balances from these, so ordering and
+ *  the stored `balanceAfter` are irrelevant here. Ownership isn't re-checked
+ *  (callers scope `accountIds` to their own accounts), same as
+ *  `getLedgerDerivedBalances`. */
+export async function getLedgerEventsForAccounts(
+  accountIds: string[],
+): Promise<Map<string, LedgerEventRow[]>> {
+  const result = new Map<string, LedgerEventRow[]>();
+  if (accountIds.length === 0) return result;
+
+  const rows = await prisma.accountLedgerEntry.findMany({
+    where: { accountId: { in: accountIds } },
+    orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, accountId: true, eventType: true, amount: true, occurredAt: true, sourceType: true },
+  });
+
+  for (const r of rows) {
+    const list = result.get(r.accountId) ?? [];
+    list.push({
+      id: r.id,
+      eventType: r.eventType,
+      amount: new Decimal(r.amount.toString()).toString(),
+      occurredAt: r.occurredAt.toISOString(),
+      sourceType: r.sourceType,
+    });
+    result.set(r.accountId, list);
+  }
+  return result;
 }
 
 export interface CreateManualAdjustmentInput {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { psychologyAnswersSchema } from "@/lib/validation/psychology";
+import { partialPsychologyAnswersSchema } from "@/lib/validation/psychology";
 import { propFirmExecutionsSchema } from "@/lib/validation/prop-firms";
 
 export const directionSchema = z.enum(["LONG", "SHORT"]);
@@ -23,11 +23,13 @@ export const tradeAllocationSchema = z.object({
 
 export const tradeSchema = z
   .object({
-    // SOT: a trade is taken under a strategy, and its market + session come from
-    // that strategy (never a global list). assetSymbol is the chosen market symbol
-    // (the save layer bridges the legacy Asset FK from it until P9).
-    strategyId: z.string().min(1, "Select a strategy."),
-    assetSymbol: z.string().min(1, "Select an asset."),
+    // A trade is normally taken under a strategy (its market + session come from
+    // that strategy), but a strategy is NOT mandatory — a trader with none set
+    // up yet, or logging a one-off, can save a freeform trade (empty string).
+    // The save layer already treats a missing strategy as null throughout
+    // (resolveStrategySnapshot / buildStrategyContext in trades.service.ts).
+    strategyId: z.string().default(""),
+    assetSymbol: z.string().trim().min(1, "Enter the asset / symbol you traded."),
     executionMinutes: z.coerce.number().int().min(0).max(1439),
     direction: directionSchema,
     higherTimeframeBias: biasSchema,
@@ -47,10 +49,6 @@ export const tradeSchema = z
       (v) => (v === "" || v == null ? null : v),
       z.coerce.number().positive().nullable(),
     ).default(null),
-    hitTP1: z.boolean().default(false),
-    hitTP2: z.boolean().default(false),
-    hitTP3: z.boolean().default(false),
-    hitFullTP: z.boolean().default(false),
     psychPreTradeMindset: z.string().trim().max(4000).nullable().default(null),
     psychPostTradeReflection: z.string().trim().max(4000).nullable().default(null),
     psychLessonsLearned: z.string().trim().max(4000).nullable().default(null),
@@ -69,7 +67,11 @@ export const tradeSchema = z
     // A single entry model chosen from the selected strategy's own Entry Models
     // (by name). Null when none is chosen or the strategy defines none.
     selectedEntryModel: z.string().nullable().default(null),
-    psychologyAnswers: psychologyAnswersSchema,
+    // Optional at create — a trade is first logged as an idea; the post-trade
+    // Honest Questionnaire is filled later in the Trade Review tab. When all 8
+    // answers ARE present the service scores & persists them (trades.service.ts
+    // scorePsychologyAnswers); a partial/empty set persists nothing.
+    psychologyAnswers: partialPsychologyAnswersSchema.default({}),
   })
   .refine(
     (data) => new Set(data.allocations.map((a) => a.tradingAccountId)).size === data.allocations.length,
@@ -129,6 +131,9 @@ export const tradeWorkspaceSectionSchema = z
     // Strategy-adherence answers: a map of question key -> yes/no. Unknown keys
     // are dropped and the percent is recomputed server-side (service layer).
     adherenceAnswers: z.record(z.string(), z.boolean()),
+    // Post-trade Honest Questionnaire answers, filled in the Trade Review tab
+    // after the trade. Persisted (with score) only once all 8 are answered.
+    psychologyAnswers: partialPsychologyAnswersSchema,
   })
   .partial()
   .refine((data) => Object.keys(data).length > 0, { message: "Nothing to update." });

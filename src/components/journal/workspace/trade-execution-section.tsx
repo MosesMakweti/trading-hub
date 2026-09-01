@@ -13,6 +13,7 @@ import {
   WorkspacePriceField,
 } from "@/components/journal/workspace/workspace-fields";
 import { TradeImageBucket } from "@/components/journal/workspace/trade-image-bucket";
+import { parseSymbol, formatTargetPrice } from "@/domain/trade-plan/instrument-catalog";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
 const ACCOUNT_KIND_LABEL: Record<string, string> = {
@@ -23,12 +24,7 @@ const ACCOUNT_KIND_LABEL: Record<string, string> = {
 
 // Section 2 — Trade Execution: what actually happened. Kept separate from the plan.
 export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
-  const tpHits = [
-    trade.hitTP1 && "TP1",
-    trade.hitTP2 && "TP2",
-    trade.hitTP3 && "TP3",
-    trade.hitFullTP && "Full TP",
-  ].filter(Boolean) as string[];
+  const targetPrecision = parseSymbol(trade.assetSymbol).spec?.decimalPrecision ?? null;
 
   return (
     <div className="space-y-5">
@@ -116,12 +112,12 @@ export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
         </div>
       </div>
 
-      {(tpHits.length > 0 || trade.executionLabels.length > 0) && (
+      {(trade.targets.length > 0 || trade.executionLabels.length > 0) && (
         <div className="space-y-2">
           <div className="flex flex-wrap gap-1.5">
-            {tpHits.map((label) => (
-              <Badge key={label} variant="success">
-                {label}
+            {trade.targets.map((t) => (
+              <Badge key={t.targetOrder} variant="outline">
+                {t.label} {formatTargetPrice(t.targetPrice, targetPrecision)}
               </Badge>
             ))}
             {trade.executionLabels.map((tag) => (

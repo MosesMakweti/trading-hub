@@ -4,9 +4,10 @@ import { listActiveDirectoryEntries } from "@/server/services/prop-firm-director
 import { listUserPropFirms } from "@/server/services/prop-firms.service";
 import { listMediaForOwners } from "@/server/services/media.service";
 import { collectAccountIds, collectEvidenceOwnerIds, toUserPropFirmDTO } from "@/server/services/prop-firms.mapper";
-import { getLedgerDerivedBalances } from "@/server/services/account-ledger.service";
+import { getLedgerDerivedBalances, getLedgerEventsForAccounts } from "@/server/services/account-ledger.service";
 import { FadeIn } from "@/components/shared/motion";
 import { PropFirmsView } from "@/components/prop-firms/prop-firms-view";
+import { buildOverviewAccountInputs } from "@/domain/prop-firms/overview-series";
 import type { DirectoryEntryDTO } from "@/types/prop-firms";
 
 export default async function PropFirmsPage({
@@ -32,9 +33,11 @@ export default async function PropFirmsPage({
   // milestone and payout, rather than N+1 per-item requests. Same for
   // ledger-derived balances (currentBalance is never trusted from the
   // stored column here — see prop-firms.mapper.ts).
-  const [mediaByOwnerId, ledgerBalanceByAccountId] = await Promise.all([
+  const accountIds = collectAccountIds(firms);
+  const [mediaByOwnerId, ledgerBalanceByAccountId, ledgerEventsByAccount] = await Promise.all([
     listMediaForOwners(user.id, "PROP_FIRM_MILESTONE", collectEvidenceOwnerIds(firms)),
-    getLedgerDerivedBalances(collectAccountIds(firms)),
+    getLedgerDerivedBalances(accountIds),
+    getLedgerEventsForAccounts(accountIds),
   ]);
 
   const directoryDtos: DirectoryEntryDTO[] = directory.map((d) => ({
@@ -49,9 +52,19 @@ export default async function PropFirmsPage({
 
   const firmDtos = firms.map((f) => toUserPropFirmDTO(f, mediaByOwnerId, ledgerBalanceByAccountId));
 
+  // Per-account inputs for the weekly Overview chart (master capital +
+  // cumulative payouts). Pure client-side filtering by market/date happens in
+  // the view; the raw ledger events travel with each account.
+  const overviewAccounts = buildOverviewAccountInputs(firmDtos, ledgerEventsByAccount);
+
   return (
     <FadeIn className="mx-auto max-w-7xl">
-      <PropFirmsView directory={directoryDtos} firms={firmDtos} initialMarket={initialMarket} />
+      <PropFirmsView
+        directory={directoryDtos}
+        firms={firmDtos}
+        initialMarket={initialMarket}
+        overviewAccounts={overviewAccounts}
+      />
     </FadeIn>
   );
 }

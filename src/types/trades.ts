@@ -10,6 +10,15 @@ export interface SelectedTagDTO {
   color: TagColor;
 }
 
+/** A planned profit target from the confirmed TradingView Trade Plan — the
+ *  sole source for TP display everywhere outside the plan workspace itself
+ *  (no separate manual "TP hit" tracking exists). */
+export interface PlannedTargetDTO {
+  targetOrder: number;
+  label: string;
+  targetPrice: number;
+}
+
 /** Per-trade discrepancy breakdown (Counterfactual model). A correctly-executed
  * trade — win OR loss — has avoidableR 0 and no leakages. R-multiples. */
 export interface TradeDiscrepancyDTO {
@@ -44,10 +53,7 @@ export interface TradeListItemDTO {
   biasConfidencePercent: number;
   expectedRR: number | null;
   actualRR: number | null;
-  hitTP1: boolean;
-  hitTP2: boolean;
-  hitTP3: boolean;
-  hitFullTP: boolean;
+  targets: PlannedTargetDTO[];
   accounts: {
     name: string;
     riskInputType: "PERCENT" | "AMOUNT";
@@ -112,10 +118,7 @@ export interface TradeWorkspaceDTO {
 
   expectedRR: number | null;
   actualRR: number | null;
-  hitTP1: boolean;
-  hitTP2: boolean;
-  hitTP3: boolean;
-  hitFullTP: boolean;
+  targets: PlannedTargetDTO[];
 
   entryModelName: string | null;
   confluenceLabels: SelectedTagDTO[];
@@ -176,6 +179,10 @@ export interface TradeWorkspaceDTO {
     percent: number;
     grade: "A" | "B" | "C" | "D" | "F";
   } | null;
+  // Raw Honest-Questionnaire answers (keyed by PSYCHOLOGY_QUESTIONS) so the
+  // Trade Review panel can seed from saved state and let the trader complete
+  // or revise them. `{}` when never answered.
+  psychologyAnswers: Record<string, string | number>;
 
   // Optional gallery preview (a representative attached image). Populated only
   // where the gallery needs it (see listTradePreviewImages); the mapper leaves it

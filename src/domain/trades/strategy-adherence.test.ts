@@ -46,4 +46,41 @@ describe("scoreStrategyAdherence", () => {
       tradeQualityPercent: null,
     });
   });
+
+  describe("direction-aware confluence denominator", () => {
+    const cf = (
+      name: string,
+      directionApplicability: "BULLISH" | "BEARISH" | "BOTH",
+    ) => ({ name, color: "GRAY", directionApplicability });
+    const set = {
+      confluences: [
+        cf("Bull MSB", "BULLISH"),
+        cf("Bear MSB", "BEARISH"),
+        cf("At key level", "BOTH"),
+      ],
+      execution: [tag("Candle Close")],
+    };
+
+    it("a long trade is only measured against BULLISH + BOTH confluences", () => {
+      const r = scoreStrategyAdherence(set, ["Bull MSB"], [], "LONG");
+      // eligible = Bull MSB + At key level (2). 1 selected → 50%.
+      expect(r.confluencePercent).toBe(50);
+    });
+
+    it("a stale bearish selection doesn't count and doesn't shrink the denominator", () => {
+      const r = scoreStrategyAdherence(set, ["Bear MSB", "At key level"], [], "LONG");
+      // eligible = Bull MSB + At key level. Only "At key level" matches → 1 of 2.
+      expect(r.confluencePercent).toBe(50);
+    });
+
+    it("a short trade is measured against BEARISH + BOTH", () => {
+      const r = scoreStrategyAdherence(set, ["Bear MSB", "At key level"], [], "SHORT");
+      expect(r.confluencePercent).toBe(100); // both eligible ones selected
+    });
+
+    it("without a direction every confluence still counts (legacy behaviour)", () => {
+      const r = scoreStrategyAdherence(set, ["Bull MSB"], []);
+      expect(r.confluencePercent).toBe(33); // 1 of 3
+    });
+  });
 });

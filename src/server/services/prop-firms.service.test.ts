@@ -431,3 +431,59 @@ describe("legacy account migration", () => {
     expect(firms[0].accounts).toHaveLength(1);
   });
 });
+
+describe("createPayout — profit-split snapshot", () => {
+  let userId: string;
+  let accountId: string;
+
+  beforeAll(async () => {
+    const user = await makeUser("payout-split");
+    userId = user.id;
+    const firm = await createUserPropFirm(userId, {
+      identityKind: "CUSTOM",
+      customCompanyName: "Split Snapshot Firm",
+      marketCategory: "CFD",
+    });
+    const account = await createPropFirmAccount(userId, {
+      userPropFirmId: firm.id,
+      displayName: "Split Snapshot Account",
+      marketCategory: "CFD",
+      modelType: "ONE_PHASE",
+      accountSize: 100_000,
+      stages: [
+        {
+          name: "Funded",
+          type: "MASTER_FUNDED",
+          rules: [{ name: "Profit split", ruleKey: "PROFIT_SPLIT", valueType: "PERCENTAGE", numericValue: 75 }],
+        },
+      ],
+    });
+    accountId = account.id;
+  });
+
+  afterAll(() => cleanupUsers(userId));
+
+  it("snapshots the account's configured split and computes the trader's net", async () => {
+    const p = await createPayout(userId, accountId, { grossPayout: 1_000 });
+    expect(p.profitSplitPercent?.toNumber()).toBe(75);
+    expect(p.netReceived?.toNumber()).toBe(750);
+  });
+
+  it("an explicit percentage overrides the account rule", async () => {
+    const p = await createPayout(userId, accountId, { grossPayout: 1_000, profitSplitPercent: 60 });
+    expect(p.profitSplitPercent?.toNumber()).toBe(60);
+    expect(p.netReceived?.toNumber()).toBe(600);
+  });
+
+  it("applies the split per payout and never recalculates a recorded one when the rule changes", async () => {
+    const p = await createPayout(userId, accountId, { grossPayout: 220.58, profitSplitPercent: 80 });
+    expect(p.netReceived?.toNumber()).toBe(176.46); // spec worked example: 220.58 × 80% = 176.464 -> 176.46
+
+    const rule = await prisma.stageRule.findFirstOrThrow({ where: { ruleKey: "PROFIT_SPLIT", stage: { accountId } } });
+    await prisma.stageRule.update({ where: { id: rule.id }, data: { numericValue: 40 } });
+
+    const after = await prisma.payout.findUniqueOrThrow({ where: { id: p.id } });
+    expect(after.profitSplitPercent?.toNumber()).toBe(80);
+    expect(after.netReceived?.toNumber()).toBe(176.46);
+  });
+});

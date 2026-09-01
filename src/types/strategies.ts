@@ -1,14 +1,21 @@
 import type { TagColor } from "@prisma/client";
 
 import type { StrategyStatusValue } from "@/lib/validation/strategies";
+import type { ConfluenceDirectionValue } from "@/lib/validation/strategy-sot";
 
 /** A colored checklist tag (confluence / execution confirmation) as the trade form sees it. */
 export interface StrategyChecklistRef {
+  /** DB id — used as stable identity for direction-aware scoring / snapshots. */
+  id?: string;
   name: string;
   color: TagColor;
   category: string | null;
   weight: number | null;
   mandatory: boolean;
+  /** CONFLUENCE only — LONG (BULLISH) / SHORT (BEARISH) / BOTH. Absent = BOTH. */
+  directionApplicability?: ConfluenceDirectionValue;
+  /** Optional organizational link between opposite versions of one condition. */
+  pairId?: string | null;
 }
 export interface StrategyTagRef {
   name: string;
@@ -147,12 +154,17 @@ export interface StrategyVersionSessionSnapshot {
 }
 
 export interface StrategyVersionConfluenceSnapshot {
+  /** Optional — pre-direction snapshots don't have it. */
+  id?: string;
   name: string;
   color: TagColor;
   category: string | null;
   description: string | null;
   weight: number | null;
   mandatory: boolean;
+  /** Optional — pre-direction snapshots read as BOTH. */
+  directionApplicability?: ConfluenceDirectionValue;
+  pairId?: string | null;
   validationCriteria: string | null;
   enabled: boolean;
 }

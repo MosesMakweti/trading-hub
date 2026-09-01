@@ -5,6 +5,7 @@ import { CheckCircle2, Target } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { RowBar } from "@/components/analytics/row-bar";
 import { formatCurrency, formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
 import { formatDate } from "@/components/prop-firms/format";
 import { CompleteStageDialog } from "../complete-stage-dialog";
@@ -89,6 +90,13 @@ export function StagesTab({
               <div className="mt-0.5 font-medium">{formatDate(stage.completionDate)}</div>
             </div>
           </div>
+
+          {profitTargetHealth?.percentConsumed != null && (
+            <div className="mt-3 flex items-center justify-between gap-3 text-xs">
+              <span className="text-muted-foreground">Profit target progress</span>
+              <RowBar percent={profitTargetHealth.percentConsumed} />
+            </div>
+          )}
 
           <div className="mt-2 text-xs text-muted-foreground">
             {stage.rules.length} rule{stage.rules.length === 1 ? "" : "s"} configured

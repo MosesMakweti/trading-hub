@@ -158,8 +158,6 @@ export const createPropFirmAccountSchema = z.object({
   activationFees: z.coerce.number().min(0).optional(),
   otherCosts: z.coerce.number().min(0).optional(),
   purchaseDate: z.coerce.date().optional(),
-  platform: z.string().trim().max(60).optional(),
-  dataFeed: z.string().trim().max(60).optional(),
   notes: optionalNote,
   stages: z.array(createAccountStageDraftSchema).min(1, "At least one stage is required.").optional(),
 });
@@ -172,8 +170,6 @@ export const updatePropFirmAccountSchema = z.object({
   status: propFirmAccountStatusSchema.optional(),
   currentBalance: z.coerce.number().optional(),
   currentEquity: z.coerce.number().optional(),
-  platform: z.string().trim().max(60).optional(),
-  dataFeed: z.string().trim().max(60).optional(),
   notes: optionalNote,
 });
 

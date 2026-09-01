@@ -4,6 +4,7 @@ import {
   SetupQualityChart,
   SetupQualityTrendChart,
 } from "@/components/analytics/adherence-charts";
+import { RowBar } from "@/components/analytics/row-bar";
 import type { AdherenceSummary } from "@/domain/performance/adherence-analytics";
 
 function fmtPercent(v: number | null) {
@@ -56,6 +57,64 @@ export function AdherenceAnalytics({ data }: { data: AdherenceSummary }) {
         </div>
       </div>
 
+      {data.directionSplits.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">
+            Long vs short setups
+            <span className="ml-1 font-normal text-muted-foreground/50">
+              scored against each direction&apos;s eligible confluences
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground">
+                  <th className="pb-1.5 font-medium">Direction</th>
+                  <th className="pb-1.5 text-right font-medium">Trades</th>
+                  <th className="pb-1.5 text-right font-medium">W / L</th>
+                  <th className="pb-1.5 text-right font-medium">Avg setup score</th>
+                  <th className="pb-1.5 text-right font-medium">Confluence adherence</th>
+                  <th className="pb-1.5 font-medium">Win rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.directionSplits.map((d) => (
+                  <tr
+                    key={d.direction}
+                    className="border-t border-border/60 transition-colors hover:bg-accent/50"
+                  >
+                    <td className="py-1.5">
+                      <span
+                        className={
+                          d.direction === "LONG"
+                            ? "inline-flex rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-xs font-medium text-success"
+                            : "inline-flex rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger"
+                        }
+                      >
+                        {d.direction === "LONG" ? "Long" : "Short"}
+                      </span>
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">{d.trades}</td>
+                    <td className="py-1.5 text-right tabular-nums text-muted-foreground">
+                      {d.wins} / {d.losses}
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {d.avgSetupScore == null ? "—" : d.avgSetupScore.toFixed(1)}
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {fmtPercent(d.avgConfluenceAdherence)}
+                    </td>
+                    <td className="py-1.5">
+                      <RowBar percent={d.winRate} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {data.confluenceCombinations.length > 0 && (
         <div className="space-y-2">
           <div className="text-xs font-medium text-muted-foreground">
@@ -68,7 +127,7 @@ export function AdherenceAnalytics({ data }: { data: AdherenceSummary }) {
                   <th className="pb-1.5 font-medium">Combination</th>
                   <th className="pb-1.5 text-right font-medium">Trades</th>
                   <th className="pb-1.5 text-right font-medium">W / L</th>
-                  <th className="pb-1.5 text-right font-medium">Win rate</th>
+                  <th className="pb-1.5 font-medium">Win rate</th>
                 </tr>
               </thead>
               <tbody>
@@ -87,8 +146,8 @@ export function AdherenceAnalytics({ data }: { data: AdherenceSummary }) {
                     <td className="py-1.5 text-right tabular-nums text-muted-foreground">
                       {combo.wins} / {combo.losses}
                     </td>
-                    <td className="py-1.5 text-right font-medium tabular-nums">
-                      {combo.winRate == null ? "—" : `${combo.winRate.toFixed(1)}%`}
+                    <td className="py-1.5">
+                      <RowBar percent={combo.winRate} />
                     </td>
                   </tr>
                 ))}
@@ -109,7 +168,7 @@ export function AdherenceAnalytics({ data }: { data: AdherenceSummary }) {
                   <th className="pb-1.5 font-medium">Confluence</th>
                   <th className="pb-1.5 text-right font-medium">Trades</th>
                   <th className="pb-1.5 text-right font-medium">W / L</th>
-                  <th className="pb-1.5 text-right font-medium">Win rate</th>
+                  <th className="pb-1.5 font-medium">Win rate</th>
                 </tr>
               </thead>
               <tbody>
@@ -122,8 +181,8 @@ export function AdherenceAnalytics({ data }: { data: AdherenceSummary }) {
                     <td className="py-1.5 text-right tabular-nums text-muted-foreground">
                       {c.wins} / {c.losses}
                     </td>
-                    <td className="py-1.5 text-right font-medium tabular-nums">
-                      {c.winRate == null ? "—" : `${c.winRate.toFixed(1)}%`}
+                    <td className="py-1.5">
+                      <RowBar percent={c.winRate} />
                     </td>
                   </tr>
                 ))}

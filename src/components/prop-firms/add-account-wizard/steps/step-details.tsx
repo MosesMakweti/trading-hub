@@ -80,16 +80,6 @@ export function StepDetails({
       <FormField label="Purchase date">
         <Input type="date" value={draft.purchaseDate} onChange={(e) => onChange({ purchaseDate: e.target.value })} />
       </FormField>
-      <FormField label="Platform">
-        <Input
-          value={draft.platform}
-          onChange={(e) => onChange({ platform: e.target.value })}
-          placeholder="e.g. MT5, Tradovate"
-        />
-      </FormField>
-      <FormField label="Broker / data feed">
-        <Input value={draft.dataFeed} onChange={(e) => onChange({ dataFeed: e.target.value })} />
-      </FormField>
       <FormField label="External reference">
         <Input
           value={draft.externalRef}

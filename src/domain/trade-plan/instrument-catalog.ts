@@ -156,3 +156,13 @@ export function listKnownInstruments(): InstrumentSpec[] {
 export function specDecimal(value: string | null): Decimal | null {
   return value == null ? null : new Decimal(value);
 }
+
+/** Entry/stop/target values are instrument PRICES, never dollar amounts —
+ *  formatCurrency (a 2-decimal $ formatter meant for account balances/PnL)
+ *  would silently round an FX price like 1.08500 to "$1.09" and prepend a
+ *  meaningless $ sign. Respects the resolved instrument's own quote
+ *  precision when known, falling back to a magnitude-based guess otherwise. */
+export function formatTargetPrice(value: number, precision: number | null): string {
+  const digits = precision ?? (Math.abs(value) >= 100 ? 2 : 5);
+  return value.toFixed(digits);
+}

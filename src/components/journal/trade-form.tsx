@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -59,6 +59,44 @@ function emptyPlanTarget(order: number): PlanTargetRow {
 
 const NO_SESSION = "__none__";
 const NO_ENTRY_MODEL = "__no_entry_model__";
+const NO_STRATEGY = "__freeform__";
+
+const FIELD_LABELS: Record<string, string> = {
+  strategyId: "Strategy",
+  assetSymbol: "Asset / symbol",
+  executionMinutes: "Execution time",
+  biasConfidencePercent: "Bias confidence %",
+  allocations: "Participating accounts",
+  psychologyAnswers: "Post-trade questionnaire",
+};
+
+/** Flatten react-hook-form's nested `errors` into a display list. Repeated
+ *  leaf messages (e.g. one per unanswered psychology question) are de-duped so
+ *  the summary stays readable. */
+function flattenErrors(errs: FieldErrors): { name: string; label: string; message: string }[] {
+  const out: { name: string; label: string; message: string }[] = [];
+  const seen = new Set<string>();
+  const walk = (node: unknown, path: string) => {
+    if (!node || typeof node !== "object") return;
+    const record = node as Record<string, unknown>;
+    if (typeof record.message === "string" && record.message) {
+      const top = path.split(".")[0];
+      const key = `${top}:${record.message}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push({ name: top, label: FIELD_LABELS[top] ?? top, message: record.message });
+      }
+      return;
+    }
+    for (const k of Object.keys(record)) {
+      if (k === "ref" || k === "type" || k === "types" || k === "root") continue;
+      walk(record[k], path ? `${path}.${k}` : k);
+    }
+    if (record.root) walk(record.root, path);
+  };
+  walk(errs, "");
+  return out;
+}
 
 // Keep a currently-selected value visible even if the strategy's list changed
 // since the trade was saved (e.g. an asset later removed from the strategy).
@@ -80,10 +118,6 @@ const emptyDefaults: TradeFormValues = {
   expectedRR: null,
   actualRR: null,
   performanceRiskPercentOverride: null,
-  hitTP1: false,
-  hitTP2: false,
-  hitTP3: false,
-  hitFullTP: false,
   psychPreTradeMindset: null,
   psychPostTradeReflection: null,
   psychLessonsLearned: null,
@@ -110,6 +144,15 @@ interface TradeFormProps {
   // point (the save layer already ignores a changed value, see
   // buildAllocations in trades.service.ts; this just tells the trader why).
   performanceRiskLocked?: boolean;
+  // When set, the form is embedded (e.g. the Today "Add trade" dialog): on a
+  // successful save it calls `onSuccess` instead of navigating away, and the
+  // Cancel button calls `onCancel` instead of linking to the day.
+  onSuccess?: (tradeId: string) => void;
+  onCancel?: () => void;
+  // Seed the Idea bias/confidence from today's plan so a trade logged mid-flow
+  // starts aligned with what the trader decided this morning (create only).
+  initialBias?: "BULLISH" | "BEARISH";
+  initialBiasConfidence?: number;
 }
 
 export function TradeForm({
@@ -121,6 +164,10 @@ export function TradeForm({
   defaultValues,
   opportunityId,
   performanceRiskLocked = false,
+  onSuccess,
+  onCancel,
+  initialBias,
+  initialBiasConfidence,
 }: TradeFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -130,11 +177,42 @@ export function TradeForm({
     handleSubmit,
     control,
     setValue,
+    getValues,
     formState: { errors },
   } = useForm<TradeFormValues, unknown, TradeInput>({
     resolver: zodResolver(tradeSchema),
-    defaultValues: defaultValues ?? emptyDefaults,
+    defaultValues:
+      defaultValues ??
+      {
+        ...emptyDefaults,
+        higherTimeframeBias: initialBias ?? emptyDefaults.higherTimeframeBias,
+        biasConfidencePercent: initialBiasConfidence ?? emptyDefaults.biasConfidencePercent,
+      },
   });
+
+  const errorList = flattenErrors(errors);
+
+  /** Runs when the trader hits Save but validation fails — the form used to do
+   *  nothing at all. Now: a toast, a summary they can act on, and a jump to it. */
+  function onInvalid(formErrors: FieldErrors<TradeFormValues>) {
+    const count = flattenErrors(formErrors).length;
+    toast.error(
+      `Can't save yet — ${count} thing${count === 1 ? "" : "s"} need${count === 1 ? "s" : ""} your attention.`,
+    );
+    requestAnimationFrame(() => {
+      document.getElementById("trade-form-errors")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
+  function jumpToField(name: string) {
+    const el =
+      (document.getElementById(name) as HTMLElement | null) ??
+      (document.getElementsByName(name)[0] as HTMLElement | null) ??
+      document.querySelector<HTMLElement>(`[data-field="${name}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.focus?.({ preventScroll: true });
+  }
 
   const { fields, append, remove } = useFieldArray({ control, name: "allocations" });
 
@@ -148,21 +226,27 @@ export function TradeForm({
   // trader multi-selects, mirroring exactly what the save layer will persist.
   const watchedConfluences = useWatch({ control, name: "selectedConfluences" });
   const watchedExecution = useWatch({ control, name: "selectedExecution" });
+  const watchedDirection = useWatch({ control, name: "direction" });
   const liveScores = scoreStrategyAdherence(
     strategyReference
       ? { confluences: strategyReference.confluences, execution: strategyReference.execution }
       : null,
     watchedConfluences ?? [],
     watchedExecution ?? [],
+    watchedDirection,
   );
-  // Live weighted setup score + mandatory validity, mirroring the save layer.
+  // Live weighted setup score + mandatory validity, mirroring the save layer —
+  // direction-aware so bullish-only weight never enters a short trade's score.
   const liveSetup = scoreSetup(
     (strategyReference?.confluences ?? []).map((c) => ({
+      id: c.id ?? c.name,
       name: c.name,
       weight: c.weight,
       mandatory: c.mandatory,
+      directionApplicability: c.directionApplicability ?? "BOTH",
     })),
     watchedConfluences ?? [],
+    { direction: watchedDirection },
   );
 
   // TradingView Trade Plan, built inline at create time (mode === "create" only —
@@ -173,7 +257,6 @@ export function TradeForm({
   // the trade saves exactly as before and Expected RR stays unset until the
   // plan is confirmed later in the workspace. Reuses the same domain math
   // TradePlanSection uses — no parallel distance/R/validation logic.
-  const watchedDirection = useWatch({ control, name: "direction" });
   const watchedAsset = useWatch({ control, name: "assetSymbol" });
   const [planTimeframe, setPlanTimeframe] = useState("");
   const [planEntry, setPlanEntry] = useState("");
@@ -265,6 +348,39 @@ export function TradeForm({
     setValue("selectedEntryModel", null);
   }, [selectedStrategyId, setValue]);
 
+  // When the trader flips direction, drop any selected confluences that no longer
+  // apply (e.g. bullish-only picks left over after switching to Short) and tell
+  // them what was removed — silent removal would look like lost data. BOTH picks
+  // and confluences with no applicability are always kept. Skips the first run so
+  // an edit-mode trade keeps its saved selection on load.
+  const directionInitialised = useRef(false);
+  useEffect(() => {
+    if (!directionInitialised.current) {
+      directionInitialised.current = true;
+      return;
+    }
+    const confluences = strategyReference?.confluences;
+    if (!confluences || confluences.length === 0) return;
+    const applicability = new Map(
+      confluences.map((c) => [c.name.toLowerCase(), c.directionApplicability ?? "BOTH"]),
+    );
+    const current = (getValues("selectedConfluences") ?? []) as string[];
+    const kept = current.filter((n) => {
+      const a = applicability.get(n.toLowerCase());
+      // Unknown name (not in this strategy) → leave it be; scoring ignores it.
+      if (a == null) return true;
+      return a === "BOTH" || (watchedDirection === "LONG" ? a === "BULLISH" : a === "BEARISH");
+    });
+    if (kept.length === current.length) return;
+    const removed = current.length - kept.length;
+    setValue("selectedConfluences", kept, { shouldDirty: true, shouldValidate: true });
+    toast.info(
+      `${removed} ${watchedDirection === "LONG" ? "bearish" : "bullish"}-only ${
+        removed === 1 ? "confluence was" : "confluences were"
+      } removed because this trade is now ${watchedDirection === "LONG" ? "Long" : "Short"}.`,
+    );
+  }, [watchedDirection, strategyReference, getValues, setValue]);
+
   function isAccountSelected(accountId: string) {
     return fields.some((f) => f.tradingAccountId === accountId);
   }
@@ -329,6 +445,15 @@ export function TradeForm({
 
     setIsSubmitting(false);
     toast.success(mode === "create" ? "Trade added." : "Trade updated.");
+
+    // Embedded (Today "Add trade" dialog): hand control back to the host — it
+    // closes the dialog and refreshes in place, so the trader never leaves the
+    // Today workflow.
+    if (onSuccess) {
+      onSuccess(result.tradeId);
+      return;
+    }
+
     // After an edit, return to that trade's workspace; after create, to the day.
     router.push(
       mode === "edit" && tradeId ? `/journal/${dateKey}/trades/${tradeId}` : `/journal/${dateKey}`,
@@ -337,7 +462,7 @@ export function TradeForm({
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+    <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-8">
       {/* Phase 1 — Trade Idea: what you're planning, before you take it. Mirrors
           the same three-phase structure (Idea / Execution / Review) used in the
           trade workspace, so the form and the case-file read as one workflow. */}
@@ -351,21 +476,25 @@ export function TradeForm({
 
         {/* Strategy is the gateway: its markets, sessions, confluences & execution
             load the fields below. A trade is always taken under a strategy (SOT). */}
-        <div className="space-y-1.5">
-          <Label className="text-xs">Strategy</Label>
+        <div className="space-y-1.5" data-field="strategyId">
+          <Label className="text-xs">Strategy <span className="text-muted-foreground">(optional)</span></Label>
           <Controller
             control={control}
             name="strategyId"
             render={({ field }) => (
               <Select
-                items={strategies.map((s) => ({ value: s.id, label: s.name }))}
-                value={field.value}
-                onValueChange={field.onChange}
+                items={[
+                  { value: NO_STRATEGY, label: "No strategy (freeform)" },
+                  ...strategies.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+                value={field.value || NO_STRATEGY}
+                onValueChange={(v) => field.onChange(v === NO_STRATEGY ? "" : v)}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a strategy" />
+                  <SelectValue placeholder="No strategy (freeform)" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={NO_STRATEGY}>No strategy (freeform)</SelectItem>
                   {strategies.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
                       {s.name} · v{s.version}
@@ -378,38 +507,45 @@ export function TradeForm({
           />
           {errors.strategyId && <p className="text-xs text-danger">{errors.strategyId.message}</p>}
           <p className="text-xs text-muted-foreground">
-            Its markets, sessions, confluences &amp; execution load below — and its name &amp;
-            version are snapshotted at save time so the record stays accurate later.
+            Pick a strategy to load its markets, sessions, confluences &amp; execution below (its
+            name &amp; version are snapshotted at save time). Leave it on <em>freeform</em> to log a
+            one-off trade with no strategy attached.
           </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs">Asset</Label>
+          {/* Always a free-text symbol field — never gated on a strategy loading.
+              When a strategy IS selected, its markets appear as datalist
+              suggestions, but the trader can type any symbol (freeform trades,
+              or a market the strategy doesn't list yet). */}
+          <div className="space-y-1.5" data-field="assetSymbol">
+            <Label className="text-xs" htmlFor="assetSymbol">Asset / symbol</Label>
             <Controller
               control={control}
               name="assetSymbol"
               render={({ field }) => {
-                const opts = withSelected(strategyReference?.applicableAssets, field.value);
+                const suggestions = strategyReference?.applicableAssets ?? [];
                 return (
-                  <Select
-                    items={opts.map((s) => ({ value: s, label: s }))}
-                    value={field.value}
-                    onValueChange={field.onChange}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue
-                        placeholder={selectedStrategyId ? "Select asset" : "Select a strategy first"}
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {opts.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {s}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <>
+                    <Input
+                      id="assetSymbol"
+                      list={suggestions.length > 0 ? "asset-symbol-suggestions" : undefined}
+                      placeholder="e.g. XAUUSD"
+                      autoComplete="off"
+                      autoCapitalize="characters"
+                      spellCheck={false}
+                      value={field.value ?? ""}
+                      onChange={(e) => field.onChange(e.target.value.toUpperCase())}
+                      aria-invalid={errors.assetSymbol ? true : undefined}
+                    />
+                    {suggestions.length > 0 && (
+                      <datalist id="asset-symbol-suggestions">
+                        {suggestions.map((s) => (
+                          <option key={s} value={s} />
+                        ))}
+                      </datalist>
+                    )}
+                  </>
                 );
               }}
             />
@@ -534,7 +670,7 @@ export function TradeForm({
             if (!selectedStrategyId) {
               return (
                 <p className="text-sm text-muted-foreground">
-                  Select a strategy to load its entry models.
+                  Freeform trade — no strategy selected. Pick a strategy above to tag an entry model.
                 </p>
               );
             }
@@ -574,15 +710,22 @@ export function TradeForm({
       </section>
 
       <section className="glass space-y-2 rounded-2xl p-4">
-        <h2 className="text-sm font-medium text-muted-foreground">Confluences</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium text-muted-foreground">Confluences</h2>
+          <span className="text-xs text-muted-foreground/60">
+            Showing the confluences that apply to a {watchedDirection === "LONG" ? "long" : "short"}{" "}
+            trade
+          </span>
+        </div>
         <StrategyTagSelect
           control={control}
           name="selectedConfluences"
           options={strategyReference?.confluences ?? []}
+          direction={watchedDirection}
           emptyLabel={
             selectedStrategyId
               ? "This strategy has no confluences yet — add them in Strategy Lab > Confluences."
-              : "Select a strategy to load its confluences."
+              : "Freeform trade — no strategy selected. Pick a strategy above to score confluences."
           }
         />
       </section>
@@ -818,7 +961,7 @@ export function TradeForm({
           emptyLabel={
             selectedStrategyId
               ? "This strategy has no execution confirmations yet — add them in Strategy Lab > Execution."
-              : "Select a strategy to load its execution confirmations."
+              : "Freeform trade — no strategy selected. Pick a strategy above to track execution confirmations."
           }
         />
       </section>
@@ -840,29 +983,7 @@ export function TradeForm({
       )}
 
       <section className="glass space-y-3 rounded-2xl p-4">
-        <h2 className="text-sm font-medium text-muted-foreground">Trade Result</h2>
-        <div className="flex flex-wrap gap-4">
-          {(
-            [
-              ["hitTP1", "TP1 Hit"],
-              ["hitTP2", "TP2 Hit"],
-              ["hitTP3", "TP3 Hit"],
-              ["hitFullTP", "Full TP Hit"],
-            ] as const
-          ).map(([name, label]) => (
-            <Controller
-              key={name}
-              control={control}
-              name={name}
-              render={({ field }) => (
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={field.value} onCheckedChange={field.onChange} />
-                  {label}
-                </label>
-              )}
-            />
-          ))}
-        </div>
+        <h2 className="text-sm font-medium text-muted-foreground">Actual RR</h2>
         <div className="max-w-xs space-y-1.5">
           <Label className="text-xs">Actual RR (leave blank if still open)</Label>
           <Controller
@@ -881,7 +1002,11 @@ export function TradeForm({
         </div>
       </section>
 
-      {/* Phase 3 — Trade Review: what I learned. */}
+      {/* Phase 3 — Trade Review: what I learned. Only shown when editing an
+          existing trade — a new trade is logged as an idea, and its review +
+          Honest Questionnaire are filled later in the Trade Review tab. */}
+      {mode === "edit" && (
+      <>
       <div className="space-y-1 pt-2">
         <h1 className="text-base font-semibold tracking-tight">Trade Review</h1>
         <p className="text-xs text-muted-foreground">What I learned.</p>
@@ -949,7 +1074,7 @@ export function TradeForm({
         </div>
       </section>
 
-      <section className="glass space-y-3 rounded-2xl p-4">
+      <section className="glass space-y-3 rounded-2xl p-4" data-field="psychologyAnswers">
         <h2 className="text-sm font-medium text-muted-foreground">
           Post-Trade Honest Questionnaire
         </h2>
@@ -958,16 +1083,48 @@ export function TradeForm({
           <p className="text-xs text-danger">Please answer every question above.</p>
         )}
       </section>
+      </>
+      )}
+
+      {errorList.length > 0 && (
+        <div
+          id="trade-form-errors"
+          className="rounded-2xl border border-danger/30 bg-danger/10 p-4"
+          role="alert"
+        >
+          <p className="text-sm font-medium text-danger">This trade can&apos;t be saved yet</p>
+          <ul className="mt-2 space-y-1 text-xs text-danger/90">
+            {errorList.slice(0, 6).map((e) => (
+              <li key={`${e.name}-${e.message}`}>
+                <button
+                  type="button"
+                  onClick={() => jumpToField(e.name)}
+                  className="text-left underline-offset-2 hover:underline"
+                >
+                  <span className="font-medium">{e.label}:</span> {e.message}
+                </button>
+              </li>
+            ))}
+            {errorList.length > 6 && <li className="text-danger/70">+{errorList.length - 6} more</li>}
+          </ul>
+        </div>
+      )}
 
       <div className="flex justify-end gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          nativeButton={false}
-          render={<a href={`/journal/${dateKey}`} />}
-        >
-          Cancel
-        </Button>
+        {onCancel ? (
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            nativeButton={false}
+            render={<a href={`/journal/${dateKey}`} />}
+          >
+            Cancel
+          </Button>
+        )}
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? "Saving..." : "Save Trade"}
         </Button>

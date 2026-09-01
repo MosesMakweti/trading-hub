@@ -1,5 +1,3 @@
-import { Badge } from "@/components/ui/badge";
-import { GRADE_VARIANT } from "@/lib/grade-variant";
 import { NoteBlock } from "@/components/journal/workspace/workspace-ui";
 import {
   WorkspaceDecisionField,
@@ -7,31 +5,19 @@ import {
   WorkspaceNoteField,
 } from "@/components/journal/workspace/workspace-fields";
 import { StrategyAdherencePanel } from "@/components/journal/workspace/strategy-adherence-panel";
+import { PsychologyReviewPanel } from "@/components/journal/workspace/psychology-review-panel";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
 // Section 3 — Trade Review: reflection after the trade. Where learning happens.
 export function TradeReviewSection({ trade }: { trade: TradeWorkspaceDTO }) {
   return (
     <div className="space-y-5">
-      {/* Psychology (existing questionnaire result) */}
-      <div>
-        <div className="mb-1.5 text-xs text-muted-foreground">Psychology</div>
-        {trade.psychology ? (
-          <div className="flex items-center gap-3 rounded-xl border border-border bg-background/40 p-3">
-            <Badge variant={GRADE_VARIANT[trade.psychology.grade]}>{trade.psychology.grade}</Badge>
-            <div className="text-sm">
-              <span className="font-semibold">{trade.psychology.percent.toFixed(1)}%</span>
-              <span className="ml-1 text-muted-foreground">discipline</span>
-            </div>
-            <div className="ml-auto text-xs text-muted-foreground tabular-nums">
-              Raw {trade.psychology.rawScore >= 0 ? "+" : ""}
-              {trade.psychology.rawScore} / 8
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground/40 italic">Not scored yet.</p>
-        )}
-      </div>
+      {/* Post-trade Honest Questionnaire — answered here, after the trade. */}
+      <PsychologyReviewPanel
+        dateKey={trade.dateKey}
+        tradeId={trade.id}
+        initialAnswers={trade.psychologyAnswers}
+      />
 
       <StrategyAdherencePanel
         dateKey={trade.dateKey}

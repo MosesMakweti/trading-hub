@@ -67,6 +67,13 @@ const tradeInclude = {
   },
   allocations: { include: { tradingAccount: true } },
   psychology: true,
+  // Planned TPs from the confirmed TradingView Trade Plan — the sole source
+  // for the "which targets are planned" badges (Journal day view + Trade
+  // Execution section); no separate manual TP-hit input exists anymore.
+  plannedTargets: { orderBy: { targetOrder: "asc" } },
+  // Existence-only — powers a "has a plan screenshot attached" flag (Dashboard
+  // recent-trades table) without pulling the actual image data.
+  planScreenshot: { select: { id: true } },
 } as const;
 
 /** A Trade with all the relations the Trade Workspace DTO needs. Returned by
@@ -75,14 +82,20 @@ export type TradeWithWorkspaceRelations = Prisma.TradeGetPayload<{ include: type
 
 // Score is always (re)computed server-side from the answers, never trusted
 // from the client — this is what guarantees a persisted score/grade can
-// never drift from what the pure scoring function would produce.
+// never drift from what the pure scoring function would produce. Returns null
+// when the questionnaire isn't fully/validly answered yet (a trade logged as
+// an idea) — the caller then persists no PsychologyQuestionnaireResponse row.
 function scorePsychologyAnswers(answers: TradeInput["psychologyAnswers"]) {
-  const answerList: PsychologyAnswer[] = Object.entries(answers).map(([key, value]) => ({
+  const answerList: PsychologyAnswer[] = Object.entries(answers ?? {}).map(([key, value]) => ({
     key,
     value,
   }));
-  const { rawScore, percent, grade } = scorePsychology(answerList);
-  return { answers, rawScore, psychologyPercent: percent, grade };
+  try {
+    const { rawScore, percent, grade } = scorePsychology(answerList);
+    return { answers, rawScore, psychologyPercent: percent, grade };
+  } catch {
+    return null;
+  }
 }
 
 // The free-text fields whose presence means "this trade has been reviewed":
@@ -108,10 +121,6 @@ function tradeScalarData(data: TradeInput) {
     biasConfidencePercent: data.biasConfidencePercent,
     expectedRR: data.expectedRR,
     actualRR: data.actualRR,
-    hitTP1: data.hitTP1,
-    hitTP2: data.hitTP2,
-    hitTP3: data.hitTP3,
-    hitFullTP: data.hitFullTP,
     psychPreTradeMindset: data.psychPreTradeMindset,
     psychPostTradeReflection: data.psychPostTradeReflection,
     psychLessonsLearned: data.psychLessonsLearned,
@@ -243,11 +252,17 @@ async function buildTradeSnapshots(
 interface FrozenExpected {
   sessions: { name: string; color: string }[];
   confluences: {
+    id?: string;
     name: string;
     color: string;
     category: string | null;
     weight: number | null;
     mandatory?: boolean;
+    // Frozen at trade time so a later strategy edit can't change which
+    // confluences were eligible for THIS trade's direction. Absent on
+    // pre-direction snapshots → treated as BOTH.
+    directionApplicability?: "BULLISH" | "BEARISH" | "BOTH";
+    pairId?: string | null;
   }[];
   execution: { name: string; color: string; category: string | null; weight: number | null }[];
 }
@@ -271,17 +286,28 @@ async function buildStrategyExecution(
     expected = ref ? { sessions: ref.sessions, confluences: ref.confluences, execution: ref.execution } : null;
   }
 
-  const scores = scoreStrategyAdherence(expected, data.selectedConfluences, data.selectedExecution);
+  const scores = scoreStrategyAdherence(
+    expected,
+    data.selectedConfluences,
+    data.selectedExecution,
+    data.direction,
+  );
 
   // Weighted confluence "setup score" — the probability/quality engine. Frozen
   // from the expected confluences' weights + mandatory flags vs what was present.
+  // Direction-aware: bullish-only weight never enters a short trade's denominator
+  // (and vice-versa). `directionApplicability` comes from the frozen snapshot, so
+  // a later strategy edit can't rewrite this trade's score.
   const setup = scoreSetup(
     (expected?.confluences ?? []).map((c) => ({
+      id: c.id ?? c.name,
       name: c.name,
       weight: c.weight,
       mandatory: c.mandatory ?? false,
+      directionApplicability: c.directionApplicability ?? "BOTH",
     })),
     data.selectedConfluences,
+    { direction: data.direction },
   );
 
   // selected* are stored as plain name arrays; each name's color is resolved at
@@ -391,7 +417,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
         status: deriveStatus(closedAt, reviewedAt),
         ...strategyExec,
         allocations: { create: allocations },
-        psychology: { create: psychology },
+        ...(psychology ? { psychology: { create: psychology } } : {}),
       },
       include: tradeInclude,
     });
@@ -469,7 +495,9 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
         status: deriveStatus(closedAt, reviewedAt),
         ...strategyExec,
         allocations: { create: allocations },
-        psychology: { upsert: { create: psychology, update: psychology } },
+        // Only (re)write the questionnaire when it's fully answered; an
+        // incomplete set leaves any existing score untouched.
+        ...(psychology ? { psychology: { upsert: { create: psychology, update: psychology } } } : {}),
       },
       include: tradeInclude,
     });
@@ -520,11 +548,22 @@ export async function updateTradeSections(
         })()
       : {};
 
+  // Post-trade Honest Questionnaire, filled in the Trade Review tab. The
+  // PsychologyQuestionnaireResponse row is written only once all 8 answers are
+  // valid; a partial set is a no-op (kept in the panel's local state until
+  // complete). `psychologyAnswers` itself is not a Trade column — strip it.
+  const { psychologyAnswers: patchedPsychAnswers, ...patchColumns } = patch;
+  const psychology =
+    patchedPsychAnswers !== undefined
+      ? scorePsychologyAnswers(patchedPsychAnswers as TradeInput["psychologyAnswers"])
+      : null;
+
   const updated = await prisma.trade.update({
     where: { id: tradeId },
     data: {
-      ...patch,
+      ...patchColumns,
       ...adherence,
+      ...(psychology ? { psychology: { upsert: { create: psychology, update: psychology } } } : {}),
       reviewedAt,
       status: deriveStatus(existing.closedAt, reviewedAt),
     },

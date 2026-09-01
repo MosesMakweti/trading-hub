@@ -43,6 +43,12 @@ export interface PayoutDTO {
   profitSplitPercent: number | null;
   netExpected: number | null;
   netReceived: number | null;
+  /** What the trader actually received after the split — derived from this
+   *  row's own immutable snapshot (netReceived, else gross × snapshot %, else
+   *  gross). Never recomputed from the account's current rule. */
+  traderReceived: number;
+  /** The prop firm's share for this row. Null when no % was ever snapshotted. */
+  propFirmShare: number | null;
   requestedDate: string | null;
   approvedDate: string | null;
   paidDate: string | null;
@@ -51,6 +57,9 @@ export interface PayoutDTO {
   referenceId: string | null;
   feesDeductions: number | null;
   notes: string | null;
+  /** Import provenance — null for a manually entered payout. */
+  platformTransactionId: string | null;
+  importBatchId: string | null;
   documents: MediaItemLikeDTO[];
 }
 
@@ -102,8 +111,6 @@ export interface PropFirmAccountDTO {
   startingBalance: number;
   currentBalance: number | null;
   currentEquity: number | null;
-  platform: string | null;
-  dataFeed: string | null;
   notes: string | null;
   archivedAt: string | null;
   createdAt: string;
@@ -193,6 +200,11 @@ export interface LedgerEntryDTO {
   occurredAt: string;
   reason: string | null;
   stageId: string | null;
+  /** Polymorphic source of a system-derived entry (e.g. "ACCOUNT_INIT",
+   *  "TRADE_EXECUTION", "PAYOUT") — powers the balance-curve opening-entry
+   *  detection and dedupe. Null for manual adjustments. */
+  sourceType: string | null;
+  sourceId: string | null;
 }
 
 export interface TrackRecordDTO {
@@ -225,6 +237,36 @@ export interface TrackRecordDTO {
   netReturnAfterCosts: number;
   tradingDaysCompleted: number;
   lastActivityAt: string | null;
+}
+
+export interface ImportBatchDTO {
+  id: string;
+  platform: string;
+  fileFormat: string;
+  fileName: string;
+  fileSizeBytes: number;
+  sheetOrTableName: string | null;
+  timezone: string;
+  status: "CONFIRMED" | "ROLLED_BACK";
+  dateRangeFrom: string | null;
+  dateRangeTo: string | null;
+  newExecutionsCount: number;
+  newTradesCount: number;
+  newPayoutsCount: number;
+  skippedDuplicatesCount: number;
+  rejectedRowsCount: number;
+  warnings: { rowIndex: number | null; message: string }[] | null;
+  createdAt: string;
+  rolledBackAt: string | null;
+}
+
+export interface MappingTemplateDTO {
+  id: string;
+  name: string;
+  platform: string;
+  columnMapping: Record<string, string | undefined>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface UserPropFirmDTO {

@@ -137,8 +137,6 @@ export function AddAccountWizard({
         activationFees: numOrUndefined(draft.activationFees),
         otherCosts: numOrUndefined(draft.otherCosts),
         purchaseDate: draft.purchaseDate ? new Date(draft.purchaseDate) : undefined,
-        platform: strOrUndefined(draft.platform),
-        dataFeed: strOrUndefined(draft.dataFeed),
         notes: strOrUndefined(draft.notes),
         stages: draft.stages.map((s) => ({
           name: s.name.trim(),

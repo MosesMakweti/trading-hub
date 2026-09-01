@@ -37,10 +37,6 @@ export async function listTradeExportRecords(
       performanceClosingPnlNet: performanceAllocation
         ? performanceAllocation.closingPnlNet.toNumber()
         : 0,
-      hitTP1: t.hitTP1,
-      hitTP2: t.hitTP2,
-      hitTP3: t.hitTP3,
-      hitFullTP: t.hitFullTP,
       psychPreTradeMindset: t.psychPreTradeMindset,
       psychPostTradeReflection: t.psychPostTradeReflection,
       psychLessonsLearned: t.psychLessonsLearned,

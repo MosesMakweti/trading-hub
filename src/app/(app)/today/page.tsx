@@ -4,10 +4,11 @@ import {
   getOrCreateTradingDay,
   toTradingDayDTO,
 } from "@/server/services/trading-day.service";
-import { listTradesForDay } from "@/server/services/trades.service";
+import { getTradeFormOptions, listTradesForDay } from "@/server/services/trades.service";
 import { toTradeWorkspaceDTO } from "@/server/services/trade-workspace.mapper";
 import { getOrCreateDayRoutine } from "@/server/services/today-routine.service";
 import { getDailyAnalytics } from "@/server/services/analytics.service";
+import { listOpportunityDtosForDay } from "@/server/services/opportunity.service";
 import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
 import { listExecutionsForTrades } from "@/server/services/trade-executions.service";
 import { toAccountAllocationSelectorDTO, toExecutionDTO } from "@/server/services/prop-firms.mapper";
@@ -28,11 +29,13 @@ export default async function TodayPage() {
   // Create the day once, THEN load everything else — passing the day into the
   // routine service avoids a second concurrent upsert racing the (userId, date) unique.
   const day = await getOrCreateTradingDay(user.id, todayKey);
-  const [trades, routine, dailyPerf, propFirmAccountsRaw] = await Promise.all([
+  const [trades, routine, dailyPerf, propFirmAccountsRaw, tradeFormOptions, opportunities] = await Promise.all([
     listTradesForDay(user.id, todayKey),
     getOrCreateDayRoutine(user.id, day),
     getDailyAnalytics(user.id, todayKey),
     listActivePropFirmAccountsForSelector(user.id),
+    getTradeFormOptions(user.id),
+    listOpportunityDtosForDay(user.id, todayKey),
   ]);
   const executionsRaw = await listExecutionsForTrades(user.id, trades.map((t) => t.id));
   const executionsByTradeId: Record<string, ReturnType<typeof toExecutionDTO>[]> = {};
@@ -76,6 +79,17 @@ export default async function TodayPage() {
         dailyAnalytics={dailyAnalytics}
         propFirmAccounts={propFirmAccountsRaw.map(toAccountAllocationSelectorDTO)}
         executionsByTradeId={executionsByTradeId}
+        tradeFormAccounts={tradeFormOptions.accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind }))}
+        tradeFormStrategies={tradeFormOptions.strategies.map((s) => ({ id: s.id, name: s.name, version: s.version }))}
+        opportunities={opportunities}
+        linkableTrades={trades
+          .filter((t) => t.opportunityId == null)
+          .map((t) => ({
+            id: t.id,
+            tradeNumber: t.tradeNumber,
+            assetSymbol: t.assetSymbol,
+            direction: t.direction,
+          }))}
       />
     </FadeIn>
   );

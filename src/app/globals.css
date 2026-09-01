@@ -296,6 +296,18 @@
       0 24px 56px -22px hsl(var(--shadow-color) / 0.3);
   }
 
+  /* Privacy mode (Dashboard command bar): blurs anything marked `.money` inside
+   * a `.privacy-mode` ancestor — screen-share/screenshot safe without hiding
+   * layout. Hover reveals the real figure for the person actually at the
+   * keyboard. Scoped locally (a wrapper class), not global app state. */
+  .privacy-mode .money {
+    filter: blur(6px);
+    transition: filter 0.15s ease;
+  }
+  .privacy-mode .money:hover {
+    filter: none;
+  }
+
   /* Brand gradient fill for CTAs and accents */
   .bg-brand-gradient {
     background-image: linear-gradient(

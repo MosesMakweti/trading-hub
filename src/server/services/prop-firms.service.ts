@@ -1,7 +1,9 @@
 import { Decimal } from "decimal.js";
 
-import { prisma } from "@/server/db";
+import { prisma, type TransactionClient } from "@/server/db";
 import { postLedgerEntry } from "@/server/services/account-ledger.service";
+import { isFundedStageType } from "@/domain/prop-firms/metrics";
+import { computePayoutSplit } from "@/domain/prop-firms/payout-math";
 import { Prisma } from "@prisma/client";
 import type {
   AccountStageStatus,
@@ -158,6 +160,28 @@ export function updateUserPropFirm(userId: string, id: string, input: UpdateUser
   });
 }
 
+/** True soft-delete — distinct from archiving (which only flips `status`).
+ *  Cascades to every live account under the firm (and each account's paired
+ *  `TradingAccount`, via `deletePropFirmAccount`) in one transaction, so a
+ *  deleted firm never leaves "live" accounts orphaned under a hidden parent. */
+export async function deleteUserPropFirm(userId: string, id: string) {
+  const owned = await prisma.userPropFirm.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!owned) throw new Error("Prop firm not found.");
+
+  const liveAccounts = await prisma.propFirmAccount.findMany({
+    where: { userPropFirmId: id, userId, deletedAt: null },
+    select: { id: true },
+  });
+
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    for (const account of liveAccounts) {
+      await deletePropFirmAccount(userId, account.id, tx);
+    }
+    await tx.userPropFirm.update({ where: { id }, data: { deletedAt: now } });
+  });
+}
+
 // ── Purchased Accounts ───────────────────────────────────────────────────────
 
 export interface CreateAccountStageDraft {
@@ -181,8 +205,6 @@ export interface CreatePropFirmAccountInput {
   activationFees?: number | null;
   otherCosts?: number | null;
   purchaseDate?: Date | null;
-  platform?: string | null;
-  dataFeed?: string | null;
   notes?: string | null;
   /** The full stage structure (with per-stage rules) from the Add Account
    *  wizard. When omitted, falls back to a single auto-named first stage
@@ -200,8 +222,6 @@ export interface UpdatePropFirmAccountInput {
   status?: PropFirmAccountStatus;
   currentBalance?: number | null;
   currentEquity?: number | null;
-  platform?: string | null;
-  dataFeed?: string | null;
   notes?: string | null;
 }
 
@@ -250,8 +270,6 @@ export async function createPropFirmAccount(userId: string, input: CreatePropFir
         activationFees: input.activationFees ?? null,
         otherCosts: input.otherCosts ?? null,
         purchaseDate: input.purchaseDate ?? null,
-        platform: input.platform ?? null,
-        dataFeed: input.dataFeed ?? null,
         startingBalance: input.accountSize,
         notes: input.notes ?? null,
       },
@@ -299,11 +317,14 @@ export async function createPropFirmAccount(userId: string, input: CreatePropFir
     // Opening ledger entry — every account's balance history starts here so
     // PropFirmAccount.currentBalance can be derived from the ledger going
     // forward (see account-ledger.service.ts / domain/prop-firms/track-record.ts).
+    // Dated at the purchase date when known so a later import of back-dated
+    // statement activity still sorts after the account was opened.
     await postLedgerEntry(tx, {
       accountId: account.id,
       stageId: firstStageId,
       eventType: "ACCOUNT_INITIALIZED",
       amount: input.accountSize,
+      occurredAt: input.purchaseDate ?? undefined,
       sourceType: "ACCOUNT_INIT",
       sourceId: account.id,
     });
@@ -344,6 +365,31 @@ export async function reactivatePropFirmAccount(userId: string, id: string) {
     where: { id },
     data: { status: "ACTIVE", archivedAt: null },
   });
+}
+
+/** True soft-delete — distinct from `archivePropFirmAccount` (a reversible
+ *  status change; the account stays visible). Also soft-deletes the paired
+ *  `TradingAccount` (mirrors `archiveTradingAccount`'s pattern), so the
+ *  deleted account stops appearing in account-selector dropdowns elsewhere
+ *  in the app while its historical trade records stay untouched. Accepts an
+ *  optional transaction client so `deleteUserPropFirm` can cascade into this
+ *  from its own transaction. */
+export async function deletePropFirmAccount(
+  userId: string,
+  id: string,
+  tx: TransactionClient = prisma,
+) {
+  const owned = await tx.propFirmAccount.findFirst({
+    where: { id, userId },
+    select: { id: true, tradingAccountId: true },
+  });
+  if (!owned) throw new Error("Account not found.");
+
+  const now = new Date();
+  await tx.propFirmAccount.update({ where: { id }, data: { deletedAt: now } });
+  if (owned.tradingAccountId) {
+    await tx.tradingAccount.update({ where: { id: owned.tradingAccountId }, data: { deletedAt: now } });
+  }
 }
 
 // ── Stages ────────────────────────────────────────────────────────────────
@@ -658,10 +704,63 @@ export interface CreatePayoutInput {
   notes?: string | null;
 }
 
+/**
+ * Resolves the profit-split percentage for an account from its PROFIT_SPLIT
+ * `StageRule` (there is no dedicated per-account field — spec §"Profit split
+ * resolution"). Prefers the current ACTIVE funded-type stage
+ * (MASTER_FUNDED/PAYOUT_ELIGIBLE), falling back to the most recently ordered
+ * stage that has the rule configured at all. Returns `null` when no
+ * PROFIT_SPLIT rule exists anywhere on the account — callers must NOT
+ * substitute a default (see `createPayout`, and the import flow which marks
+ * payouts as requiring review instead).
+ */
+export async function resolveCurrentProfitSplitPercent(userId: string, accountId: string): Promise<number | null> {
+  const account = await prisma.propFirmAccount.findFirst({ where: { id: accountId, userId }, select: { id: true } });
+  if (!account) throw new Error("Account not found.");
+
+  const stages = await prisma.accountStage.findMany({
+    where: { accountId },
+    orderBy: { order: "desc" },
+    include: { rules: { where: { ruleKey: "PROFIT_SPLIT" } } },
+  });
+
+  const fundedActive = stages.find((s) => s.status === "ACTIVE" && isFundedStageType(s.type) && s.rules.length > 0);
+  const anyWithRule = stages.find((s) => s.rules.length > 0);
+  const stage = fundedActive ?? anyWithRule;
+  const rule = stage?.rules[0];
+  return rule?.numericValue != null ? new Decimal(rule.numericValue.toString()).toNumber() : null;
+}
+
+/**
+ * Logs a payout. The gross amount is treated as the pre-split withdrawal; the
+ * profit split (the caller's explicit `profitSplitPercent`, else the account's
+ * currently-configured percentage) is **snapshotted immutably onto this row**
+ * and used to compute `netReceived` = the trader's cut. A later change to the
+ * account's split never touches this row. When no split is available anywhere,
+ * the payout is still recorded but carries no percent/net — the UI prompts the
+ * user to set one.
+ */
 export async function createPayout(userId: string, accountId: string, input: CreatePayoutInput) {
   const owned = await prisma.propFirmAccount.findFirst({ where: { id: accountId, userId }, select: { id: true } });
   if (!owned) throw new Error("Account not found.");
-  return prisma.payout.create({ data: { accountId, status: "AVAILABLE", ...input } });
+
+  const pct =
+    input.profitSplitPercent != null
+      ? input.profitSplitPercent
+      : await resolveCurrentProfitSplitPercent(userId, accountId);
+
+  const netReceived =
+    pct != null ? Number(computePayoutSplit(input.grossPayout, pct).traderPayout) : (input.netExpected ?? null);
+
+  return prisma.payout.create({
+    data: {
+      accountId,
+      status: "AVAILABLE",
+      ...input,
+      profitSplitPercent: pct,
+      netReceived,
+    },
+  });
 }
 
 export interface UpdatePayoutInput {
@@ -683,6 +782,55 @@ export interface UpdatePayoutInput {
  *  transaction. Returns `{ payout, milestoneId }` — `milestoneId` is null
  *  when this call didn't trigger a PAID transition, so the caller can chain
  *  a certificate/evidence upload the same way advanceAccountStage does. */
+/** Posts the negative PAYOUT ledger entry (money leaving the account's own
+ *  balance — the profit was already recognized via TRADE_PNL entries, so
+ *  this never double-counts) and creates a PAYOUT_RECEIVED milestone for a
+ *  payout that just became PAID. Shared by `updatePayout`'s PAID-transition
+ *  and the CSV-import confirm flow (prop-firm-import.service.ts).
+ *
+ *  `ledgerAmountOverride` lets a caller supply the true amount that left the
+ *  account when it's known independently of netReceived/grossPayout — the
+ *  import flow needs this: a broker statement's withdrawal line is the FULL
+ *  gross amount that actually left the trading account (profitSplitPercent
+ *  only governs how the prop firm subsequently pays the trader their cut
+ *  *outside* the trading account — it never reduces the account's own
+ *  balance by less than the real withdrawal). Manual entry (no override)
+ *  keeps its original behavior: netReceived when set, else grossPayout
+ *  minus fees. */
+export async function postPayoutPaidLedgerEntry(
+  tx: TransactionClient,
+  payout: { id: string; accountId: string; stageId: string | null; grossPayout: unknown; netReceived: unknown; feesDeductions: unknown },
+  occurredAt: Date,
+  ledgerAmountOverride?: Decimal.Value,
+): Promise<{ milestoneId: string }> {
+  const ledgerAmount =
+    ledgerAmountOverride != null
+      ? new Decimal(ledgerAmountOverride)
+      : payout.netReceived != null
+        ? new Decimal(String(payout.netReceived))
+        : new Decimal(String(payout.grossPayout)).minus(payout.feesDeductions != null ? String(payout.feesDeductions) : 0);
+
+  await postLedgerEntry(tx, {
+    accountId: payout.accountId,
+    stageId: payout.stageId,
+    eventType: "PAYOUT",
+    amount: ledgerAmount.negated(),
+    occurredAt,
+    sourceType: "PAYOUT",
+    sourceId: payout.id,
+  });
+
+  const milestone = await tx.accountMilestone.create({
+    data: {
+      accountId: payout.accountId,
+      stageId: payout.stageId,
+      type: "PAYOUT_RECEIVED",
+      title: `Payout received (${ledgerAmount.toFixed(2)})`,
+    },
+  });
+  return { milestoneId: milestone.id };
+}
+
 export async function updatePayout(userId: string, payoutId: string, input: UpdatePayoutInput) {
   const existing = await prisma.payout.findFirst({
     where: { id: payoutId, account: { userId } },
@@ -700,30 +848,8 @@ export async function updatePayout(userId: string, payoutId: string, input: Upda
       // already reflect this call's input (or the prior stored value when
       // this call didn't touch them) — falls back to gross − fees only when
       // netReceived was never set at all.
-      const netReceived =
-        payout.netReceived != null
-          ? new Decimal(payout.netReceived.toString())
-          : new Decimal(payout.grossPayout.toString()).minus(payout.feesDeductions?.toString() ?? 0);
-
-      await postLedgerEntry(tx, {
-        accountId: payout.accountId,
-        stageId: payout.stageId,
-        eventType: "PAYOUT",
-        amount: netReceived.negated(),
-        occurredAt: input.paidDate ?? payout.paidDate ?? new Date(),
-        sourceType: "PAYOUT",
-        sourceId: payout.id,
-      });
-
-      const milestone = await tx.accountMilestone.create({
-        data: {
-          accountId: payout.accountId,
-          stageId: payout.stageId,
-          type: "PAYOUT_RECEIVED",
-          title: `Payout received (${netReceived.toFixed(2)})`,
-        },
-      });
-      milestoneId = milestone.id;
+      const result = await postPayoutPaidLedgerEntry(tx, payout, input.paidDate ?? payout.paidDate ?? new Date());
+      milestoneId = result.milestoneId;
     }
 
     return { payout, milestoneId };

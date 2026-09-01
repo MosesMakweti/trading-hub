@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { archiveTrade } from "@/actions/trades.actions";
 import { GRADE_VARIANT } from "@/lib/grade-variant";
+import { parseSymbol, formatTargetPrice } from "@/domain/trade-plan/instrument-catalog";
 import type { TradeListItemDTO, TradeDiscrepancyDTO } from "@/types/trades";
 
 // Per-trade discrepancy badge (Counterfactual model): clean = neutral/positive,
@@ -55,12 +56,7 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
     });
   }
 
-  const tpHits = [
-    trade.hitTP1 && "TP1",
-    trade.hitTP2 && "TP2",
-    trade.hitTP3 && "TP3",
-    trade.hitFullTP && "Full TP",
-  ].filter(Boolean) as string[];
+  const targetPrecision = parseSymbol(trade.assetSymbol).spec?.decimalPrecision ?? null;
 
   return (
     <div className="glass space-y-3 rounded-2xl p-4">
@@ -142,14 +138,14 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
       {(trade.entryModelName != null ||
         trade.confluenceLabels.length > 0 ||
         trade.executionLabels.length > 0 ||
-        tpHits.length > 0 ||
+        trade.targets.length > 0 ||
         trade.tradeQualityPercent != null ||
         trade.setupValid != null ||
         trade.setupRating != null) && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {tpHits.map((label) => (
-            <Badge key={label} variant="success">
-              {label}
+          {trade.targets.map((t) => (
+            <Badge key={t.targetOrder} variant="outline">
+              {t.label} {formatTargetPrice(t.targetPrice, targetPrecision)}
             </Badge>
           ))}
           {trade.entryModelName && (

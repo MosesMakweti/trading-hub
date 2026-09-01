@@ -7,6 +7,7 @@ import { computeTargetRMultiples, computeWeightedPlannedR } from "@/domain/trade
 import { hasBlockingIssues, validatePlan } from "@/domain/trade-plan/plan-validation";
 import { lookupInstrument, parseSymbol } from "@/domain/trade-plan/instrument-catalog";
 import { NullRecognitionProvider, type ScreenshotRecognitionProvider } from "@/domain/trade-plan/recognition-types";
+import { ClaudeVisionRecognitionProvider } from "@/domain/trade-plan/providers/claude-vision-provider";
 import type { ConfirmPlanInput, RevisePlanInput, AnnotationUpsertInput } from "@/lib/validation/trade-plan";
 
 /**
@@ -21,13 +22,13 @@ import type { ConfirmPlanInput, RevisePlanInput, AnnotationUpsertInput } from "@
 
 // ── Provider resolution (spec §3: provider-agnostic, no hardcoded secrets) ──
 
-/** No vision/OCR provider is configured in this codebase — this always
- *  resolves to the Null provider today. A real provider is added by
- *  implementing ScreenshotRecognitionProvider in its own file and swapping
- *  it in here, gated on its own env var (e.g. `if (process.env.SOME_KEY)
- *  return new SomeVisionProvider()`) — never a hardcoded credential. */
+/** Prefers the Claude vision provider, gated on its own `isAvailable()`
+ *  (i.e. `ANTHROPIC_API_KEY` set — never a hardcoded credential) and falls
+ *  back to the Null provider otherwise, so "recognition unavailable" stays a
+ *  real, exercised path in workspaces without the key configured. */
 function resolveRecognitionProvider(): ScreenshotRecognitionProvider {
-  return new NullRecognitionProvider();
+  const claudeVision = new ClaudeVisionRecognitionProvider();
+  return claudeVision.isAvailable() ? claudeVision : new NullRecognitionProvider();
 }
 
 async function assertOwnsTrade(userId: string, tradeId: string) {

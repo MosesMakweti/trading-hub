@@ -15,6 +15,7 @@ import { FormField } from "@/components/accounts/form-field";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatCurrency, formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
 import { formatDate } from "@/components/prop-firms/format";
+import { AccountBalanceCurve, ledgerEntriesToBalanceEvents } from "@/components/prop-firms/account-balance-curve";
 import { createManualLedgerAdjustmentAction } from "@/actions/trade-executions.actions";
 import type { LedgerEntryDTO, PropFirmAccountDTO } from "@/types/prop-firms";
 
@@ -26,7 +27,12 @@ const EVENT_LABELS: Record<string, string> = {
   CHALLENGE_PURCHASE_FEE: "Challenge purchase fee",
   RESET_FEE: "Reset fee",
   ACTIVATION_FEE: "Activation fee",
+  OTHER_FEE: "Fee",
   PAYOUT: "Payout",
+  WITHDRAWAL: "Withdrawal",
+  DEPOSIT: "Deposit",
+  CREDIT: "Credit",
+  BALANCE_CORRECTION: "Balance correction",
   REFUND: "Refund",
   STAGE_PASSED: "Stage passed",
   STAGE_FAILED: "Stage failed",
@@ -113,6 +119,14 @@ export function LedgerTab({ account, ledger }: { account: PropFirmAccountDTO; le
       <div className="flex items-center justify-end">
         <ManualAdjustmentDialog accountId={account.id} />
       </div>
+
+      {ledger.length >= 2 && (
+        <AccountBalanceCurve
+          events={ledgerEntriesToBalanceEvents(ledger)}
+          startingBalance={account.startingBalance}
+          accountCurrency={account.accountCurrency}
+        />
+      )}
 
       {ledger.length === 0 ? (
         <EmptyState icon={Receipt} title="No ledger history yet" description="Balance-affecting events will appear here." />

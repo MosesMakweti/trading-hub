@@ -16,6 +16,7 @@ import {
 
 import type { CounterfactualPoint, LeakageEvent } from "@/domain/analytics/counterfactual-engine";
 import { CATEGORY_LABEL, LEAKAGE_TONE } from "@/components/analytics/leakage-meta";
+import { CHART_AXIS_TICK } from "@/components/analytics/chart-theme";
 
 const R = (n: number, sign = false) => `${sign && n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
 
@@ -109,14 +110,14 @@ export function CounterfactualGapChart({
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
           <XAxis
             dataKey="sequence"
-            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+            tick={CHART_AXIS_TICK}
             axisLine={{ stroke: "var(--border)" }}
             tickLine={false}
             tickFormatter={(v: number) => `#${v}`}
             minTickGap={28}
           />
           <YAxis
-            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+            tick={CHART_AXIS_TICK}
             axisLine={false}
             tickLine={false}
             width={40}

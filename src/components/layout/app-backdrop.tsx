@@ -4,10 +4,17 @@
 // light mode — genuinely different artwork, not one image color-adjusted),
 // softened with a slow drift, a top fade (keeps the header band clean), an
 // atmospheric top bloom, and a vignette — so foreground glass cards always read
-// clearly over it. Both images render at all times; only the theme's `dark:`
-// class variant decides which is visible (same trick as `ThemeToggle`'s two
-// icons), so there's no client/server hydration mismatch. The only motion is a
-// very slow GPU drift, disabled under reduced-motion.
+// clearly over it. Source art is 4608x1536 WebP (3x the old 1536x512 JPEG,
+// Lanczos-upscaled + unsharp-masked, lossless-grade quality at a fraction of
+// the JPEG file size) so it stays crisp at full-viewport `object-cover` sizes
+// on 4K/5K displays. A second, blurred copy of the
+// same image is masked to a soft ring around the edges (radial mask keeps the
+// centre — where the trend line reads — untouched), giving a mild
+// depth-of-field effect rather than blurring the whole scene. Both images
+// render at all times; only the theme's `dark:` class variant decides which
+// is visible (same trick as `ThemeToggle`'s two icons), so there's no
+// client/server hydration mismatch. The only motion is a very slow GPU drift,
+// disabled under reduced-motion.
 
 import Image from "next/image";
 
@@ -16,21 +23,47 @@ export function AppBackdrop() {
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
       <div className="backdrop-drift-a absolute inset-0" style={{ opacity: "var(--backdrop-strength)" }}>
         <Image
-          src="/backdrop/market-light.jpg"
+          src="/backdrop/market-light.webp"
           alt=""
           fill
           priority
+          quality={90}
           sizes="100vw"
           className="object-cover dark:hidden"
         />
         <Image
-          src="/backdrop/market-dark.jpg"
+          src="/backdrop/market-dark.webp"
           alt=""
           fill
           priority
+          quality={90}
           sizes="100vw"
           className="hidden object-cover dark:block"
         />
+
+        {/* Depth-of-field ring: same art, blurred, masked to the edges only. */}
+        <div
+          className="absolute inset-0"
+          style={{
+            maskImage: "radial-gradient(ellipse 62% 58% at 50% 42%, transparent 55%, black 100%)",
+            WebkitMaskImage: "radial-gradient(ellipse 62% 58% at 50% 42%, transparent 55%, black 100%)",
+          }}
+        >
+          <Image
+            src="/backdrop/market-light.webp"
+            alt=""
+            fill
+            sizes="100vw"
+            className="object-cover blur-2xl dark:hidden"
+          />
+          <Image
+            src="/backdrop/market-dark.webp"
+            alt=""
+            fill
+            sizes="100vw"
+            className="hidden object-cover blur-2xl dark:block"
+          />
+        </div>
       </div>
 
       {/* Keep the header band clean: fade the canvas colour over the top. */}

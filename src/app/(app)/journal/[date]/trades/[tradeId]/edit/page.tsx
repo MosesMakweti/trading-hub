@@ -60,10 +60,6 @@ export default async function EditTradePage({
     expectedRR: trade.expectedRR ? trade.expectedRR.toNumber() : null,
     actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
     performanceRiskPercentOverride: performanceAllocation ? performanceAllocation.riskValue.toNumber() : null,
-    hitTP1: trade.hitTP1,
-    hitTP2: trade.hitTP2,
-    hitTP3: trade.hitTP3,
-    hitFullTP: trade.hitFullTP,
     psychPreTradeMindset: trade.psychPreTradeMindset,
     psychPostTradeReflection: trade.psychPostTradeReflection,
     psychLessonsLearned: trade.psychLessonsLearned,
@@ -86,15 +82,16 @@ export default async function EditTradePage({
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center gap-2">
+      <div className="space-y-2">
         <Button
           variant="ghost"
-          size="icon-sm"
-          aria-label="Back to trade workspace"
+          size="sm"
+          className="-ml-2 gap-1.5 text-muted-foreground"
           nativeButton={false}
           render={<Link href={`/journal/${dateKey}/trades/${tradeId}`} />}
         >
-          <ChevronLeft />
+          <ChevronLeft className="size-3.5" />
+          Back to trade
         </Button>
         <h1 className="text-xl font-semibold tracking-tight">
           Edit Trade — {formatDateKeyLong(dateKey)}

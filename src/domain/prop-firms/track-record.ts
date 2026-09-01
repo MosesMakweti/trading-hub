@@ -17,8 +17,13 @@ export type LedgerEventTypeLike =
   | "CHALLENGE_PURCHASE_FEE"
   | "RESET_FEE"
   | "ACTIVATION_FEE"
+  | "OTHER_FEE"
   | "PAYOUT"
   | "REFUND"
+  | "DEPOSIT"
+  | "WITHDRAWAL"
+  | "CREDIT"
+  | "BALANCE_CORRECTION"
   | "STAGE_PASSED"
   | "STAGE_FAILED"
   | "ACCOUNT_BREACHED"
@@ -88,7 +93,7 @@ export interface TrackRecordSummary {
   lastActivityAt: Date | null;
 }
 
-const FEE_EVENT_TYPES: LedgerEventTypeLike[] = ["COMMISSION_FEE", "CHALLENGE_PURCHASE_FEE", "RESET_FEE", "ACTIVATION_FEE"];
+const FEE_EVENT_TYPES: LedgerEventTypeLike[] = ["COMMISSION_FEE", "CHALLENGE_PURCHASE_FEE", "RESET_FEE", "ACTIVATION_FEE", "OTHER_FEE"];
 
 function average(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -111,7 +116,14 @@ export function computeTrackRecord(
   startingBalance: Decimal.Value,
 ): TrackRecordSummary {
   const starting = new Decimal(startingBalance);
-  const sortedEntries = [...entries].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+  // Canonical order: the opening entry folds in first regardless of its
+  // `occurredAt` (a back-dated import can leave ACCOUNT_INITIALIZED with a
+  // later timestamp than the activity it precedes), then chronological.
+  const sortedEntries = [...entries].sort((a, b) => {
+    const aOpen = a.eventType === "ACCOUNT_INITIALIZED" ? 0 : 1;
+    const bOpen = b.eventType === "ACCOUNT_INITIALIZED" ? 0 : 1;
+    return aOpen - bOpen || a.occurredAt.getTime() - b.occurredAt.getTime();
+  });
   const currentBalance = sortedEntries.length > 0 ? new Decimal(sortedEntries[sortedEntries.length - 1].balanceAfter) : starting;
 
   let feesPaid = new Decimal(0);

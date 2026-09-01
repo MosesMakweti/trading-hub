@@ -24,14 +24,16 @@ export default async function NewTradePage({
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center gap-2">
+      <div className="space-y-2">
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="sm"
+          className="-ml-2 gap-1.5 text-muted-foreground"
           nativeButton={false}
           render={<Link href={`/journal/${dateKey}`} />}
         >
-          <ChevronLeft />
+          <ChevronLeft className="size-3.5" />
+          Back to {formatDateKeyLong(dateKey)}
         </Button>
         <h1 className="text-xl font-semibold tracking-tight">
           Add Trade — {formatDateKeyLong(dateKey)}

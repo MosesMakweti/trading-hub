@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 import { KpiCard } from "@/components/analytics/kpi-card";
 import { ProgressRing } from "@/components/analytics/progress-ring";
 import { MonthlyReturnsChart } from "@/components/analytics/monthly-returns-chart";
+import { RowBar } from "@/components/analytics/row-bar";
 import type { getAnalyticsData } from "@/server/services/analytics.service";
 
 type TradingData = Awaited<ReturnType<typeof getAnalyticsData>>["trading"];
@@ -182,12 +183,39 @@ export function AnalyticsBreakdowns({ trading }: { trading: TradingData }) {
             <ProgressRing value={b.risk.consistency} tone="brand" label="Risk consistency" />
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <KpiCard label="Avg Risk / Trade" value={b.risk.avgRisk == null ? "—" : `${b.risk.avgRisk.toFixed(2)}%`} />
-            <KpiCard label="Largest Risk" value={b.risk.maxRisk == null ? "—" : `${b.risk.maxRisk.toFixed(2)}%`} />
-            <KpiCard label="Recovery Factor" value={ratio(trading.recoveryFactor)} />
-            <KpiCard label="Max Drawdown" value={`${trading.maxDrawdownPercent.toFixed(1)}%`} tone="danger" />
-            <KpiCard label="Consecutive Wins" value={String(trading.longestWinStreak)} tone="success" />
-            <KpiCard label="Consecutive Losses" value={String(trading.longestLossStreak)} tone="danger" />
+            <KpiCard
+              label="Avg Risk / Trade"
+              value={b.risk.avgRisk == null ? "—" : `${b.risk.avgRisk.toFixed(2)}%`}
+              count={b.risk.avgRisk == null ? undefined : { value: b.risk.avgRisk, decimals: 2, suffix: "%" }}
+            />
+            <KpiCard
+              label="Largest Risk"
+              value={b.risk.maxRisk == null ? "—" : `${b.risk.maxRisk.toFixed(2)}%`}
+              count={b.risk.maxRisk == null ? undefined : { value: b.risk.maxRisk, decimals: 2, suffix: "%" }}
+            />
+            <KpiCard
+              label="Recovery Factor"
+              value={ratio(trading.recoveryFactor)}
+              count={trading.recoveryFactor == null ? undefined : { value: trading.recoveryFactor, decimals: 2 }}
+            />
+            <KpiCard
+              label="Max Drawdown"
+              value={`${trading.maxDrawdownPercent.toFixed(1)}%`}
+              count={{ value: trading.maxDrawdownPercent, decimals: 1, suffix: "%" }}
+              tone="danger"
+            />
+            <KpiCard
+              label="Consecutive Wins"
+              value={String(trading.longestWinStreak)}
+              count={{ value: trading.longestWinStreak, decimals: 0 }}
+              tone="success"
+            />
+            <KpiCard
+              label="Consecutive Losses"
+              value={String(trading.longestLossStreak)}
+              count={{ value: trading.longestLossStreak, decimals: 0 }}
+              tone="danger"
+            />
           </div>
         </div>
         <div className="glass space-y-2 rounded-2xl p-4">
@@ -273,7 +301,7 @@ function MonthlyTable({ months }: { months: MonthPerf[] }) {
             <th className="py-2 pr-4 text-right font-normal">Trades</th>
             <th className="py-2 pr-4 text-right font-normal">Net P&L</th>
             <th className="py-2 pr-4 text-right font-normal">Return</th>
-            <th className="py-2 pr-4 text-right font-normal">Win Rate</th>
+            <th className="py-2 pr-4 font-normal">Win Rate</th>
             <th className="py-2 pr-4 text-right font-normal">Avg R</th>
             <th className="py-2 text-right font-normal">Expectancy</th>
           </tr>
@@ -290,7 +318,9 @@ function MonthlyTable({ months }: { months: MonthPerf[] }) {
                 {m.returnPercent >= 0 ? "+" : ""}
                 {m.returnPercent.toFixed(2)}%
               </td>
-              <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">{pct(m.winRate)}</td>
+              <td className="py-2.5 pr-4">
+                <RowBar percent={m.winRate} />
+              </td>
               <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">{rr(m.avgR)}</td>
               <td className="py-2.5 text-right text-muted-foreground tabular-nums">{rr(m.expectancy)}</td>
             </tr>

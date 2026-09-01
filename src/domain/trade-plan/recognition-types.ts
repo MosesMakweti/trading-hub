@@ -3,13 +3,13 @@
  * can look at a chart image and return structured field guesses implements
  * `ScreenshotRecognitionProvider` — a real AI-vision provider is a single
  * new file implementing this interface, wired in
- * server/services/trade-plan-recognition.service.ts's `resolveProvider()`.
- * No provider is configured in this codebase yet (no vision/OCR service
- * existed before this feature, and no API credentials are hardcoded here
- * per instruction) — `NullRecognitionProvider` below is what runs today,
- * and recognition failure is a first-class, always-exercised path rather
- * than a rare edge case (spec §2: "recognition failure must not block the
- * trader").
+ * server/services/trade-plan.service.ts's `resolveRecognitionProvider()`.
+ * `domain/trade-plan/providers/claude-vision-provider.ts` is that provider
+ * (Claude API vision, gated on `ANTHROPIC_API_KEY` — no credential is
+ * hardcoded here per instruction); `NullRecognitionProvider` below is the
+ * fallback when that key isn't set, so recognition failure stays a
+ * first-class, always-exercised path rather than a rare edge case (spec §2:
+ * "recognition failure must not block the trader").
  */
 
 export type RecognitionFieldTypeLike =

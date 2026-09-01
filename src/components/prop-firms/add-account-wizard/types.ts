@@ -55,8 +55,6 @@ export interface AccountDraft {
   activationFees: string;
   otherCosts: string;
   purchaseDate: string;
-  platform: string;
-  dataFeed: string;
   notes: string;
   stages: DraftStage[];
 }

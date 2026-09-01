@@ -121,12 +121,16 @@ function buildSnapshot(s: StrategyTree): StrategyVersionSnapshot {
     confluences: s.checklistItems
       .filter((c) => c.kind === "CONFLUENCE")
       .map((c) => ({
+        id: c.id,
         name: c.name,
         color: c.color,
         category: c.category,
         description: c.description,
         weight: c.weight,
         mandatory: c.mandatory,
+        // Frozen so a later strategy edit can't retro-change a trade's eligible set.
+        directionApplicability: c.directionApplicability,
+        pairId: c.pairId,
         validationCriteria: c.validationCriteria,
         enabled: c.enabled,
       })),
@@ -416,6 +420,10 @@ export async function restoreStrategyVersionAsNewStrategy(
               description: c.description,
               weight: c.weight,
               mandatory: c.mandatory,
+              // Pre-direction snapshots have no applicability → BOTH.
+              directionApplicability:
+                kind === "CONFLUENCE" ? c.directionApplicability ?? "BOTH" : "BOTH",
+              pairId: kind === "CONFLUENCE" ? c.pairId ?? null : null,
               validationCriteria: c.validationCriteria,
               enabled: c.enabled,
               sortOrder: i,
@@ -484,7 +492,17 @@ export async function getStrategyReference(userId: string, id: string) {
       checklistItems: {
         where: { deletedAt: null, enabled: true },
         orderBy: { sortOrder: "asc" },
-        select: { name: true, color: true, category: true, weight: true, mandatory: true, kind: true },
+        select: {
+          id: true,
+          name: true,
+          color: true,
+          category: true,
+          weight: true,
+          mandatory: true,
+          kind: true,
+          directionApplicability: true,
+          pairId: true,
+        },
       },
       tradeManagement: {
         include: {
@@ -515,20 +533,26 @@ export async function getStrategyReference(userId: string, id: string) {
     confluences: s.checklistItems
       .filter((c) => c.kind === "CONFLUENCE")
       .map((c) => ({
+        id: c.id,
         name: c.name,
         color: c.color,
         category: c.category,
         weight: c.weight,
         mandatory: c.mandatory,
+        directionApplicability: c.directionApplicability,
+        pairId: c.pairId,
       })),
     execution: s.checklistItems
       .filter((c) => c.kind === "EXECUTION")
       .map((c) => ({
+        id: c.id,
         name: c.name,
         color: c.color,
         category: c.category,
         weight: c.weight,
         mandatory: c.mandatory,
+        directionApplicability: c.directionApplicability,
+        pairId: c.pairId,
       })),
     tradeManagement: s.tradeManagement
       ? {

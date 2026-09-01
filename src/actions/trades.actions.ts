@@ -87,6 +87,7 @@ export async function updateTradeSection(
   await tradesService.updateTradeSections(user.id, tradeId, parsed.data);
   revalidatePath(`/journal/${dateKey}/trades/${tradeId}`);
   revalidatePath(`/journal/${dateKey}`);
+  revalidatePath("/today");
   return { success: true };
 }
 

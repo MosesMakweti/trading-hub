@@ -277,6 +277,11 @@ export async function getAnalyticsData(
   const psychologyPoints: PsychologyDataPoint[] = [];
   const adherencePoints: AdherenceTradePoint[] = [];
   const dailyPnlMap = new Map<string, number>();
+  // Per-day sums of each trade's real R fields (Trade.expectedRR/actualRR — the
+  // trader's planned-vs-journaled R, distinct from the %-of-balance figures fed
+  // into metrics.* above) — powers the Equity Curve's Expected vs Actual mode.
+  const dailyExpectedR = new Map<string, number>();
+  const dailyActualR = new Map<string, number>();
   // $ P&L per trade + the running-balance series, for the dollar summary and
   // drawdown (Analytics module). Same allocations as everything else — no new query.
   const tradePnls: number[] = [];
@@ -349,6 +354,12 @@ export async function getAnalyticsData(
       strategyLabel,
     });
     dailyPnlMap.set(dateKey, (dailyPnlMap.get(dateKey) ?? 0) + pnl);
+    if (t.expectedRR != null) {
+      dailyExpectedR.set(dateKey, (dailyExpectedR.get(dateKey) ?? 0) + t.expectedRR.toNumber());
+    }
+    if (t.actualRR != null) {
+      dailyActualR.set(dateKey, (dailyActualR.get(dateKey) ?? 0) + t.actualRR.toNumber());
+    }
 
     adherencePoints.push({
       win: pnl > 0 ? true : pnl < 0 ? false : null,
@@ -359,6 +370,7 @@ export async function getAnalyticsData(
       tradeQualityPercent: t.tradeQualityPercent,
       setupScore: t.setupScore,
       setupRating: t.setupRating as (typeof adherencePoints)[number]["setupRating"],
+      direction: t.direction,
     });
 
     // Deviation engine: the OBJECTIVE trader-controlled R-costs (entry/exit/risk
@@ -420,6 +432,19 @@ export async function getAnalyticsData(
     balanceBeforeRange,
     Array.from(dailyPnlMap.entries()).map(([dateKey, pnl]) => ({ dateKey, pnl })),
   );
+
+  // Expected vs Actual R curve (Dashboard equity curve comparison mode) — every
+  // day that had a trade, cumulative planned R vs cumulative journaled actual R.
+  const expectedVsActualDays = [...new Set([...dailyExpectedR.keys(), ...dailyActualR.keys()])].sort(
+    (a, b) => a.localeCompare(b),
+  );
+  let cumExpectedR = 0;
+  let cumActualR = 0;
+  const expectedVsActualCurve = expectedVsActualDays.map((dateKey) => {
+    cumExpectedR += dailyExpectedR.get(dateKey) ?? 0;
+    cumActualR += dailyActualR.get(dateKey) ?? 0;
+    return { dateKey, cumulativeExpectedR: cumExpectedR, cumulativeActualR: cumActualR };
+  });
 
   const ruleAdherenceValues = inRange
     .map((a) => ruleAdherenceForTrade(a.trade))
@@ -524,6 +549,7 @@ export async function getAnalyticsData(
       statsByStrategy: metrics.statsByStrategy(tradeInputs),
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
+      expectedVsActualCurve,
       counterfactual,
       opportunity,
       breakdowns,

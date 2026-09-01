@@ -56,23 +56,27 @@ export function OpportunityAnalytics({
         <KpiCard
           label="Edge capture"
           value={pct(s.edgeCapturePercent)}
+          count={s.edgeCapturePercent == null ? undefined : { value: s.edgeCapturePercent, decimals: 0, suffix: "%" }}
           tone={s.edgeCapturePercent != null && s.edgeCapturePercent >= 60 ? "success" : "neutral"}
           sublabel="of available edge banked"
         />
         <KpiCard
           label="Execution rate"
           value={pct(s.executionRatePercent)}
+          count={s.executionRatePercent == null ? undefined : { value: s.executionRatePercent, decimals: 0, suffix: "%" }}
           sublabel={`${s.executed} of ${s.validOpportunities} valid setups taken`}
         />
         <KpiCard
           label="Missed opportunity"
           value={rr(s.missedOpportunityCostR)}
+          count={{ value: s.missedOpportunityCostR, decimals: 2, suffix: "R", signed: true }}
           tone={s.missedOpportunityCostR > 0 ? "danger" : "neutral"}
           sublabel="forgone on valid setups skipped (avoidable)"
         />
         <KpiCard
           label="Execution variance"
           value={rr(s.executionLeakageR)}
+          count={{ value: s.executionLeakageR, decimals: 2, suffix: "R", signed: true }}
           sublabel="vs expectancy on trades taken — normal variance"
         />
       </div>

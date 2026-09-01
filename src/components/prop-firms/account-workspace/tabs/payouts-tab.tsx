@@ -54,18 +54,31 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "success" | "dang
   CANCELLED: "outline",
 };
 
-function AddPayoutDialog({ accountId }: { accountId: string }) {
+/** The account's currently-configured profit split, if any — prefers an ACTIVE
+ *  funded-type stage, else any stage carrying a PROFIT_SPLIT rule. Mirrors
+ *  `resolveCurrentProfitSplitPercent` on the server. */
+function resolveAccountSplit(account: PropFirmAccountDTO): number | null {
+  const ordered = [...account.stages].sort((a, b) => b.order - a.order);
+  const r0 = ordered.find(
+    (s) => s.status === "ACTIVE" && isFundedStageType(s.type as never) && s.rules.some((r) => r.ruleKey === "PROFIT_SPLIT"),
+  );
+  const rAny = ordered.find((s) => s.rules.some((r) => r.ruleKey === "PROFIT_SPLIT"));
+  const rule = (r0 ?? rAny)?.rules.find((r) => r.ruleKey === "PROFIT_SPLIT");
+  return rule?.numericValue ?? null;
+}
+
+function AddPayoutDialog({ accountId, defaultSplit }: { accountId: string; defaultSplit: number | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [gross, setGross] = useState("");
-  const [split, setSplit] = useState("80");
+  const [split, setSplit] = useState(defaultSplit != null ? String(defaultSplit) : "");
   const [method, setMethod] = useState("");
   const [notes, setNotes] = useState("");
   const [isPending, startTransition] = useTransition();
 
   function reset() {
     setGross("");
-    setSplit("80");
+    setSplit(defaultSplit != null ? String(defaultSplit) : "");
     setMethod("");
     setNotes("");
   }
@@ -107,11 +120,24 @@ function AddPayoutDialog({ accountId }: { accountId: string }) {
           <DialogDescription>Track a requested or received payout for this funded account.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <FormField label="Gross payout">
+          <FormField label="Gross payout (before profit split)">
             <Input type="number" step="0.01" value={gross} onChange={(e) => setGross(e.target.value)} />
           </FormField>
           <FormField label="Profit split %">
-            <Input type="number" step="0.01" value={split} onChange={(e) => setSplit(e.target.value)} />
+            <Input
+              type="number"
+              step="0.01"
+              min={0}
+              max={100}
+              value={split}
+              onChange={(e) => setSplit(e.target.value)}
+              placeholder={defaultSplit != null ? String(defaultSplit) : "e.g. 80"}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Saved on this payout as a snapshot — trader gets{" "}
+              {gross && split ? formatCurrency((Number(gross) * Number(split)) / 100) : "gross × split%"}. Changing the
+              account&apos;s split later won&apos;t affect it.
+            </p>
           </FormField>
           <FormField label="Payment method">
             <Input value={method} onChange={(e) => setMethod(e.target.value)} placeholder="e.g. Wire, Crypto" />
@@ -216,7 +242,7 @@ export function PayoutsTab({ account }: { account: PropFirmAccountDTO }) {
     <div className="space-y-3">
       {eligible && (
         <div className="flex justify-end">
-          <AddPayoutDialog accountId={account.id} />
+          <AddPayoutDialog accountId={account.id} defaultSplit={resolveAccountSplit(account)} />
         </div>
       )}
 
@@ -229,10 +255,15 @@ export function PayoutsTab({ account }: { account: PropFirmAccountDTO }) {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">{formatCurrency(p.grossPayout)}</span>
+                  <span className="text-xs text-muted-foreground">gross</span>
                   <Badge variant={STATUS_VARIANT[p.status] ?? "secondary"}>{STATUS_LABELS[p.status] ?? p.status}</Badge>
+                  {p.importBatchId && <Badge variant="outline">Imported</Badge>}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {p.netReceived != null ? `Net ${formatCurrency(p.netReceived)}` : "Net pending"}
+                  Trader receives <span className="font-medium text-foreground">{formatCurrency(p.traderReceived)}</span>
+                  {p.profitSplitPercent != null
+                    ? ` · split ${p.profitSplitPercent}% · firm ${formatCurrency(p.propFirmShare ?? 0)}`
+                    : " · no profit split set"}
                   {p.paidDate ? ` · Paid ${formatDate(p.paidDate)}` : p.requestedDate ? ` · Requested ${formatDate(p.requestedDate)}` : ""}
                 </div>
               </div>

@@ -6,11 +6,14 @@ import type {
 import type { MediaItemDTO } from "@/server/services/media.service";
 import type { RuleEvaluationResult } from "@/domain/prop-firms/rule-health";
 import type { TrackRecordSummary } from "@/domain/prop-firms/track-record";
+import { propFirmShareFromSnapshot, traderReceivedFromSnapshot } from "@/domain/prop-firms/payout-math";
 import type {
   AccountAllocationSelectorDTO,
   AccountStageDTO,
   ExecutionDTO,
+  ImportBatchDTO,
   LedgerEntryDTO,
+  MappingTemplateDTO,
   MediaItemLikeDTO,
   MilestoneDTO,
   PayoutDTO,
@@ -96,13 +99,19 @@ function toPayoutDTO(
   payout: PropFirmAccountWithRelations["payouts"][number],
   mediaByOwnerId: MediaByOwnerId,
 ): PayoutDTO {
+  const grossPayout = payout.grossPayout.toNumber();
+  const profitSplitPercent = payout.profitSplitPercent?.toNumber() ?? null;
+  const netReceived = payout.netReceived?.toNumber() ?? null;
+  const snapshot = { grossPayout, profitSplitPercent, netReceived };
   return {
     id: payout.id,
     stageId: payout.stageId,
-    grossPayout: payout.grossPayout.toNumber(),
-    profitSplitPercent: payout.profitSplitPercent?.toNumber() ?? null,
+    grossPayout,
+    profitSplitPercent,
     netExpected: payout.netExpected?.toNumber() ?? null,
-    netReceived: payout.netReceived?.toNumber() ?? null,
+    netReceived,
+    traderReceived: traderReceivedFromSnapshot(snapshot),
+    propFirmShare: propFirmShareFromSnapshot(snapshot),
     requestedDate: payout.requestedDate?.toISOString() ?? null,
     approvedDate: payout.approvedDate?.toISOString() ?? null,
     paidDate: payout.paidDate?.toISOString() ?? null,
@@ -111,6 +120,8 @@ function toPayoutDTO(
     referenceId: payout.referenceId,
     feesDeductions: payout.feesDeductions?.toNumber() ?? null,
     notes: payout.notes,
+    platformTransactionId: payout.platformTransactionId,
+    importBatchId: payout.importBatchId,
     documents: toMediaLikeList(payout.id, mediaByOwnerId),
   };
 }
@@ -147,8 +158,6 @@ export function toPropFirmAccountDTO(
     startingBalance: account.startingBalance.toNumber(),
     currentBalance: ledgerBalance ? ledgerBalance.toNumber() : (account.currentBalance?.toNumber() ?? null),
     currentEquity: account.currentEquity?.toNumber() ?? null,
-    platform: account.platform,
-    dataFeed: account.dataFeed,
     notes: account.notes,
     archivedAt: account.archivedAt?.toISOString() ?? null,
     createdAt: account.createdAt.toISOString(),
@@ -314,6 +323,8 @@ type LedgerEntryRow = {
   occurredAt: Date;
   reason: string | null;
   stageId: string | null;
+  sourceType?: string | null;
+  sourceId?: string | null;
 };
 
 export function toLedgerEntryDTO(entry: LedgerEntryRow): LedgerEntryDTO {
@@ -325,6 +336,8 @@ export function toLedgerEntryDTO(entry: LedgerEntryRow): LedgerEntryDTO {
     occurredAt: entry.occurredAt.toISOString(),
     reason: entry.reason,
     stageId: entry.stageId,
+    sourceType: entry.sourceType ?? null,
+    sourceId: entry.sourceId ?? null,
   };
 }
 
@@ -359,6 +372,72 @@ export function toTrackRecordDTO(summary: TrackRecordSummary): TrackRecordDTO {
     netReturnAfterCosts: summary.netReturnAfterCosts.toNumber(),
     tradingDaysCompleted: summary.tradingDaysCompleted,
     lastActivityAt: summary.lastActivityAt?.toISOString() ?? null,
+  };
+}
+
+type ImportBatchRow = {
+  id: string;
+  platform: string;
+  fileFormat: string;
+  fileName: string;
+  fileSizeBytes: number;
+  sheetOrTableName: string | null;
+  timezone: string;
+  status: string;
+  dateRangeFrom: Date | null;
+  dateRangeTo: Date | null;
+  newExecutionsCount: number;
+  newTradesCount: number;
+  newPayoutsCount: number;
+  skippedDuplicatesCount: number;
+  rejectedRowsCount: number;
+  warnings: unknown;
+  createdAt: Date;
+  rolledBackAt: Date | null;
+};
+
+export function toImportBatchDTO(batch: ImportBatchRow): ImportBatchDTO {
+  return {
+    id: batch.id,
+    platform: batch.platform,
+    fileFormat: batch.fileFormat,
+    fileName: batch.fileName,
+    fileSizeBytes: batch.fileSizeBytes,
+    sheetOrTableName: batch.sheetOrTableName ?? null,
+    timezone: batch.timezone,
+    status: batch.status as ImportBatchDTO["status"],
+    dateRangeFrom: batch.dateRangeFrom?.toISOString() ?? null,
+    dateRangeTo: batch.dateRangeTo?.toISOString() ?? null,
+    newExecutionsCount: batch.newExecutionsCount,
+    newTradesCount: batch.newTradesCount,
+    newPayoutsCount: batch.newPayoutsCount,
+    skippedDuplicatesCount: batch.skippedDuplicatesCount,
+    rejectedRowsCount: batch.rejectedRowsCount,
+    warnings: Array.isArray(batch.warnings)
+      ? (batch.warnings as { rowIndex: number | null; message: string }[])
+      : null,
+    createdAt: batch.createdAt.toISOString(),
+    rolledBackAt: batch.rolledBackAt?.toISOString() ?? null,
+  };
+}
+
+type MappingTemplateRow = {
+  id: string;
+  name: string;
+  platform: string;
+  columnMapping: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export function toMappingTemplateDTO(template: MappingTemplateRow): MappingTemplateDTO {
+  return {
+    id: template.id,
+    name: template.name,
+    platform: template.platform,
+    columnMapping: (template.columnMapping ?? {}) as Record<string, string | undefined>,
+    createdAt: template.createdAt.toISOString(),
+    updatedAt: template.updatedAt.toISOString(),
   };
 }
 

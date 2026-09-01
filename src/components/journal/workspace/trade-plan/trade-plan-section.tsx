@@ -14,7 +14,7 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
 import { PlanScreenshotDropzone } from "@/components/journal/workspace/trade-plan/plan-screenshot-dropzone";
 import { PlanAnnotatedImage, type PlanImageLine } from "@/components/journal/workspace/trade-plan/plan-annotated-image";
-import { parseSymbol } from "@/domain/trade-plan/instrument-catalog";
+import { parseSymbol, formatTargetPrice as formatPrice } from "@/domain/trade-plan/instrument-catalog";
 import { computeDistance } from "@/domain/trade-plan/distance";
 import { computeTargetRMultiples, computeWeightedPlannedR } from "@/domain/trade-plan/planned-rr";
 import { validatePlan, hasBlockingIssues, type PlanValidationIssue } from "@/domain/trade-plan/plan-validation";
@@ -54,16 +54,6 @@ function emptyTarget(order: number): TargetRow {
     moveToBreakEven: false,
     notes: "",
   };
-}
-
-/** Entry/stop/target values are instrument PRICES, never dollar amounts —
- *  formatCurrency (a 2-decimal $ formatter meant for account balances/PnL)
- *  would silently round an FX price like 1.08500 to "$1.09" and prepend a
- *  meaningless $ sign. Respects the resolved instrument's own quote
- *  precision when known. */
-function formatPrice(value: number, precision: number | null): string {
-  const digits = precision ?? (Math.abs(value) >= 100 ? 2 : 5);
-  return value.toFixed(digits);
 }
 
 const STATUS_LABEL: Record<string, string> = {

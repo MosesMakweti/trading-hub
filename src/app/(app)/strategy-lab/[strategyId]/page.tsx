@@ -74,6 +74,8 @@ export default async function StrategyWorkspacePage({
     description: r.description,
     weight: r.weight,
     mandatory: r.mandatory,
+    directionApplicability: r.directionApplicability,
+    pairId: r.pairId,
     validationCriteria: r.validationCriteria,
     enabled: r.enabled,
   });

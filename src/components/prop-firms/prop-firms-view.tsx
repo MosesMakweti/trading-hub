@@ -11,8 +11,10 @@ import { MarketSwitch, type MarketCategory } from "@/components/prop-firms/marke
 import { MarketOverview } from "@/components/prop-firms/market-overview";
 import { PortfolioFilters, type DateRange, type PortfolioFilter } from "@/components/prop-firms/portfolio-filters";
 import { PriorityReorderStrip } from "@/components/prop-firms/priority-reorder-strip";
+import { PropFirmOverviewChart } from "@/components/prop-firms/prop-firm-overview-chart";
 import { toAccountRollupInput } from "@/components/prop-firms/rollup";
 import { aggregateAccounts, challengePassRatePercent, isFundedStageType } from "@/domain/prop-firms/metrics";
+import type { OverviewAccountInput } from "@/domain/prop-firms/overview-series";
 import type { DirectoryEntryDTO, PropFirmAccountDTO, UserPropFirmDTO } from "@/types/prop-firms";
 
 function accountMatchesFilter(account: PropFirmAccountDTO, filter: PortfolioFilter): boolean {
@@ -48,10 +50,12 @@ export function PropFirmsView({
   directory,
   firms,
   initialMarket,
+  overviewAccounts,
 }: {
   directory: DirectoryEntryDTO[];
   firms: UserPropFirmDTO[];
   initialMarket: MarketCategory;
+  overviewAccounts: OverviewAccountInput[];
 }) {
   const [market, setMarket] = useState<MarketCategory>(initialMarket);
   const [filter, setFilter] = useState<PortfolioFilter>("ALL");
@@ -74,6 +78,11 @@ export function PropFirmsView({
   }, [marketFirms, filter, dateRange]);
 
   const visibleAccounts = useMemo(() => visibleFirms.flatMap(({ accounts }) => accounts), [visibleFirms]);
+
+  const visibleOverviewAccounts = useMemo(() => {
+    const ids = new Set(visibleAccounts.map((a) => a.id));
+    return overviewAccounts.filter((a) => ids.has(a.accountId));
+  }, [overviewAccounts, visibleAccounts]);
 
   const metrics = useMemo(
     () => aggregateAccounts(visibleAccounts.map(toAccountRollupInput)),
@@ -129,6 +138,15 @@ export function PropFirmsView({
             dateRange={dateRange}
             onDateRangeChange={setDateRange}
           />
+
+          {visibleOverviewAccounts.length > 0 && (
+            <PropFirmOverviewChart
+              accounts={visibleOverviewAccounts}
+              from={dateRange.from}
+              to={dateRange.to}
+              subtitle={`Weekly funded-account capital and cumulative payouts · ${market === "CFD" ? "CFDs" : "Futures"}`}
+            />
+          )}
 
           {filter === "PRIORITY" && visibleFirms.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">

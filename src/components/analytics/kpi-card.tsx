@@ -21,6 +21,7 @@ export function KpiCard({
   spark,
   sparkTone = "auto",
   icon: Icon,
+  size = "default",
   className,
 }: {
   label: string;
@@ -34,6 +35,9 @@ export function KpiCard({
   spark?: number[];
   sparkTone?: "auto" | "success" | "danger" | "brand" | "muted";
   icon?: LucideIcon;
+  /** "lg" bumps the headline value up a size — for the one anchor metric in a
+   *  dense grid (e.g. Net P&L), not for routine use. */
+  size?: "default" | "lg";
   className?: string;
 }) {
   return (
@@ -56,7 +60,8 @@ export function KpiCard({
       <div className="mt-1.5 flex items-baseline gap-2">
         <div
           className={cn(
-            "text-2xl font-semibold tracking-tight tabular-nums",
+            "font-semibold tracking-tight tabular-nums",
+            size === "lg" ? "text-3xl" : "text-2xl",
             tone === "success" && "text-success",
             tone === "danger" && "text-danger",
           )}

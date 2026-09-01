@@ -12,6 +12,7 @@ import {
 } from "recharts";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CHART_TOOLTIP_STYLE, CHART_AXIS_TICK } from "@/components/analytics/chart-theme";
 import type { EquityCurvePoint } from "@/domain/performance/rr";
 
 export function EquityCurveChart({ data }: { data: EquityCurvePoint[] }) {
@@ -33,9 +34,11 @@ export function EquityCurveChart({ data }: { data: EquityCurvePoint[] }) {
           </TabsList>
         </Tabs>
       </div>
-      {chartData.length === 0 ? (
+      {chartData.length < 2 ? (
         <p className="py-16 text-center text-sm text-muted-foreground">
-          No closed trades in this range yet.
+          {chartData.length === 0
+            ? "No closed trades in this range yet."
+            : "Just one closed trade so far — the curve needs at least two points."}
         </p>
       ) : (
         <ResponsiveContainer width="100%" height={280}>
@@ -49,26 +52,20 @@ export function EquityCurveChart({ data }: { data: EquityCurvePoint[] }) {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis
               dataKey="date"
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+              tick={CHART_AXIS_TICK}
               axisLine={{ stroke: "var(--border)" }}
               tickLine={false}
               minTickGap={40}
             />
             <YAxis
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+              tick={CHART_AXIS_TICK}
               axisLine={false}
               tickLine={false}
               width={44}
               tickFormatter={(v: number) => `${v.toFixed(0)}%`}
             />
             <Tooltip
-              contentStyle={{
-                background: "var(--popover)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                fontSize: 12,
-                color: "var(--popover-foreground)",
-              }}
+              contentStyle={CHART_TOOLTIP_STYLE}
               formatter={(value) => [`${Number(value).toFixed(2)}%`, "Return"]}
             />
             <Area

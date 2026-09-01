@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArchiveRestore, Archive as ArchiveIcon } from "lucide-react";
+import { ArchiveRestore, Archive as ArchiveIcon, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,27 +12,26 @@ import { FormField } from "@/components/accounts/form-field";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
   archivePropFirmAccountAction,
+  deletePropFirmAccountAction,
   reactivatePropFirmAccountAction,
   updatePropFirmAccountAction,
 } from "@/actions/prop-firms.actions";
 import type { PropFirmAccountDTO } from "@/types/prop-firms";
 
-export function SettingsTab({ account }: { account: PropFirmAccountDTO }) {
+export function SettingsTab({ account, firmId }: { account: PropFirmAccountDTO; firmId: string }) {
   const router = useRouter();
   const [modelName, setModelName] = useState(account.modelName ?? "");
-  const [platform, setPlatform] = useState(account.platform ?? "");
-  const [dataFeed, setDataFeed] = useState(account.dataFeed ?? "");
   const [notes, setNotes] = useState(account.notes ?? "");
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [isSaving, startSave] = useTransition();
   const [isArchiving, startArchive] = useTransition();
+  const [isDeleting, startDelete] = useTransition();
 
   function handleSave() {
     startSave(async () => {
       const result = await updatePropFirmAccountAction(account.id, {
         modelName: modelName.trim() || undefined,
-        platform: platform.trim() || undefined,
-        dataFeed: dataFeed.trim() || undefined,
         notes: notes.trim() || undefined,
       });
       if (!result.success) {
@@ -60,17 +59,24 @@ export function SettingsTab({ account }: { account: PropFirmAccountDTO }) {
     });
   }
 
+  function handleDelete() {
+    startDelete(async () => {
+      const result = await deletePropFirmAccountAction(account.id);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Account deleted.");
+      router.push(`/prop-firms/${firmId}`);
+      router.refresh();
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="glass space-y-3 rounded-2xl p-4">
         <FormField label="Model name">
           <Input value={modelName} onChange={(e) => setModelName(e.target.value)} />
-        </FormField>
-        <FormField label="Platform">
-          <Input value={platform} onChange={(e) => setPlatform(e.target.value)} />
-        </FormField>
-        <FormField label="Broker / data feed">
-          <Input value={dataFeed} onChange={(e) => setDataFeed(e.target.value)} />
         </FormField>
         <FormField label="Notes">
           <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -105,6 +111,25 @@ export function SettingsTab({ account }: { account: PropFirmAccountDTO }) {
         </Button>
       </div>
 
+      <div className="glass flex items-center justify-between rounded-2xl border border-danger/20 p-4">
+        <div>
+          <div className="text-sm font-medium">Delete this account</div>
+          <p className="text-xs text-muted-foreground">
+            Removes it from Prop Firms and account selectors everywhere. This can&apos;t be undone from here.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="destructive"
+          className="gap-1.5"
+          onClick={() => setConfirmDelete(true)}
+          disabled={isDeleting}
+        >
+          <Trash2 className="size-3.5" />
+          Delete
+        </Button>
+      </div>
+
       <ConfirmDialog
         open={confirmArchive}
         onOpenChange={setConfirmArchive}
@@ -113,6 +138,17 @@ export function SettingsTab({ account }: { account: PropFirmAccountDTO }) {
         confirmLabel="Archive"
         isPending={isArchiving}
         onConfirm={handleArchiveToggle}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete this account?"
+        description={`"${account.displayName}" will be removed from Prop Firms and account selectors. This can't be undone from here.`}
+        confirmLabel="Delete"
+        variant="destructive"
+        isPending={isDeleting}
+        onConfirm={handleDelete}
       />
     </div>
   );

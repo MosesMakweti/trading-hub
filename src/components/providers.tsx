@@ -17,7 +17,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <SessionProvider>
         <TooltipProvider>
           {children}
-          <Toaster richColors position="top-right" />
+          <Toaster
+            richColors
+            position="top-right"
+            closeButton
+            duration={3500}
+            visibleToasts={3}
+          />
         </TooltipProvider>
       </SessionProvider>
     </ThemeProvider>

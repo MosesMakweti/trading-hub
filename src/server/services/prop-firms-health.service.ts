@@ -114,7 +114,7 @@ export async function getCurrentStageRuleHealth(userId: string, accountId: strin
 
 async function trackRecordExecutionRows(where: { accountStageId: string } | { propFirmAccountId: string }) {
   const executions = await prisma.tradeAccountExecution.findMany({ where });
-  return executions.map((e) => ({
+  const rows = executions.map((e) => ({
     grossPnl: e.grossPnl?.toString() ?? null,
     netPnl: e.netPnl?.toString() ?? null,
     plannedRiskAmount: e.plannedRiskAmount.toString(),
@@ -124,6 +124,32 @@ async function trackRecordExecutionRows(where: { accountStageId: string } | { pr
     closedAt: e.closedAt,
     dateKey: (e.closedAt ?? e.plannedAt).toISOString().slice(0, 10),
   }));
+
+  // CSV-imported trades are account-lifetime, not stage-scoped, so they only
+  // fold into the account-level track record. Their P&L already reached the
+  // ledger via TRADE_PNL entries at confirm time (so balance/ROI/drawdown
+  // already include them) — this adds them to the execution list purely so
+  // win/loss/profit-factor/streak counts also reflect imports. computeTrackRecord
+  // derives netPnl from executions (not the ledger), so there's no double count.
+  if ("propFirmAccountId" in where) {
+    const importedTrades = await prisma.propFirmImportedTrade.findMany({
+      where: { accountId: where.propFirmAccountId },
+    });
+    for (const t of importedTrades) {
+      rows.push({
+        grossPnl: t.grossPnl.toString(),
+        netPnl: t.netPnl.toString(),
+        plannedRiskAmount: "0", // required by the type; unused by the math
+        riskPercentOfBase: null,
+        actualR: null,
+        status: t.status === "CLOSED" ? "CLOSED" : t.status === "PARTIAL" ? "PARTIALLY_CLOSED" : "EXECUTED",
+        closedAt: t.closedAt,
+        dateKey: (t.closedAt ?? t.openedAt).toISOString().slice(0, 10),
+      });
+    }
+  }
+
+  return rows;
 }
 
 /** Account-level track record (spec §6) — computed from the WHOLE account's

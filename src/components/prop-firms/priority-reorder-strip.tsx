@@ -135,22 +135,24 @@ function Row({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-sm"
           disabled={disabled || index === 0}
+          title="Move up"
           aria-label={`Move ${firm.companyName} up in priority`}
           onClick={() => onMove(index, -1)}
         >
-          <ArrowUp className="size-3.5" />
+          <ArrowUp className="size-4" />
         </Button>
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-sm"
           disabled={disabled || index === count - 1}
+          title="Move down"
           aria-label={`Move ${firm.companyName} down in priority`}
           onClick={() => onMove(index, 1)}
         >
-          <ArrowDown className="size-3.5" />
+          <ArrowDown className="size-4" />
         </Button>
       </div>
     </div>

@@ -14,7 +14,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tag } from "@/components/ui/tag";
 import { ImageAttachments } from "@/components/media/image-attachments";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import {
+  CONFLUENCE_DIRECTION_META,
+  ConfluenceDirectionBadge,
+} from "@/components/shared/confluence-direction-badge";
 import { ColorPicker } from "@/components/strategy-lab/sot/color-picker";
+import type { ConfluenceDirectionValue } from "@/lib/validation/strategy-sot";
 import {
   createStrategyChecklistItem,
   deleteStrategyChecklistItem,
@@ -29,6 +34,8 @@ export interface StrategyChecklistItemDTO {
   description: string | null;
   weight: number | null;
   mandatory: boolean;
+  directionApplicability: ConfluenceDirectionValue;
+  pairId: string | null;
   validationCriteria: string | null;
   enabled: boolean;
 }
@@ -42,6 +49,7 @@ interface Draft {
   description: string;
   weight: string;
   mandatory: boolean;
+  directionApplicability: ConfluenceDirectionValue;
   validationCriteria: string;
   enabled: boolean;
 }
@@ -52,6 +60,7 @@ const emptyDraft: Draft = {
   description: "",
   weight: "",
   mandatory: false,
+  directionApplicability: "BOTH",
   validationCriteria: "",
   enabled: true,
 };
@@ -62,6 +71,7 @@ const toDraft = (i: StrategyChecklistItemDTO): Draft => ({
   description: i.description ?? "",
   weight: i.weight == null ? "" : String(i.weight),
   mandatory: i.mandatory,
+  directionApplicability: i.directionApplicability,
   validationCriteria: i.validationCriteria ?? "",
   enabled: i.enabled,
 });
@@ -100,6 +110,9 @@ export function StrategyChecklistSection({
       description: draft.description.trim() || null,
       weight: draft.weight.trim() === "" ? null : Number(draft.weight),
       mandatory: kind === "CONFLUENCE" ? draft.mandatory : false,
+      // Direction filtering is a confluence concept; execution items stay BOTH.
+      directionApplicability:
+        kind === "CONFLUENCE" ? draft.directionApplicability : ("BOTH" as ConfluenceDirectionValue),
       validationCriteria: draft.validationCriteria.trim() || null,
       enabled: draft.enabled,
     };
@@ -183,6 +196,9 @@ export function StrategyChecklistSection({
               <span className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
                 <Lock className="size-2.5" /> Core
               </span>
+            )}
+            {kind === "CONFLUENCE" && (
+              <ConfluenceDirectionBadge direction={item.directionApplicability} />
             )}
             {item.category && (
               <span className="text-xs text-muted-foreground">{item.category}</span>
@@ -352,6 +368,37 @@ function ItemForm({
           >
             Optional (adds to score)
           </button>
+        </div>
+      )}
+
+      {kind === "CONFLUENCE" && (
+        <div className="space-y-1">
+          <div className="flex overflow-hidden rounded-lg border border-border text-xs">
+            {(["BULLISH", "BOTH", "BEARISH"] as const).map((dir, idx) => {
+              const meta = CONFLUENCE_DIRECTION_META[dir];
+              const Icon = meta.icon;
+              const active = draft.directionApplicability === dir;
+              return (
+                <button
+                  key={dir}
+                  type="button"
+                  onClick={() => setDraft({ ...draft, directionApplicability: dir })}
+                  className={cn(
+                    "flex flex-1 items-center justify-center gap-1 px-3 py-1.5 font-medium transition-colors",
+                    idx > 0 && "border-l border-border",
+                    active ? meta.className : "text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  <Icon className="size-3" />
+                  {meta.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-muted-foreground/70">
+            Applies only to matching trade direction. Long trades score against Bullish +
+            Both; short trades against Bearish + Both.
+          </p>
         </div>
       )}
 

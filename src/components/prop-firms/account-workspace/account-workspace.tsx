@@ -7,7 +7,16 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PropFirmLogo } from "@/components/prop-firms/prop-firm-logo";
 import { formatCurrency } from "@/components/journal/workspace/workspace-ui";
-import type { ExecutionDTO, LedgerEntryDTO, PropFirmAccountDTO, RuleHealthDTO, TrackRecordDTO } from "@/types/prop-firms";
+import type {
+  ExecutionDTO,
+  ImportBatchDTO,
+  LedgerEntryDTO,
+  MappingTemplateDTO,
+  PropFirmAccountDTO,
+  RuleHealthDTO,
+  TrackRecordDTO,
+} from "@/types/prop-firms";
+import { ImportTab } from "./tabs/import-tab";
 import { OverviewTab } from "./tabs/overview-tab";
 import { StagesTab } from "./tabs/stages-tab";
 import { RulesTab } from "./tabs/rules-tab";
@@ -42,6 +51,8 @@ export function AccountWorkspace({
   trackRecord,
   stageTrackRecords,
   ruleHealthByRuleId,
+  importBatches,
+  mappingTemplates,
 }: {
   account: PropFirmAccountDTO;
   firm: FirmSummary;
@@ -50,6 +61,8 @@ export function AccountWorkspace({
   trackRecord: TrackRecordDTO;
   stageTrackRecords: Record<string, TrackRecordDTO>;
   ruleHealthByRuleId: Record<string, RuleHealthDTO>;
+  importBatches: ImportBatchDTO[];
+  mappingTemplates: MappingTemplateDTO[];
 }) {
   return (
     <div className="space-y-5">
@@ -97,13 +110,14 @@ export function AccountWorkspace({
           <TabsTrigger value="trades">Trades</TabsTrigger>
           <TabsTrigger value="ledger">Ledger</TabsTrigger>
           <TabsTrigger value="payouts">Payouts</TabsTrigger>
+          <TabsTrigger value="import">Import</TabsTrigger>
           <TabsTrigger value="milestones">Milestones</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
-          <OverviewTab account={account} trackRecord={trackRecord} ruleHealthByRuleId={ruleHealthByRuleId} />
+          <OverviewTab account={account} trackRecord={trackRecord} ruleHealthByRuleId={ruleHealthByRuleId} ledger={ledger} />
         </TabsContent>
         <TabsContent value="stages" className="mt-4">
           <StagesTab account={account} ruleHealthByRuleId={ruleHealthByRuleId} />
@@ -120,6 +134,9 @@ export function AccountWorkspace({
         <TabsContent value="payouts" className="mt-4">
           <PayoutsTab account={account} />
         </TabsContent>
+        <TabsContent value="import" className="mt-4">
+          <ImportTab account={account} batches={importBatches} mappingTemplates={mappingTemplates} />
+        </TabsContent>
         <TabsContent value="milestones" className="mt-4">
           <MilestonesTab account={account} />
         </TabsContent>
@@ -127,7 +144,7 @@ export function AccountWorkspace({
           <DocumentsTab account={account} />
         </TabsContent>
         <TabsContent value="settings" className="mt-4">
-          <SettingsTab account={account} />
+          <SettingsTab account={account} firmId={firm.id} />
         </TabsContent>
       </Tabs>
     </div>

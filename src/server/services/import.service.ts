@@ -90,10 +90,6 @@ export async function importTrades(
         // trade-export.ts). A re-imported trade's Performance PnL stays 0
         // until real entry/stop/exit data is entered for it in the workspace.
         performanceRiskPercentOverride: null,
-        hitTP1: record.hitTP1,
-        hitTP2: record.hitTP2,
-        hitTP3: record.hitTP3,
-        hitFullTP: record.hitFullTP,
         psychPreTradeMindset: record.psychPreTradeMindset,
         psychPostTradeReflection: record.psychPostTradeReflection,
         psychLessonsLearned: record.psychLessonsLearned,

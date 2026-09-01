@@ -37,8 +37,6 @@ export function StepReview({ draft }: { draft: AccountDraft }) {
           <ReviewField label="Account size" value={formatCurrency(num(draft.accountSize))} />
           <ReviewField label="Currency" value={draft.accountCurrency || "USD"} />
           <ReviewField label="Total costs" value={formatCurrency(totalCosts)} />
-          <ReviewField label="Platform" value={draft.platform || "—"} />
-          <ReviewField label="Broker / feed" value={draft.dataFeed || "—"} />
           <ReviewField label="Purchase date" value={draft.purchaseDate || "—"} />
         </div>
         {draft.notes && <p className="mt-3 text-xs text-muted-foreground">{draft.notes}</p>}

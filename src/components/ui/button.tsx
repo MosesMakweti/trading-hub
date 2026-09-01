@@ -34,6 +34,19 @@ const buttonVariants = cva(
         "icon-lg": "size-9",
       },
     },
+    compoundVariants: [
+      // Icon-only ghost buttons carry no label, so at rest they read as
+      // decoration rather than controls. Give the small/large icon sizes a
+      // faint resting surface + hairline border so they're recognisably
+      // pressable everywhere (toolbars, card headers, list rows). The plain
+      // `icon` size is left untouched — it's what calendar day cells use.
+      {
+        variant: "ghost",
+        size: ["icon-xs", "icon-sm", "icon-lg"],
+        className:
+          "border-border/60 bg-muted/40 text-muted-foreground hover:border-border dark:border-input/40 dark:bg-input/25",
+      },
+    ],
     defaultVariants: {
       variant: "default",
       size: "default",

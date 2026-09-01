@@ -2,6 +2,8 @@
 
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { CHART_TOOLTIP_STYLE, CHART_AXIS_TICK } from "@/components/analytics/chart-theme";
+
 export function MonthlyReturnsChart({ data }: { data: { month: string; percent: number }[] }) {
   return (
     <div className="glass space-y-3 rounded-2xl p-4">
@@ -16,25 +18,19 @@ export function MonthlyReturnsChart({ data }: { data: { month: string; percent: 
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis
               dataKey="month"
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+              tick={CHART_AXIS_TICK}
               axisLine={{ stroke: "var(--border)" }}
               tickLine={false}
             />
             <YAxis
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+              tick={CHART_AXIS_TICK}
               axisLine={false}
               tickLine={false}
               width={44}
               tickFormatter={(v: number) => `${v.toFixed(0)}%`}
             />
             <Tooltip
-              contentStyle={{
-                background: "var(--popover)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                fontSize: 12,
-                color: "var(--popover-foreground)",
-              }}
+              contentStyle={CHART_TOOLTIP_STYLE}
               formatter={(value) => [`${Number(value).toFixed(2)}%`, "Return"]}
             />
             <Bar dataKey="percent" radius={[4, 4, 4, 4]} maxBarSize={36}>

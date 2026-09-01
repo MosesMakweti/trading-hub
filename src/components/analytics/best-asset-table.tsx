@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { RowBar } from "@/components/analytics/row-bar";
 import type { AssetStats } from "@/domain/performance/metrics";
 
 /**
@@ -33,17 +34,7 @@ export function BestAssetTable({ stats }: { stats: AssetStats[] }) {
               <td className="py-2.5 pr-4 font-medium">{s.assetSymbol}</td>
               <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">{s.totalTrades}</td>
               <td className="py-2.5 pr-4">
-                <div className="flex items-center gap-2">
-                  <div className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-chart-2"
-                      style={{ width: `${Math.max(0, Math.min(100, s.winRate ?? 0))}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    {s.winRate == null ? "—" : `${s.winRate.toFixed(0)}%`}
-                  </span>
-                </div>
+                <RowBar percent={s.winRate} />
               </td>
               <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">
                 {s.averageRR == null ? "—" : `${s.averageRR.toFixed(2)}R`}

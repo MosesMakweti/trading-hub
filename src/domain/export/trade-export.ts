@@ -30,10 +30,6 @@ export interface TradeExportRecord {
   // data (entry/stop/exit) is entered for it in the workspace.
   performanceClosingPnlGross: number;
   performanceClosingPnlNet: number;
-  hitTP1: boolean;
-  hitTP2: boolean;
-  hitTP3: boolean;
-  hitFullTP: boolean;
   psychPreTradeMindset: string | null;
   psychPostTradeReflection: string | null;
   psychLessonsLearned: string | null;
@@ -55,10 +51,6 @@ export interface TradeExportRow {
   "Actual RR": string;
   "Performance PnL (Net)": number;
   "Psychology Grade": string;
-  "TP1 Hit": string;
-  "TP2 Hit": string;
-  "TP3 Hit": string;
-  "Full TP Hit": string;
 }
 
 function minutesToTimeString(minutes: number): string {
@@ -81,10 +73,6 @@ export function toExportRow(
     "Actual RR": record.actualRR == null ? "" : String(record.actualRR),
     "Performance PnL (Net)": record.performanceClosingPnlNet,
     "Psychology Grade": psychologyGrade ?? "",
-    "TP1 Hit": record.hitTP1 ? "Yes" : "No",
-    "TP2 Hit": record.hitTP2 ? "Yes" : "No",
-    "TP3 Hit": record.hitTP3 ? "Yes" : "No",
-    "Full TP Hit": record.hitFullTP ? "Yes" : "No",
   };
 }
 

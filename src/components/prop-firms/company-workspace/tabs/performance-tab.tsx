@@ -1,15 +1,30 @@
 import { LineChart } from "lucide-react";
 
 import { EmptyState } from "@/components/shared/empty-state";
+import { CountUp, type CountUpConfig } from "@/components/analytics/count-up";
 import { formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
 import { accountRoiPercent, type AggregateMetrics } from "@/domain/prop-firms/metrics";
+import type { OverviewAccountInput } from "@/domain/prop-firms/overview-series";
+import { PropFirmOverviewChart } from "@/components/prop-firms/prop-firm-overview-chart";
 import type { UserPropFirmDTO } from "@/types/prop-firms";
 
 function formatPercent(n: number | null): string {
   return n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
 }
 
-export function PerformanceTab({ firm, metrics }: { firm: UserPropFirmDTO; metrics: AggregateMetrics }) {
+function countOf(v: number | null, config: Omit<CountUpConfig, "value">): CountUpConfig | undefined {
+  return v == null ? undefined : { value: v, ...config };
+}
+
+export function PerformanceTab({
+  firm,
+  metrics,
+  overviewAccounts,
+}: {
+  firm: UserPropFirmDTO;
+  metrics: AggregateMetrics;
+  overviewAccounts: OverviewAccountInput[];
+}) {
   if (firm.accounts.length === 0) {
     return (
       <EmptyState
@@ -22,11 +37,53 @@ export function PerformanceTab({ firm, metrics }: { firm: UserPropFirmDTO; metri
 
   return (
     <div className="space-y-3">
+      <PropFirmOverviewChart
+        accounts={overviewAccounts}
+        title="Master capital & payouts"
+        subtitle={`Weekly funded-account capital and cumulative payouts · ${firm.companyName}`}
+      />
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <SummaryStat label="Net trading P&L" value={formatSignedCurrency(metrics.netTradingPnl)} />
-        <SummaryStat label="Account ROI" value={formatPercent(metrics.accountRoiPercent)} />
-        <SummaryStat label="Investment ROI" value={formatPercent(metrics.traderInvestmentRoiPercent)} />
-        <SummaryStat label="Net profit" value={formatSignedCurrency(metrics.netPropFirmProfit)} />
+        <SummaryStat
+          label="Net trading P&L"
+          value={formatSignedCurrency(metrics.netTradingPnl)}
+          count={countOf(metrics.netTradingPnl, { decimals: 2, prefix: "$", grouping: true, signed: true })}
+          tone={metrics.netTradingPnl > 0 ? "text-success" : metrics.netTradingPnl < 0 ? "text-danger" : undefined}
+        />
+        <SummaryStat
+          label="Account ROI"
+          value={formatPercent(metrics.accountRoiPercent)}
+          count={countOf(metrics.accountRoiPercent, { decimals: 1, suffix: "%", signed: true })}
+          tone={
+            metrics.accountRoiPercent == null
+              ? undefined
+              : metrics.accountRoiPercent > 0
+                ? "text-success"
+                : metrics.accountRoiPercent < 0
+                  ? "text-danger"
+                  : undefined
+          }
+        />
+        <SummaryStat
+          label="Investment ROI"
+          value={formatPercent(metrics.traderInvestmentRoiPercent)}
+          count={countOf(metrics.traderInvestmentRoiPercent, { decimals: 1, suffix: "%", signed: true })}
+          tone={
+            metrics.traderInvestmentRoiPercent == null
+              ? undefined
+              : metrics.traderInvestmentRoiPercent > 0
+                ? "text-success"
+                : metrics.traderInvestmentRoiPercent < 0
+                  ? "text-danger"
+                  : undefined
+          }
+        />
+        <SummaryStat
+          label="Net profit"
+          value={formatSignedCurrency(metrics.netPropFirmProfit)}
+          count={countOf(metrics.netPropFirmProfit, { decimals: 2, prefix: "$", grouping: true, signed: true })}
+          tone={metrics.netPropFirmProfit > 0 ? "text-success" : metrics.netPropFirmProfit < 0 ? "text-danger" : undefined}
+        />
       </div>
 
       <div className="space-y-2">
@@ -66,11 +123,21 @@ export function PerformanceTab({ firm, metrics }: { firm: UserPropFirmDTO; metri
   );
 }
 
-function SummaryStat({ label, value }: { label: string; value: string }) {
+function SummaryStat({
+  label,
+  value,
+  count,
+  tone,
+}: {
+  label: string;
+  value: string;
+  count?: CountUpConfig;
+  tone?: string;
+}) {
   return (
     <div className="glass rounded-xl p-3.5">
       <div className="text-[10px] tracking-wide text-muted-foreground uppercase">{label}</div>
-      <div className="mt-0.5 text-base font-semibold">{value}</div>
+      <div className={`mt-0.5 text-base font-semibold ${tone ?? ""}`}>{count ? <CountUp {...count} /> : value}</div>
     </div>
   );
 }

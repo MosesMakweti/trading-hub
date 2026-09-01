@@ -1,14 +1,20 @@
+import { useState, useTransition } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUpRight, ShieldAlert, Wallet } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { AlertTriangle, ArrowUpRight, ShieldAlert, Trash2, Wallet } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatCurrency, formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
 import { formatDate } from "@/components/prop-firms/format";
 import { accountRoiPercent } from "@/domain/prop-firms/metrics";
-import type { PropFirmAccountDTO, UserPropFirmDTO } from "@/types/prop-firms";
+import { deletePropFirmAccountAction } from "@/actions/prop-firms.actions";
+import { CsvImportButton } from "@/components/prop-firms/import/csv-import-button";
+import type { MappingTemplateDTO, PropFirmAccountDTO, UserPropFirmDTO } from "@/types/prop-firms";
 
 const MODEL_LABELS: Record<string, string> = {
   ONE_PHASE: "One-phase",
@@ -37,19 +43,43 @@ function lastActivity(account: PropFirmAccountDTO): string {
   return dates.reduce((latest, d) => (d > latest ? d : latest), dates[0]);
 }
 
-function AccountCard({ account, firmId }: { account: PropFirmAccountDTO; firmId: string }) {
+function AccountCard({
+  account,
+  firmId,
+  mappingTemplates,
+}: {
+  account: PropFirmAccountDTO;
+  firmId: string;
+  mappingTemplates: MappingTemplateDTO[];
+}) {
+  const router = useRouter();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isDeleting, startDelete] = useTransition();
   const stage = currentStage(account);
   const pnl = account.currentBalance != null ? account.currentBalance - account.startingBalance : null;
   const roi = pnl != null ? accountRoiPercent(pnl, account.startingBalance) : null;
   const isAtRisk = account.status === "ACTIVE" && account.currentBalance != null && account.currentBalance < account.startingBalance;
   const isBreached = account.status === "BREACHED";
 
+  function handleDelete() {
+    startDelete(async () => {
+      const result = await deletePropFirmAccountAction(account.id);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Account deleted.");
+      setConfirmDelete(false);
+      router.refresh();
+    });
+  }
+
   return (
     <div className="glass space-y-3 rounded-2xl p-4">
       <div className="flex items-start justify-between gap-2">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-medium">{account.displayName}</span>
+            <span className="truncate font-medium">{account.displayName}</span>
             <Badge variant={STATUS_VARIANT[account.status] ?? "secondary"}>{account.status}</Badge>
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
@@ -57,15 +87,28 @@ function AccountCard({ account, firmId }: { account: PropFirmAccountDTO; firmId:
             {stage ? ` · ${stage.name}` : ""}
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          nativeButton={false}
-          render={<Link href={`/prop-firms/${firmId}/accounts/${account.id}`} />}
-          aria-label={`Open ${account.displayName}`}
-        >
-          <ArrowUpRight className="size-3.5" />
-        </Button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button
+            size="sm"
+            className="gap-1.5"
+            nativeButton={false}
+            render={<Link href={`/prop-firms/${firmId}/accounts/${account.id}`} />}
+            aria-label={`Open ${account.displayName}`}
+          >
+            <ArrowUpRight className="size-4" />
+            Open account
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="icon-sm"
+            onClick={() => setConfirmDelete(true)}
+            title="Delete account"
+            aria-label={`Delete ${account.displayName}`}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
       </div>
 
       {(isAtRisk || isBreached) && (
@@ -100,9 +143,26 @@ function AccountCard({ account, firmId }: { account: PropFirmAccountDTO; firmId:
         <Field label="Daily loss remaining" value="Unavailable" hint="Live rule tracking not yet enabled" />
       </div>
 
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
         <span>Last activity {formatDate(lastActivity(account))}</span>
+        <CsvImportButton
+          accountId={account.id}
+          accountName={account.displayName}
+          mappingTemplates={mappingTemplates}
+          variant="outline"
+        />
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete this account?"
+        description={`"${account.displayName}" will be removed from Prop Firms and account selectors. This can't be undone from here.`}
+        confirmLabel="Delete"
+        variant="destructive"
+        isPending={isDeleting}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }
@@ -118,7 +178,13 @@ function Field({ label, value, tone, hint }: { label: string; value: string; ton
   );
 }
 
-export function AccountsTab({ firm }: { firm: UserPropFirmDTO }) {
+export function AccountsTab({
+  firm,
+  mappingTemplates,
+}: {
+  firm: UserPropFirmDTO;
+  mappingTemplates: MappingTemplateDTO[];
+}) {
   if (firm.accounts.length === 0) {
     return (
       <EmptyState
@@ -132,7 +198,7 @@ export function AccountsTab({ firm }: { firm: UserPropFirmDTO }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       {firm.accounts.map((account) => (
-        <AccountCard key={account.id} account={account} firmId={firm.id} />
+        <AccountCard key={account.id} account={account} firmId={firm.id} mappingTemplates={mappingTemplates} />
       ))}
     </div>
   );

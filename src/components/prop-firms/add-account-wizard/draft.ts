@@ -53,8 +53,6 @@ export function emptyDraft(seed?: { userPropFirmId?: string; companyName?: strin
     activationFees: "",
     otherCosts: "",
     purchaseDate: "",
-    platform: "",
-    dataFeed: "",
     notes: "",
     stages: stagesForModel(modelType),
   };

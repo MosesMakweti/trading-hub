@@ -43,6 +43,9 @@ model User {
   tradePlanScreenshots     TradePlanScreenshot[]
   tradeActualPartialExits  TradeActualPartialExit[]
   performanceRiskSnapshots PerformanceRiskSnapshot[]
+
+  propFirmImportBatches          PropFirmImportBatch[]
+  propFirmImportMappingTemplates PropFirmImportMappingTemplate[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -376,10 +379,6 @@ model Trade {
   // until then ("not planned yet", never a misleading 0R placeholder).
   expectedRR               Decimal?     @db.Decimal(8, 2)
   actualRR                 Decimal?     @db.Decimal(8, 2)
-  hitTP1                   Boolean      @default(false)
-  hitTP2                   Boolean      @default(false)
-  hitTP3                   Boolean      @default(false)
-  hitFullTP                Boolean      @default(false)
   psychPreTradeMindset     String?
   psychPostTradeReflection String?
   psychLessonsLearned      String?
@@ -916,6 +915,17 @@ enum StrategyChecklistKind {
   EXECUTION
 }
 
+// Direction applicability of a CONFLUENCE checklist item. BULLISH confluences are
+// only eligible for LONG trades, BEARISH only for SHORT; BOTH covers
+// direction-neutral conditions (session, volatility, key level, liquidity, news,
+// general HTF context). Existing rows default to BOTH — direction is never
+// guessed from a confluence's name.
+enum ConfluenceDirection {
+  BULLISH
+  BEARISH
+  BOTH
+}
+
 model Strategy {
   id     String @id @default(cuid())
   userId String
@@ -1151,6 +1161,14 @@ model StrategyChecklistItem {
   category           String?
   description        String?
   weight             Int? // probability weight (0-100) used by the weighted setup-scoring engine
+  // CONFLUENCE only: which trade direction this confluence is eligible for.
+  // Filters BEFORE scoring so bull-only weights never enter a long denominator
+  // (and vice-versa). Always BOTH for EXECUTION items and for pre-existing rows.
+  directionApplicability ConfluenceDirection @default(BOTH)
+  // Optional organizational link between opposite versions of the same condition
+  // (e.g. "Bullish MSB" / "Bearish MSB" share a pairId). Display-only — never a
+  // substitute for `directionApplicability`, and pairing is not required.
+  pairId                 String?
   // Confluence scoring (CONFLUENCE kind): mandatory items gate setup validity — a
   // setup missing any mandatory confluence is "Invalid Setup". Optional items only
   // add to the weighted probability score. validationCriteria is the objective test
@@ -1370,9 +1388,6 @@ model PropFirmAccount {
   otherCosts     Decimal?  @db.Decimal(14, 2)
   purchaseDate   DateTime? @db.Date
 
-  platform String? // trading platform (e.g. MT5, cTrader, Tradovate)
-  dataFeed String? // broker / data feed
-
   status PropFirmAccountStatus @default(ACTIVE)
 
   // Manual snapshots for now (Phase 1) — not yet computed from stage
@@ -1403,6 +1418,13 @@ model PropFirmAccount {
   payouts       Payout[]
   executions    TradeAccountExecution[]
   ledgerEntries AccountLedgerEntry[]
+
+  // CSV import (§ Prop Firm CSV Import) — entirely separate from `executions`
+  // (real Journal-linked TradeAccountExecution rows) and never touches Trade.
+  importBatches        PropFirmImportBatch[]
+  importedExecutions   PropFirmImportedExecution[]
+  importedTrades       PropFirmImportedTrade[]
+  importedTransactions PropFirmTransaction[]
 
   @@index([userId, status, deletedAt])
   @@index([userPropFirmId])
@@ -1624,6 +1646,15 @@ model Payout {
   feesDeductions Decimal?     @db.Decimal(14, 2)
   notes          String?
 
+  // CSV import provenance (§ Prop Firm CSV Import) — all null for a manually
+  // entered payout. `sourceTransactionId` is unique: at most one confirmed
+  // Payout per raw imported withdrawal transaction.
+  importBatchId         String?
+  importBatch           PropFirmImportBatch? @relation(fields: [importBatchId], references: [id])
+  platformTransactionId String?
+  sourceTransactionId   String?              @unique
+  sourceTransaction     PropFirmTransaction? @relation(fields: [sourceTransactionId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1650,8 +1681,13 @@ enum LedgerEventType {
   CHALLENGE_PURCHASE_FEE
   RESET_FEE
   ACTIVATION_FEE
+  OTHER_FEE
   PAYOUT
   REFUND
+  DEPOSIT
+  WITHDRAWAL
+  CREDIT
+  BALANCE_CORRECTION
   STAGE_PASSED
   STAGE_FAILED
   ACCOUNT_BREACHED
@@ -1664,6 +1700,7 @@ enum LedgerSourceType {
   PAYOUT
   STAGE_TRANSITION
   ACCOUNT_INIT
+  IMPORTED_TRANSACTION
   MANUAL
 }
 
@@ -2054,4 +2091,248 @@ model TradeActualPartialExit {
   @@index([tradeId])
   @@index([accountExecutionId])
   @@index([plannedTargetId])
+}
+
+// ── Prop Firm CSV Import (Phase 1: Generic CSV, MT4, MT5) ───────────────────
+// Entirely separate from the Journal / global Trade model. Imported data only
+// ever creates PropFirmImportedExecution/PropFirmImportedTrade/
+// PropFirmTransaction rows, plus — for a confirmed withdrawal — an ordinary
+// Payout row (extended below with import provenance columns). Balance/equity
+// effects are posted to the account's own AccountLedgerEntry the exact same
+// way manual TradeAccountExecution fills and Payout PAID-transitions already
+// are (postLedgerEntry, account-ledger.service.ts) — nothing here ever
+// creates, updates, or reads a Trade, TradeAccountExecution, or
+// PerformanceRiskSnapshot row.
+
+enum PropFirmImportPlatform {
+  MT4
+  MT5
+  CTRADER
+  NINJATRADER
+  TRADOVATE
+  GENERIC_CSV
+}
+
+enum PropFirmImportFileFormat {
+  CSV
+  TSV
+  TXT
+  XLSX
+  XLS
+  HTML
+  XML
+}
+
+enum PropFirmImportBatchStatus {
+  CONFIRMED
+  ROLLED_BACK
+}
+
+enum PropFirmTransactionClassification {
+  DEPOSIT
+  WITHDRAWAL_PAYOUT
+  WITHDRAWAL_UNCLASSIFIED
+  INTERNAL_TRANSFER
+  ACCOUNT_RESET
+  FEE
+  COMMISSION
+  REFUND
+  BALANCE_CORRECTION
+  CREDIT
+  UNKNOWN
+}
+
+enum PropFirmImportedTradeStatus {
+  OPEN
+  PARTIAL
+  CLOSED
+}
+
+// One row per confirmed upload. Written only inside confirmImport's single
+// transaction alongside everything it produced, so a failed/cancelled import
+// never leaves an orphaned batch row.
+model PropFirmImportBatch {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  platform      PropFirmImportPlatform
+  fileFormat    PropFirmImportFileFormat
+  fileName      String
+  fileSizeBytes Int
+  // Browser-reported MIME type of the upload (may be empty/generic) + the
+  // worksheet / HTML table / statement section the rows were taken from —
+  // both kept for audit.
+  sourceMimeType   String?
+  sheetOrTableName String?
+  timezone      String // IANA zone, user-confirmed before parsing
+
+  status PropFirmImportBatchStatus @default(CONFIRMED)
+
+  dateRangeFrom DateTime?
+  dateRangeTo   DateTime?
+
+  newExecutionsCount     Int   @default(0)
+  newTradesCount         Int   @default(0)
+  newPayoutsCount        Int   @default(0)
+  skippedDuplicatesCount Int   @default(0)
+  rejectedRowsCount      Int   @default(0)
+  warnings               Json?
+
+  mappingTemplateId String?
+  mappingTemplate   PropFirmImportMappingTemplate? @relation(fields: [mappingTemplateId], references: [id])
+
+  createdAt    DateTime  @default(now())
+  rolledBackAt DateTime?
+
+  executions   PropFirmImportedExecution[]
+  transactions PropFirmTransaction[]
+  payouts      Payout[]
+
+  @@index([accountId, createdAt])
+}
+
+// One row per platform execution/deal/fill, after adapter normalization —
+// preserved verbatim (rawRow) for audit even after trade reconstruction
+// groups it into a PropFirmImportedTrade. `dedupeKey` is always populated
+// (platform id when available, else a normalized fingerprint) and is the
+// sole idempotency guard, backed by the unique index below.
+model PropFirmImportedExecution {
+  id String @id @default(cuid())
+
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  importBatchId String
+  importBatch   PropFirmImportBatch @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
+
+  platform            PropFirmImportPlatform
+  platformExecutionId String?
+  platformOrderId     String?
+  platformDealId      String?
+
+  instrumentRaw        String
+  instrumentNormalized String
+  direction            Direction
+
+  quantity Decimal @db.Decimal(14, 4)
+  price    Decimal @db.Decimal(18, 8)
+
+  grossPnl   Decimal? @db.Decimal(14, 2)
+  commission Decimal? @db.Decimal(14, 2)
+  swap       Decimal? @db.Decimal(14, 2)
+  otherFees  Decimal? @db.Decimal(14, 2)
+  currency   String?
+
+  executedAt DateTime
+  dedupeKey  String
+  rawRow     Json
+
+  reconstructedTradeId String?
+  reconstructedTrade   PropFirmImportedTrade? @relation(fields: [reconstructedTradeId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([accountId, dedupeKey])
+  @@index([importBatchId])
+  @@index([reconstructedTradeId])
+}
+
+// A reconstructed logical round-trip trade — derived, never hand-edited.
+// Recomputed wholesale from an account's surviving PropFirmImportedExecution
+// rows on every confirm/rollback (prop-firm-import.service.ts) rather than
+// patched in place, so it's always exactly consistent with its executions.
+model PropFirmImportedTrade {
+  id String @id @default(cuid())
+
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  instrument String
+  direction  Direction
+  status     PropFirmImportedTradeStatus
+
+  openedAt DateTime
+  closedAt DateTime?
+
+  entryCount Int
+  exitCount  Int
+
+  totalQuantity Decimal  @db.Decimal(14, 4)
+  avgEntryPrice Decimal  @db.Decimal(18, 8)
+  avgExitPrice  Decimal? @db.Decimal(18, 8)
+
+  grossPnl   Decimal @db.Decimal(14, 2)
+  commission Decimal @db.Decimal(14, 2)
+  swap       Decimal @db.Decimal(14, 2)
+  otherFees  Decimal @db.Decimal(14, 2)
+  netPnl     Decimal @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  executions PropFirmImportedExecution[]
+
+  @@index([accountId])
+}
+
+// A non-trade financial event from an imported statement — deposits,
+// withdrawals (payout candidates), fees, credits, unknown adjustments.
+// `classification` starts as the adapter/classifier's best guess;
+// `requiresReview` gates anything under-confidence until the user confirms
+// it in the import preview. A confirmed WITHDRAWAL_PAYOUT gets exactly one
+// linked Payout row via Payout.sourceTransactionId (unique).
+model PropFirmTransaction {
+  id String @id @default(cuid())
+
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  importBatchId String
+  importBatch   PropFirmImportBatch @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
+
+  platform              PropFirmImportPlatform
+  platformTransactionId String?
+  rawType               String
+  classification        PropFirmTransactionClassification
+
+  amount   Decimal @db.Decimal(14, 2)
+  currency String?
+
+  occurredAt DateTime
+  dedupeKey  String
+  rawRow     Json
+
+  requiresReview Boolean   @default(false)
+  reviewedAt     DateTime?
+
+  createdAt DateTime @default(now())
+
+  payout Payout?
+
+  @@unique([accountId, dedupeKey])
+  @@index([importBatchId])
+}
+
+// A reusable column-mapping for Generic CSV (and manually-remapped platform
+// CSVs) — saved so a recurring broker/format doesn't need re-mapping on
+// every upload.
+model PropFirmImportMappingTemplate {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name          String
+  platform      PropFirmImportPlatform
+  columnMapping Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  batches PropFirmImportBatch[]
+
+  @@unique([userId, name])
 }
