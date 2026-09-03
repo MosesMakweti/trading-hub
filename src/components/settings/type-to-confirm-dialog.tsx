@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 
 /**
  * A destructive confirmation that only enables its action once the user types an
- * exact phrase (e.g. DELETE or RESET TRADEOS). The `description` slot takes rich
+ * exact phrase (e.g. DELETE or RESET TRADITORIUM). The `description` slot takes rich
  * content so a card can spell out precisely what will be removed. Used for the
  * irreversible Data Management actions.
  */

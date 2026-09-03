@@ -1,4 +1,4 @@
-// The Counterfactual Engine — TradeOS's Discrepancy Gap, rebuilt from first
+// The Counterfactual Engine — Traditorium's Discrepancy Gap, rebuilt from first
 // principles. The gap is NO LONGER "expected − actual" (which wrongly penalised a
 // correctly-executed loss). It is:
 //

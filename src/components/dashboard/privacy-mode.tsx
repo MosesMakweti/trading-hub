@@ -5,7 +5,7 @@ import { Eye, EyeOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "tradeos-privacy-mode";
+const STORAGE_KEY = "traditorium-privacy-mode";
 
 const PrivacyModeContext = createContext<{ enabled: boolean; toggle: () => void } | null>(null);
 

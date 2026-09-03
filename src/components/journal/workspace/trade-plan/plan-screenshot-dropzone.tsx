@@ -25,7 +25,7 @@ function assetIdFromUrl(url: string): string {
  * pick an existing Before-Trade image (spec §1). Uploads reuse the app's own
  * authenticated /api/media/upload route (ownerType=TRADE, category=BEFORE) —
  * identical validation/ownership path as every other image upload in
- * TradeOS — then wraps the resulting asset into this trade's plan via
+ * Traditorium — then wraps the resulting asset into this trade's plan via
  * attachPlanScreenshotAction.
  */
 export function PlanScreenshotDropzone({

@@ -36,7 +36,7 @@ interface Point {
 }
 
 /**
- * ImageAttachments — the universal, reusable image uploader for TradeOS. Drop it
+ * ImageAttachments — the universal, reusable image uploader for Traditorium. Drop it
  * anywhere with `ownerType` + `ownerId` (and an optional `category`) and it manages
  * the whole lifecycle: click-to-upload AND drag-and-drop, live progress, compact
  * glass thumbnails, full-size zoom, and delete. It self-fetches its list on mount

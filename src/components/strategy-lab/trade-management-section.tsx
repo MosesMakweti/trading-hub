@@ -241,7 +241,7 @@ export function TradeManagementSection({
             <p className="text-xs text-muted-foreground">
               Your strategy&apos;s statistical edge — the benchmark for the Expected Statistical
               Equity line. It is a per-trade average over a large sample, never the predicted result
-              of the next trade. TradeOS uses your <strong>Live</strong> expectancy once the sample is
+              of the next trade. Traditorium uses your <strong>Live</strong> expectancy once the sample is
               large enough, and falls back to these <strong>Backtested</strong> numbers otherwise.
             </p>
           </div>

@@ -1,5 +1,5 @@
 /**
- * Decimal-safe planned-distance math (spec §6). TradeOS never forces every
+ * Decimal-safe planned-distance math (spec §6). Traditorium never forces every
  * instrument into pips — the unit is resolved per instrument (forex → pips,
  * futures → ticks, everything else → points/price/percent) and carried
  * alongside every distance value so analytics can group correctly instead of

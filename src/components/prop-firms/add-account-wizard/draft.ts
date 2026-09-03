@@ -1,7 +1,7 @@
 import { defaultStagesForModel, type ModelTypeLike } from "@/domain/prop-firms/stage-templates";
 import type { AccountDraft, DraftRule, DraftStage, WizardStep } from "./types";
 
-const STORAGE_KEY = "trade-os:prop-firms:add-account-draft";
+const STORAGE_KEY = "traditorium:prop-firms:add-account-draft";
 
 function uid(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto

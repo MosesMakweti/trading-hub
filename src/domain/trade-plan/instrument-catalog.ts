@@ -22,7 +22,7 @@ export type AssetClassLike = "FOREX" | "METALS" | "INDEX" | "FUTURES" | "CRYPTO"
 export type DistanceUnitLike = "PIP" | "POINT" | "TICK" | "PRICE" | "PERCENT";
 
 export interface InstrumentSpec {
-  /** The canonical TradeOS symbol — what gets stored once confirmed. */
+  /** The canonical Traditorium symbol — what gets stored once confirmed. */
   canonicalSymbol: string;
   displayName: string;
   assetClass: AssetClassLike;

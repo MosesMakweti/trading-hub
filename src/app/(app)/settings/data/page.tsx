@@ -36,7 +36,7 @@ export default function DataSettingsPage() {
       <section className="glass space-y-3 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Import</h2>
         <p className="text-xs text-muted-foreground">
-          Upload a JSON export from tradeOS. Trades matching an existing date/asset/time are
+          Upload a JSON export from Traditorium. Trades matching an existing date/asset/time are
           skipped automatically, so re-importing the same file never creates duplicates.
         </p>
         <ImportTradesForm />

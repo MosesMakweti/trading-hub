@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   BookOpenText,
-  CandlestickChart,
   FlaskConical,
   LayoutDashboard,
   PlaySquare,
@@ -15,6 +14,7 @@ import {
   Wallet,
 } from "lucide-react";
 
+import { TraditoriumMark } from "@/components/brand/traditorium-mark";
 import {
   Sidebar,
   SidebarContent,
@@ -50,10 +50,10 @@ export function AppSidebar() {
           className="flex items-center gap-2.5 px-1 py-1.5 text-sm font-semibold tracking-tight"
         >
           <span className="bg-brand-gradient flex size-8 shrink-0 items-center justify-center rounded-lg text-white shadow-glow">
-            <CandlestickChart className="size-4.5" />
+            <TraditoriumMark className="size-4.5" />
           </span>
           <span className="group-data-[collapsible=icon]:hidden">
-            trade<span className="font-mono font-medium text-primary">OS</span>
+            Tradit<span className="font-mono font-medium text-primary">orium</span>
           </span>
         </Link>
       </SidebarHeader>

@@ -1,6 +1,6 @@
-# TradeOS Design System
+# Traditorium Design System
 
-**The single source of truth for all TradeOS UI.** Every page and component inherits
+**The single source of truth for all Traditorium UI.** Every page and component inherits
 from this system — no one-off UI. Read this before designing or changing any screen, and
 run the [Per-page checklist](#per-page-checklist) before you implement.
 
@@ -10,14 +10,14 @@ run the [Per-page checklist](#per-page-checklist) before you implement.
 > tokens, glass depth hierarchy, chart language), and sets the rules future work must follow.
 
 Grounded in research of premium information-dense software (Linear, Stripe/Vercel dashboards,
-TradingView, Raycast, Superhuman) and the `ui-ux-pro-max` design-intelligence base. TradeOS
+TradingView, Raycast, Superhuman) and the `ui-ux-pro-max` design-intelligence base. Traditorium
 has its **own** identity — these are references, not templates.
 
 ---
 
 ## 1. Philosophy & experience principles
 
-TradeOS is software a professional trader lives in **8–12 hours a day**. Every decision
+Traditorium is software a professional trader lives in **8–12 hours a day**. Every decision
 serves that: reduce stress, sharpen focus, encourage discipline.
 
 It should feel: **professional · premium · institutional · focused · fast · elegant ·
@@ -40,6 +40,21 @@ Five operating principles:
 
 **Avoid:** visual clutter · crypto neon · gaming aesthetics · overloaded dashboards · heavy
 gradients on content · large distracting animation · emoji as icons · raw hex in components.
+
+### Brand: Traditorium
+
+**Traditorium — the operating environment for traders.** The name (`Tradit·orium`,
+"the place where the parts of a trader's operation come together") is set as a wordmark:
+`Tradit` in Geist Sans semibold + `orium` in Geist Mono, `text-primary` — the mono suffix
+is the "environment" half, echoing the `-OS` treatment it replaces.
+
+The **mark** (`components/brand/TraditoriumMark`) is a "T" beam spanning a single
+candlestick — one roof over the whole of a trader's operation, with the trade standing
+under it. Monochrome, drawn on lucide's 24×24 grid at matching stroke weight,
+`currentColor`, and legible down to favicon size. It rides the same `bg-brand-gradient`
++ `shadow-glow` chip as before — no new color is introduced; the interface stays
+graphite/white/gray. Browser-tab icon: `src/app/icon.svg` (white mark on a `#1C1E24`
+rounded square).
 
 ---
 

@@ -84,7 +84,7 @@ function MiniStat({ label, value, tone }: { label: string; value: string; tone?:
 }
 
 /**
- * The Analytics module — TradeOS's central trading-performance intelligence
+ * The Analytics module — Traditorium's central trading-performance intelligence
  * center. Composes the existing analytics calculations + dataviz primitives into
  * a sectioned, ring-forward terminal (no duplicate calculations; everything
  * derives from `getAnalyticsData`). Phase A: Performance Overview, full-width

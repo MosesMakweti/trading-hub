@@ -32,7 +32,7 @@ export interface JournalDayRecapDTO {
   analytics: StrategyPerformanceSummary & { netPnl: number };
 }
 
-/** The Today workspace's day record (TradeOS V2 backbone). */
+/** The Today workspace's day record (Traditorium V2 backbone). */
 export interface TradingDayDTO {
   id: string;
   dateKey: string;
