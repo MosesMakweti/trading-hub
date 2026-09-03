@@ -3,6 +3,8 @@
 import { CandlestickChart, LineChart, ShieldCheck, Sparkles } from "lucide-react";
 import { motion, useReducedMotion, type Variants } from "motion/react";
 
+import { TraditoriumMark } from "@/components/brand/traditorium-mark";
+
 const HIGHLIGHTS = [
   {
     icon: LineChart,
@@ -110,10 +112,10 @@ export function AuthBrandPanel() {
       >
         <motion.div variants={item} className="flex items-center gap-2.5 text-white">
           <div className="flex size-9 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur">
-            <CandlestickChart className="size-5" />
+            <TraditoriumMark className="size-5" />
           </div>
           <span className="text-lg font-semibold tracking-tight">
-            trade<span className="font-mono font-medium text-primary">OS</span>
+            Tradit<span className="font-mono font-medium text-primary">orium</span>
           </span>
         </motion.div>
 
@@ -123,7 +125,7 @@ export function AuthBrandPanel() {
             className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-medium ring-1 ring-white/20 backdrop-blur"
           >
             <Sparkles className="size-3.5" />
-            Your private trading desk
+            The operating environment for traders
           </motion.div>
           <motion.h1
             variants={item}

@@ -23,7 +23,7 @@ import {
 } from "@/types/opportunity";
 
 // Records WHY a valid setup was skipped + WHAT it would have done. The outcome is
-// trader-entered (TradeOS has no price feed); "Couldn't tell" (UNDETERMINED) hides
+// trader-entered (Traditorium has no price feed); "Couldn't tell" (UNDETERMINED) hides
 // the R field and is honestly excluded from the missed-opportunity cost.
 export function MissOutcomeForm({
   dateKey,

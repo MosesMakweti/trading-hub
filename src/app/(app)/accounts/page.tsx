@@ -7,6 +7,9 @@ import {
 } from "@/server/services/accounts.service";
 import { buildEquityCurve, dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import { winRate as computeWinRate, profitFactor as computeProfitFactor } from "@/domain/performance/metrics";
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
+
 import { PerformanceAccountSection } from "@/components/accounts/performance-account-section";
 import { AccountsView } from "@/components/accounts/accounts-view";
 import { FadeIn } from "@/components/shared/motion";
@@ -85,7 +88,19 @@ export default async function AccountsPage() {
 
   return (
     <FadeIn className="mx-auto max-w-6xl space-y-10">
-      <h1 className="text-2xl font-semibold tracking-tight">My Accounts</h1>
+      <div className="space-y-3">
+        <h1 className="text-2xl font-semibold tracking-tight">My Accounts</h1>
+        <Link
+          href="/prop-firms"
+          className="glass flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm transition-colors hover:bg-accent"
+        >
+          <span>
+            Prop firm accounts are moving to a richer <span className="font-medium">Prop Firms</span> module —
+            stages, rules, and payouts, not just a balance.
+          </span>
+          <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+        </Link>
+      </div>
 
       <PerformanceAccountSection
         account={performanceAccountDTO}

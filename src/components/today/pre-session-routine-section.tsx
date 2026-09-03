@@ -30,9 +30,13 @@ export interface DayRoutineDTO {
 export function PreSessionRoutineSection({
   dateKey,
   routine,
+  onReadyChange,
 }: {
   dateKey: string;
   routine: DayRoutineDTO;
+  /** Fired whenever readiness is toggled: `true` = confirmed (parent advances
+   *  to Today's Plan), `false` = reopened (parent re-locks). */
+  onReadyChange?: (ready: boolean) => void;
 }) {
   const router = useRouter();
   const [responses, setResponses] = useState<Record<string, RoutineResponse>>(
@@ -79,8 +83,18 @@ export function PreSessionRoutineSection({
       setReadyAt(next ? new Date().toISOString() : null);
       // Re-read the day so the workspace unlocks / re-locks the other tabs.
       router.refresh();
+      // Confirming carries the trader straight to Today's Plan; reopening
+      // re-locks the downstream tabs.
+      onReadyChange?.(next);
     });
   }
+
+  // The bar + headline track what actually gates the day — mandatory
+  // completion — not the raw item count. Optional items are shown as a
+  // secondary stat so "done everything required" reads as 100%, not 33%.
+  // With no mandatory items, fall back to overall progress.
+  const gatePercent =
+    mandatory.total > 0 ? (mandatoryDone ? 100 : mandatory.percent) : progress.percent;
 
   return (
     <div className="space-y-4">
@@ -89,8 +103,15 @@ export function PreSessionRoutineSection({
         <div className="flex items-center justify-between gap-2 text-sm">
           <span className="font-medium">Pre-session routine</span>
           <div className="flex items-center gap-3">
-            <span className="text-muted-foreground tabular-nums">
-              {progress.completed} / {progress.total} · {progress.percent}%
+            <span
+              className={cn(
+                "tabular-nums",
+                mandatory.total > 0 && mandatoryDone ? "text-success" : "text-muted-foreground",
+              )}
+            >
+              {mandatory.total > 0
+                ? `Mandatory ${mandatory.completed}/${mandatory.total} · ${gatePercent}%`
+                : `${progress.completed}/${progress.total} · ${progress.percent}%`}
             </span>
             <Button
               variant="ghost"
@@ -106,8 +127,11 @@ export function PreSessionRoutineSection({
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-muted">
           <div
-            className="bg-brand-gradient h-full rounded-full transition-[width] duration-300 ease-out"
-            style={{ width: `${progress.percent}%` }}
+            className={cn(
+              "h-full rounded-full transition-[width] duration-300 ease-out",
+              mandatory.total > 0 && mandatoryDone ? "bg-success" : "bg-brand-gradient",
+            )}
+            style={{ width: `${gatePercent}%` }}
           />
         </div>
         {(mandatory.total > 0 || optional.total > 0) && (
@@ -115,7 +139,11 @@ export function PreSessionRoutineSection({
             {mandatory.total > 0 && (
               <span className={cn("flex items-center gap-1.5 tabular-nums", mandatoryDone ? "text-success" : "text-warning")}>
                 {mandatoryDone ? <CircleCheck className="size-3.5" /> : <Lock className="size-3.5" />}
-                Mandatory {mandatory.completed}/{mandatory.total}
+                {mandatoryDone
+                  ? "All required items done"
+                  : `${mandatory.total - mandatory.completed} required item${
+                      mandatory.total - mandatory.completed === 1 ? "" : "s"
+                    } left`}
               </span>
             )}
             {optional.total > 0 && (
@@ -123,6 +151,9 @@ export function PreSessionRoutineSection({
                 Optional {optional.completed}/{optional.total}
               </span>
             )}
+            <span className="text-muted-foreground/60 tabular-nums">
+              {progress.completed}/{progress.total} total
+            </span>
           </div>
         )}
       </div>

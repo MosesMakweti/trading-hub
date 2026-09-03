@@ -74,6 +74,8 @@ export default async function StrategyWorkspacePage({
     description: r.description,
     weight: r.weight,
     mandatory: r.mandatory,
+    directionApplicability: r.directionApplicability,
+    pairId: r.pairId,
     validationCriteria: r.validationCriteria,
     enabled: r.enabled,
   });
@@ -148,6 +150,8 @@ export default async function StrategyWorkspacePage({
     expectedAvgRr: tradeManagement.expectedAvgRr,
     expectedExpectancy: tradeManagement.expectedExpectancy,
     minExecutionScore: tradeManagement.minExecutionScore,
+    maxDailyRiskPercent: tradeManagement.maxDailyRiskPercent,
+    maxTradesPerDay: tradeManagement.maxTradesPerDay,
     partialTakeProfits: tradeManagement.partialTakeProfits.map((p) => ({
       id: p.id,
       trigger: p.trigger,

@@ -42,12 +42,13 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     sessionColor,
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
-    expectedRR: trade.expectedRR.toNumber(),
+    expectedRR: trade.expectedRR ? trade.expectedRR.toNumber() : null,
     actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
-    hitTP1: trade.hitTP1,
-    hitTP2: trade.hitTP2,
-    hitTP3: trade.hitTP3,
-    hitFullTP: trade.hitFullTP,
+    targets: trade.plannedTargets.map((pt) => ({
+      targetOrder: pt.targetOrder,
+      label: pt.label,
+      targetPrice: pt.targetPrice.toNumber(),
+    })),
     entryModelName: trade.selectedEntryModel,
     // Only link to the strategy while it still exists (not soft-deleted); the
     // name/version always come from the snapshot.
@@ -85,11 +86,13 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     reasonForTrade: trade.reasonForTrade,
     actualEntry: trade.actualEntry ? trade.actualEntry.toNumber() : null,
     actualExit: trade.actualExit ? trade.actualExit.toNumber() : null,
+    actualStopLoss: trade.actualStopLoss ? trade.actualStopLoss.toNumber() : null,
     executionNotes: trade.executionNotes,
     whatWentWell: trade.whatWentWell,
     whatWentWrong: trade.whatWentWrong,
     whatSurprisedMe: trade.whatSurprisedMe,
     wouldTakeAgain: trade.wouldTakeAgain,
+    tradeIntent: trade.tradeIntent,
     psychology: trade.psychology
       ? {
           rawScore: trade.psychology.rawScore,
@@ -97,6 +100,8 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
           grade: trade.psychology.grade,
         }
       : null,
+    psychologyAnswers:
+      (trade.psychology?.answers as Record<string, string | number> | undefined) ?? {},
     adherenceAnswers: (trade.adherenceAnswers as Record<string, boolean> | null) ?? {},
     adherencePercent: trade.adherencePercent,
     status: trade.status,

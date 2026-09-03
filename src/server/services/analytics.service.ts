@@ -19,17 +19,12 @@ import {
   type AdherenceTradePoint,
 } from "@/domain/performance/adherence-analytics";
 import {
-  buildDiscrepancyCurve,
-  classifyTrade,
-  summarizeDiscrepancy,
-  type DiscrepancyTradeInput,
-} from "@/domain/analytics/discrepancy-model";
-import { computeExpectancy, resolveExpectancy } from "@/domain/performance/expectancy";
-import {
-  aggregateDeviationCauses,
-  computeDeviations,
-  type Deviation,
-} from "@/domain/analytics/deviation-engine";
+  buildCounterfactualCurve,
+  summarizeAttribution,
+  type CounterfactualInput,
+} from "@/domain/analytics/counterfactual-engine";
+import { computeExpectancy } from "@/domain/performance/expectancy";
+import { computeDeviations } from "@/domain/analytics/deviation-engine";
 import {
   buildOpportunityCurve,
   summarizeOpportunities,
@@ -231,9 +226,19 @@ export async function getAnalyticsData(
         include: {
           psychology: true,
           allocations: { include: { tradingAccount: true } },
-          // The strategy's live benchmark (proven edge) + risk budget → Discrepancy Gap.
+          // The strategy's live benchmark (proven edge) + risk budget + counterfactual
+          // day-limits → Discrepancy Gap.
           strategy: {
-            select: { tradeManagement: { select: { expectedExpectancy: true, maxRiskPercent: true } } },
+            select: {
+              tradeManagement: {
+                select: {
+                  expectedExpectancy: true,
+                  maxRiskPercent: true,
+                  maxDailyRiskPercent: true,
+                  maxTradesPerDay: true,
+                },
+              },
+            },
           },
         },
       },
@@ -258,28 +263,6 @@ export async function getAnalyticsData(
     }
   }
 
-  // Per-strategy statistical expectancy for the Expected Statistical Equity line
-  // (System A of the corrected discrepancy model). Computed LIVE from each strategy's
-  // own qualifying realized R over ALL-TIME history; when the sample is too small it
-  // falls back to the user's backtested number, else the trade is unbenchmarked
-  // (INSUFFICIENT_SAMPLE — no fabricated benchmark). NOT the planned target RR.
-  const strategyRs = new Map<string, number[]>();
-  const strategyBacktest = new Map<string, number | null>();
-  for (const alloc of allPerformanceAllocations) {
-    const t = alloc.trade;
-    if (!t.strategyId) continue;
-    strategyBacktest.set(t.strategyId, t.strategy?.tradeManagement?.expectedExpectancy ?? null);
-    if (t.actualRR != null) {
-      const arr = strategyRs.get(t.strategyId) ?? [];
-      arr.push(t.actualRR.toNumber());
-      strategyRs.set(t.strategyId, arr);
-    }
-  }
-  const resolvedExpectancy = new Map<string, number | null>();
-  for (const [sid, backtest] of strategyBacktest) {
-    resolvedExpectancy.set(sid, resolveExpectancy(computeExpectancy(strategyRs.get(sid) ?? []), backtest).expectancyR);
-  }
-
   // SOT: rule adherence is now the strategy-execution adherence frozen on the
   // trade (selected vs the strategy's expected execution set) — no longer derived
   // from the removed global checklist. Null for pre-SOT trades (excluded from avgs).
@@ -293,9 +276,12 @@ export async function getAnalyticsData(
   const tradeInputs: metrics.TradeMetricInput[] = [];
   const psychologyPoints: PsychologyDataPoint[] = [];
   const adherencePoints: AdherenceTradePoint[] = [];
-  const correctedInputs: DiscrepancyTradeInput[] = [];
-  const deviationPrimaries: (Deviation | null)[] = [];
   const dailyPnlMap = new Map<string, number>();
+  // Per-day sums of each trade's real R fields (Trade.expectedRR/actualRR — the
+  // trader's planned-vs-journaled R, distinct from the %-of-balance figures fed
+  // into metrics.* above) — powers the Equity Curve's Expected vs Actual mode.
+  const dailyExpectedR = new Map<string, number>();
+  const dailyActualR = new Map<string, number>();
   // $ P&L per trade + the running-balance series, for the dollar summary and
   // drawdown (Analytics module). Same allocations as everything else — no new query.
   const tradePnls: number[] = [];
@@ -303,6 +289,22 @@ export async function getAnalyticsData(
   // Per-trade points for the Phase B breakdowns (day-of-week / month / direction /
   // session / hour / risk) — built from the same rows, not a second data source.
   const analyticsPoints: AnalyticsTradePoint[] = [];
+
+  // Day-level aggregates (over ALL in-range trades — a day's over-risk / overtrading
+  // is real regardless of the active filters) for the counterfactual's day flags.
+  const dayRisk = new Map<string, number>();
+  const dayCount = new Map<string, number>();
+  for (const a of inRange) {
+    const dk = utcDateToKey(a.trade.tradeDate);
+    dayCount.set(dk, (dayCount.get(dk) ?? 0) + 1);
+    if (a.riskInputType === "PERCENT") {
+      dayRisk.set(dk, (dayRisk.get(dk) ?? 0) + a.riskValue.toNumber());
+    }
+  }
+
+  // Counterfactual (Process-Perfect) events, collected with a chronological key so
+  // executed trades and missed opportunities interleave correctly before the curve.
+  const cfEvents: { chronoKey: number; input: CounterfactualInput }[] = [];
 
   for (const alloc of inRange) {
     const t = alloc.trade;
@@ -352,6 +354,12 @@ export async function getAnalyticsData(
       strategyLabel,
     });
     dailyPnlMap.set(dateKey, (dailyPnlMap.get(dateKey) ?? 0) + pnl);
+    if (t.expectedRR != null) {
+      dailyExpectedR.set(dateKey, (dailyExpectedR.get(dateKey) ?? 0) + t.expectedRR.toNumber());
+    }
+    if (t.actualRR != null) {
+      dailyActualR.set(dateKey, (dailyActualR.get(dateKey) ?? 0) + t.actualRR.toNumber());
+    }
 
     adherencePoints.push({
       win: pnl > 0 ? true : pnl < 0 ? false : null,
@@ -362,12 +370,13 @@ export async function getAnalyticsData(
       tradeQualityPercent: t.tradeQualityPercent,
       setupScore: t.setupScore,
       setupRating: t.setupRating as (typeof adherencePoints)[number]["setupRating"],
+      direction: t.direction,
     });
 
     // Deviation engine: the OBJECTIVE trader-controlled R-costs (entry/exit/risk
     // slip). This — NOT expected−actual — is the avoidable discrepancy.
     const tradeActualR = t.actualRR ? t.actualRR.toNumber() : null;
-    const { deviations, primary } = computeDeviations({
+    const { deviations } = computeDeviations({
       direction: t.direction,
       plannedEntry: t.plannedEntry ? t.plannedEntry.toNumber() : null,
       plannedStopLoss: t.plannedStopLoss ? t.plannedStopLoss.toNumber() : null,
@@ -380,23 +389,28 @@ export async function getAnalyticsData(
         : null,
       actualRiskPercent: alloc.riskInputType === "PERCENT" ? alloc.riskValue.toNumber() : null,
     });
-    deviationPrimaries.push(primary);
 
-    // Corrected discrepancy input: Expected Statistical R = the strategy's resolved
-    // expectancy (System A); avoidable R = objective deviations only. A correctly
-    // executed trade contributes 0 avoidable R whether it won or lost.
-    const proc = classifyTrade({
-      actualR: tradeActualR,
-      deviations,
-      adherenceFollowed: t.setupValid, // true = followed, false = invalid setup taken, null = no strategy
-      hasExecutionData: t.plannedEntry != null && t.actualEntry != null,
-    });
-    correctedInputs.push({
-      sequence: t.tradeNumber ?? correctedInputs.length + 1,
-      dateKey,
-      strategyExpectancyR: t.strategyId ? (resolvedExpectancy.get(t.strategyId) ?? null) : null,
-      actualR: tradeActualR,
-      avoidableR: proc.avoidableR,
+    // Counterfactual (Process-Perfect) executed event — reuses the same deviations.
+    const dailyRiskLimit = t.strategy?.tradeManagement?.maxDailyRiskPercent ?? null;
+    const maxPerDay = t.strategy?.tradeManagement?.maxTradesPerDay ?? null;
+    cfEvents.push({
+      chronoKey: t.tradeDate.getTime() + (t.executionMinutes ?? 0) * 60000,
+      input: {
+        kind: "EXECUTED",
+        eventId: t.id,
+        sequence: 0, // reassigned after the chronological merge below
+        dateKey,
+        actualR: tradeActualR,
+        validSetup: t.setupValid,
+        missingConfluences: (t.missingConfluences as string[] | null) ?? [],
+        deviations,
+        wouldTakeAgain: t.wouldTakeAgain,
+        behaviorTag: t.tradeIntent,
+        psychologyPercent: t.psychology?.psychologyPercent ?? null,
+        missingExecutionConfirmations: t.executionPercent != null && t.executionPercent < 100 ? 1 : 0,
+        exceededDailyRisk: dailyRiskLimit != null && (dayRisk.get(dateKey) ?? 0) > dailyRiskLimit,
+        overtrade: maxPerDay != null && (dayCount.get(dateKey) ?? 0) > maxPerDay,
+      },
     });
 
     if (t.psychology) {
@@ -418,6 +432,19 @@ export async function getAnalyticsData(
     balanceBeforeRange,
     Array.from(dailyPnlMap.entries()).map(([dateKey, pnl]) => ({ dateKey, pnl })),
   );
+
+  // Expected vs Actual R curve (Dashboard equity curve comparison mode) — every
+  // day that had a trade, cumulative planned R vs cumulative journaled actual R.
+  const expectedVsActualDays = [...new Set([...dailyExpectedR.keys(), ...dailyActualR.keys()])].sort(
+    (a, b) => a.localeCompare(b),
+  );
+  let cumExpectedR = 0;
+  let cumActualR = 0;
+  const expectedVsActualCurve = expectedVsActualDays.map((dateKey) => {
+    cumExpectedR += dailyExpectedR.get(dateKey) ?? 0;
+    cumActualR += dailyActualR.get(dateKey) ?? 0;
+    return { dateKey, cumulativeExpectedR: cumExpectedR, cumulativeActualR: cumActualR };
+  });
 
   const ruleAdherenceValues = inRange
     .map((a) => ruleAdherenceForTrade(a.trade))
@@ -463,16 +490,29 @@ export async function getAnalyticsData(
     missReasons,
   };
 
-  // Corrected Discrepancy model — the two systems (see domain/analytics/discrepancy-model):
-  //  A. Performance Variance = Expected Statistical Equity (Σ strategy expectancy) − Actual.
-  //     This is mostly NORMAL variance; a correctly-executed loss lands here, not in error.
-  //  B. Avoidable Discrepancy = Σ objective deviation costs + validated missed-winner cost —
-  //     trader-controlled leakage only. Normal Variance = A − B (the residual).
-  const discrepancy = {
-    curve: buildDiscrepancyCurve(correctedInputs),
-    summary: summarizeDiscrepancy(correctedInputs, opportunity.summary.missedOpportunityCostR),
-    // Objective avoidable causes (entry/exit/risk), for the drill-down + Psychology Lab.
-    causes: aggregateDeviationCauses(deviationPrimaries),
+  // Counterfactual (Process-Perfect) Discrepancy Gap — the rebuilt model. Executed
+  // events (from the loop) interleave with MISSED valid opportunities by chronology;
+  // sequence is reassigned so the cumulative curve is truly chronological.
+  const missedCfEvents = opportunityInputs
+    .filter((o) => o.outcome === "MISSED")
+    .map((o) => ({
+      chronoKey: dateKeyToUtcDate(o.dateKey).getTime() + 12 * 60 * 60 * 1000,
+      input: {
+        kind: "MISSED" as const,
+        eventId: o.opportunityId,
+        sequence: 0,
+        dateKey: o.dateKey,
+        validSetup: o.valid,
+        missedRealizedR: o.missedRealizedR ?? null,
+      } satisfies CounterfactualInput,
+    }));
+  const counterfactualInputs: CounterfactualInput[] = [...cfEvents, ...missedCfEvents]
+    .sort((a, b) => a.chronoKey - b.chronoKey)
+    .map((e, i) => ({ ...e.input, sequence: i + 1 }));
+  const counterfactual = {
+    hasData: counterfactualInputs.length > 0,
+    curve: buildCounterfactualCurve(counterfactualInputs),
+    summary: summarizeAttribution(counterfactualInputs),
   };
 
   return {
@@ -509,7 +549,8 @@ export async function getAnalyticsData(
       statsByStrategy: metrics.statsByStrategy(tradeInputs),
       monthlyReturns: metrics.monthlyReturns(dailyPercents),
       equityCurve: buildEquityCurve(dailyPercents),
-      discrepancy,
+      expectedVsActualCurve,
+      counterfactual,
       opportunity,
       breakdowns,
       dailyPercents,

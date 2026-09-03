@@ -35,7 +35,18 @@ const dec = (n: number | null): Prisma.Decimal | null =>
 /** The frozen "expected set" (mirrors Trade.strategyExecutionSnapshot). */
 interface FrozenExpected {
   sessions: { name: string; color: string }[];
-  confluences: { name: string; color: string; category: string | null; weight: number | null; mandatory?: boolean }[];
+  confluences: {
+    id?: string;
+    name: string;
+    color: string;
+    category: string | null;
+    weight: number | null;
+    mandatory?: boolean;
+    // Frozen at spot time — a later strategy edit can't change this
+    // opportunity's eligible set. Absent on pre-direction snapshots → BOTH.
+    directionApplicability?: "BULLISH" | "BEARISH" | "BOTH";
+    pairId?: string | null;
+  }[];
   execution: { name: string; color: string; category: string | null; weight: number | null }[];
 }
 
@@ -63,11 +74,25 @@ export async function createOpportunity(
   };
 
   // Same validity + weighted setup score used for trades — one scoring engine.
+  // Direction-aware: only confluences eligible for this opportunity's direction
+  // are scored / required.
   const setup = scoreSetup(
-    expected.confluences.map((c) => ({ name: c.name, weight: c.weight, mandatory: c.mandatory ?? false })),
+    expected.confluences.map((c) => ({
+      id: c.id ?? c.name,
+      name: c.name,
+      weight: c.weight,
+      mandatory: c.mandatory ?? false,
+      directionApplicability: c.directionApplicability ?? "BOTH",
+    })),
     data.selectedConfluences,
+    { direction: data.direction },
   );
-  const scores = scoreStrategyAdherence(expected, data.selectedConfluences, data.selectedExecution);
+  const scores = scoreStrategyAdherence(
+    expected,
+    data.selectedConfluences,
+    data.selectedExecution,
+    data.direction,
+  );
 
   return prisma.tradeOpportunity.create({
     data: {
@@ -120,11 +145,14 @@ export async function listOpportunityDtosForDay(
     const snap = executionSnapshot(o.strategyExecutionSnapshot);
     const missingMandatory = scoreSetup(
       (snap.confluences ?? []).map((c) => ({
+        id: c.id ?? c.name,
         name: c.name,
         weight: null,
         mandatory: c.mandatory ?? false,
+        directionApplicability: c.directionApplicability ?? "BOTH",
       })),
       (o.selectedConfluences as string[] | null) ?? [],
+      { direction: o.direction },
     ).missingMandatory;
 
     return {

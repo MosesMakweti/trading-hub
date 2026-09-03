@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  adherenceByDirection,
   confluenceCombinations,
   confluenceLeaderboard,
   setupQualityBuckets,
@@ -51,6 +52,34 @@ describe("summarizeAdherence", () => {
     expect(s.confluenceCombinations).toEqual([]);
     expect(s.setupQualityBuckets).toEqual([]);
     expect(s.setupQualityTrend).toEqual([]);
+    expect(s.directionSplits).toEqual([]);
+  });
+});
+
+describe("adherenceByDirection", () => {
+  it("splits win rate + averages by long / short, dropping empty directions", () => {
+    const splits = adherenceByDirection([
+      point({ direction: "LONG", win: true, setupScore: 90, confluencePercent: 100 }),
+      point({ direction: "LONG", win: false, setupScore: 70, confluencePercent: 60 }),
+      point({ direction: "SHORT", win: true, setupScore: 80, confluencePercent: 80 }),
+    ]);
+    expect(splits.map((s) => s.direction)).toEqual(["LONG", "SHORT"]);
+    const long = splits.find((s) => s.direction === "LONG")!;
+    expect(long.trades).toBe(2);
+    expect(long.winRate).toBe(50);
+    expect(long.avgSetupScore).toBe(80); // (90 + 70) / 2
+    expect(long.avgConfluenceAdherence).toBe(80); // (100 + 60) / 2
+    const short = splits.find((s) => s.direction === "SHORT")!;
+    expect(short.trades).toBe(1);
+    expect(short.winRate).toBe(100);
+  });
+
+  it("ignores points with no recorded direction (legacy trades)", () => {
+    const splits = adherenceByDirection([
+      point({ direction: null, win: true, setupScore: 99 }),
+      point({ win: false, setupScore: 10 }), // undefined direction
+    ]);
+    expect(splits).toEqual([]);
   });
 });
 

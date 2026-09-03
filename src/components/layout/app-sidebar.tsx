@@ -5,15 +5,16 @@ import { usePathname } from "next/navigation";
 import {
   BarChart3,
   BookOpenText,
-  CandlestickChart,
   FlaskConical,
   LayoutDashboard,
+  PlaySquare,
   Settings,
   Sun,
   TrendingUp,
   Wallet,
 } from "lucide-react";
 
+import { TraditoriumMark } from "@/components/brand/traditorium-mark";
 import {
   Sidebar,
   SidebarContent,
@@ -31,9 +32,10 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/today", label: "Today", icon: Sun },
   { href: "/journal", label: "Journal", icon: BookOpenText },
+  { href: "/trades-album", label: "Trades Album", icon: PlaySquare },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/edge", label: "Edge Review", icon: TrendingUp },
-  { href: "/accounts", label: "My Accounts", icon: Wallet },
+  { href: "/prop-firms", label: "Prop Firms", icon: Wallet },
   { href: "/strategy-lab", label: "Strategy Lab", icon: FlaskConical },
 ];
 
@@ -48,10 +50,10 @@ export function AppSidebar() {
           className="flex items-center gap-2.5 px-1 py-1.5 text-sm font-semibold tracking-tight"
         >
           <span className="bg-brand-gradient flex size-8 shrink-0 items-center justify-center rounded-lg text-white shadow-glow">
-            <CandlestickChart className="size-4.5" />
+            <TraditoriumMark className="size-4.5" />
           </span>
           <span className="group-data-[collapsible=icon]:hidden">
-            trade<span className="font-mono font-medium text-primary">OS</span>
+            Tradit<span className="font-mono font-medium text-primary">orium</span>
           </span>
         </Link>
       </SidebarHeader>

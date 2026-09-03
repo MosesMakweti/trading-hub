@@ -9,9 +9,13 @@ import type { SelectedTagDTO } from "@/types/trades";
 // they fall back to the legacy global-checklist labels, rendered neutral (GRAY).
 
 interface SnapshotTag {
+  id?: string;
   name: string;
   color: TagColor | string;
   mandatory?: boolean;
+  /** Present on snapshots frozen after direction-aware confluences shipped. */
+  directionApplicability?: "BULLISH" | "BEARISH" | "BOTH";
+  pairId?: string | null;
 }
 
 interface ExecutionSnapshot {

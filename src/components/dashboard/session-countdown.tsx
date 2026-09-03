@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Clock } from "lucide-react";
 
 import { minutesToTimeString } from "@/lib/date";
 import { nextSessionEvent, type SessionWindow } from "@/domain/schedule/session-countdown";
@@ -34,11 +35,18 @@ export function SessionCountdown({ sessions }: { sessions: SessionWindow[] }) {
 
   if (!event) {
     return (
-      <div className="glass rounded-2xl p-4">
+      <div className="glass space-y-1.5 rounded-2xl p-4">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Clock className="size-4" />
           No trading sessions configured yet.
         </div>
+        <Link
+          href="/strategy-lab"
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          Add session windows to a strategy
+          <ArrowRight className="size-3" />
+        </Link>
       </div>
     );
   }

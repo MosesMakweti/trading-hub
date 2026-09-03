@@ -27,6 +27,7 @@ const full: StrategyVersionSnapshot = {
     trailingStopRules: null, scalingInRules: null, scalingOutRules: null,
     maxHoldingTime: "1 session", maxRiskPercent: 1,
     expectedWinRate: null, expectedAvgRr: null, expectedExpectancy: null, minExecutionScore: null,
+    maxDailyRiskPercent: null, maxTradesPerDay: null,
     partialTakeProfits: [{ id: "p1", trigger: "2R", percentToClose: 50, reason: null }],
     customRules: [{ id: "r1", text: "BE at 2R" }, { id: "r2", text: "No news" }],
   },

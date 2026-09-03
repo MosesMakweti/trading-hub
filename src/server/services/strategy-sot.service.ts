@@ -73,6 +73,9 @@ export async function createChecklistItem(
       description: data.description ?? null,
       weight: data.weight ?? null,
       mandatory: data.mandatory,
+      // Direction applies to confluences only; execution confirmations stay BOTH.
+      directionApplicability: kind === "CONFLUENCE" ? data.directionApplicability : "BOTH",
+      pairId: kind === "CONFLUENCE" ? data.pairId ?? null : null,
       validationCriteria: data.validationCriteria ?? null,
       enabled: data.enabled,
       sortOrder: (last?.sortOrder ?? -1) + 1,
@@ -85,6 +88,11 @@ export async function updateChecklistItem(
   id: string,
   data: StrategyChecklistItemInput,
 ) {
+  const existing = await prisma.strategyChecklistItem.findFirst({
+    where: { id, userId },
+    select: { kind: true },
+  });
+  const isConfluence = existing?.kind === "CONFLUENCE";
   return prisma.strategyChecklistItem.update({
     where: { id, userId },
     data: {
@@ -94,6 +102,10 @@ export async function updateChecklistItem(
       description: data.description ?? null,
       weight: data.weight ?? null,
       mandatory: data.mandatory,
+      // Edit direction in place — no delete/recreate needed. Execution items
+      // are always BOTH.
+      directionApplicability: isConfluence ? data.directionApplicability : "BOTH",
+      pairId: isConfluence ? data.pairId ?? null : null,
       validationCriteria: data.validationCriteria ?? null,
       enabled: data.enabled,
     },

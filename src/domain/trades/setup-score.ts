@@ -1,70 +1,87 @@
-// Pure weighted confluence "setup score" engine. Given a strategy's EXPECTED
-// confluences (each with a probability weight + whether it's a mandatory core
-// requirement) and the confluences the trader confirmed present, it produces the
-// setup's validity, weighted probability score, and A+/A/B/C/Low rating.
+// Weighted confluence "setup score" — a thin, backward-compatible wrapper over
+// the single direction-aware engine in domain/trades/confluence-score.ts. It
+// keeps the historical `SetupScore` shape (setupValid / setupScore / setupRating
+// / missingConfluences / missingMandatory) that the trade row, snapshots, and
+// analytics already persist and read.
 //
-// This is a discipline / setup-quality measure, NOT a market-direction prediction.
-// Mandatory confluences GATE validity (a setup missing any is "Invalid"); optional
-// confluences only add to the weighted score.
+// This is a discipline / setup-quality measure, NOT a market-direction
+// prediction. Mandatory confluences GATE validity; optional confluences only add
+// to the weighted score. There is exactly one scoring engine.
+
+import {
+  scoreConfluences,
+  type ConfluenceDirectionValue,
+  type SetupRating,
+  type TradeDirectionValue,
+} from "./confluence-score";
+
+export type { SetupRating } from "./confluence-score";
+export { ratingForScore } from "./confluence-score";
 
 export interface SetupConfluence {
   name: string;
   weight: number | null; // 0–100; null counts as 0 toward the weighted score
   mandatory: boolean;
+  /** Optional — where available, enables direction filtering. Absent = BOTH. */
+  id?: string;
+  directionApplicability?: ConfluenceDirectionValue | null;
 }
-
-export type SetupRating = "A+" | "A" | "B" | "C" | "LOW";
 
 export interface SetupScore {
-  setupValid: boolean; // false when a mandatory confluence is missing
-  totalWeight: number; // sum of expected confluence weights
-  completedWeight: number; // sum of weights of confluences present
+  setupValid: boolean; // false when an ELIGIBLE mandatory confluence is missing
+  totalWeight: number; // sum of ELIGIBLE expected confluence weights
+  completedWeight: number; // sum of weights of ELIGIBLE confluences present
   setupScore: number | null; // completedWeight / totalWeight × 100 (rounded); null if totalWeight is 0
   setupRating: SetupRating | null; // band of setupScore; null when score is null
-  missingConfluences: string[]; // expected confluences not present (original names)
+  missingConfluences: string[]; // ELIGIBLE expected confluences not present (original names)
   missingMandatory: string[]; // the subset of missing confluences that are mandatory
+  /** Selections no longer eligible for the current direction (empty in the
+   *  legacy no-direction call). */
+  ineligibleSelected: string[];
 }
 
-/** A+ 95–100 · A 85–94 · B 75–84 · C 65–74 · Low < 65. */
-export function ratingForScore(score: number): SetupRating {
-  if (score >= 95) return "A+";
-  if (score >= 85) return "A";
-  if (score >= 75) return "B";
-  if (score >= 65) return "C";
-  return "LOW";
-}
+/**
+ * Score a setup.
+ *
+ * @param opts.direction  LONG / SHORT filters confluences to `<dir> + BOTH`
+ *   before scoring. Omit entirely to keep the pre-direction behaviour (every
+ *   confluence eligible). Pass `null` to represent "no direction chosen yet"
+ *   (nothing eligible, score unavailable).
+ */
+export function scoreSetup(
+  expected: SetupConfluence[],
+  selectedNames: string[],
+  opts?: { direction?: TradeDirectionValue | null },
+): SetupScore {
+  const directionAware = opts != null && "direction" in opts;
 
-export function scoreSetup(expected: SetupConfluence[], selectedNames: string[]): SetupScore {
-  const selected = new Set(selectedNames.map((n) => n.trim().toLowerCase()));
-  const isPresent = (c: SetupConfluence) => selected.has(c.name.trim().toLowerCase());
-
-  let totalWeight = 0;
-  let completedWeight = 0;
-  const missingConfluences: string[] = [];
-  const missingMandatory: string[] = [];
-
-  for (const c of expected) {
-    const weight = c.weight ?? 0;
-    totalWeight += weight;
-    if (isPresent(c)) {
-      completedWeight += weight;
-    } else {
-      missingConfluences.push(c.name);
-      if (c.mandatory) missingMandatory.push(c.name);
-    }
-  }
-
-  const setupValid = missingMandatory.length === 0;
-  const setupScore = totalWeight > 0 ? Math.round((completedWeight / totalWeight) * 100) : null;
-  const setupRating = setupScore == null ? null : ratingForScore(setupScore);
+  const result = scoreConfluences({
+    confluences: expected.map((c) => ({
+      id: c.id ?? c.name,
+      name: c.name,
+      weight: c.weight,
+      mandatory: c.mandatory,
+      // No direction filtering requested → treat every confluence as neutral.
+      directionApplicability: directionAware ? c.directionApplicability ?? "BOTH" : "BOTH",
+    })),
+    selectedNames,
+    direction: directionAware ? (opts!.direction ?? null) : "LONG",
+  });
 
   return {
-    setupValid,
-    totalWeight,
-    completedWeight,
-    setupScore,
-    setupRating,
-    missingConfluences,
-    missingMandatory,
+    // Non-direction-aware call: `direction` was forced to "LONG" above, so
+    // `mandatoryRequirementsMet` already means "no eligible mandatory missing".
+    setupValid: result.mandatoryRequirementsMet,
+    totalWeight: result.totalEligibleWeight,
+    completedWeight: result.selectedEligibleWeight,
+    setupScore: result.score,
+    setupRating: result.rating,
+    missingConfluences: result.missingConfluenceNames,
+    missingMandatory: result.missingMandatoryConfluenceNames,
+    ineligibleSelected: result.ineligibleSelectedConfluenceNames,
   };
 }
+
+// Re-export for callers that want the raw engine.
+export { scoreConfluences } from "./confluence-score";
+export type { ConfluenceScoreResult } from "./confluence-score";

@@ -19,19 +19,11 @@ import type {
   SetupQualityBucket,
   SetupQualityTrendPoint,
 } from "@/domain/performance/adherence-analytics";
+import { CHART_TOOLTIP_STYLE as TOOLTIP_STYLE, CHART_AXIS_TICK as AXIS_TICK } from "@/components/analytics/chart-theme";
 
 // The whole adherence view is a magnitude story (win rate / average score), so
 // every mark is a single brand hue — identity is carried by the axis text
 // (band letters, confluence names), never by color alone. See the dataviz skill.
-const TOOLTIP_STYLE = {
-  background: "var(--popover)",
-  border: "1px solid var(--border)",
-  borderRadius: 8,
-  fontSize: 12,
-  color: "var(--popover-foreground)",
-} as const;
-
-const AXIS_TICK = { fill: "var(--muted-foreground)", fontSize: 11 } as const;
 
 function EmptyChart({ label }: { label: string }) {
   return <p className="py-12 text-center text-sm text-muted-foreground">{label}</p>;

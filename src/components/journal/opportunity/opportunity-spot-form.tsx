@@ -16,6 +16,7 @@ import {
 import { TAG_STYLES } from "@/components/ui/tag";
 import { cn } from "@/lib/utils";
 import { scoreSetup } from "@/domain/trades/setup-score";
+import { isConfluenceEligible } from "@/domain/trades/confluence-score";
 import { SetupScoreCard } from "@/components/journal/setup-score-card";
 import { loadStrategyReference } from "@/actions/trades.actions";
 import { createOpportunity } from "@/actions/opportunity.actions";
@@ -79,14 +80,46 @@ export function OpportunitySpotForm({
     };
   }, [strategyId]);
 
+  // Direction-aware, mirroring the save layer: a long opportunity is scored only
+  // against Bullish + Both confluences (and vice-versa).
   const liveSetup = scoreSetup(
     (reference?.confluences ?? []).map((c) => ({
+      id: c.id ?? c.name,
       name: c.name,
       weight: c.weight,
       mandatory: c.mandatory,
+      directionApplicability: c.directionApplicability ?? "BOTH",
     })),
     confluences,
+    { direction },
   );
+
+  // Flipping direction is a discrete user action (not derived state): drop the
+  // confluences that no longer apply and tell the trader what went, so silent
+  // removal never looks like lost data.
+  const changeDirection = (next: "LONG" | "SHORT") => {
+    setDirection(next);
+    const opts = reference?.confluences ?? [];
+    if (opts.length === 0) return;
+    const applicability = new Map(
+      opts.map((c) => [c.name.toLowerCase(), c.directionApplicability ?? "BOTH"] as const),
+    );
+    setConfluences((current) => {
+      const kept = current.filter((n) => {
+        const a = applicability.get(n.toLowerCase());
+        return a == null || isConfluenceEligible(a, next);
+      });
+      if (kept.length !== current.length) {
+        const removed = current.length - kept.length;
+        toast.info(
+          `${removed} ${next === "LONG" ? "bearish" : "bullish"}-only ${
+            removed === 1 ? "confluence was" : "confluences were"
+          } removed because this trade is now ${next === "LONG" ? "Long" : "Short"}.`,
+        );
+      }
+      return kept;
+    });
+  };
 
   const toggle = (list: string[], set: (v: string[]) => void, name: string) =>
     set(list.includes(name) ? list.filter((x) => x !== name) : [...list, name]);
@@ -178,7 +211,7 @@ export function OpportunitySpotForm({
                 key={d}
                 type="button"
                 aria-pressed={direction === d}
-                onClick={() => setDirection(d)}
+                onClick={() => changeDirection(d)}
                 className={cn(
                   "flex-1 rounded-md border px-2 py-1.5 text-xs font-medium transition-colors",
                   direction === d
@@ -205,12 +238,25 @@ export function OpportunitySpotForm({
       </div>
 
       <div className="space-y-2">
-        <Label className="text-xs">Confluences present</Label>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">Confluences present</Label>
+          {reference && (
+            <span className="text-[11px] text-muted-foreground/60">
+              Applicable to a {direction === "LONG" ? "long" : "short"} trade
+            </span>
+          )}
+        </div>
         <TagToggleRow
-          options={reference?.confluences ?? []}
+          options={(reference?.confluences ?? []).filter((c) =>
+            isConfluenceEligible(c.directionApplicability ?? "BOTH", direction),
+          )}
           selected={confluences}
           onToggle={(n) => toggle(confluences, setConfluences, n)}
-          empty={strategyId ? "This strategy has no confluences yet." : "Select a strategy first."}
+          empty={
+            strategyId
+              ? "No confluences apply to this trade direction in this strategy."
+              : "Select a strategy first."
+          }
         />
         <SetupScoreCard
           score={liveSetup.setupScore}

@@ -1,207 +1,164 @@
 import Link from "next/link";
-import { Sparkles, Target, Trophy } from "lucide-react";
+import { Sparkles, Trophy } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
 import { getDashboardData } from "@/server/services/dashboard.service";
 import { formatDateKeyLong } from "@/lib/date";
-import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
-import { SessionCountdown } from "@/components/dashboard/session-countdown";
-import { WorkflowProgress, WORKFLOW_STEP_META, type WorkflowStep } from "@/components/dashboard/workflow-progress";
+import { presetToRange, type DateRangePreset } from "@/lib/date-ranges";
+import { CommandBar, type UnreviewedTradeSummary } from "@/components/dashboard/command-bar";
+import { KpiRow } from "@/components/dashboard/kpi-row";
+import { CommandEquityCurve } from "@/components/dashboard/command-equity-curve";
+import { TodayPanel } from "@/components/dashboard/today-panel";
+import { MiniJournalCalendar } from "@/components/dashboard/mini-journal-calendar";
+import { RecentTradesTable } from "@/components/dashboard/recent-trades-table";
+import { PropFirmHealthCard } from "@/components/dashboard/prop-firm-health-card";
+import { PerformanceAccountCard } from "@/components/dashboard/performance-account-card";
+import { PrivacyModeProvider } from "@/components/dashboard/privacy-mode";
 import { QuickActions } from "@/components/dashboard/quick-actions";
-import { PerformanceSnapshot } from "@/components/dashboard/performance-snapshot";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
-import { RecentTradesList, type RecentTradeSummary } from "@/components/dashboard/recent-trades-list";
-import { KpiCard } from "@/components/analytics/kpi-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FadeIn } from "@/components/shared/motion";
 
-export default async function DashboardPage() {
+const VALID_PRESETS: Exclude<DateRangePreset, "custom">[] = ["week", "month", "3months", "year"];
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string; account?: string }>;
+}) {
   const user = await requireUser();
-  const data = await getDashboardData(user.id);
+  const params = await searchParams;
+
+  const preset: Exclude<DateRangePreset, "custom"> = VALID_PRESETS.includes(
+    params.range as Exclude<DateRangePreset, "custom">,
+  )
+    ? (params.range as Exclude<DateRangePreset, "custom">)
+    : "month";
+  const { from, to } = presetToRange(preset);
+  const accountId = params.account || undefined;
+
+  const data = await getDashboardData(user.id, { from, to, accountId });
   const today = data.todayKey;
 
-  const recentTrades: RecentTradeSummary[] = data.recentTrades.map((t) => {
-    const performanceAllocation = t.allocations.find((a) => a.tradingAccount.kind === "PERFORMANCE");
-    return {
-      id: t.id,
-      dateKey: t.tradeDate.toISOString().slice(0, 10),
-      assetSymbol: t.assetSymbol,
-      direction: t.direction,
-      performancePnl: performanceAllocation ? performanceAllocation.closingPnlNet.toNumber() : 0,
-      psychologyGrade: t.psychology?.grade ?? null,
-    };
-  });
+  const unreviewedTrades: UnreviewedTradeSummary[] = data.todayTrades
+    .filter((t) => t.reviewedAt == null)
+    .map((t) => ({ id: t.id, dateKey: today, assetSymbol: t.assetSymbol }));
 
   const recentReflections = data.recentTrades
     .filter((t) => t.psychPostTradeReflection || t.psychLessonsLearned)
     .slice(0, 3);
 
-  // Workflow state for today, from the same state machine the Today workspace
-  // uses: Prep/Plan/Analyze from the TradingDay (null until the day is started in
-  // /today), Trade/Review derived from the day's trades. Every step links into
-  // the Today workspace — the hub where the workflow happens.
-  const done: WorkflowDoneState = {
-    prep: data.tradingDay?.prepCompletedAt != null,
-    plan: data.tradingDay?.planCompletedAt != null,
-    trade: data.todayTrades.length > 0,
-    review: data.todayTrades.some((t) => t.reviewedAt != null),
-    analyze: data.tradingDay?.analyzedAt != null,
-  };
-  const statusByKey = new Map(deriveWorkflowSteps(done).map((s) => [s.key, s.status]));
-  const workflowSteps: WorkflowStep[] = WORKFLOW_STEP_META.map((m) => ({
-    ...m,
-    status: statusByKey.get(m.key) ?? "upcoming",
-    href: "/today",
-  }));
+  const strategyName = data.todayTrades[0]?.strategyNameSnapshot ?? null;
 
   return (
-    <FadeIn className="mx-auto max-w-6xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-          Welcome back
-          {user.name ? <>, {user.name}</> : null}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{formatDateKeyLong(today)}</p>
-      </div>
-
-      <WorkflowProgress steps={workflowSteps} caption="Continue in the Today workspace →" />
-
-      <QuickActions />
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Today at a glance</h2>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <SessionCountdown sessions={data.sessions} />
-
-          <div className="glass flex flex-col rounded-2xl p-4">
-            <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              Strategy Lab
-            </h3>
-            <p className="mt-1.5 line-clamp-3 flex-1 text-sm text-muted-foreground">
-              Your strategies, entry models, and methodology — the playbook every trade follows.
-            </p>
-            <Link
-              href="/strategy-lab"
-              className="mt-2 inline-block text-xs font-medium text-primary hover:underline"
-            >
-              Open Strategy Lab →
-            </Link>
-          </div>
-
-          <div className="glass flex flex-col rounded-2xl p-4">
-            <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              Today&apos;s Journal
-            </h3>
-            <p className="mt-1.5 flex-1">
-              <span className="text-2xl font-semibold tabular-nums">{data.todayTrades.length}</span>
-              <span className="ml-1.5 text-sm text-muted-foreground">
-                trade{data.todayTrades.length === 1 ? "" : "s"} logged today
-              </span>
-            </p>
-            <Link
-              href={`/journal/${today}`}
-              className="mt-2 inline-block text-xs font-medium text-primary hover:underline"
-            >
-              Open today&apos;s journal →
-            </Link>
+    <PrivacyModeProvider>
+      <FadeIn className="mx-auto max-w-[1600px] space-y-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              Welcome back
+              {user.name ? <>, {user.name}</> : null}
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">{formatDateKeyLong(today)}</p>
           </div>
         </div>
-      </section>
 
-      <PerformanceSnapshot
-        winRate={data.winRate}
-        winRateSeries={data.winRateSeries}
-        totalTrades={data.totalTrades}
-        winningTrades={data.winningTrades}
-        losingTrades={data.losingTrades}
-        bestAccount={data.bestAccount}
-        bestAsset={data.bestAsset}
-        equityCurve={data.equityCurve}
-        discrepancy={data.discrepancy}
-      />
+        <CommandBar
+          sessions={data.sessions}
+          accounts={data.accounts}
+          preset={preset}
+          todayKey={today}
+          unreviewedTrades={unreviewedTrades}
+        />
 
-      {data.opportunity.hasData && (
-        <section className="space-y-3">
-          <h2 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-            <Target className="size-4" />
-            Edge Capture
-            <Link href="/analytics" className="ml-auto text-xs font-medium text-primary hover:underline">
-              Full opportunity analytics →
-            </Link>
-          </h2>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <KpiCard
-              label="Edge capture"
-              value={
-                data.opportunity.summary.edgeCapturePercent == null
-                  ? "—"
-                  : `${data.opportunity.summary.edgeCapturePercent.toFixed(0)}%`
-              }
-              tone={
-                data.opportunity.summary.edgeCapturePercent != null &&
-                data.opportunity.summary.edgeCapturePercent >= 60
-                  ? "success"
-                  : "neutral"
-              }
-              sublabel="of available edge banked"
-            />
-            <KpiCard
-              label="Execution rate"
-              value={
-                data.opportunity.summary.executionRatePercent == null
-                  ? "—"
-                  : `${data.opportunity.summary.executionRatePercent.toFixed(0)}%`
-              }
-              sublabel={`${data.opportunity.summary.executed} of ${data.opportunity.summary.validOpportunities} valid setups`}
-            />
-            <KpiCard
-              label="Missed opportunity"
-              value={`${data.opportunity.summary.missedOpportunityCostR > 0 ? "+" : ""}${data.opportunity.summary.missedOpportunityCostR.toFixed(2)}R`}
-              tone={data.opportunity.summary.missedOpportunityCostR > 0 ? "danger" : "neutral"}
-              sublabel={`${data.opportunity.summary.missed} missed`}
-            />
-            <KpiCard
-              label="Execution leakage"
-              value={`${data.opportunity.summary.executionLeakageR > 0 ? "+" : ""}${data.opportunity.summary.executionLeakageR.toFixed(2)}R`}
-              tone={data.opportunity.summary.executionLeakageR > 0 ? "danger" : "neutral"}
-              sublabel="edge lost on trades taken"
+        <KpiRow analytics={data.analytics} previousAnalytics={data.previousAnalytics} />
+
+        {/* Equity curve pairs with Today — both land around the same natural
+            height, so this row doesn't leave a stretched, empty-looking gap
+            on the shorter side (see [[dashboard-command-center]]). */}
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
+          <div className="lg:col-span-8">
+            <CommandEquityCurve
+              data={data.analytics.trading.equityCurve}
+              startingBalance={data.analytics.trading.startingBalance}
+              expectedVsActual={data.analytics.trading.expectedVsActualCurve}
             />
           </div>
-        </section>
-      )}
-
-      <section id="notes" className="glass space-y-3 rounded-2xl p-4 scroll-mt-20">
-        <h2 className="text-sm font-medium text-muted-foreground">Today&apos;s Notes</h2>
-        <DailyNoteEditor dateKey={today} initialContent={data.todayNote?.content ?? null} />
-      </section>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <section className="space-y-3">
-          <h2 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-            <Trophy className="size-4" />
-            Recent Trades
-          </h2>
-          <RecentTradesList trades={recentTrades} />
-        </section>
-
-        <section className="space-y-3">
-          <h2 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-            <Sparkles className="size-4" />
-            Recent Psychology Notes
-          </h2>
-          {recentReflections.length === 0 ? (
-            <EmptyState
-              icon={Sparkles}
-              title="No reflections yet"
-              description="Reflections you write after trades will show up here."
+          <div className="lg:col-span-4">
+            <TodayPanel
+              todayKey={today}
+              prepCompletedAt={data.tradingDay?.prepCompletedAt ?? null}
+              routineReadyAt={data.tradingDay?.routineReadyAt ?? null}
+              strategyName={strategyName}
+              risk={data.todayRisk}
             />
-          ) : (
-            <div className="space-y-2">
+          </div>
+        </div>
+
+        {/* The month calendar is naturally tall (a 6-week grid) — paired with
+            the Performance + Prop-Firm cards stacked on the other side, which
+            grow with account count, so the two sides track each other rather
+            than one dwarfing the other. */}
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
+          <div className="lg:col-span-4">
+            <MiniJournalCalendar dailyPnl={data.dailyPnl} />
+          </div>
+          <div className="space-y-4 lg:col-span-8">
+            <PerformanceAccountCard
+              currentBalance={data.analytics.trading.currentBalance}
+              netPnl={data.analytics.trading.netPnl}
+              winRate={data.analytics.trading.winRate}
+              profitFactor={data.analytics.trading.profitFactor}
+            />
+            {data.propFirmHealth.length === 0 ? (
+              <div className="glass flex items-center rounded-lg p-3 text-xs text-muted-foreground">
+                No active prop-firm accounts.{" "}
+                <Link href="/prop-firms" className="ml-1 font-medium text-primary hover:underline">
+                  Add one →
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                {data.propFirmHealth.map((summary) => (
+                  <PropFirmHealthCard key={summary.accountId} summary={summary} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <section className="glass space-y-3 rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <Trophy className="size-4" />
+              Recent Trades
+            </h2>
+            <Link href="/trades-album" className="text-xs font-medium text-primary hover:underline">
+              Full trade history →
+            </Link>
+          </div>
+          <RecentTradesTable trades={data.recentTrades} />
+        </section>
+
+        <QuickActions />
+
+        <section id="notes" className="glass space-y-3 rounded-xl p-4 scroll-mt-20">
+          <h2 className="text-sm font-medium text-muted-foreground">Today&apos;s Notes</h2>
+          <DailyNoteEditor dateKey={today} initialContent={data.todayNote?.content ?? null} />
+        </section>
+
+        {recentReflections.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <Sparkles className="size-4" />
+              Recent Psychology Notes
+            </h2>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {recentReflections.map((t) => (
                 <Link
                   key={t.id}
                   href={`/journal/${t.tradeDate.toISOString().slice(0, 10)}`}
-                  className="glass block rounded-xl p-3 text-sm transition-all hover:-translate-y-0.5 hover:shadow-elevated"
+                  className="glass block rounded-lg p-3 text-sm transition-all hover:-translate-y-0.5 hover:shadow-elevated"
                 >
                   <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="font-medium text-foreground">{t.assetSymbol}</span>
@@ -211,9 +168,17 @@ export default async function DashboardPage() {
                 </Link>
               ))}
             </div>
-          )}
-        </section>
-      </div>
-    </FadeIn>
+          </section>
+        )}
+
+        {data.recentTrades.length === 0 && (
+          <EmptyState
+            icon={Sparkles}
+            title="Nothing logged yet"
+            description="Log your first trade to start seeing your command center come alive."
+          />
+        )}
+      </FadeIn>
+    </PrivacyModeProvider>
   );
 }

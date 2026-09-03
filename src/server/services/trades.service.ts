@@ -3,17 +3,11 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate } from "@/lib/date";
 import { dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
-import { effectiveRiskPercent, scalePnlByRisk, PERFORMANCE_ACCOUNT_RISK_PERCENT } from "@/domain/performance/allocation";
 import { scorePsychology, type PsychologyAnswer } from "@/domain/psychology/scoring";
 import { deriveStatus, nextClosedAt, nextReviewedAt } from "@/domain/trades/lifecycle";
 import { sanitizeAdherenceAnswers, scoreAdherence } from "@/domain/trades/adherence";
-import type {
-  RiskInputType,
-  TradeInput,
-  TradeWorkspaceSectionInput,
-} from "@/lib/validation/trades";
+import type { TradeInput, TradeWorkspaceSectionInput } from "@/lib/validation/trades";
 import {
-  getAccountBalance,
   getAccountTrackRecord,
   getOrCreatePerformanceAccount,
   listTradingAccounts,
@@ -22,6 +16,14 @@ import {
 import { getStrategyReference, listStrategies } from "@/server/services/strategies.service";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 import { scoreSetup } from "@/domain/trades/setup-score";
+import { syncExecutionsWithinTx } from "@/server/services/trade-executions.service";
+import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
+import { lockPlanIfConfirmedAndUnlocked } from "@/server/services/trade-plan.service";
+import {
+  getPerformanceConfig,
+  lockPerformanceRiskSnapshot,
+  settlePerformanceTrade,
+} from "@/server/services/performance-account.service";
 
 // Composes the reference data the trade form needs (accounts/assets/
 // sessions/entry-models/checklists), reusing each feature's own service
@@ -30,9 +32,10 @@ export async function getTradeFormOptions(userId: string) {
   // SOT: a trade's strategy is the gateway — its markets, sessions, confluences,
   // execution AND entry models are loaded client-side from the selected strategy's
   // reference. The form only needs the account list and the strategy picker.
-  const [accounts, strategies] = await Promise.all([
+  const [accounts, strategies, propFirmAccounts] = await Promise.all([
     listTradingAccounts(userId),
     listStrategies(userId),
+    listActivePropFirmAccountsForSelector(userId),
   ]);
 
   // Only offer non-archived strategies for a new selection; the edit page adds
@@ -42,6 +45,7 @@ export async function getTradeFormOptions(userId: string) {
   return {
     accounts,
     strategies: selectableStrategies,
+    propFirmAccounts,
   };
 }
 
@@ -63,6 +67,13 @@ const tradeInclude = {
   },
   allocations: { include: { tradingAccount: true } },
   psychology: true,
+  // Planned TPs from the confirmed TradingView Trade Plan — the sole source
+  // for the "which targets are planned" badges (Journal day view + Trade
+  // Execution section); no separate manual TP-hit input exists anymore.
+  plannedTargets: { orderBy: { targetOrder: "asc" } },
+  // Existence-only — powers a "has a plan screenshot attached" flag (Dashboard
+  // recent-trades table) without pulling the actual image data.
+  planScreenshot: { select: { id: true } },
 } as const;
 
 /** A Trade with all the relations the Trade Workspace DTO needs. Returned by
@@ -71,14 +82,20 @@ export type TradeWithWorkspaceRelations = Prisma.TradeGetPayload<{ include: type
 
 // Score is always (re)computed server-side from the answers, never trusted
 // from the client — this is what guarantees a persisted score/grade can
-// never drift from what the pure scoring function would produce.
+// never drift from what the pure scoring function would produce. Returns null
+// when the questionnaire isn't fully/validly answered yet (a trade logged as
+// an idea) — the caller then persists no PsychologyQuestionnaireResponse row.
 function scorePsychologyAnswers(answers: TradeInput["psychologyAnswers"]) {
-  const answerList: PsychologyAnswer[] = Object.entries(answers).map(([key, value]) => ({
+  const answerList: PsychologyAnswer[] = Object.entries(answers ?? {}).map(([key, value]) => ({
     key,
     value,
   }));
-  const { rawScore, percent, grade } = scorePsychology(answerList);
-  return { answers, rawScore, psychologyPercent: percent, grade };
+  try {
+    const { rawScore, percent, grade } = scorePsychology(answerList);
+    return { answers, rawScore, psychologyPercent: percent, grade };
+  } catch {
+    return null;
+  }
 }
 
 // The free-text fields whose presence means "this trade has been reviewed":
@@ -104,10 +121,6 @@ function tradeScalarData(data: TradeInput) {
     biasConfidencePercent: data.biasConfidencePercent,
     expectedRR: data.expectedRR,
     actualRR: data.actualRR,
-    hitTP1: data.hitTP1,
-    hitTP2: data.hitTP2,
-    hitTP3: data.hitTP3,
-    hitFullTP: data.hitFullTP,
     psychPreTradeMindset: data.psychPreTradeMindset,
     psychPostTradeReflection: data.psychPostTradeReflection,
     psychLessonsLearned: data.psychLessonsLearned,
@@ -127,49 +140,46 @@ function tradeMarketData(data: TradeInput) {
 
 /**
  * Builds every allocation row for a trade: the Performance Account's own
- * (user-entered, fixed 1% risk) allocation, plus one auto-calculated
- * allocation per additional participating account, scaled from the
- * Performance Account's PnL by that account's relative risk%. When editing
- * an existing trade, `excludeTradeId` excludes the trade's own prior
- * allocations from each account's balance lookup, so risk% is computed
- * against the balance as it stood before this trade — not double-counted.
+ * automatic allocation (spec §3/§4 — created every time, PnL always 0/0 at
+ * save time; the ONLY writer of its PnL going forward is
+ * performance-account.service.ts's settlePerformanceTrade, driven by the
+ * trade's actual execution data, never this form), plus one row per
+ * additional REAL participating account, each with its own independently
+ * entered risk% and PnL (spec §1/§17 — never derived/scaled from the
+ * Performance Account's result).
+ *
+ * The Performance allocation's `riskValue` is the pre-execution risk%
+ * override surface (spec §5): the trade's explicit override when given,
+ * else the account's configured default. On an EDIT, once the risk
+ * snapshot is already locked this incoming value is ignored — the locked
+ * snapshot's own frozen riskPercent is what settlement actually uses, so a
+ * later form re-save can never silently change historical risk.
  */
 async function buildAllocations(userId: string, data: TradeInput, excludeTradeId?: string) {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
+  const performanceConfig = await getPerformanceConfig(userId);
+  const performanceRiskPercent = data.performanceRiskPercentOverride ?? performanceConfig.defaultRiskPercent.toNumber();
 
-  const participatingAccounts = data.allocations.length
-    ? await prisma.tradingAccount.findMany({
-        where: { userId, id: { in: data.allocations.map((a) => a.tradingAccountId) } },
-      })
-    : [];
+  const alreadyLocked = excludeTradeId
+    ? await prisma.performanceRiskSnapshot.findUnique({ where: { tradeId: excludeTradeId }, select: { riskPercent: true } })
+    : null;
 
-  const participating = await Promise.all(
-    data.allocations.map(async (a) => {
-      const account = participatingAccounts.find((acc) => acc.id === a.tradingAccountId);
-      if (!account) throw new Error("Selected account not found.");
-      const balance = await getAccountBalance(account.id, excludeTradeId);
-      const riskPercent = effectiveRiskPercent(
-        a.riskInputType as RiskInputType,
-        a.riskValue,
-        balance,
-      );
-      return {
-        tradingAccountId: a.tradingAccountId,
-        riskInputType: a.riskInputType,
-        riskValue: a.riskValue,
-        closingPnlGross: scalePnlByRisk(data.performanceClosingPnlGross, riskPercent),
-        closingPnlNet: scalePnlByRisk(data.performanceClosingPnlNet, riskPercent),
-      };
-    }),
-  );
+  const participating = data.allocations.map((a) => ({
+    tradingAccountId: a.tradingAccountId,
+    riskInputType: a.riskInputType,
+    riskValue: a.riskValue,
+    closingPnlGross: a.closingPnlGross,
+    closingPnlNet: a.closingPnlNet,
+  }));
 
   return [
     {
       tradingAccountId: performanceAccount.id,
       riskInputType: "PERCENT" as const,
-      riskValue: PERFORMANCE_ACCOUNT_RISK_PERCENT,
-      closingPnlGross: data.performanceClosingPnlGross,
-      closingPnlNet: data.performanceClosingPnlNet,
+      riskValue: alreadyLocked ? alreadyLocked.riskPercent.toNumber() : performanceRiskPercent,
+      // Never written here — see the doc comment above.
+      closingPnlGross: 0,
+      closingPnlNet: 0,
     },
     ...participating,
   ];
@@ -242,11 +252,17 @@ async function buildTradeSnapshots(
 interface FrozenExpected {
   sessions: { name: string; color: string }[];
   confluences: {
+    id?: string;
     name: string;
     color: string;
     category: string | null;
     weight: number | null;
     mandatory?: boolean;
+    // Frozen at trade time so a later strategy edit can't change which
+    // confluences were eligible for THIS trade's direction. Absent on
+    // pre-direction snapshots → treated as BOTH.
+    directionApplicability?: "BULLISH" | "BEARISH" | "BOTH";
+    pairId?: string | null;
   }[];
   execution: { name: string; color: string; category: string | null; weight: number | null }[];
 }
@@ -270,17 +286,28 @@ async function buildStrategyExecution(
     expected = ref ? { sessions: ref.sessions, confluences: ref.confluences, execution: ref.execution } : null;
   }
 
-  const scores = scoreStrategyAdherence(expected, data.selectedConfluences, data.selectedExecution);
+  const scores = scoreStrategyAdherence(
+    expected,
+    data.selectedConfluences,
+    data.selectedExecution,
+    data.direction,
+  );
 
   // Weighted confluence "setup score" — the probability/quality engine. Frozen
   // from the expected confluences' weights + mandatory flags vs what was present.
+  // Direction-aware: bullish-only weight never enters a short trade's denominator
+  // (and vice-versa). `directionApplicability` comes from the frozen snapshot, so
+  // a later strategy edit can't rewrite this trade's score.
   const setup = scoreSetup(
     (expected?.confluences ?? []).map((c) => ({
+      id: c.id ?? c.name,
       name: c.name,
       weight: c.weight,
       mandatory: c.mandatory ?? false,
+      directionApplicability: c.directionApplicability ?? "BOTH",
     })),
     data.selectedConfluences,
+    { direction: data.direction },
   );
 
   // selected* are stored as plain name arrays; each name's color is resolved at
@@ -376,22 +403,33 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
   const closedAt = nextClosedAt(null, data.actualRR != null, now);
   const reviewedAt = nextReviewedAt(null, hasReview, now);
 
-  return prisma.trade.create({
-    data: {
-      userId,
-      tradeDate: dateKeyToUtcDate(dateKey),
-      ...tradeScalarData(data),
-      ...assetLink,
-      ...snapshots,
-      tradeNumber,
-      closedAt,
-      reviewedAt,
-      status: deriveStatus(closedAt, reviewedAt),
-      ...strategyExec,
-      allocations: { create: allocations },
-      psychology: { create: psychology },
-    },
-    include: tradeInclude,
+  return prisma.$transaction(async (tx) => {
+    const trade = await tx.trade.create({
+      data: {
+        userId,
+        tradeDate: dateKeyToUtcDate(dateKey),
+        ...tradeScalarData(data),
+        ...assetLink,
+        ...snapshots,
+        tradeNumber,
+        closedAt,
+        reviewedAt,
+        status: deriveStatus(closedAt, reviewedAt),
+        ...strategyExec,
+        allocations: { create: allocations },
+        ...(psychology ? { psychology: { create: psychology } } : {}),
+      },
+      include: tradeInclude,
+    });
+
+    // Prop Firms module (System B) — sibling to `allocations` above, never
+    // merged with System A. Zero, one, or many independent account
+    // executions of this same shared idea.
+    if (data.propFirmExecutions.length > 0) {
+      await syncExecutionsWithinTx(tx, userId, trade.id, data.propFirmExecutions);
+    }
+
+    return trade;
   });
 }
 
@@ -416,6 +454,21 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
     });
 
     await tx.tradeAccountAllocation.deleteMany({ where: { tradeId } });
+    // Prop Firms module (System B) — diffed (upsert-or-remove per account),
+    // never delete-and-recreate, so an edit preserves each execution's
+    // ledger idempotency (see trade-executions.service.ts). Guarded the same
+    // way as createTrade: the Edit Trade form (trade-form.tsx) has no field
+    // for propFirmExecutions at all, so it always submits `[]` — calling
+    // syncExecutionsWithinTx unconditionally would treat that as "the trader
+    // removed every account allocation" and silently delete each execution
+    // (reversing its ledger PnL) on every unrelated edit. Account
+    // allocations are managed exclusively through their own dedicated
+    // actions (upsertExecutionAction/removeExecutionAction in
+    // trade-executions.actions.ts), never through this form, so an empty
+    // list here means "not provided," not "clear them all."
+    if (data.propFirmExecutions.length > 0) {
+      await syncExecutionsWithinTx(tx, userId, tradeId, data.propFirmExecutions);
+    }
 
     const now = new Date();
     // The form owns the psychology reflections; the workspace review prompts
@@ -442,10 +495,21 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
         status: deriveStatus(closedAt, reviewedAt),
         ...strategyExec,
         allocations: { create: allocations },
-        psychology: { upsert: { create: psychology, update: psychology } },
+        // Only (re)write the questionnaire when it's fully answered; an
+        // incomplete set leaves any existing score untouched.
+        ...(psychology ? { psychology: { upsert: { create: psychology, update: psychology } } } : {}),
       },
       include: tradeInclude,
     });
+  }).then(async () => {
+    // The allocation rebuild above always re-creates the Performance row at
+    // 0/0 (see buildAllocations) — if this trade's risk was already locked,
+    // restore its calculated PnL immediately so an unrelated edit (e.g.
+    // changing the asset) never blanks out a settled result. A no-op when
+    // the trade isn't locked yet. Re-fetched fresh so the returned trade
+    // reflects the corrected allocation, not the pre-settlement 0/0 write.
+    await settlePerformanceTrade(userId, tradeId);
+    return prisma.trade.findFirstOrThrow({ where: { id: tradeId, userId }, include: tradeInclude });
   });
 }
 
@@ -484,16 +548,49 @@ export async function updateTradeSections(
         })()
       : {};
 
-  return prisma.trade.update({
+  // Post-trade Honest Questionnaire, filled in the Trade Review tab. The
+  // PsychologyQuestionnaireResponse row is written only once all 8 answers are
+  // valid; a partial set is a no-op (kept in the panel's local state until
+  // complete). `psychologyAnswers` itself is not a Trade column — strip it.
+  const { psychologyAnswers: patchedPsychAnswers, ...patchColumns } = patch;
+  const psychology =
+    patchedPsychAnswers !== undefined
+      ? scorePsychologyAnswers(patchedPsychAnswers as TradeInput["psychologyAnswers"])
+      : null;
+
+  const updated = await prisma.trade.update({
     where: { id: tradeId },
     data: {
-      ...patch,
+      ...patchColumns,
       ...adherence,
+      ...(psychology ? { psychology: { upsert: { create: psychology, update: psychology } } } : {}),
       reviewedAt,
       status: deriveStatus(existing.closedAt, reviewedAt),
     },
     include: tradeInclude,
   });
+
+  // TradingView Screenshot Trade Plan (spec §13): the first time an actual
+  // entry is recorded, whatever plan is currently confirmed gets locked —
+  // later edits become revisions with a required reason, never silent
+  // rewrites of what the trader actually planned before executing.
+  const firstActualEntry = "actualEntry" in patchRecord && patch.actualEntry != null && existing.actualEntry == null;
+  if (firstActualEntry) {
+    await lockPlanIfConfirmedAndUnlocked(userId, tradeId);
+  }
+
+  // Performance Account automatic benchmark: lock the immutable risk
+  // snapshot the moment actualEntry first appears (spec §4), then recompute
+  // realized R / PnL whenever any of the canonical actual-execution fields
+  // change (spec §13) — a no-op until the trade is fully closed.
+  if (firstActualEntry) {
+    await lockPerformanceRiskSnapshot(userId, tradeId);
+  }
+  if ("actualEntry" in patchRecord || "actualStopLoss" in patchRecord || "actualExit" in patchRecord) {
+    await settlePerformanceTrade(userId, tradeId);
+  }
+
+  return updated;
 }
 
 export async function archiveTrade(userId: string, tradeId: string) {
@@ -519,20 +616,33 @@ export async function archiveTrade(userId: string, tradeId: string) {
   });
 }
 
+export interface DailyPnlEntry {
+  dateKey: string;
+  percent: number;
+  pnl: number;
+  tradeCount: number;
+  wins: number;
+  losses: number;
+}
+
 /**
- * Backs the journal calendar's daily P&L badges — derived entirely from the
- * Performance Account's real dollar track record (the single source of
- * truth for all analytics), not from any self-reported RR.
+ * Backs the journal calendar (day badges, weekly totals, the year-view
+ * activity map) — derived entirely from the Performance Account's real
+ * dollar track record (the single source of truth for all analytics), not
+ * from any self-reported RR. `wins`/`losses` are per-trade `pnl` sign, so a
+ * day's totals stay consistent with Analytics/Dashboard/Equity Curve.
  */
-export async function listDailyPnl(userId: string) {
+export async function listDailyPnl(userId: string): Promise<DailyPnlEntry[]> {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
   const { entries } = await getAccountTrackRecord(performanceAccount.id);
 
-  const byDay = new Map<string, { pnl: number; count: number }>();
+  const byDay = new Map<string, { pnl: number; count: number; wins: number; losses: number }>();
   for (const e of entries) {
-    const existing = byDay.get(e.dateKey) ?? { pnl: 0, count: 0 };
+    const existing = byDay.get(e.dateKey) ?? { pnl: 0, count: 0, wins: 0, losses: 0 };
     existing.pnl += e.pnl;
     existing.count += 1;
+    if (e.pnl > 0) existing.wins += 1;
+    else if (e.pnl < 0) existing.losses += 1;
     byDay.set(e.dateKey, existing);
   }
 
@@ -542,9 +652,12 @@ export async function listDailyPnl(userId: string) {
   );
   const percentByDay = new Map(dailyPercents.map((d) => [d.dateKey, d.percent]));
 
-  return Array.from(byDay.entries()).map(([dateKey, { count }]) => ({
+  return Array.from(byDay.entries()).map(([dateKey, { pnl, count, wins, losses }]) => ({
     dateKey,
     percent: percentByDay.get(dateKey) ?? 0,
+    pnl,
     tradeCount: count,
+    wins,
+    losses,
   }));
 }

@@ -3,12 +3,26 @@
 // trader actually selected, measure how closely the executed trade followed the
 // predefined strategy. This is NOT a market-direction prediction — it's a discipline
 // score. Count-based for now; `weight` is carried for future weighted scoring.
+//
+// Direction-aware: confluences that don't apply to the trade's direction are
+// filtered out BEFORE the ratio, so a long trade is never marked "non-adherent"
+// for skipping a bearish-only confluence (and vice-versa). This mirrors the
+// eligibility rule in the weighted engine (domain/trades/confluence-score.ts) —
+// there is still only one notion of "eligible".
+
+import {
+  isConfluenceEligible,
+  type ConfluenceDirectionValue,
+  type TradeDirectionValue,
+} from "./confluence-score";
 
 export interface AdherenceTag {
   name: string;
   color: string; // TagColor value, kept as a string here to stay framework/enum-free
   category?: string | null;
   weight?: number | null;
+  /** CONFLUENCE only. Absent → BOTH (legacy snapshots). */
+  directionApplicability?: ConfluenceDirectionValue | null;
 }
 
 export interface StrategyExpectedSet {
@@ -33,15 +47,27 @@ function ratio(expectedNames: string[], selected: string[]): number | null {
 }
 
 /**
- * confluence% = (selected ∩ expected) / expected; same for execution. Trade quality
+ * confluence% = (selected ∩ eligible expected) / eligible expected; same for
+ * execution (execution confirmations are never direction-filtered). Trade quality
  * is the mean of whichever scores apply. All null when the strategy defined none.
+ *
+ * @param direction  LONG / SHORT restricts the expected confluence set to
+ *   `<dir> + BOTH` before the ratio. Omit to keep the legacy behaviour (every
+ *   expected confluence counts). `null` behaves like "no direction" → legacy.
  */
 export function scoreStrategyAdherence(
   expected: Pick<StrategyExpectedSet, "confluences" | "execution"> | null,
   selectedConfluences: string[],
   selectedExecution: string[],
+  direction?: TradeDirectionValue | null,
 ): AdherenceScores {
-  const confluencePercent = ratio((expected?.confluences ?? []).map((c) => c.name), selectedConfluences);
+  const eligibleConfluences =
+    direction == null
+      ? (expected?.confluences ?? [])
+      : (expected?.confluences ?? []).filter((c) =>
+          isConfluenceEligible(c.directionApplicability, direction),
+        );
+  const confluencePercent = ratio(eligibleConfluences.map((c) => c.name), selectedConfluences);
   const executionPercent = ratio((expected?.execution ?? []).map((e) => e.name), selectedExecution);
 
   const parts = [confluencePercent, executionPercent].filter((x): x is number => x != null);

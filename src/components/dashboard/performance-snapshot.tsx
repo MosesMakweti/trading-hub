@@ -8,7 +8,10 @@ import { ProgressRing } from "@/components/analytics/progress-ring";
 import { Donut } from "@/components/analytics/donut";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
 import { DiscrepancyGapCard } from "@/components/dashboard/discrepancy-gap-card";
-import type { DiscrepancyCurvePoint, DiscrepancySummary } from "@/domain/analytics/discrepancy-model";
+import type {
+  AttributionSummary,
+  CounterfactualPoint,
+} from "@/domain/analytics/counterfactual-engine";
 
 /**
  * Performance Snapshot — the Dashboard's at-a-glance health check: headline KPIs
@@ -24,7 +27,7 @@ export function PerformanceSnapshot({
   bestAccount,
   bestAsset,
   equityCurve,
-  discrepancy,
+  counterfactual,
 }: {
   winRate: number | null;
   winRateSeries: number[];
@@ -34,7 +37,7 @@ export function PerformanceSnapshot({
   bestAccount: { name: string; returnPercent: number } | null;
   bestAsset: { assetSymbol: string; totalReturnPercent: number } | null;
   equityCurve: ComponentProps<typeof EquityCurveChart>["data"];
-  discrepancy: { curve: DiscrepancyCurvePoint[]; summary: DiscrepancySummary };
+  counterfactual: { curve: CounterfactualPoint[]; summary: AttributionSummary };
 }) {
   const signed = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
   const breakeven = Math.max(0, totalTrades - winningTrades - losingTrades);
@@ -87,14 +90,18 @@ export function PerformanceSnapshot({
 
       <div className="glass-strong grid grid-cols-2 items-center gap-4 rounded-xl px-4 py-5 sm:grid-cols-4 sm:px-6">
         <ProgressRing value={winRate} tone="brand" label="Win rate" />
-        <ProgressRing value={discrepancy.summary.edgeCapturePercent} tone="success" label="Edge capture" />
+        <ProgressRing
+          value={counterfactual.summary.processEfficiencyPercent}
+          tone="success"
+          label="Process eff."
+        />
         <div className="flex flex-col items-center justify-center gap-1 text-center">
           <span
             className={`text-2xl font-semibold tabular-nums ${
-              discrepancy.summary.avoidableDiscrepancyR > 0 ? "text-danger" : "text-foreground"
+              counterfactual.summary.totalAvoidableGapR > 0 ? "text-danger" : "text-foreground"
             }`}
           >
-            {discrepancy.summary.avoidableDiscrepancyR.toFixed(1)}R
+            {counterfactual.summary.totalAvoidableGapR.toFixed(1)}R
           </span>
           <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Avoidable</span>
         </div>
@@ -114,7 +121,7 @@ export function PerformanceSnapshot({
 
       <div className="grid gap-4 lg:grid-cols-2">
         <EquityCurveChart data={equityCurve} />
-        <DiscrepancyGapCard curve={discrepancy.curve} summary={discrepancy.summary} />
+        <DiscrepancyGapCard curve={counterfactual.curve} summary={counterfactual.summary} />
       </div>
     </section>
   );

@@ -1,6 +1,5 @@
-import { CandlestickChart } from "lucide-react";
-
 import { AuthBrandPanel } from "@/components/auth/auth-brand-panel";
+import { TraditoriumMark } from "@/components/brand/traditorium-mark";
 import { ThemeToggle } from "@/components/shared/theme-toggle";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -25,10 +24,10 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         {/* Compact brand mark for the mobile / narrow layout */}
         <div className="mb-8 flex items-center gap-2.5 lg:hidden">
           <div className="bg-brand-gradient flex size-9 items-center justify-center rounded-xl text-white shadow-glow">
-            <CandlestickChart className="size-5" />
+            <TraditoriumMark className="size-5" />
           </div>
           <span className="text-lg font-semibold tracking-tight">
-            trade<span className="font-mono font-medium text-primary">OS</span>
+            Tradit<span className="font-mono font-medium text-primary">orium</span>
           </span>
         </div>
 

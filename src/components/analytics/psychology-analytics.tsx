@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils";
 import { KpiCard } from "@/components/analytics/kpi-card";
 import { PsychologyTrendChart } from "@/components/analytics/psychology-trend-chart";
 import { BreakdownList } from "@/components/analytics/breakdown-list";
@@ -19,10 +20,12 @@ export function PsychologyAnalytics({ data }: { data: PsychologyData }) {
         <KpiCard
           label="Avg Psychology Score"
           value={data.averageScore == null ? "—" : `${data.averageScore >= 0 ? "+" : ""}${data.averageScore.toFixed(1)} / 8`}
+          count={data.averageScore == null ? undefined : { value: data.averageScore, decimals: 1, suffix: " / 8", signed: true }}
         />
         <KpiCard
           label="Avg Psychology %"
           value={data.averagePercent == null ? "—" : `${data.averagePercent.toFixed(1)}%`}
+          count={data.averagePercent == null ? undefined : { value: data.averagePercent, decimals: 1, suffix: "%" }}
           spark={data.trendByWeek.map((p) => p.averagePercent)}
           sparkTone="brand"
         />
@@ -82,12 +85,28 @@ export function PsychologyAnalytics({ data }: { data: PsychologyData }) {
   );
 }
 
+/** Correlation magnitude as a single-hue bar (sign carries direction via color,
+ *  never encoded by hue-cycling) — matches the dataviz "sequential = one hue"
+ *  rule already used throughout the module, instead of a bare number. */
 function CorrelationStat({ label, value }: { label: string; value: number | null }) {
+  const magnitude = value == null ? 0 : Math.min(100, Math.abs(value) * 100);
   return (
     <div className="rounded-xl border border-border bg-background/40 p-3 text-center">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold tabular-nums">
+      <div
+        className={cn(
+          "mt-1 text-lg font-semibold tabular-nums",
+          value != null && value > 0 && "text-success",
+          value != null && value < 0 && "text-danger",
+        )}
+      >
         {value == null ? "—" : value.toFixed(2)}
+      </div>
+      <div className="mx-auto mt-2 h-1.5 w-20 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn("h-full rounded-full", value != null && value < 0 ? "bg-danger" : "bg-success")}
+          style={{ width: `${magnitude}%` }}
+        />
       </div>
     </div>
   );

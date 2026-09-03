@@ -24,18 +24,28 @@ model User {
   accounts Account[]
   sessions Session[]
 
-  tradingAccounts TradingAccount[]
-  dailyNotes      DailyNote[]
-  tradingDays     TradingDay[]
-  weeklyReviews   WeeklyReview[]
-  trades          Trade[]
-  opportunities   TradeOpportunity[]
-  strategies      Strategy[]
-  routineSections RoutineSection[]
-  routineItems    RoutineItem[]
-  strategySessions      StrategySession[]
+  tradingAccounts        TradingAccount[]
+  dailyNotes             DailyNote[]
+  tradingDays            TradingDay[]
+  weeklyReviews          WeeklyReview[]
+  trades                 Trade[]
+  opportunities          TradeOpportunity[]
+  strategies             Strategy[]
+  routineSections        RoutineSection[]
+  routineItems           RoutineItem[]
+  strategySessions       StrategySession[]
   strategyChecklistItems StrategyChecklistItem[]
-  mediaAssets     MediaAsset[]
+  mediaAssets            MediaAsset[]
+
+  userPropFirms            UserPropFirm[]
+  propFirmAccounts         PropFirmAccount[]
+  tradeAccountExecutions   TradeAccountExecution[]
+  tradePlanScreenshots     TradePlanScreenshot[]
+  tradeActualPartialExits  TradeActualPartialExit[]
+  performanceRiskSnapshots PerformanceRiskSnapshot[]
+
+  propFirmImportBatches          PropFirmImportBatch[]
+  propFirmImportMappingTemplates PropFirmImportMappingTemplate[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -86,9 +96,9 @@ model WeeklyReview {
 }
 
 model TradingDay {
-  id     String @id @default(cuid())
+  id     String   @id @default(cuid())
   userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   date   DateTime @db.Date
 
   status          TradingDayStatus @default(ACTIVE)
@@ -174,14 +184,103 @@ model TradingAccount {
   totalWithdrawals Decimal? @db.Decimal(14, 2)
   totalDeposits    Decimal? @db.Decimal(14, 2)
 
+  // performance-only — the virtual benchmark account's own configuration.
+  // Null on every other kind. defaultRiskPercent falls back to 1% (the
+  // app's long-standing "1R = 1%" convention) when unset; maxRiskPercent is
+  // an optional per-trade cap; compoundingEnabled decides whether the next
+  // trade's risk amount is based on the latest settled balance (true) or
+  // always the fixed startingBalance (false, spec §11); effectiveDate
+  // records when this configuration took effect (informational).
+  defaultRiskPercent Decimal?  @db.Decimal(6, 3)
+  maxRiskPercent     Decimal?  @db.Decimal(6, 3)
+  compoundingEnabled Boolean   @default(true)
+  currency           String?
+  effectiveDate      DateTime? @db.Date
+
   // currentBalance is intentionally not a column — it's always baseline
   // (accountSize for prop-firm, startingBalance for brokerage/performance)
   // plus the sum of this account's trade allocation PnLs, computed on read
   // in accounts.service.ts. Persisting it would risk drifting from the
   // trade history that's supposed to be its source of truth.
-  allocations TradeAccountAllocation[]
+  allocations              TradeAccountAllocation[]
+  // Prop Firms module (Phase 1) — the richer PropFirmAccount this row is
+  // paired with, when one exists (new prop-firm accounts, or a legacy row
+  // wrapped by ensureLegacyPropFirmsMigrated). Null for brokerage/performance.
+  propFirmAccount          PropFirmAccount?
+  // Performance benchmark only — one immutable risk snapshot per trade
+  // (see PerformanceRiskSnapshot below).
+  performanceRiskSnapshots PerformanceRiskSnapshot[]
 
   @@index([userId, kind, deletedAt])
+}
+
+// ── Performance Account automatic benchmark (spec: "Adjust the Performance
+// Account so it functions as an automatic, virtual benchmark") ─────────────
+// One row per Trade (tradeId is unique) for the TradingAccount(kind:
+// PERFORMANCE). Two groups of fields:
+//   - LOCKED at first actual entry, then immutable forever (balanceBefore,
+//     riskPercent, riskAmount, actualEntry, direction, assetSymbol, currency,
+//     lockedAt) — "the historical risk amount must not change merely because
+//     the Performance Account balance changes later."
+//   - RECALCULABLE outcome (initialStop/initialStopSource resolved once then
+//     frozen; realizedR/performancePnl/settledAt/calculationVersion) — safe
+//     to recompute in place when actual exit/partial-exit data changes after
+//     settlement (calculationVersion increments each time), since this whole
+//     row is itself the append-only-per-trade ledger effect: the @@unique on
+//     tradeId is what makes settlement idempotent (never a second effect for
+//     the same trade), and deleting the Trade cascades this row away, which
+//     is the "reverse any posted ledger effect" behavior for a voided trade.
+model PerformanceRiskSnapshot {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tradeId String @unique
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  performanceAccountId String
+  performanceAccount   TradingAccount @relation(fields: [performanceAccountId], references: [id])
+
+  // The confirmed TradePlanVersion active when the risk was locked, if any —
+  // informational provenance, never re-resolved later.
+  planVersionId String?
+  planVersion   TradePlanVersion? @relation(fields: [planVersionId], references: [id], onDelete: SetNull)
+
+  // ── Locked at first actual entry — immutable ────────────────────────────
+  balanceBefore Decimal   @db.Decimal(14, 2)
+  riskPercent   Decimal   @db.Decimal(6, 3)
+  riskAmount    Decimal   @db.Decimal(14, 2)
+  currency      String
+  actualEntry   Decimal   @db.Decimal(18, 8)
+  direction     Direction
+  assetSymbol   String
+  lockedAt      DateTime  @default(now())
+
+  // ── Resolved once (first time available), then frozen — spec §8: moving
+  // the stop to break-even/trailing later must never redefine the original
+  // 1R unit.
+  initialStop       Decimal?           @db.Decimal(18, 8)
+  initialStopSource InitialStopSource?
+
+  // ── Recalculable outcome — only written once the canonical trade is
+  // fully closed (spec §9: never a partial settlement while exposure
+  // remains). Re-derived in place (never a fabricated second row) whenever
+  // actual exit/partial-exit data changes after the fact.
+  realizedR          Decimal?  @db.Decimal(8, 4)
+  performancePnl     Decimal?  @db.Decimal(14, 2)
+  settledAt          DateTime?
+  calculationVersion Int       @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([performanceAccountId])
+}
+
+enum InitialStopSource {
+  ACTUAL
+  PLANNED
 }
 
 // Pre-Session Routine item type. Extensible: adding a future type (RATING,
@@ -196,13 +295,13 @@ enum RoutineItemType {
 // A titled group of routine items (e.g. "Personal Readiness"). The editable
 // template; the trader adds/renames/reorders/collapses sections in Settings.
 model RoutineSection {
-  id        String        @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String
-  sortOrder Int           @default(0)
-  collapsed Boolean       @default(false)
-  createdAt DateTime      @default(now())
+  sortOrder Int       @default(0)
+  collapsed Boolean   @default(false)
+  createdAt DateTime  @default(now())
   deletedAt DateTime?
 
   items RoutineItem[]
@@ -213,20 +312,20 @@ model RoutineSection {
 // A single routine item within a section. `type` picks the renderer; `config`
 // holds per-type settings for future types (rating scale, dropdown options…).
 model RoutineItem {
-  id        String          @id @default(cuid())
-  userId    String
-  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sectionId String
-  section   RoutineSection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  type      RoutineItemType @default(CHECKBOX)
-  label     String
-  config    Json?
+  id          String          @id @default(cuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sectionId   String
+  section     RoutineSection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  type        RoutineItemType @default(CHECKBOX)
+  label       String
+  config      Json?
   // Mandatory items GATE the day: Today's Plan (and the rest of the workflow) stays
   // locked until every mandatory item is complete. Optional items never block.
-  isMandatory Boolean       @default(false)
-  sortOrder Int             @default(0)
-  createdAt DateTime        @default(now())
-  deletedAt DateTime?
+  isMandatory Boolean         @default(false)
+  sortOrder   Int             @default(0)
+  createdAt   DateTime        @default(now())
+  deletedAt   DateTime?
 
   @@index([userId, sectionId, sortOrder])
 }
@@ -260,23 +359,26 @@ enum MediaOwnerType {
   STRATEGY_CHECKLIST_ITEM
   STRATEGY_FRAMEWORK_STEP
   ARSENAL_CONCEPT
+  // Prop Firms module (see AccountMilestone) — certificates/evidence attached
+  // to a milestone (payout proof, pass certificate, breach screenshot, …).
+  PROP_FIRM_MILESTONE
 }
 
 model Trade {
-  id                       String    @id @default(cuid())
+  id                       String       @id @default(cuid())
   userId                   String
-  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tradeDate                DateTime  @db.Date
+  user                     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeDate                DateTime     @db.Date
   executionMinutes         Int
   direction                Direction
   higherTimeframeBias      Bias
   biasConfidencePercent    Int
-  expectedRR               Decimal   @db.Decimal(8, 2)
-  actualRR                 Decimal?  @db.Decimal(8, 2)
-  hitTP1                   Boolean   @default(false)
-  hitTP2                   Boolean   @default(false)
-  hitTP3                   Boolean   @default(false)
-  hitFullTP                Boolean   @default(false)
+  // Nullable — no longer manually entered at trade creation. Derived and kept
+  // in sync from the TradingView Trade Plan's confirmed weighted planned R
+  // (savePlan in trade-plan.service.ts) once that plan is confirmed; null
+  // until then ("not planned yet", never a misleading 0R placeholder).
+  expectedRR               Decimal?     @db.Decimal(8, 2)
+  actualRR                 Decimal?     @db.Decimal(8, 2)
   psychPreTradeMindset     String?
   psychPostTradeReflection String?
   psychLessonsLearned      String?
@@ -285,19 +387,34 @@ model Trade {
   // in the workspace sections; the /edit form leaves them untouched. Prices
   // use Decimal(18,8) for FX/crypto precision. wouldTakeAgain is tri-state
   // (null = not answered yet).
-  plannedEntry             Decimal?  @db.Decimal(18, 8)
-  plannedStopLoss          Decimal?  @db.Decimal(18, 8)
-  plannedTarget            Decimal?  @db.Decimal(18, 8)
+  plannedEntry             Decimal?     @db.Decimal(18, 8)
+  plannedStopLoss          Decimal?     @db.Decimal(18, 8)
+  plannedTarget            Decimal?     @db.Decimal(18, 8)
+  // TradingView Screenshot Trade Plan — chart timeframe of the plan (e.g. "15m").
+  // Sits alongside the plannedEntry/StopLoss/Target trio above; kept as a plain
+  // string (not an enum) since TradingView's own timeframe labels vary by asset
+  // class and the trader may type one recognition doesn't cover.
+  timeframe                String?
   marketContext            String?
   areasOfInterest          String?
   reasonForTrade           String?
-  actualEntry              Decimal?  @db.Decimal(18, 8)
-  actualExit               Decimal?  @db.Decimal(18, 8)
+  actualEntry              Decimal?     @db.Decimal(18, 8)
+  actualExit               Decimal?     @db.Decimal(18, 8)
+  // The stop actually in place at execution, entered explicitly by the
+  // trader — never inferred from actualExit (checkpoint 2 §4: "do not infer
+  // an actual stop from the final exit unless the execution explicitly
+  // confirms it was a stop-loss exit"). Null = not recorded, which the
+  // comparison service must report as missing data, not guess at.
+  actualStopLoss           Decimal?     @db.Decimal(18, 8)
   executionNotes           String?
   whatWentWell             String?
   whatWentWrong            String?
   whatSurprisedMe          String?
   wouldTakeAgain           Boolean?
+  // Behavioral intent tag for the Counterfactual (Discrepancy Gap) engine. Null on
+  // historical rows → the engine infers behavior from other signals. FOMO/REVENGE/
+  // IMPULSE/BOREDOM mark a trade a disciplined process would not have taken.
+  tradeIntent              TradeIntent?
   // Trade Timeline lifecycle stamps (Phase 3) — captured when the trade first
   // transitions into each state (see domain/trades/lifecycle.ts). createdAt is
   // "logged", the in-market "executed" moment is derived (tradeDate +
@@ -310,7 +427,7 @@ model Trade {
   // time, so a completed trade always shows the strategy as it was when taken,
   // even after the strategy is versioned, renamed, or deleted.
   strategyId               String?
-  strategy                 Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  strategy                 Strategy?    @relation(fields: [strategyId], references: [id], onDelete: SetNull)
   strategyNameSnapshot     String?
   strategyVersionSnapshot  Int?
   // Phase 5 (polish extras). tradeNumber is a stable, per-user monotonic counter
@@ -320,7 +437,7 @@ model Trade {
   // strategy-adherence self-scoring: answers as a {key: bool} Json map, plus the
   // denormalized percent computed by the pure scorer.
   tradeNumber              Int?
-  status                   TradeStatus @default(OPEN)
+  status                   TradeStatus  @default(OPEN)
   adherenceAnswers         Json?
   adherencePercent         Float?
 
@@ -347,24 +464,35 @@ model Trade {
   // setupRating is the A+/A/B/C/Low band; setupValid is false when a mandatory
   // confluence was missing ("Invalid Setup"); missingConfluences is the string[] of
   // expected-but-absent confluence names.
-  setupScore                Float?
-  setupRating               String?
-  setupValid                Boolean?
-  missingConfluences        Json?
+  setupScore         Float?
+  setupRating        String?
+  setupValid         Boolean?
+  missingConfluences Json?
 
   // Trade Opportunity architecture: the valid setup this executed trade came from
   // (when logged via the opportunity flow). Optional — trades logged directly have
   // no opportunity. @unique enforces one executed trade per opportunity (no
   // double-counting). SetNull so deleting the opportunity never deletes the trade.
-  opportunityId            String?          @unique
-  opportunity              TradeOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  opportunityId String?           @unique
+  opportunity   TradeOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
 
-  createdAt                DateTime  @default(now())
-  updatedAt                DateTime  @updatedAt
-  deletedAt                DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
-  allocations         TradeAccountAllocation[]
-  psychology          PsychologyQuestionnaireResponse?
+  allocations        TradeAccountAllocation[]
+  propFirmExecutions TradeAccountExecution[]
+  psychology         PsychologyQuestionnaireResponse?
+
+  // TradingView Screenshot Trade Plan — one screenshot-derived plan per trade
+  // (at most; a manually-planned trade has none), its live target list, and
+  // the append-only history of confirmed-plan snapshots. See the model group
+  // below Trade for the full doc comment on how these fit together.
+  planScreenshot          TradePlanScreenshot?
+  plannedTargets          PlannedTarget[]
+  planVersions            TradePlanVersion[]
+  actualPartialExits      TradeActualPartialExit[]
+  performanceRiskSnapshot PerformanceRiskSnapshot?
 
   @@unique([userId, tradeNumber])
   @@index([userId, tradeDate])
@@ -375,6 +503,18 @@ enum TradeStatus {
   OPEN
   CLOSED
   REVIEWED
+}
+
+// Behavioral intent behind an executed trade (Counterfactual engine). PLANNED is
+// the disciplined default; the rest are process breaches of decreasing "should not
+// have taken this" severity. Null = unspecified (historical / not tagged).
+enum TradeIntent {
+  PLANNED
+  FOMO
+  REVENGE
+  BOREDOM
+  IMPULSE
+  MANUAL_OVERRIDE
 }
 
 // ── Trade Opportunity architecture ───────────────────────────────────────────
@@ -445,14 +585,14 @@ model TradeOpportunity {
   // strategyExecutionSnapshot freezes the strategy's EXPECTED sessions/confluences/
   // execution (mirrors Trade) so chips resolve colors + the record survives edits.
   strategyExecutionSnapshot Json?
-  selectedConfluences Json? // present confluences at spot time
-  selectedExecution   Json? // present execution confirmations
-  missingConfluences  Json? // expected-but-absent (drives the Invalid Setup state)
-  confluencePercent   Float?
-  executionPercent    Float?
-  setupScore          Float?
-  setupRating         String?
-  setupValid          Boolean? // false = INVALIDATED candidate; null = unscored
+  selectedConfluences       Json? // present confluences at spot time
+  selectedExecution         Json? // present execution confirmations
+  missingConfluences        Json? // expected-but-absent (drives the Invalid Setup state)
+  confluencePercent         Float?
+  executionPercent          Float?
+  setupScore                Float?
+  setupRating               String?
+  setupValid                Boolean? // false = INVALIDATED candidate; null = unscored
 
   // Planned trade (the intended idea), same precision as Trade's plan fields.
   plannedEntry    Decimal? @db.Decimal(18, 8)
@@ -469,12 +609,12 @@ model TradeOpportunity {
   status OpportunityStatus @default(PENDING)
 
   // MISSED-only fields (null otherwise).
-  missReason    MissReason?
-  missNote      String?
-  missedOutcome MissedOutcome? // trader-entered; UNDETERMINED excluded from R cost
+  missReason      MissReason?
+  missNote        String?
+  missedOutcome   MissedOutcome? // trader-entered; UNDETERMINED excluded from R cost
   // Realized-if-taken R, TRADER-ENTERED (e.g. +3.0 for a missed win, −1.0 for a
   // missed loss). Null when UNDETERMINED. Used as the actual-forgone R.
-  missedRealizedR Decimal? @db.Decimal(8, 2)
+  missedRealizedR Decimal?       @db.Decimal(8, 2)
 
   // The executed trade, when status = EXECUTED (reverse of Trade.opportunityId,
   // one-to-one). Null for every non-executed outcome.
@@ -526,17 +666,131 @@ model PsychologyQuestionnaireResponse {
 // scaling the Performance Account's PnL by relative risk% (see
 // domain/performance/allocation.ts) — never entered manually.
 model TradeAccountAllocation {
-  id               String        @id @default(cuid())
+  id               String         @id @default(cuid())
   tradeId          String
-  trade            Trade         @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  trade            Trade          @relation(fields: [tradeId], references: [id], onDelete: Cascade)
   tradingAccountId String
   tradingAccount   TradingAccount @relation(fields: [tradingAccountId], references: [id])
   riskInputType    RiskInputType
-  riskValue        Decimal       @db.Decimal(14, 2)
-  closingPnlGross  Decimal       @db.Decimal(14, 2)
-  closingPnlNet    Decimal       @db.Decimal(14, 2)
+  riskValue        Decimal        @db.Decimal(14, 2)
+  closingPnlGross  Decimal        @db.Decimal(14, 2)
+  closingPnlNet    Decimal        @db.Decimal(14, 2)
 
   @@unique([tradeId, tradingAccountId])
+}
+
+// ── Prop Firms module (Phase 2: Trade Idea ↔ Account Execution) ─────────────
+// The System-B analogue of TradeAccountAllocation above, but for
+// PropFirmAccount instead of TradingAccount, and with genuinely independent
+// per-account risk/planned/actual fields rather than one derived from a
+// Performance Account. A Trade (the "Idea" — shared thesis/setup/planned
+// entry-stop-target already on Trade) has zero, one, or many of these — one
+// per PropFirmAccount it was allocated/executed on. Fully additive; nothing
+// on Trade/TradeAccountAllocation/TradingAccount changes.
+enum RiskEntryMode {
+  PERCENT
+  AMOUNT
+  FIXED_SIZE
+}
+
+enum RiskBasis {
+  CURRENT_BALANCE
+  CURRENT_EQUITY
+  STAGE_STARTING_BALANCE
+}
+
+// PLANNED = risk not yet confirmed. ALLOCATED = risk/account confirmed but
+// not yet in the market. EXECUTED = position open. PARTIALLY_CLOSED = some
+// size closed, some still open. CLOSED = fully settled (realized PnL final).
+// CANCELLED/MISSED/NOT_TAKEN never affect the account's balance but stay
+// visible for review (spec §3).
+enum ExecutionStatus {
+  PLANNED
+  ALLOCATED
+  EXECUTED
+  PARTIALLY_CLOSED
+  CLOSED
+  CANCELLED
+  MISSED
+  NOT_TAKEN
+}
+
+model TradeAccountExecution {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tradeId String
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  propFirmAccountId String
+  propFirmAccount   PropFirmAccount @relation(fields: [propFirmAccountId], references: [id])
+
+  // The account's active AccountStage at the moment this execution was taken.
+  // A plain FK is sufficient as a "snapshot" — a stage's identity fields
+  // (name/type/order) are set once at creation and its performance fields
+  // only ever change once, atomically, when advanceAccountStage closes it —
+  // so this FK never silently repoints under an old execution.
+  accountStageId String
+  accountStage   AccountStage @relation(fields: [accountStageId], references: [id])
+
+  // ── Planned risk / sizing ──────────────────────────────────────────────
+  riskEntryMode  RiskEntryMode
+  riskBasis      RiskBasis
+  riskInputValue Decimal       @db.Decimal(14, 4) // the raw %, $, or lot/contract count entered
+
+  // The resolved risk base (account balance/equity/stage-starting balance,
+  // per riskBasis) at the moment this allocation was FIRST confirmed. Frozen
+  // — never recomputed on a later edit unless the trader explicitly changes
+  // riskEntryMode/riskBasis/riskInputValue (see upsertExecutionWithinTx).
+  // This is what makes plannedRiskAmount an immutable snapshot rather than a
+  // value that silently drifts when the account's balance later moves from
+  // unrelated trades (spec §1: "do not recalculate the original risk amount
+  // from a future account balance").
+  riskBaseSnapshot          Decimal  @db.Decimal(14, 2)
+  plannedRiskAmount         Decimal  @db.Decimal(14, 2) // frozen at save: Base × %/100, or the $ entered
+  plannedPositionSize       Decimal? @db.Decimal(14, 4) // lots/contracts — null when instrument data was insufficient (never guessed)
+  positionSizeMissingReason String? // explains what's needed when plannedPositionSize is null
+
+  // Nullable OVERRIDE of the Idea's plannedEntry/plannedStopLoss/plannedTarget
+  // (on Trade). Null = inherit the idea's plan. A CFD execution and a futures
+  // execution of the same idea can legitimately need different instrument
+  // prices, without duplicating the shared analysis for the common case.
+  plannedEntryOverride    Decimal? @db.Decimal(18, 8)
+  plannedStopLossOverride Decimal? @db.Decimal(18, 8)
+  plannedTargetOverride   Decimal? @db.Decimal(18, 8)
+  plannedR                Decimal? @db.Decimal(8, 4) // frozen planned reward:risk from the resolved plan
+
+  // ── Actuals ─────────────────────────────────────────────────────────────
+  actualEntry       Decimal? @db.Decimal(18, 8)
+  actualExit        Decimal? @db.Decimal(18, 8)
+  actualLotSize     Decimal? @db.Decimal(14, 4)
+  actualContractQty Decimal? @db.Decimal(14, 4)
+
+  grossPnl       Decimal? @db.Decimal(14, 2)
+  commission     Decimal? @db.Decimal(14, 2)
+  swapFinancing  Decimal? @db.Decimal(14, 2)
+  otherFees      Decimal? @db.Decimal(14, 2)
+  netPnl         Decimal? @db.Decimal(14, 2) // Gross − Commission − Swap − OtherFees, or estimated (see isPnlEstimated)
+  isPnlEstimated Boolean  @default(false) // true when netPnl was derived from actualR × plannedRiskAmount, not real PnL
+  actualR        Decimal? @db.Decimal(8, 4) // netPnl / plannedRiskAmount
+
+  status         ExecutionStatus @default(PLANNED)
+  executionNotes String?
+
+  plannedAt DateTime  @default(now())
+  openedAt  DateTime?
+  closedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  actualPartialExits TradeActualPartialExit[]
+
+  @@unique([tradeId, propFirmAccountId])
+  @@index([userId, propFirmAccountId, deletedAt])
+  @@index([accountStageId])
+  @@index([tradeId])
 }
 
 // ── Universal media system ───────────────────────────────────────────────────
@@ -556,6 +810,15 @@ model MediaAsset {
 
   attachments MediaAttachment[]
 
+  // TradingView Screenshot Trade Plan reuses this same asset table for its
+  // original upload and (optional) annotated preview render — no parallel
+  // file-storage system. Named relations since one screenshot can reference
+  // two distinct assets. The original also gets a normal MediaAttachment
+  // (TRADE, category "BEFORE") so it keeps appearing in the existing
+  // Journal/Trades Album galleries exactly like any other before-trade image.
+  planScreenshotOriginalOf TradePlanScreenshot? @relation("TradePlanScreenshotOriginal")
+  planScreenshotPreviewOf  TradePlanScreenshot? @relation("TradePlanScreenshotPreview")
+
   @@index([userId, createdAt])
 }
 
@@ -570,6 +833,7 @@ model MediaAttachment {
   ownerType MediaOwnerType
   ownerId   String
   category  String?
+  caption   String?
   sortOrder Int            @default(0)
   createdAt DateTime       @default(now())
 
@@ -651,6 +915,17 @@ enum StrategyChecklistKind {
   EXECUTION
 }
 
+// Direction applicability of a CONFLUENCE checklist item. BULLISH confluences are
+// only eligible for LONG trades, BEARISH only for SHORT; BOTH covers
+// direction-neutral conditions (session, volatility, key level, liquidity, news,
+// general HTF context). Existing rows default to BOTH — direction is never
+// guessed from a confluence's name.
+enum ConfluenceDirection {
+  BULLISH
+  BEARISH
+  BOTH
+}
+
 model Strategy {
   id     String @id @default(cuid())
   userId String
@@ -676,13 +951,13 @@ model Strategy {
   deletedAt DateTime? // soft delete (registered in server/db.ts); Archive is a status, Delete sets this
 
   // ── Workspace sections ─────────────────────────────────────────────────────
-  arsenalConcepts ArsenalConcept[]         // Section 1 — Arsenal (expandable concept cards)
-  frameworkSteps  StrategyFrameworkStep[]  // Section 2 — Framework (ordered decision steps)
-  timeframes      StrategyTimeframe[]      // Section 3 — Timeframe workspace (each has checkpoints)
-  entryModels     StrategyEntryModel[]     // Section 4 — Entry Models
+  arsenalConcepts ArsenalConcept[] // Section 1 — Arsenal (expandable concept cards)
+  frameworkSteps  StrategyFrameworkStep[] // Section 2 — Framework (ordered decision steps)
+  timeframes      StrategyTimeframe[] // Section 3 — Timeframe workspace (each has checkpoints)
+  entryModels     StrategyEntryModel[] // Section 4 — Entry Models
   tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (1:1 + partial TPs, custom rules)
-  sessions        StrategySession[]        // Section — Trading Sessions (SOT refactor)
-  checklistItems  StrategyChecklistItem[]  // Sections — Confluences + Execution Confirmations (SOT)
+  sessions        StrategySession[] // Section — Trading Sessions (SOT refactor)
+  checklistItems  StrategyChecklistItem[] // Sections — Confluences + Execution Confirmations (SOT)
   // Journal link: a trade references a strategy (not a copy). onDelete: SetNull
   // on the Trade side keeps completed trades (with their snapshots) intact.
   trades          Trade[]
@@ -845,6 +1120,12 @@ model StrategyTradeManagement {
   maxHoldingTime String? // free text, e.g. "2 hours", "1 session"
   maxRiskPercent Decimal? @db.Decimal(6, 2)
 
+  // Counterfactual engine limits (optional). A day whose realized risk exceeds
+  // maxDailyRiskPercent, or whose trade count exceeds maxTradesPerDay, raises a
+  // FLAGGED risk/behavioral breach on the offending trades (no fabricated R).
+  maxDailyRiskPercent Float?
+  maxTradesPerDay     Int?
+
   // Discrepancy-Gap benchmarks (D2): the strategy's PROVEN edge, used by the
   // Execution Engine as the "expected" baseline. expectedExpectancy (R per trade at
   // full execution) is the primary input to Expected R; the others describe the edge
@@ -873,20 +1154,28 @@ model StrategyChecklistItem {
   strategyId String
   strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
 
-  kind        StrategyChecklistKind
-  name        String
-  color       TagColor @default(GRAY)
-  icon        String? // optional lucide icon name
-  category    String?
-  description String?
-  weight      Int? // probability weight (0-100) used by the weighted setup-scoring engine
+  kind               StrategyChecklistKind
+  name               String
+  color              TagColor              @default(GRAY)
+  icon               String? // optional lucide icon name
+  category           String?
+  description        String?
+  weight             Int? // probability weight (0-100) used by the weighted setup-scoring engine
+  // CONFLUENCE only: which trade direction this confluence is eligible for.
+  // Filters BEFORE scoring so bull-only weights never enter a long denominator
+  // (and vice-versa). Always BOTH for EXECUTION items and for pre-existing rows.
+  directionApplicability ConfluenceDirection @default(BOTH)
+  // Optional organizational link between opposite versions of the same condition
+  // (e.g. "Bullish MSB" / "Bearish MSB" share a pairId). Display-only — never a
+  // substitute for `directionApplicability`, and pairing is not required.
+  pairId                 String?
   // Confluence scoring (CONFLUENCE kind): mandatory items gate setup validity — a
   // setup missing any mandatory confluence is "Invalid Setup". Optional items only
   // add to the weighted probability score. validationCriteria is the objective test
   // for "is this confluence actually present?".
-  mandatory          Boolean @default(false)
+  mandatory          Boolean               @default(false)
   validationCriteria String?
-  enabled     Boolean  @default(true)
+  enabled            Boolean               @default(true)
 
   sortOrder Int       @default(0)
   createdAt DateTime  @default(now())
@@ -951,4 +1240,1099 @@ model TradeManagementRule {
   deletedAt DateTime?
 
   @@index([tradeManagementId, deletedAt, sortOrder])
+}
+
+// ── Prop Firms module (Phase 1: foundation) ──────────────────────────────────
+// Replaces the user-facing Accounts section for PROP_FIRM-kind accounts with a
+// real hierarchy: directory -> UserPropFirm -> PropFirmAccount -> AccountStage
+// -> StageRule, plus AccountMilestone (evidence) and Payout. Deliberately
+// additive: `TradingAccount`/`TradeAccountAllocation` are UNTOUCHED and remain
+// the trade-allocation FK target (createTrade, analytics, the Dashboard "Best
+// Account" KPI, and CSV import-by-name all depend on them as-is). Each
+// PropFirmAccount optionally pairs 1:1 with a TradingAccount row via
+// `tradingAccountId` — new accounts get one created alongside them; existing
+// PROP_FIRM TradingAccount rows are lazily wrapped into one by
+// `ensureLegacyPropFirmsMigrated` (prop-firms-migration.service.ts) the first
+// time a user opens /prop-firms, under a single custom "Migrated Accounts"
+// UserPropFirm — no data is deleted, no manual script to remember to run.
+//
+// "Current stage" is intentionally NOT a stored pointer (no
+// PropFirmAccount.currentStageId): mirrors this schema's own convention that
+// TradingAccount.currentBalance is never stored either, always computed. The
+// current stage is whichever AccountStage for the account has status PENDING
+// or ACTIVE — enforced by application logic (advancing a stage always closes
+// the previous one first, in one transaction; see advanceAccountStage).
+//
+// Live rule evaluation, trade allocation to a specific stage, and a full
+// stage/rule/milestone/payout management UI are explicitly OUT of scope here
+// — StageRule.evaluationMetadata is reserved Json for that later phase.
+
+enum MarketCategory {
+  CFD
+  FUTURES
+}
+
+// Global, admin-curated catalog (seeded — see src/data/prop-firm-directory.ts).
+// Identity/branding only: it must never be read as "these are this firm's
+// current rules" — rules live per-stage, entered by the trader.
+model PropFirmDirectoryEntry {
+  id             String           @id @default(cuid())
+  companyName    String
+  slug           String           @unique
+  logoUrl        String?
+  markets        MarketCategory[] // CFD, FUTURES, or both
+  website        String?
+  accentColor    String?
+  isActive       Boolean          @default(true)
+  sortOrder      Int              @default(0)
+  lastVerifiedAt DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  userFirms UserPropFirm[]
+
+  @@index([isActive, sortOrder])
+}
+
+enum PropFirmIdentityKind {
+  DIRECTORY
+  CUSTOM
+}
+
+enum UserPropFirmStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+// A trader's relationship to one company (directory-backed or custom-entered),
+// scoped to one market category. Priority is NOT exclusive — multiple firms
+// can be `isPriority` at once; `priorityOrder` is the trader's own ranking
+// among those (nulls last / unordered when not a priority).
+model UserPropFirm {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  identityKind     PropFirmIdentityKind
+  directoryEntryId String?
+  directoryEntry   PropFirmDirectoryEntry? @relation(fields: [directoryEntryId], references: [id])
+
+  // Custom-firm identity (identityKind = CUSTOM only).
+  customCompanyName String?
+  customLogoUrl     String?
+  customWebsite     String?
+  customAccentColor String?
+
+  marketCategory MarketCategory
+  isPriority     Boolean            @default(false)
+  priorityOrder  Int?
+  status         UserPropFirmStatus @default(ACTIVE)
+  notes          String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  accounts PropFirmAccount[]
+
+  @@index([userId, status, deletedAt])
+  @@index([userId, isPriority, priorityOrder])
+}
+
+enum PropFirmAccountModelType {
+  ONE_PHASE
+  TWO_PHASE
+  THREE_PHASE
+  INSTANT_FUNDED
+  CUSTOM
+}
+
+enum PropFirmAccountStatus {
+  ACTIVE
+  PASSED
+  FAILED
+  BREACHED
+  FUNDED
+  ARCHIVED
+}
+
+// A single purchased account under a UserPropFirm. `tradingAccountId` is the
+// paired ledger row trades actually allocate against (unchanged mechanism);
+// everything else here is the rich metadata TradingAccount has no room for.
+// `externalRef` is a broker/account NUMBER for reference only — never a
+// password or credential (enforced by convention + validation, not schema).
+model PropFirmAccount {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  userPropFirmId String
+  userPropFirm   UserPropFirm @relation(fields: [userPropFirmId], references: [id], onDelete: Cascade)
+
+  tradingAccountId String?         @unique
+  tradingAccount   TradingAccount? @relation(fields: [tradingAccountId], references: [id])
+
+  displayName    String
+  externalRef    String?
+  marketCategory MarketCategory
+  modelName      String?
+  modelType      PropFirmAccountModelType
+
+  accountSize     Decimal @db.Decimal(14, 2)
+  accountCurrency String  @default("USD")
+
+  purchasePrice  Decimal?  @db.Decimal(14, 2)
+  discount       Decimal?  @db.Decimal(14, 2)
+  resetFees      Decimal?  @db.Decimal(14, 2)
+  activationFees Decimal?  @db.Decimal(14, 2)
+  otherCosts     Decimal?  @db.Decimal(14, 2)
+  purchaseDate   DateTime? @db.Date
+
+  status PropFirmAccountStatus @default(ACTIVE)
+
+  // Manual snapshots for now (Phase 1) — not yet computed from stage
+  // executions, which needs the trade-allocation work deferred to a later
+  // phase. startingBalance is the account's opening balance (usually ==
+  // accountSize, kept separate since resets can change it without changing
+  // the purchased size).
+  startingBalance Decimal  @db.Decimal(14, 2)
+  currentBalance  Decimal? @db.Decimal(14, 2)
+  currentEquity   Decimal? @db.Decimal(14, 2)
+
+  archivedAt DateTime?
+  notes      String?
+
+  // Daily-loss / consistency reset boundary (spec §7) — one boundary per
+  // account, shared by every daily-scoped rule on its stages (a property of
+  // the funding firm's rules, not of an individual rule row). Null timezone
+  // = UTC; dailyResetHour is the local hour (0-23) the trading day resets.
+  dailyResetTimezone String?
+  dailyResetHour     Int?    @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  stages        AccountStage[]
+  milestones    AccountMilestone[]
+  payouts       Payout[]
+  executions    TradeAccountExecution[]
+  ledgerEntries AccountLedgerEntry[]
+
+  // CSV import (§ Prop Firm CSV Import) — entirely separate from `executions`
+  // (real Journal-linked TradeAccountExecution rows) and never touches Trade.
+  importBatches        PropFirmImportBatch[]
+  importedExecutions   PropFirmImportedExecution[]
+  importedTrades       PropFirmImportedTrade[]
+  importedTransactions PropFirmTransaction[]
+
+  @@index([userId, status, deletedAt])
+  @@index([userPropFirmId])
+}
+
+enum AccountStageType {
+  PHASE_1
+  PHASE_2
+  PHASE_3
+  VERIFICATION
+  MASTER_FUNDED
+  PAYOUT_ELIGIBLE
+  CUSTOM
+}
+
+enum AccountStageStatus {
+  PENDING
+  ACTIVE
+  PASSED
+  FAILED
+  BREACHED
+  RESET
+  ABANDONED
+  ARCHIVED
+}
+
+// One historical record per stage a PropFirmAccount has gone through.
+// Advancing a stage (advanceAccountStage) closes the current PENDING/ACTIVE
+// one and creates the next in the SAME transaction — a stage's performance
+// fields are never overwritten once closed; a reset/failure creates a NEW
+// stage row rather than mutating the old one.
+model AccountStage {
+  id        String          @id @default(cuid())
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  name  String
+  order Int
+  type  AccountStageType
+
+  startingBalance Decimal            @db.Decimal(14, 2)
+  currentBalance  Decimal?           @db.Decimal(14, 2) // final balance once closed
+  startDate       DateTime?
+  completionDate  DateTime?
+  status          AccountStageStatus @default(PENDING)
+  profitLoss      Decimal?           @db.Decimal(14, 2)
+  completionNotes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rules         StageRule[]
+  milestones    AccountMilestone[]
+  payouts       Payout[]
+  executions    TradeAccountExecution[]
+  ledgerEntries AccountLedgerEntry[]
+
+  @@index([accountId, order])
+  @@index([accountId, status])
+}
+
+// The rule-template catalog (section 5 of the spec). Purely a vocabulary enum
+// today — CUSTOM covers anything not yet templated. The live evaluation engine
+// (reads these + StageRule.evaluationMetadata) is a later phase.
+enum RuleKey {
+  PROFIT_TARGET
+  MAX_DAILY_LOSS
+  MAX_TOTAL_LOSS
+  STATIC_DRAWDOWN
+  INTRADAY_TRAILING_DRAWDOWN
+  EOD_TRAILING_DRAWDOWN
+  DRAWDOWN_BALANCE_BASED
+  DRAWDOWN_EQUITY_BASED
+  MIN_TRADING_DAYS
+  MAX_TRADING_DAYS
+  CONSISTENCY_RULE
+  MAX_RISK_PER_TRADE
+  MAX_RISK_PER_DAY
+  MAX_OPEN_POSITIONS
+  MAX_LOT_SIZE
+  MAX_CONTRACT_SIZE
+  NEWS_TRADING_RESTRICTION
+  WEEKEND_HOLDING_RESTRICTION
+  OVERNIGHT_HOLDING_RESTRICTION
+  COPY_TRADING_RESTRICTION
+  EA_BOT_RESTRICTION
+  INACTIVITY_LIMIT
+  PAYOUT_WAITING_PERIOD
+  PROFIT_SPLIT
+  SCALING_REQUIREMENT
+  CUSTOM
+}
+
+enum RuleValueType {
+  NUMERIC
+  MONETARY
+  PERCENTAGE
+  BOOLEAN
+  TEXT
+}
+
+enum RuleBreachAction {
+  WARNING_ONLY
+  SOFT_BREACH
+  HARD_BREACH_FAIL
+  HARD_BREACH_TERMINATE
+  CUSTOM
+}
+
+// A configured rule instance on one stage. Exactly one of
+// numericValue/booleanValue/textValue is meaningful, per `valueType` — the
+// schema doesn't enforce which (kept flexible on purpose), validation does.
+model StageRule {
+  id      String       @id @default(cuid())
+  stageId String
+  stage   AccountStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  name      String
+  ruleKey   RuleKey
+  valueType RuleValueType
+
+  numericValue Decimal? @db.Decimal(14, 4)
+  booleanValue Boolean?
+  textValue    String?
+
+  measurementBasis  String? // e.g. "balance" | "equity" | free text
+  measurementPeriod String? // e.g. "daily" | "per-trade" | "account-lifetime" | free text
+  // Configurable rule-health boundaries (percent of the rule's limit
+  // consumed), read by domain/prop-firms/rule-health.ts. Sensible defaults
+  // (70/90/100) apply when null — see stateFromPercent.
+  warningThreshold  Decimal?          @db.Decimal(14, 4) // Safe → Approaching
+  criticalThreshold Decimal?          @db.Decimal(14, 4) // Approaching → Critical
+  breachThreshold   Decimal?          @db.Decimal(14, 4) // Critical → Breached
+  breachAction      RuleBreachAction?
+
+  description String?
+  isEnabled   Boolean @default(true)
+  sortOrder   Int     @default(0)
+
+  // Reserved for the live-evaluation engine (a later phase) — never read by
+  // Phase 1 code.
+  evaluationMetadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([stageId, sortOrder])
+}
+
+enum MilestoneType {
+  ACCOUNT_PURCHASED
+  PHASE_PASSED
+  PHASE_FAILED
+  STAGE_RESET
+  FUNDED_ACHIEVED
+  PAYOUT_RECEIVED
+  SCALING_MILESTONE
+  ACCOUNT_BREACHED
+  CUSTOM
+}
+
+// A generalized achievement/evidence record for an account (and, when
+// relevant, one specific stage). Evidence FILES reuse the universal media
+// system (MediaAttachment.ownerType = PROP_FIRM_MILESTONE, ownerId = this
+// milestone's id) — no duplicate storage mechanism. No direct `userId`: scoped
+// through `account.userId`, the same pattern TradeAccountAllocation uses via
+// `trade.userId` rather than a denormalized column.
+model AccountMilestone {
+  id        String          @id @default(cuid())
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  stageId   String?
+  stage     AccountStage?   @relation(fields: [stageId], references: [id])
+
+  type        MilestoneType
+  title       String?
+  achievedAt  DateTime      @default(now())
+  description String?
+
+  createdAt DateTime @default(now())
+
+  @@index([accountId])
+  @@index([stageId])
+}
+
+enum PayoutStatus {
+  AVAILABLE
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  PAID
+  REJECTED
+  CANCELLED
+}
+
+// A payout drawn against a funded account (optionally tied to the specific
+// funded stage). Certificate/payment evidence again reuses MediaAttachment
+// (ownerType = PROP_FIRM_MILESTONE, ownerId = this payout's id — a payout IS
+// a kind of milestone evidence target, same owner-type as AccountMilestone).
+model Payout {
+  id        String          @id @default(cuid())
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  stageId   String?
+  stage     AccountStage?   @relation(fields: [stageId], references: [id])
+
+  grossPayout        Decimal  @db.Decimal(14, 2)
+  profitSplitPercent Decimal? @db.Decimal(5, 2)
+  netExpected        Decimal? @db.Decimal(14, 2)
+  netReceived        Decimal? @db.Decimal(14, 2)
+
+  requestedDate DateTime? @db.Date
+  approvedDate  DateTime? @db.Date
+  paidDate      DateTime? @db.Date
+
+  status         PayoutStatus @default(AVAILABLE)
+  paymentMethod  String?
+  referenceId    String?
+  feesDeductions Decimal?     @db.Decimal(14, 2)
+  notes          String?
+
+  // CSV import provenance (§ Prop Firm CSV Import) — all null for a manually
+  // entered payout. `sourceTransactionId` is unique: at most one confirmed
+  // Payout per raw imported withdrawal transaction.
+  importBatchId         String?
+  importBatch           PropFirmImportBatch? @relation(fields: [importBatchId], references: [id])
+  platformTransactionId String?
+  sourceTransactionId   String?              @unique
+  sourceTransaction     PropFirmTransaction? @relation(fields: [sourceTransactionId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([accountId, status])
+}
+
+// ── Account ledger (spec §5) ─────────────────────────────────────────────────
+// Immutable, auditable balance history for a PropFirmAccount — aggregate
+// balances/track-record are computed FROM these rows (domain/prop-firms/
+// track-record.ts) rather than repeatedly overwriting a stored total.
+// TRADE_PNL/PAYOUT/STAGE_*/ACCOUNT_INITIALIZED entries are system-derived and
+// idempotent via the (sourceType, sourceId, eventType) unique key — an
+// edit/re-import/resync upserts the SAME row instead of duplicating.
+// MANUAL_ADJUSTMENT/CUSTOM_ADJUSTMENT rows have no source (sourceType/
+// sourceId null) and are always plain inserts — Postgres treats NULLs as
+// distinct in a unique index, so they never collide with each other,
+// preserving full manual-adjustment history. `reason` is required (validated
+// in account-ledger.service.ts) for MANUAL_ADJUSTMENT/CUSTOM_ADJUSTMENT.
+enum LedgerEventType {
+  ACCOUNT_INITIALIZED
+  TRADE_PNL
+  MANUAL_ADJUSTMENT
+  COMMISSION_FEE
+  CHALLENGE_PURCHASE_FEE
+  RESET_FEE
+  ACTIVATION_FEE
+  OTHER_FEE
+  PAYOUT
+  REFUND
+  DEPOSIT
+  WITHDRAWAL
+  CREDIT
+  BALANCE_CORRECTION
+  STAGE_PASSED
+  STAGE_FAILED
+  ACCOUNT_BREACHED
+  STAGE_STARTING_BALANCE_RESET
+  CUSTOM_ADJUSTMENT
+}
+
+enum LedgerSourceType {
+  TRADE_EXECUTION
+  PAYOUT
+  STAGE_TRANSITION
+  ACCOUNT_INIT
+  IMPORTED_TRANSACTION
+  MANUAL
+}
+
+model AccountLedgerEntry {
+  id        String          @id @default(cuid())
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  stageId   String?
+  stage     AccountStage?   @relation(fields: [stageId], references: [id])
+
+  eventType    LedgerEventType
+  amount       Decimal         @db.Decimal(14, 2) // signed: + increases balance, − decreases
+  balanceAfter Decimal         @db.Decimal(14, 2) // running balance snapshot, written at insert time
+
+  occurredAt DateTime @default(now())
+  reason     String? // required (enforced in service) for MANUAL_ADJUSTMENT/CUSTOM_ADJUSTMENT
+
+  // Polymorphic source reference (no hard FK — same convention as
+  // AccountMilestone/MediaAttachment's ownerId), e.g. sourceType=
+  // TRADE_EXECUTION, sourceId=TradeAccountExecution.id. Drives idempotent
+  // upserts via the unique index below.
+  sourceType LedgerSourceType?
+  sourceId   String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([sourceType, sourceId, eventType])
+  @@index([accountId, occurredAt])
+  @@index([stageId])
+}
+
+// ── TradingView Screenshot Trade Plan ────────────────────────────────────────
+// Lets a trader upload a TradingView chart screenshot as the visual source of
+// a Trade Idea's PLANNED execution (direction/entry/stop/targets/R:R) — never
+// the actual execution (Trade.actualEntry/actualExit and TradeAccountExecution
+// stay exactly as they are, entered separately). Additive: nothing on Trade's
+// existing plannedEntry/plannedStopLoss/plannedTarget columns is removed —
+// those stay as the simple single-target legacy fields (kept in sync with
+// PlannedTarget #1 on confirm, for every existing reader of them); this model
+// group is the richer multi-target, screenshot-backed source of truth for
+// trades planned through this feature.
+//
+// One screenshot per trade (TradePlanScreenshot.tradeId is unique) —
+// "replacing the screenshot before confirmation" mutates this same row's file
+// reference and resets its recognition state rather than creating a new row.
+// The trader can also point a fresh Trade Idea at an image already uploaded
+// as a before-trade attachment (spec: "select an already uploaded before-
+// trade screenshot") — same underlying MediaAsset, wrapped by this row.
+//
+// Recognition is provider-agnostic (see domain/trade-plan/recognition.ts) and
+// OPTIONAL: with no vision provider configured, every screenshot resolves
+// straight to MANUALLY_CONFIGURED and the trader annotates by hand — the
+// recognition failure path is a first-class, always-exercised state, not an
+// edge case.
+enum ScreenshotPlanStatus {
+  UPLOADED
+  QUEUED
+  PROCESSING
+  RECOGNITION_COMPLETE
+  NEEDS_CONFIRMATION
+  CONFIRMED
+  RECOGNITION_FAILED
+  MANUALLY_CONFIGURED
+  LOCKED
+}
+
+enum AssetClass {
+  FOREX
+  METALS
+  INDEX
+  FUTURES
+  CRYPTO
+  STOCK
+  OTHER
+}
+
+// The unit a planned distance/annotation is expressed in — deliberately NOT
+// forced to pips for every instrument (spec §6/§17: "do not combine pips,
+// points and ticks into a misleading universal average").
+enum DistanceUnit {
+  PIP
+  POINT
+  TICK
+  PRICE
+  PERCENT
+}
+
+model TradePlanScreenshot {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tradeId String @unique
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  // The uploaded chart image (reuses the universal media system — see
+  // MediaAsset's planScreenshotOriginalOf/planScreenshotPreviewOf). previewMediaAssetId
+  // is an OPTIONAL separately-rendered image with the confirmed annotations
+  // burned in for quick sharing/review — the original above is never
+  // overwritten, per spec §8 ("do not permanently draw annotations onto the
+  // only copy of the screenshot").
+  mediaAssetId        String      @unique
+  mediaAsset          MediaAsset  @relation("TradePlanScreenshotOriginal", fields: [mediaAssetId], references: [id])
+  previewMediaAssetId String?     @unique
+  previewMediaAsset   MediaAsset? @relation("TradePlanScreenshotPreview", fields: [previewMediaAssetId], references: [id])
+
+  width  Int?
+  height Int?
+
+  status              ScreenshotPlanStatus @default(UPLOADED)
+  recognitionProvider String? // e.g. "anthropic-vision" — null when no provider ran (manual path)
+  recognitionVersion  String? // provider/prompt/model version, for reproducibility of past results
+  recognitionError    String? // trader-facing reason when status = RECOGNITION_FAILED
+
+  // Best-effort top-line detections, denormalized here for quick display
+  // (the full per-field detail — confidence, bounding box, raw text — lives
+  // in ScreenshotRecognitionField below, one row per detected field).
+  detectedSymbol            String?
+  canonicalInstrumentSymbol String? // resolved via domain/trade-plan/instrument-catalog.ts
+  detectedTimeframe         String?
+  detectedDirection         Direction?
+  recognitionMetadata       Json? // raw provider response, for debugging/re-processing — never logged verbatim (see privacy notes)
+
+  uploadedAt  DateTime  @default(now())
+  processedAt DateTime?
+  confirmedAt DateTime?
+  lockedAt    DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  recognitionFields ScreenshotRecognitionField[]
+  annotations       TradePlanAnnotation[]
+
+  @@index([userId, tradeId])
+  @@index([status])
+}
+
+// What a screenshot annotation/plan field represents — mirrors the Trade
+// Idea's own planned vocabulary so a detected field maps 1:1 onto a plan input.
+enum RecognitionFieldType {
+  SYMBOL
+  ASSET_CLASS
+  TIMEFRAME
+  DIRECTION
+  ENTRY
+  STOP_LOSS
+  TARGET
+  RISK_REWARD
+  STOP_DISTANCE
+  TARGET_DISTANCE
+  CHART_TIMESTAMP
+}
+
+enum RecognitionSource {
+  AI_VISION
+  OCR
+  MANUAL
+}
+
+enum RecognitionConfirmationStatus {
+  PENDING
+  ACCEPTED
+  CORRECTED
+  REJECTED
+}
+
+// One row per detected (or manually-entered-in-its-place) field on a
+// screenshot — the structured result the spec requires instead of
+// unstructured text, each with its own confidence/bounding box/raw text so
+// the confirmation screen can render "Detected from screenshot · High
+// confidence" per field rather than one blended verdict for the whole image.
+model ScreenshotRecognitionField {
+  id           String              @id @default(cuid())
+  screenshotId String
+  screenshot   TradePlanScreenshot @relation(fields: [screenshotId], references: [id], onDelete: Cascade)
+
+  fieldType         RecognitionFieldType
+  targetOrder       Int? // disambiguates TARGET rows (TP1/TP2/TP3/…) when fieldType = TARGET
+  rawExtractedText  String?
+  detectedValue     String? // stored as text — a price, a symbol, "LONG", "15m", etc.; parsed by the caller per fieldType
+  confidence        Float? // 0–1, null when not provided by the recognition source
+  boundingBox       Json? // { x, y, width, height } normalized 0–1 within the image, when available
+  recognitionSource RecognitionSource    @default(MANUAL)
+  warning           String? // e.g. "Overlapping price labels — low confidence"
+
+  confirmationStatus RecognitionConfirmationStatus @default(PENDING)
+  confirmedValue     String? // what the trader actually accepted/corrected it to
+  confirmedByUserId  String?
+  confirmedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([screenshotId, fieldType])
+}
+
+// A horizontal (or point-to-point) level drawn on the screenshot — entry,
+// stop, a target, or a free-form level. Coordinates are NORMALIZED (0–1) so
+// they stay aligned regardless of how large the image renders; per spec §7,
+// the `confirmedPrice` — never the pixel position — is the source of truth
+// for every calculation. A dragged line only ever updates its own
+// coordinates, not confirmedPrice, unless the trader also edits the price.
+enum AnnotationType {
+  ENTRY
+  STOP_LOSS
+  TARGET
+  INVALIDATION
+  BREAK_EVEN
+  CUSTOM
+}
+
+enum AnnotationSource {
+  DETECTED
+  MANUAL
+}
+
+model TradePlanAnnotation {
+  id           String              @id @default(cuid())
+  screenshotId String
+  screenshot   TradePlanScreenshot @relation(fields: [screenshotId], references: [id], onDelete: Cascade)
+
+  type  AnnotationType
+  label String // e.g. "Entry", "TP2", or a custom name the trader gave it
+
+  confirmedPrice Decimal? @db.Decimal(18, 8) // null until the trader confirms/enters a price for this line
+
+  // Normalized 0–1 coordinates within the screenshot. A simple horizontal
+  // line only needs y; startX/endX/endY support a non-horizontal or
+  // point-to-point annotation (e.g. a trend-aligned stop) when the trader
+  // draws one.
+  y      Float
+  startX Float?
+  endX   Float?
+  endY   Float?
+
+  color   String // semantic hex/token — see domain/trade-plan/annotation-colors.ts
+  visible Boolean @default(true)
+
+  targetOrder Int? // ordering among TARGET-type annotations (TP1 = 1, TP2 = 2, …)
+  confidence  Float? // carried over from the recognition field that produced this, when DETECTED
+  source      AnnotationSource @default(MANUAL)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([screenshotId, type])
+}
+
+// A single planned profit target on a Trade Idea — the live, editable set.
+// Trade.plannedTarget (the original single-target column) is kept in sync
+// with target #1 on every confirm, so existing readers of that field (older
+// trades, other UI) keep working unchanged; PlannedTarget[] is the richer
+// source of truth for anything built against this feature.
+model PlannedTarget {
+  id      String @id @default(cuid())
+  tradeId String
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  targetOrder Int // 1 = TP1, 2 = TP2, …
+  label       String // defaults to "TP{targetOrder}", renameable
+
+  targetPrice Decimal @db.Decimal(18, 8)
+
+  // Frozen at confirm time from domain/trade-plan/distance.ts — never
+  // recomputed from a later-edited instrument catalog entry.
+  unitDistance Decimal?      @db.Decimal(18, 8)
+  unitType     DistanceUnit?
+  rMultiple    Decimal?      @db.Decimal(8, 4)
+
+  plannedClosePercent   Decimal? @db.Decimal(5, 2) // 0–100; null/unset = trader hasn't planned a partial split
+  managementInstruction String? // free text, e.g. "Move stop to break-even after this fills"
+  moveToBreakEven       Boolean  @default(false)
+  notes                 String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  actualPartialExits TradeActualPartialExit[]
+
+  @@unique([tradeId, targetOrder])
+}
+
+// An append-only, immutable snapshot of the confirmed plan — one row created
+// on first confirmation (version 1) and one more each time a LOCKED plan is
+// edited (spec §13: "create a new revision, preserve the previous version,
+// require an edit reason"). Never updated after creation.
+model TradePlanVersion {
+  id      String @id @default(cuid())
+  tradeId String
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  versionNumber Int
+
+  // The exact MediaAsset in effect at this version, if any — MediaAsset rows
+  // are never deleted by the trade-plan replace flow (only the
+  // TradePlanScreenshot *wrapper* row is), so this stays resolvable forever,
+  // even after the live screenshot is later replaced. This is what makes a
+  // version's screenshot immutable without needing a separate versioned
+  // screenshot table (spec checkpoint 2 §2).
+  screenshotMediaAssetId String?
+
+  assetSymbol String?
+  direction   Direction?
+  timeframe   String?
+
+  entry               Decimal? @db.Decimal(18, 8)
+  stopLoss            Decimal? @db.Decimal(18, 8)
+  // Frozen copy of every target at this version — [{ targetOrder, label,
+  // targetPrice, unitDistance, unitType, rMultiple, plannedClosePercent }].
+  // Json (not a relation) because a version must never change even if the
+  // live PlannedTarget rows are later edited or deleted.
+  targetsSnapshot     Json?
+  // Frozen copy of every TradePlanAnnotation visible on the screenshot at
+  // save time — [{ type, label, confirmedPrice, y, startX, endX, endY,
+  // color, targetOrder, source }]. Replacing the screenshot later deletes
+  // the live TradePlanAnnotation rows (they belong to that screenshot
+  // wrapper), so without this snapshot a historical version would lose its
+  // original annotations the moment the screenshot was replaced — this is
+  // the fix for exactly that gap (checkpoint 2 §2).
+  annotationsSnapshot Json?
+
+  stopDistance     Decimal?      @db.Decimal(18, 8)
+  stopDistanceUnit DistanceUnit?
+  weightedPlannedR Decimal?      @db.Decimal(8, 4)
+
+  editReason      String? // required by the service for every version after #1
+  createdByUserId String
+  locked          Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  performanceRiskSnapshots PerformanceRiskSnapshot[]
+
+  @@unique([tradeId, versionNumber])
+  @@index([tradeId])
+}
+
+// ── Actual partial exits (checkpoint 2 §13) ──────────────────────────────────
+// The structured, normalized record of what actually closed and when —
+// sibling to PlannedTarget (the plan side), never conflated with it. A
+// partial's `plannedTargetId` is the trader's (or an unambiguous automatic)
+// mapping to a specific planned target, never assumed from exit order alone
+// (spec: "do not assume that an actual partial corresponds to TP1 merely
+// because it is the first recorded exit" — see domain/trade-plan/
+// partial-matching.ts).
+enum PartialExitSource {
+  CONFIRMED
+  MANUAL
+  IMPORTED
+}
+
+model TradeActualPartialExit {
+  id      String @id @default(cuid())
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeId String
+  trade   Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  // Optional — set when this trade has multiple Prop Firms account
+  // allocations and this partial belongs to one specific account's
+  // execution rather than the trade's own base actualEntry/actualExit.
+  accountExecutionId String?
+  accountExecution   TradeAccountExecution? @relation(fields: [accountExecutionId], references: [id], onDelete: SetNull)
+
+  plannedTargetId String?
+  plannedTarget   PlannedTarget? @relation(fields: [plannedTargetId], references: [id], onDelete: SetNull)
+
+  exitOrder      Int
+  exitPrice      Decimal  @db.Decimal(18, 8)
+  percentClosed  Decimal? @db.Decimal(5, 2) // 0–100
+  quantityClosed Decimal? @db.Decimal(14, 4) // lots/contracts/units, when tracked instead of/alongside percent
+  exitedAt       DateTime
+
+  grossPnl  Decimal? @db.Decimal(14, 2)
+  fees      Decimal? @db.Decimal(14, 2)
+  netPnl    Decimal? @db.Decimal(14, 2)
+  realizedR Decimal? @db.Decimal(8, 4)
+
+  notes  String?
+  source PartialExitSource @default(MANUAL)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tradeId, exitOrder])
+  @@index([tradeId])
+  @@index([accountExecutionId])
+  @@index([plannedTargetId])
+}
+
+// ── Prop Firm CSV Import (Phase 1: Generic CSV, MT4, MT5) ───────────────────
+// Entirely separate from the Journal / global Trade model. Imported data only
+// ever creates PropFirmImportedExecution/PropFirmImportedTrade/
+// PropFirmTransaction rows, plus — for a confirmed withdrawal — an ordinary
+// Payout row (extended below with import provenance columns). Balance/equity
+// effects are posted to the account's own AccountLedgerEntry the exact same
+// way manual TradeAccountExecution fills and Payout PAID-transitions already
+// are (postLedgerEntry, account-ledger.service.ts) — nothing here ever
+// creates, updates, or reads a Trade, TradeAccountExecution, or
+// PerformanceRiskSnapshot row.
+
+enum PropFirmImportPlatform {
+  MT4
+  MT5
+  CTRADER
+  NINJATRADER
+  TRADOVATE
+  GENERIC_CSV
+}
+
+enum PropFirmImportFileFormat {
+  CSV
+  TSV
+  TXT
+  XLSX
+  XLS
+  HTML
+  XML
+}
+
+enum PropFirmImportBatchStatus {
+  CONFIRMED
+  ROLLED_BACK
+}
+
+enum PropFirmTransactionClassification {
+  DEPOSIT
+  WITHDRAWAL_PAYOUT
+  WITHDRAWAL_UNCLASSIFIED
+  INTERNAL_TRANSFER
+  ACCOUNT_RESET
+  FEE
+  COMMISSION
+  REFUND
+  BALANCE_CORRECTION
+  CREDIT
+  UNKNOWN
+}
+
+enum PropFirmImportedTradeStatus {
+  OPEN
+  PARTIAL
+  CLOSED
+}
+
+// One row per confirmed upload. Written only inside confirmImport's single
+// transaction alongside everything it produced, so a failed/cancelled import
+// never leaves an orphaned batch row.
+model PropFirmImportBatch {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  platform      PropFirmImportPlatform
+  fileFormat    PropFirmImportFileFormat
+  fileName      String
+  fileSizeBytes Int
+  // Browser-reported MIME type of the upload (may be empty/generic) + the
+  // worksheet / HTML table / statement section the rows were taken from —
+  // both kept for audit.
+  sourceMimeType   String?
+  sheetOrTableName String?
+  timezone      String // IANA zone, user-confirmed before parsing
+
+  status PropFirmImportBatchStatus @default(CONFIRMED)
+
+  dateRangeFrom DateTime?
+  dateRangeTo   DateTime?
+
+  newExecutionsCount     Int   @default(0)
+  newTradesCount         Int   @default(0)
+  newPayoutsCount        Int   @default(0)
+  skippedDuplicatesCount Int   @default(0)
+  rejectedRowsCount      Int   @default(0)
+  warnings               Json?
+
+  mappingTemplateId String?
+  mappingTemplate   PropFirmImportMappingTemplate? @relation(fields: [mappingTemplateId], references: [id])
+
+  createdAt    DateTime  @default(now())
+  rolledBackAt DateTime?
+
+  executions   PropFirmImportedExecution[]
+  transactions PropFirmTransaction[]
+  payouts      Payout[]
+
+  @@index([accountId, createdAt])
+}
+
+// One row per platform execution/deal/fill, after adapter normalization —
+// preserved verbatim (rawRow) for audit even after trade reconstruction
+// groups it into a PropFirmImportedTrade. `dedupeKey` is always populated
+// (platform id when available, else a normalized fingerprint) and is the
+// sole idempotency guard, backed by the unique index below.
+model PropFirmImportedExecution {
+  id String @id @default(cuid())
+
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  importBatchId String
+  importBatch   PropFirmImportBatch @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
+
+  platform            PropFirmImportPlatform
+  platformExecutionId String?
+  platformOrderId     String?
+  platformDealId      String?
+
+  instrumentRaw        String
+  instrumentNormalized String
+  direction            Direction
+
+  quantity Decimal @db.Decimal(14, 4)
+  price    Decimal @db.Decimal(18, 8)
+
+  grossPnl   Decimal? @db.Decimal(14, 2)
+  commission Decimal? @db.Decimal(14, 2)
+  swap       Decimal? @db.Decimal(14, 2)
+  otherFees  Decimal? @db.Decimal(14, 2)
+  currency   String?
+
+  executedAt DateTime
+  dedupeKey  String
+  rawRow     Json
+
+  reconstructedTradeId String?
+  reconstructedTrade   PropFirmImportedTrade? @relation(fields: [reconstructedTradeId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([accountId, dedupeKey])
+  @@index([importBatchId])
+  @@index([reconstructedTradeId])
+}
+
+// A reconstructed logical round-trip trade — derived, never hand-edited.
+// Recomputed wholesale from an account's surviving PropFirmImportedExecution
+// rows on every confirm/rollback (prop-firm-import.service.ts) rather than
+// patched in place, so it's always exactly consistent with its executions.
+model PropFirmImportedTrade {
+  id String @id @default(cuid())
+
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  instrument String
+  direction  Direction
+  status     PropFirmImportedTradeStatus
+
+  openedAt DateTime
+  closedAt DateTime?
+
+  entryCount Int
+  exitCount  Int
+
+  totalQuantity Decimal  @db.Decimal(14, 4)
+  avgEntryPrice Decimal  @db.Decimal(18, 8)
+  avgExitPrice  Decimal? @db.Decimal(18, 8)
+
+  grossPnl   Decimal @db.Decimal(14, 2)
+  commission Decimal @db.Decimal(14, 2)
+  swap       Decimal @db.Decimal(14, 2)
+  otherFees  Decimal @db.Decimal(14, 2)
+  netPnl     Decimal @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  executions PropFirmImportedExecution[]
+
+  @@index([accountId])
+}
+
+// A non-trade financial event from an imported statement — deposits,
+// withdrawals (payout candidates), fees, credits, unknown adjustments.
+// `classification` starts as the adapter/classifier's best guess;
+// `requiresReview` gates anything under-confidence until the user confirms
+// it in the import preview. A confirmed WITHDRAWAL_PAYOUT gets exactly one
+// linked Payout row via Payout.sourceTransactionId (unique).
+model PropFirmTransaction {
+  id String @id @default(cuid())
+
+  accountId String
+  account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  importBatchId String
+  importBatch   PropFirmImportBatch @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
+
+  platform              PropFirmImportPlatform
+  platformTransactionId String?
+  rawType               String
+  classification        PropFirmTransactionClassification
+
+  amount   Decimal @db.Decimal(14, 2)
+  currency String?
+
+  occurredAt DateTime
+  dedupeKey  String
+  rawRow     Json
+
+  requiresReview Boolean   @default(false)
+  reviewedAt     DateTime?
+
+  createdAt DateTime @default(now())
+
+  payout Payout?
+
+  @@unique([accountId, dedupeKey])
+  @@index([importBatchId])
+}
+
+// A reusable column-mapping for Generic CSV (and manually-remapped platform
+// CSVs) — saved so a recurring broker/format doesn't need re-mapping on
+// every upload.
+model PropFirmImportMappingTemplate {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name          String
+  platform      PropFirmImportPlatform
+  columnMapping Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  batches PropFirmImportBatch[]
+
+  @@unique([userId, name])
 }

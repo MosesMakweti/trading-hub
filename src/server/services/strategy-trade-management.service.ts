@@ -69,6 +69,8 @@ export async function updateTradeManagement(
   if (data.expectedAvgRr !== undefined) patch.expectedAvgRr = data.expectedAvgRr;
   if (data.expectedExpectancy !== undefined) patch.expectedExpectancy = data.expectedExpectancy;
   if (data.minExecutionScore !== undefined) patch.minExecutionScore = data.minExecutionScore;
+  if (data.maxDailyRiskPercent !== undefined) patch.maxDailyRiskPercent = data.maxDailyRiskPercent;
+  if (data.maxTradesPerDay !== undefined) patch.maxTradesPerDay = data.maxTradesPerDay;
 
   const result = await prisma.strategyTradeManagement.updateMany({
     where: ownedRecord(userId, id),

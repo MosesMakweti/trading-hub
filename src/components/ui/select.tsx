@@ -63,7 +63,11 @@ function SelectContent({
   sideOffset = 4,
   align = "center",
   alignOffset = 0,
-  alignItemWithTrigger = true,
+  // Default to a normal dropdown BELOW the trigger. The base-ui default
+  // (align the selected item over the trigger, native-macOS style) mis-positions
+  // and can leave a stale popup floating inside scroll containers — the
+  // "detached menu text overlapping the page" bug.
+  alignItemWithTrigger = false,
   ...props
 }: SelectPrimitive.Popup.Props &
   Pick<

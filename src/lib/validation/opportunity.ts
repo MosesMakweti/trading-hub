@@ -39,7 +39,7 @@ export const opportunityCreateSchema = z.object({
   plannedRR: z.coerce.number().nullable().default(null),
 });
 
-// Recording that a valid setup was MISSED. The outcome is TRADER-ENTERED (TradeOS
+// Recording that a valid setup was MISSED. The outcome is TRADER-ENTERED (Traditorium
 // has no price feed): UNDETERMINED forfeits the realized-R field, while a
 // win/loss/BE must carry a consistent realized-R sign so the data can't contradict
 // itself (a "missed win" with a negative R, etc.).

@@ -145,7 +145,7 @@ export function DataManagementView({ counts }: { counts: DataCounts }) {
       const result = await resetAllDataAction();
       if (result.success) {
         setResetOpen(false);
-        toast.success("TradeOS has been reset. Welcome to a fresh workspace.");
+        toast.success("Traditorium has been reset. Welcome to a fresh workspace.");
         router.push("/dashboard");
         router.refresh();
       } else {
@@ -159,7 +159,7 @@ export function DataManagementView({ counts }: { counts: DataCounts }) {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Data Management</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Control and permanently remove your TradeOS data. Every action here affects only your own
+          Control and permanently remove your Traditorium data. Every action here affects only your own
           account and cannot be undone.
         </p>
       </div>
@@ -211,7 +211,7 @@ export function DataManagementView({ counts }: { counts: DataCounts }) {
         </div>
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="text-sm font-medium">Reset TradeOS</div>
+            <div className="text-sm font-medium">Reset Traditorium</div>
             <p className="mt-0.5 text-sm text-muted-foreground">
               Delete all trader-created data and start with a completely fresh workspace. Your
               account, login, and profile are kept.
@@ -224,7 +224,7 @@ export function DataManagementView({ counts }: { counts: DataCounts }) {
             onClick={() => setResetOpen(true)}
           >
             <Trash2 className="size-3.5" />
-            Reset TradeOS
+            Reset Traditorium
           </Button>
         </div>
       </div>
@@ -242,12 +242,12 @@ export function DataManagementView({ counts }: { counts: DataCounts }) {
         onConfirm={() => activeSection && runDeleteSection(activeSection)}
       />
 
-      {/* Full reset (type RESET TRADEOS) — keyed so the typed phrase resets on reopen */}
+      {/* Full reset (type RESET TRADITORIUM) — keyed so the typed phrase resets on reopen */}
       <TypeToConfirmDialog
         key={resetOpen ? "reset-open" : "reset-closed"}
         open={resetOpen}
         onOpenChange={(open) => !open && setResetOpen(false)}
-        title="Reset all TradeOS data?"
+        title="Reset all Traditorium data?"
         description={
           <>
             <p>This permanently deletes <span className="font-medium text-foreground">everything you have created</span>:</p>
@@ -265,8 +265,8 @@ export function DataManagementView({ counts }: { counts: DataCounts }) {
             </p>
           </>
         }
-        phrase="RESET TRADEOS"
-        confirmLabel="Reset TradeOS"
+        phrase="RESET TRADITORIUM"
+        confirmLabel="Reset Traditorium"
         isPending={pending}
         onConfirm={runReset}
       />

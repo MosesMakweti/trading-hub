@@ -2,6 +2,10 @@ export interface TradeExportAllocation {
   accountName: string;
   riskInputType: "PERCENT" | "AMOUNT";
   riskValue: number;
+  // Independent per-account PnL (spec: real accounts never derive PnL from
+  // the Performance Account) — manually entered/imported for that account.
+  closingPnlGross: number;
+  closingPnlNet: number;
 }
 
 /**
@@ -17,14 +21,15 @@ export interface TradeExportRecord {
   direction: "LONG" | "SHORT";
   higherTimeframeBias: "BULLISH" | "BEARISH";
   biasConfidencePercent: number;
-  expectedRR: number;
+  expectedRR: number | null;
   actualRR: number | null;
+  // Read-only, informational — the Performance Account's system-calculated
+  // PnL at export time (realized R × locked risk amount). Never written on
+  // import: the Performance Account has no manual PnL input anymore, so a
+  // re-imported trade's Performance PnL is 0 until real actual-execution
+  // data (entry/stop/exit) is entered for it in the workspace.
   performanceClosingPnlGross: number;
   performanceClosingPnlNet: number;
-  hitTP1: boolean;
-  hitTP2: boolean;
-  hitTP3: boolean;
-  hitFullTP: boolean;
   psychPreTradeMindset: string | null;
   psychPostTradeReflection: string | null;
   psychLessonsLearned: string | null;
@@ -42,14 +47,10 @@ export interface TradeExportRow {
   Time: string;
   Asset: string;
   Direction: string;
-  "Expected RR": number;
+  "Expected RR": string;
   "Actual RR": string;
   "Performance PnL (Net)": number;
   "Psychology Grade": string;
-  "TP1 Hit": string;
-  "TP2 Hit": string;
-  "TP3 Hit": string;
-  "Full TP Hit": string;
 }
 
 function minutesToTimeString(minutes: number): string {
@@ -68,14 +69,10 @@ export function toExportRow(
     Time: minutesToTimeString(record.executionMinutes),
     Asset: record.assetSymbol,
     Direction: record.direction === "LONG" ? "Long" : "Short",
-    "Expected RR": record.expectedRR,
+    "Expected RR": record.expectedRR == null ? "" : String(record.expectedRR),
     "Actual RR": record.actualRR == null ? "" : String(record.actualRR),
     "Performance PnL (Net)": record.performanceClosingPnlNet,
     "Psychology Grade": psychologyGrade ?? "",
-    "TP1 Hit": record.hitTP1 ? "Yes" : "No",
-    "TP2 Hit": record.hitTP2 ? "Yes" : "No",
-    "TP3 Hit": record.hitTP3 ? "Yes" : "No",
-    "Full TP Hit": record.hitFullTP ? "Yes" : "No",
   };
 }
 

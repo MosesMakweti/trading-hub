@@ -21,7 +21,17 @@ const BIASES: { value: DayBias; label: string; selected: "default" | "destructiv
   { value: "NEUTRAL", label: "Neutral", selected: "secondary" },
 ];
 
-export function TodaysPlanSection({ dateKey, plan }: { dateKey: string; plan: TodaysPlanDTO }) {
+export function TodaysPlanSection({
+  dateKey,
+  plan,
+  onComplete,
+}: {
+  dateKey: string;
+  plan: TodaysPlanDTO;
+  /** Called once the plan is marked complete — the parent moves the workspace
+   *  on to Trade Idea. */
+  onComplete?: () => void;
+}) {
   const router = useRouter();
 
   const [bias, setBias] = useState<DayBias | null>(plan.bias);
@@ -82,6 +92,7 @@ export function TodaysPlanSection({ dateKey, plan }: { dateKey: string; plan: To
       setIsComplete(next);
       toast.success(next ? "Plan set." : "Plan reopened.");
       router.refresh(); // advance the workflow stepper
+      if (next) onComplete?.(); // …and carry the trader on to Trade Idea
     });
   }
 

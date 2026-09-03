@@ -16,8 +16,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "tradeOS",
-  description: "A private trading journal, strategy lab, and analytics desk.",
+  title: {
+    default: "Traditorium",
+    template: "%s · Traditorium",
+  },
+  description:
+    "Traditorium — the operating environment for traders. Plan, journal, and analyze every trade in one place.",
 };
 
 export default function RootLayout({

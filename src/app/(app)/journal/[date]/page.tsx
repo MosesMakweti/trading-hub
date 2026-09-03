@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
 import { JournalDayRecap } from "@/components/journal/journal-day-recap";
+import { TodayLiveCallout } from "@/components/journal/today-live-callout";
 import { ReadOnlyDayBanner } from "@/components/journal/read-only-day-banner";
 import { TradeCard } from "@/components/journal/trade-card";
 import { WORKFLOW_STEP_META, type WorkflowStep } from "@/components/dashboard/workflow-progress";
@@ -61,12 +62,13 @@ export default async function JournalDayPage({
     direction: t.direction,
     higherTimeframeBias: t.higherTimeframeBias,
     biasConfidencePercent: t.biasConfidencePercent,
-    expectedRR: t.expectedRR.toNumber(),
+    expectedRR: t.expectedRR ? t.expectedRR.toNumber() : null,
     actualRR: t.actualRR ? t.actualRR.toNumber() : null,
-    hitTP1: t.hitTP1,
-    hitTP2: t.hitTP2,
-    hitTP3: t.hitTP3,
-    hitFullTP: t.hitFullTP,
+    targets: t.plannedTargets.map((pt) => ({
+      targetOrder: pt.targetOrder,
+      label: pt.label,
+      targetPrice: pt.targetPrice.toNumber(),
+    })),
     accounts: t.allocations.map((a) => ({
       name: a.tradingAccount.name,
       riskInputType: a.riskInputType,
@@ -166,7 +168,14 @@ export default async function JournalDayPage({
 
       {!editable && <ReadOnlyDayBanner dateKey={dateKey} />}
 
-      {recap && <JournalDayRecap recap={recap} steps={recapSteps} />}
+      {/* Today's live routine/plan/workflow live in the Today workspace, not
+          here — show a signpost instead of a frozen recap of the live day.
+          Past days keep the full read-only recap. */}
+      {isToday ? (
+        <TodayLiveCallout recap={recap} tradeCount={trades.length} />
+      ) : (
+        recap && <JournalDayRecap recap={recap} steps={recapSteps} />
+      )}
 
       <section className="glass space-y-3 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Daily Notes</h2>

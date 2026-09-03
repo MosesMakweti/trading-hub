@@ -29,7 +29,7 @@ export async function listTradeExportRecords(
       direction: t.direction,
       higherTimeframeBias: t.higherTimeframeBias,
       biasConfidencePercent: t.biasConfidencePercent,
-      expectedRR: t.expectedRR.toNumber(),
+      expectedRR: t.expectedRR ? t.expectedRR.toNumber() : null,
       actualRR: t.actualRR ? t.actualRR.toNumber() : null,
       performanceClosingPnlGross: performanceAllocation
         ? performanceAllocation.closingPnlGross.toNumber()
@@ -37,10 +37,6 @@ export async function listTradeExportRecords(
       performanceClosingPnlNet: performanceAllocation
         ? performanceAllocation.closingPnlNet.toNumber()
         : 0,
-      hitTP1: t.hitTP1,
-      hitTP2: t.hitTP2,
-      hitTP3: t.hitTP3,
-      hitFullTP: t.hitFullTP,
       psychPreTradeMindset: t.psychPreTradeMindset,
       psychPostTradeReflection: t.psychPostTradeReflection,
       psychLessonsLearned: t.psychLessonsLearned,
@@ -51,6 +47,8 @@ export async function listTradeExportRecords(
         accountName: a.tradingAccount.name,
         riskInputType: a.riskInputType,
         riskValue: a.riskValue.toNumber(),
+        closingPnlGross: a.closingPnlGross.toNumber(),
+        closingPnlNet: a.closingPnlNet.toNumber(),
       })),
       // SOT: the by-name selections frozen on the trade (pre-SOT trades backfilled in P9).
       confluenceLabels: (t.selectedConfluences as string[] | null) ?? [],

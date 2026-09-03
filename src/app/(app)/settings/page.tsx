@@ -21,7 +21,7 @@ const AREAS: { href: string; icon: LucideIcon; title: string; description: strin
     href: "/settings/data-management",
     icon: Trash2,
     title: "Data Management",
-    description: "Control and permanently remove your TradeOS data — by section, or a full reset.",
+    description: "Control and permanently remove your Traditorium data — by section, or a full reset.",
   },
 ];
 

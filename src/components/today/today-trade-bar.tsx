@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { Plus, SquareArrowOutUpRight } from "lucide-react";
+import { SquareArrowOutUpRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { TradeStatusBadge } from "@/components/journal/workspace/workspace-ui";
+import { AddTradeDialog } from "@/components/today/add-trade-dialog";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
 /**
@@ -17,11 +18,19 @@ export function TodayTradeBar({
   focusedId,
   onFocus,
   todayKey,
+  accounts,
+  strategies,
+  planBias,
+  planConviction,
 }: {
   trades: TradeWorkspaceDTO[];
   focusedId: string | null;
   onFocus: (id: string) => void;
   todayKey: string;
+  accounts: { id: string; name: string; kind: string }[];
+  strategies: { id: string; name: string; version: number }[];
+  planBias?: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
+  planConviction?: number | null;
 }) {
   return (
     <div className="glass flex flex-wrap items-center gap-2 rounded-2xl p-2.5">
@@ -62,15 +71,13 @@ export function TodayTradeBar({
             Open
           </Button>
         )}
-        <Button
-          size="sm"
-          className="gap-1.5"
-          nativeButton={false}
-          render={<Link href={`/journal/${todayKey}/trades/new`} />}
-        >
-          <Plus className="size-3.5" />
-          Add trade
-        </Button>
+        <AddTradeDialog
+          dateKey={todayKey}
+          accounts={accounts}
+          strategies={strategies}
+          planBias={planBias}
+          planConviction={planConviction}
+        />
       </div>
     </div>
   );

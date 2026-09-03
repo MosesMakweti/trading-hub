@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export interface HeatmapPoint {
   dateKey: string;
@@ -52,12 +53,15 @@ export function Heatmap({
         {weeks.map((week, wi) => (
           <div key={wi} className="flex flex-col gap-1">
             {week.map((cell) => (
-              <div
-                key={cell.dateKey}
-                className="size-3 rounded-sm"
-                style={{ backgroundColor: getColor(cell.data?.value ?? 0, Boolean(cell.data)) }}
-                title={cell.data?.label ?? cell.dateKey}
-              />
+              <Tooltip key={cell.dateKey}>
+                <TooltipTrigger
+                  type="button"
+                  className="size-3 rounded-sm transition-transform hover:scale-125"
+                  style={{ backgroundColor: getColor(cell.data?.value ?? 0, Boolean(cell.data)) }}
+                  aria-label={cell.data?.label ?? cell.dateKey}
+                />
+                <TooltipContent side="top">{cell.data?.label ?? cell.dateKey}</TooltipContent>
+              </Tooltip>
             ))}
           </div>
         ))}

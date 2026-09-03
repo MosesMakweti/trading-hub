@@ -13,6 +13,7 @@ import {
 } from "recharts";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CHART_TOOLTIP_STYLE, CHART_AXIS_TICK } from "@/components/analytics/chart-theme";
 import type { TrendPoint } from "@/domain/psychology/analytics";
 
 export function PsychologyTrendChart({
@@ -52,26 +53,20 @@ export function PsychologyTrendChart({
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
             <XAxis
               dataKey="key"
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+              tick={CHART_AXIS_TICK}
               axisLine={{ stroke: "var(--border)" }}
               tickLine={false}
             />
             <YAxis
               domain={[0, 100]}
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+              tick={CHART_AXIS_TICK}
               axisLine={false}
               tickLine={false}
               width={36}
               tickFormatter={(v: number) => `${v}%`}
             />
             <Tooltip
-              contentStyle={{
-                background: "var(--popover)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                fontSize: 12,
-                color: "var(--popover-foreground)",
-              }}
+              contentStyle={CHART_TOOLTIP_STYLE}
               formatter={(value) => [`${Number(value).toFixed(1)}%`, "Avg discipline"]}
             />
             <Line

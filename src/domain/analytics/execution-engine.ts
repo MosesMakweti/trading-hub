@@ -1,4 +1,4 @@
-// The Execution Engine — the single source of all Discrepancy-Gap math for TradeOS.
+// The Execution Engine — the single source of all Discrepancy-Gap math for Traditorium.
 // Pure and framework-free: it takes each completed trade's strategy edge (expectancy),
 // execution quality, and realized R, and produces the Expected vs Actual equity curves,
 // the gap between them, and the derived efficiency / recoverable-edge / streak metrics.

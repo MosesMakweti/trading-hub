@@ -17,6 +17,21 @@ export interface AdherenceTradePoint {
   tradeQualityPercent: number | null;
   setupScore: number | null; // weighted probability score
   setupRating: SetupRating | null; // A+/A/B/C/LOW band
+  // Trade direction — its scores were frozen against the direction-eligible
+  // confluence set. null on trades logged before direction was recorded.
+  direction?: "LONG" | "SHORT" | null;
+}
+
+// Long vs short discipline: are your setups sharper in one direction? Built from
+// each trade's direction-aware frozen scores — no recomputation of history.
+export interface AdherenceDirectionSplit {
+  direction: "LONG" | "SHORT";
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number | null;
+  avgSetupScore: number | null;
+  avgConfluenceAdherence: number | null;
 }
 
 export interface ConfluenceStat {
@@ -64,6 +79,7 @@ export interface AdherenceSummary {
   confluenceCombinations: ConfluenceCombinationStat[];
   setupQualityBuckets: SetupQualityBucket[];
   setupQualityTrend: SetupQualityTrendPoint[];
+  directionSplits: AdherenceDirectionSplit[];
 }
 
 const RATING_ORDER: SetupRating[] = ["A+", "A", "B", "C", "LOW"];
@@ -205,6 +221,28 @@ export function setupQualityTrend(points: AdherenceTradePoint[]): SetupQualityTr
     .map(([month, scores]) => ({ month, avgScore: average(scores), trades: scores.length }));
 }
 
+/** Long vs short adherence split (directions with no trades are dropped). */
+export function adherenceByDirection(points: AdherenceTradePoint[]): AdherenceDirectionSplit[] {
+  return (["LONG", "SHORT"] as const).flatMap((direction) => {
+    const group = points.filter((p) => p.direction === direction);
+    if (group.length === 0) return [];
+    const wins = group.filter((p) => p.win === true).length;
+    const losses = group.filter((p) => p.win === false).length;
+    const decided = wins + losses;
+    return [
+      {
+        direction,
+        trades: group.length,
+        wins,
+        losses,
+        winRate: decided > 0 ? round1((wins / decided) * 100) : null,
+        avgSetupScore: averageField(group, (p) => p.setupScore),
+        avgConfluenceAdherence: averageField(group, (p) => p.confluencePercent),
+      },
+    ];
+  });
+}
+
 export function summarizeAdherence(points: AdherenceTradePoint[]): AdherenceSummary {
   const winners = points.filter((p) => p.win === true);
   const losers = points.filter((p) => p.win === false);
@@ -219,5 +257,6 @@ export function summarizeAdherence(points: AdherenceTradePoint[]): AdherenceSumm
     confluenceCombinations: confluenceCombinations(points),
     setupQualityBuckets: setupQualityBuckets(points),
     setupQualityTrend: setupQualityTrend(points),
+    directionSplits: adherenceByDirection(points),
   };
 }

@@ -57,14 +57,9 @@ export default async function EditTradePage({
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
     selectedSession: trade.selectedSession ?? null,
-    expectedRR: trade.expectedRR.toNumber(),
+    expectedRR: trade.expectedRR ? trade.expectedRR.toNumber() : null,
     actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
-    performanceClosingPnlGross: performanceAllocation?.closingPnlGross.toNumber() ?? 0,
-    performanceClosingPnlNet: performanceAllocation?.closingPnlNet.toNumber() ?? 0,
-    hitTP1: trade.hitTP1,
-    hitTP2: trade.hitTP2,
-    hitTP3: trade.hitTP3,
-    hitFullTP: trade.hitFullTP,
+    performanceRiskPercentOverride: performanceAllocation ? performanceAllocation.riskValue.toNumber() : null,
     psychPreTradeMindset: trade.psychPreTradeMindset,
     psychPostTradeReflection: trade.psychPostTradeReflection,
     psychLessonsLearned: trade.psychLessonsLearned,
@@ -73,6 +68,8 @@ export default async function EditTradePage({
       tradingAccountId: a.tradingAccountId,
       riskInputType: a.riskInputType,
       riskValue: a.riskValue.toNumber(),
+      closingPnlGross: a.closingPnlGross.toNumber(),
+      closingPnlNet: a.closingPnlNet.toNumber(),
     })),
     // SOT: selections are stored by name (from the chosen strategy). Old trades
     // predating the strategy-scoped model have no names yet — start empty; the
@@ -85,15 +82,16 @@ export default async function EditTradePage({
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center gap-2">
+      <div className="space-y-2">
         <Button
           variant="ghost"
-          size="icon-sm"
-          aria-label="Back to trade workspace"
+          size="sm"
+          className="-ml-2 gap-1.5 text-muted-foreground"
           nativeButton={false}
           render={<Link href={`/journal/${dateKey}/trades/${tradeId}`} />}
         >
-          <ChevronLeft />
+          <ChevronLeft className="size-3.5" />
+          Back to trade
         </Button>
         <h1 className="text-xl font-semibold tracking-tight">
           Edit Trade — {formatDateKeyLong(dateKey)}
@@ -107,6 +105,7 @@ export default async function EditTradePage({
         accounts={accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind }))}
         strategies={formStrategies}
         defaultValues={defaultValues}
+        performanceRiskLocked={trade.actualEntry != null}
       />
     </div>
   );

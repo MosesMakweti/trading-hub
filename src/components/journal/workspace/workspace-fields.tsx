@@ -9,6 +9,13 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useDebouncedAutosave, type SaveState } from "@/hooks/use-debounced-autosave";
 import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
 import { updateTradeSection } from "@/actions/trades.actions";
@@ -27,7 +34,7 @@ type NoteField = Extract<
 
 type PriceField = Extract<
   keyof TradeWorkspaceSectionInput,
-  "plannedEntry" | "plannedStopLoss" | "plannedTarget" | "actualEntry" | "actualExit"
+  "plannedEntry" | "plannedStopLoss" | "plannedTarget" | "actualEntry" | "actualExit" | "actualStopLoss"
 >;
 
 // A tiny "saving / saved" indicator shared by every editable field.
@@ -209,6 +216,79 @@ export function WorkspaceDecisionField({
           </Button>
         ))}
       </div>
+    </div>
+  );
+}
+
+type TradeIntentValue = NonNullable<TradeWorkspaceSectionInput["tradeIntent"]>;
+const UNSET = "UNSET";
+const INTENT_OPTIONS: { value: TradeIntentValue; label: string }[] = [
+  { value: "PLANNED", label: "Planned (disciplined)" },
+  { value: "FOMO", label: "FOMO" },
+  { value: "REVENGE", label: "Revenge" },
+  { value: "BOREDOM", label: "Boredom" },
+  { value: "IMPULSE", label: "Impulsive" },
+  { value: "MANUAL_OVERRIDE", label: "Manual override vs plan" },
+];
+
+/**
+ * Behavioral intent tag for the Counterfactual (Discrepancy Gap) engine. PLANNED is
+ * disciplined; FOMO / Revenge / Boredom / Impulse mark a trade the process would not
+ * have taken (so its loss becomes avoidable, its win "unearned"); Manual override is
+ * a flagged behavioral breach. "—" leaves it unspecified (the engine then infers).
+ */
+export function WorkspaceIntentField({
+  dateKey,
+  tradeId,
+  label,
+  initialValue,
+  className,
+}: {
+  dateKey: string;
+  tradeId: string;
+  label: string;
+  initialValue: TradeIntentValue | null;
+  className?: string;
+}) {
+  const editable = useWorkspaceEditable();
+  const router = useRouter();
+  const [value, setValue] = useState<TradeIntentValue | null>(initialValue);
+  const [saving, setSaving] = useState<SaveState>("idle");
+
+  async function choose(raw: string | null) {
+    const next = raw == null || raw === UNSET ? null : (raw as TradeIntentValue);
+    if (next === value) return;
+    setValue(next);
+    setSaving("saving");
+    const result = await updateTradeSection(dateKey, tradeId, { tradeIntent: next });
+    if (result.success) {
+      setSaving("saved");
+      router.refresh();
+    } else {
+      setSaving("error");
+      toast.error(result.error);
+    }
+  }
+
+  return (
+    <div className={cn("space-y-1", className)}>
+      <div className="flex items-center gap-1.5">
+        <label className="text-xs text-muted-foreground">{label}</label>
+        {editable && <SaveIndicator state={saving} />}
+      </div>
+      <Select items={INTENT_OPTIONS} value={value ?? UNSET} onValueChange={choose} disabled={!editable}>
+        <SelectTrigger className="h-9 w-full text-sm" aria-label={label}>
+          <SelectValue placeholder="—" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={UNSET}>—</SelectItem>
+          {INTENT_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

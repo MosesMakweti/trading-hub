@@ -13,6 +13,7 @@ export const ROUTINE_ITEM_TYPES: readonly RoutineItemTypeValue[] = [
 export interface DefaultRoutineItem {
   label: string;
   type: RoutineItemTypeValue;
+  isMandatory?: boolean;
 }
 
 export interface DefaultRoutineSection {
@@ -21,8 +22,13 @@ export interface DefaultRoutineSection {
 }
 
 const check = (label: string): DefaultRoutineItem => ({ label, type: "CHECKBOX" });
+/** A mandatory checkbox — gates "ready to trade" until ticked. */
+const req = (label: string): DefaultRoutineItem => ({ label, type: "CHECKBOX", isMandatory: true });
 
-// A sensible, discipline-reinforcing ritual — the trader edits it freely in Settings.
+// A sensible, discipline-reinforcing ritual — the trader edits it freely in
+// Settings, including which items are required. The defaults make the genuine
+// pre-trade gates mandatory: you shouldn't trade without an HTF read, marked
+// levels, and confirmed risk.
 export const DEFAULT_ROUTINE: DefaultRoutineSection[] = [
   {
     title: "Personal Readiness",
@@ -37,8 +43,8 @@ export const DEFAULT_ROUTINE: DefaultRoutineSection[] = [
     title: "Market Preparation",
     items: [
       check("Economic calendar reviewed"),
-      check("HTF analysis completed"),
-      check("Key levels marked"),
+      req("HTF analysis completed"),
+      req("Key levels marked"),
       check("Watchlist finalized"),
       check("Session volatility understood"),
     ],
@@ -46,8 +52,8 @@ export const DEFAULT_ROUTINE: DefaultRoutineSection[] = [
   {
     title: "Risk Confirmation",
     items: [
-      check("Daily risk confirmed"),
-      check("Maximum trades confirmed"),
+      req("Daily risk confirmed"),
+      req("Maximum trades confirmed"),
       check("Account balances checked"),
       check("No rule violations"),
     ],

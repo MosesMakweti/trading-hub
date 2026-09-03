@@ -42,6 +42,7 @@ export async function getOrCreateDefaultRoutine(userId: string) {
             sectionId: created.id,
             label: item.label,
             type: item.type,
+            isMandatory: item.isMandatory ?? false,
             sortOrder: i,
           })),
         });
