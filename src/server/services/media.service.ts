@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db";
 import { deleteMediaFile } from "@/lib/media-storage";
+import { isR2Configured } from "@/lib/r2";
 import type { MediaOwnerType } from "@prisma/client";
 
 // Re-exported for backward compatibility (existing server-side importers) —
@@ -29,9 +30,9 @@ export interface MediaItemDTO {
   caption: string | null;
 }
 
-/** Local filesystem storage is always available, so uploads are always enabled. */
+/** Uploads are enabled once the R2 bucket credentials are configured. */
 export function isUploadsEnabled(): boolean {
-  return true;
+  return isR2Configured();
 }
 
 /** How many attachments an owner already has in a given category (for the cap). */

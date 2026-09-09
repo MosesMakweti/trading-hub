@@ -43,11 +43,11 @@ function bad(error: string, status = 400) {
 }
 
 /**
- * Universal media upload endpoint (local filesystem backend). The browser posts
- * the file(s) here directly — no cloud round-trip, so it completes on localhost.
- * Enforces: authenticated user, ownership of the target record, image-only MIME,
- * and the size cap. Files land in the private uploads dir; only the auth-scoped
- * GET /api/media/[id] route ever serves them.
+ * Universal media upload endpoint (Cloudflare R2 backend). The browser posts the
+ * file(s) here directly; this route buffers each one and uploads it to the
+ * private R2 bucket. Enforces: authenticated user, ownership of the target
+ * record, image-only MIME, and the size cap. Only the auth-scoped
+ * GET /api/media/[id] route ever serves the stored objects back.
  */
 export async function POST(request: Request) {
   const session = await auth();

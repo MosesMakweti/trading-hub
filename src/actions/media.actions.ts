@@ -32,9 +32,9 @@ export async function loadMediaAction(
 }
 
 /**
- * Deletes one attachment (hosted file + record). Scoped to the user through the
+ * Deletes one attachment (R2 object + record). Scoped to the user through the
  * asset's owner, so a user can only delete their own media. Uploads themselves go
- * straight to UploadThing via the FileRouter — this action only covers deletion.
+ * through POST /api/media/upload — this action only covers deletion.
  */
 export async function deleteMediaAction(attachmentId: string): Promise<SimpleResult> {
   const user = await requireUser();
