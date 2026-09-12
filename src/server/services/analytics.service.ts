@@ -33,10 +33,9 @@ import {
   getMissReasonAggregate,
   getOpportunityInputs,
 } from "@/server/services/opportunity.service";
-import {
-  summarizeStrategyPerformance,
-  type StrategyTradePoint,
-} from "@/domain/performance/strategy-performance";
+import type { StrategyPerformanceSummary } from "@/domain/performance/strategy-performance";
+import { toStrategyPerformanceSummary } from "@/domain/analytics/canonical-aggregations";
+import { getCanonicalAnalyticsDataset } from "@/server/services/analytics-canonical.service";
 import * as psychAnalytics from "@/domain/psychology/analytics";
 import type { PsychologyDataPoint } from "@/domain/psychology/analytics";
 import {
@@ -45,104 +44,39 @@ import {
 } from "@/server/services/accounts.service";
 
 /**
- * Every number returned here is derived from the Performance Account's real
- * dollar track record — the app's single source of truth for analytics (see
- * accounts.service.ts). Nothing here reads `Trade.actualRR` (the trader's
- * separate, optional self-reported R-multiple); a trade's "contribution %"
- * is always `performancePnl / balanceBeforeThatTrade * 100`.
+ * Every $ number returned here is derived from the Performance Account's real
+ * dollar track record — this remains the app's single source of truth for
+ * ACCOUNT/EQUITY accounting (realized $ balance, drawdown, opportunity and
+ * discrepancy inputs). Stage 10.5: trader-PERFORMANCE numbers (win rate,
+ * expectancy, R, strategy/asset/day breakdowns) have moved to the canonical
+ * dataset (analytics-canonical.service.ts) — see `getDailyAnalytics` and
+ * `getStrategyPerformance` below, which delegate to it instead of deriving R
+ * from `performancePnl / balanceBeforeThatTrade * 100`.
  */
 /**
  * Performance for a single strategy (win-rate / RR / psychology / adherence by
- * strategy). Uses the same Performance Account contribution % as the global
- * analytics: it walks the full allocation history to get each trade's balance-
- * before contribution, then keeps only the trades linked to this strategy. All
- * numbers are therefore computed identically to the rest of the app.
+ * strategy) — Stage 10.5: delegates to the canonical, R-primary dataset
+ * (`toStrategyPerformanceSummary`) instead of walking the Performance
+ * Account's contribution-% ledger. All-time (no date bound), scoped to this
+ * strategy's frozen `strategyId`.
  */
-/**
- * Day-scoped analytics for the Today workspace's Daily Analytics section. Same
- * Performance Account contribution % as everywhere else (walk the full allocation
- * history for balance-before, keep only the day's trades), summarised by the
- * shared `summarizeStrategyPerformance`, plus the day's net PnL in dollars.
- */
-export async function getDailyAnalytics(userId: string, dateKey: string) {
-  const performanceAccount = await getOrCreatePerformanceAccount(userId);
-
-  const allocations = await prisma.tradeAccountAllocation.findMany({
-    where: { tradingAccountId: performanceAccount.id, trade: { deletedAt: null } },
-    include: {
-      trade: {
-        select: {
-          tradeDate: true,
-          adherencePercent: true,
-          assetSymbol: true,
-          psychology: { select: { psychologyPercent: true } },
-        },
-      },
-    },
-    orderBy: [{ trade: { tradeDate: "asc" } }, { trade: { executionMinutes: "asc" } }],
-  });
-
-  let runningBalance = PERFORMANCE_ACCOUNT_STARTING_BALANCE;
-  const points: StrategyTradePoint[] = [];
-  let netPnl = 0;
-  for (const alloc of allocations) {
-    const t = alloc.trade;
-    const pnl = alloc.closingPnlNet.toNumber();
-    const contributionPercent = runningBalance !== 0 ? (pnl / runningBalance) * 100 : 0;
-    runningBalance += pnl;
-    if (utcDateToKey(t.tradeDate) === dateKey) {
-      points.push({
-        dateKey,
-        assetSymbol: t.assetSymbol,
-        actualRR: contributionPercent,
-        psychologyPercent: t.psychology?.psychologyPercent ?? null,
-        adherencePercent: t.adherencePercent,
-      });
-      netPnl += pnl;
-    }
-  }
-
-  return { ...summarizeStrategyPerformance(points), netPnl };
+export async function getStrategyPerformance(userId: string, strategyId: string): Promise<StrategyPerformanceSummary> {
+  const rows = await getCanonicalAnalyticsDataset(userId, { strategyId });
+  return toStrategyPerformanceSummary(rows);
 }
 
-export async function getStrategyPerformance(userId: string, strategyId: string) {
-  const performanceAccount = await getOrCreatePerformanceAccount(userId);
-
-  const allocations = await prisma.tradeAccountAllocation.findMany({
-    where: { tradingAccountId: performanceAccount.id, trade: { deletedAt: null } },
-    include: {
-      trade: {
-        select: {
-          strategyId: true,
-          tradeDate: true,
-          adherencePercent: true,
-          assetSymbol: true,
-          psychology: { select: { psychologyPercent: true } },
-        },
-      },
-    },
-    orderBy: [{ trade: { tradeDate: "asc" } }, { trade: { executionMinutes: "asc" } }],
-  });
-
-  let runningBalance = PERFORMANCE_ACCOUNT_STARTING_BALANCE;
-  const points: StrategyTradePoint[] = [];
-  for (const alloc of allocations) {
-    const t = alloc.trade;
-    const pnl = alloc.closingPnlNet.toNumber();
-    const contributionPercent = runningBalance !== 0 ? (pnl / runningBalance) * 100 : 0;
-    runningBalance += pnl;
-    if (t.strategyId === strategyId) {
-      points.push({
-        dateKey: utcDateToKey(t.tradeDate),
-        assetSymbol: t.assetSymbol,
-        actualRR: contributionPercent,
-        psychologyPercent: t.psychology?.psychologyPercent ?? null,
-        adherencePercent: t.adherencePercent,
-      });
-    }
-  }
-
-  return summarizeStrategyPerformance(points);
+/**
+ * Day-scoped analytics for the Today workspace's Daily Analytics section and
+ * the Journal day recap — Stage 10.5: the SAME canonical dataset and
+ * converter as `getStrategyPerformance` and every other trader-performance
+ * view, scoped to this one day. `netPnl` sums the day's real settled/partial
+ * $ PnL (canonical `pnl`) — one definition of "today's PnL", not a second
+ * dollar computation.
+ */
+export async function getDailyAnalytics(userId: string, dateKey: string) {
+  const rows = await getCanonicalAnalyticsDataset(userId, { from: dateKey, to: dateKey });
+  const netPnl = rows.reduce((sum, r) => sum + (r.pnl ?? 0), 0);
+  return { ...toStrategyPerformanceSummary(rows), netPnl };
 }
 
 /**

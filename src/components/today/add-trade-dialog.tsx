@@ -77,6 +77,11 @@ export function AddTradeDialog({
           strategies={strategies}
           initialBias={initialBias}
           initialBiasConfidence={initialBiasConfidence}
+          // Stage 6 — declutter Today's live "Add Trade Idea" flow. Account
+          // allocation stays fully available from the standalone Journal
+          // create/edit trade pages; the automatic Performance Account
+          // allocation still happens server-side regardless (trades.service.ts).
+          showAccountAllocation={false}
           onSuccess={() => {
             setOpen(false);
             router.refresh();

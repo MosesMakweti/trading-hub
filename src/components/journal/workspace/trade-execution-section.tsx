@@ -12,7 +12,7 @@ import {
   WorkspaceNoteField,
   WorkspacePriceField,
 } from "@/components/journal/workspace/workspace-fields";
-import { TradeImageBucket } from "@/components/journal/workspace/trade-image-bucket";
+import { PartialExitsEditor } from "@/components/journal/workspace/partial-exits-editor";
 import { parseSymbol, formatTargetPrice } from "@/domain/trade-plan/instrument-catalog";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
@@ -184,10 +184,11 @@ export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
         />
       </div>
 
-      {/* After-Trade images — what happened during/after execution: actual entry,
-          trade management, exit, final chart. */}
-      <div className="space-y-2 rounded-xl border border-border bg-background/30 p-3">
-        <TradeImageBucket tradeId={trade.id} category="AFTER" label="After-Trade Images" />
+      {/* Actual partial exits (Stage 7 §2) — realized R / Performance PnL
+          recompute automatically from these; see Trade Review for the
+          weighted result and the planned-vs-actual comparison. */}
+      <div className="rounded-xl border border-border bg-background/30 p-3">
+        <PartialExitsEditor dateKey={trade.dateKey} tradeId={trade.id} />
       </div>
     </div>
   );

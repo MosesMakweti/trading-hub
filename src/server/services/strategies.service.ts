@@ -28,6 +28,23 @@ const strategyTreeInclude = {
   // SOT strategy-scoped sessions + confluences/execution (frozen in version snapshots).
   sessions: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
   checklistItems: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+  // Setup Types (Stage 3) — scenarios' conditions are resolved against their
+  // checklist item so the snapshot below can freeze EFFECTIVE mandatory/weight
+  // (after any scenario override), never the live checklist item's own values.
+  setupTypes: {
+    where: { deletedAt: null },
+    orderBy: { sortOrder: "asc" },
+    include: {
+      scenarios: {
+        include: {
+          conditions: {
+            orderBy: { sortOrder: "asc" },
+            include: { checklistItem: true },
+          },
+        },
+      },
+    },
+  },
   tradeManagement: {
     include: {
       partialTakeProfits: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
@@ -146,6 +163,26 @@ function buildSnapshot(s: StrategyTree): StrategyVersionSnapshot {
         validationCriteria: c.validationCriteria,
         enabled: c.enabled,
       })),
+    // Setup Types (Stage 3) — mandatory/weight are the EFFECTIVE values (scenario
+    // override ?? the checklist item's own), frozen here so a later edit to
+    // either the Setup Type or the underlying checklist item can never retroactively
+    // change what a historical trade was validated against.
+    setupTypes: s.setupTypes.map((st) => ({
+      name: st.name,
+      description: st.description,
+      scenarios: st.scenarios.map((sc) => ({
+        direction: sc.direction,
+        description: sc.description,
+        conditions: sc.conditions.map((c) => ({
+          checklistItemId: c.checklistItemId,
+          name: c.checklistItem.name,
+          directionApplicability: c.checklistItem.directionApplicability,
+          mandatory: c.mandatoryOverride ?? c.checklistItem.mandatory,
+          weight: c.weightOverride ?? c.checklistItem.weight,
+          sortOrder: c.sortOrder,
+        })),
+      })),
+    })),
   };
 }
 
@@ -518,6 +555,14 @@ export async function getStrategyReference(userId: string, id: string) {
           },
         },
       },
+      // Trade Idea Validation Shield (Stage 4) — just enough to populate the
+      // trade form's Setup Type picker; its scenario/conditions are loaded
+      // live (getEffectiveScenario) only once a Setup Type is actually picked.
+      setupTypes: {
+        where: { deletedAt: null },
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, name: true },
+      },
     },
   });
   if (!s) return null;
@@ -567,6 +612,7 @@ export async function getStrategyReference(userId: string, id: string) {
           })),
         }
       : null,
+    setupTypes: s.setupTypes.map((t) => ({ id: t.id, name: t.name })),
   };
 }
 

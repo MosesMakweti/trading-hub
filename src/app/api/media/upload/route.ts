@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { MediaOwnerType } from "@prisma/client";
 
+import { prisma } from "@/server/db";
 import { auth } from "@/server/auth";
 import { utcDateToKey } from "@/lib/date";
 import { getTrade } from "@/server/services/trades.service";
@@ -28,6 +29,7 @@ const OWNER_TYPES: MediaOwnerType[] = [
   "STRATEGY_FRAMEWORK_STEP",
   "ARSENAL_CONCEPT",
   "PROP_FIRM_MILESTONE",
+  "DAILY_ASSET_ANALYSIS",
 ];
 
 // Certificates/confirmation evidence accept PDFs too; every other owner type
@@ -67,8 +69,15 @@ export async function POST(request: Request) {
   const category = typeof rawCategory === "string" && rawCategory.length > 0 ? rawCategory : null;
   const rawCaption = form.get("caption");
   const caption = typeof rawCaption === "string" && rawCaption.length > 0 ? rawCaption : null;
+  const rawTimeframe = form.get("timeframe");
+  const timeframe = typeof rawTimeframe === "string" && rawTimeframe.length > 0 ? rawTimeframe : null;
 
   if (!OWNER_TYPES.includes(ownerType) || !ownerId) return bad("Invalid target.");
+  // Chart timeframe is required for asset-analysis screenshots so it's always
+  // available historically — never left to be guessed later.
+  if (ownerType === "DAILY_ASSET_ANALYSIS" && !timeframe) {
+    return bad("A timeframe is required for a chart-analysis screenshot.");
+  }
 
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
   if (files.length === 0) return bad("No files provided.");
@@ -99,6 +108,23 @@ export async function POST(request: Request) {
     }
   }
 
+  // Same rule for an asset analysis on an archived day — resolve its
+  // TradingDay's date and gate through the same day-editable check.
+  if (ownerType === "DAILY_ASSET_ANALYSIS") {
+    const analysis = await prisma.dailyAssetAnalysis.findFirst({
+      where: { id: ownerId, userId },
+      select: { tradingDay: { select: { date: true } } },
+    });
+    if (analysis) {
+      try {
+        await assertDayEditable(userId, utcDateToKey(analysis.tradingDay.date));
+      } catch (e) {
+        if (e instanceof DayArchivedError) return bad(e.message, 403);
+        throw e;
+      }
+    }
+  }
+
   const accepted = acceptedMimeFor(ownerType);
   const created: MediaItemDTO[] = [];
   for (const file of files) {
@@ -119,6 +145,7 @@ export async function POST(request: Request) {
           mimeType: file.type,
           fileSize: file.size,
           caption,
+          timeframe,
         }),
       );
     } catch (e) {

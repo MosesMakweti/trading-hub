@@ -5,6 +5,10 @@ import { createTrade, updateTrade } from "@/server/services/trades.service";
 import { createPropFirmAccount, createUserPropFirm } from "@/server/services/prop-firms.service";
 import { getAccountLedger } from "@/server/services/account-ledger.service";
 import { upsertExecution } from "@/server/services/trade-executions.service";
+import {
+  createOrGetDailyAssetAnalysis,
+  updateDailyAssetAnalysis,
+} from "@/server/services/daily-asset-analysis.service";
 import type { TradeInput } from "@/lib/validation/trades";
 
 /** Real integration tests against the dev Postgres DB — same pattern as
@@ -113,5 +117,42 @@ describe("updateTrade never wipes a trade's Prop Firms account executions (regre
     ledger = await getAccountLedger(userId, accountId);
     expect(ledger.some((e) => e.eventType === "TRADE_PNL")).toBe(true);
     expect(ledger.find((e) => e.eventType === "TRADE_PNL")?.amount.toNumber()).toBe(2_000);
+  });
+});
+
+describe("dailyBiasSnapshot — frozen at trade creation (Stage 4/11)", () => {
+  // Cleanup batched into afterAll (same pattern as the describe block above) —
+  // a Trade's allocation → Performance Account FK makes per-test cleanup via
+  // user.deleteMany order-sensitive; batching at the end avoids that entirely
+  // for this file's own users without affecting the assertions themselves.
+  const userIds: string[] = [];
+  afterAll(async () => {
+    await cleanupUsers(...userIds);
+  });
+
+  it("freezes the asset's DailyAssetAnalysis.finalBias at first entry, unaffected by a later change to that analysis", async () => {
+    const user = await makeUser("bias-freeze");
+    userIds.push(user.id);
+
+    const dateKey = "2026-07-02";
+    const analysis = await createOrGetDailyAssetAnalysis(user.id, dateKey, "XAUUSD");
+    await updateDailyAssetAnalysis(user.id, analysis.id, { finalBias: "LONG" });
+
+    const trade = await createTrade(user.id, dateKey, minimalTradeInput({ assetSymbol: "XAUUSD" }));
+    expect(trade.dailyBiasSnapshot).toBe("LONG");
+
+    // The analysis changes its mind after the trade was created — the
+    // trade's frozen snapshot must not move with it.
+    await updateDailyAssetAnalysis(user.id, analysis.id, { finalBias: "SHORT" });
+    const reloaded = await prisma.trade.findUniqueOrThrow({ where: { id: trade.id } });
+    expect(reloaded.dailyBiasSnapshot).toBe("LONG");
+  });
+
+  it("is null when the asset has no analysis for that day", async () => {
+    const user = await makeUser("bias-freeze-none");
+    userIds.push(user.id);
+
+    const trade = await createTrade(user.id, "2026-07-03", minimalTradeInput({ assetSymbol: "GBPUSD" }));
+    expect(trade.dailyBiasSnapshot).toBeNull();
   });
 });

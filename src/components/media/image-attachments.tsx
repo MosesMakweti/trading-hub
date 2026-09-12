@@ -24,6 +24,7 @@ import type { MediaItemDTO } from "@/server/services/media.service";
 import type { MediaOwnerType } from "@prisma/client";
 
 const DEFAULT_MAX = 12;
+const DEFAULT_TIMEFRAMES = ["Monthly", "Weekly", "Daily", "4H", "1H", "15M", "5M", "1M"];
 const isPdf = (mimeType: string) => mimeType === "application/pdf";
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
@@ -56,6 +57,8 @@ export function ImageAttachments({
   uploadsEnabled: uploadsEnabledProp,
   className,
   acceptDocuments = false,
+  requireTimeframe = false,
+  timeframeOptions = DEFAULT_TIMEFRAMES,
 }: {
   ownerType: MediaOwnerType;
   ownerId: string;
@@ -69,6 +72,11 @@ export function ImageAttachments({
   className?: string;
   /** Accept PDFs alongside images (certificates/evidence). Default image-only. */
   acceptDocuments?: boolean;
+  /** Chart-analysis screenshots (DAILY_ASSET_ANALYSIS): shows a timeframe
+   *  picker above the dropzone and tags every upload in the next batch with
+   *  it, plus a small badge on each thumbnail. */
+  requireTimeframe?: boolean;
+  timeframeOptions?: string[];
 }) {
   const acceptedMime = acceptDocuments ? ACCEPTED_DOCUMENT_MIME : ACCEPTED_IMAGE_MIME;
   const acceptedSet = new Set<string>(acceptedMime);
@@ -82,6 +90,7 @@ export function ImageAttachments({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [timeframe, setTimeframe] = useState<string>(timeframeOptions[0] ?? "");
 
   // Self-fetch on mount unless the caller supplied `initial`.
   useEffect(() => {
@@ -110,6 +119,7 @@ export function ImageAttachments({
       form.set("ownerType", ownerType);
       form.set("ownerId", ownerId);
       if (category) form.set("category", category);
+      if (requireTimeframe && timeframe) form.set("timeframe", timeframe);
       for (const file of files) form.append("files", file);
 
       const xhr = new XMLHttpRequest();
@@ -243,6 +253,11 @@ export function ImageAttachments({
                   </>
                 )}
               </button>
+              {img.timeframe && (
+                <span className="pointer-events-none absolute bottom-1 left-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                  {img.timeframe}
+                </span>
+              )}
               {canManage && (
                 <Button
                   type="button"
@@ -256,6 +271,30 @@ export function ImageAttachments({
                 </Button>
               )}
             </div>
+          ))}
+        </div>
+      )}
+
+      {/* Timeframe picker for chart-analysis screenshots — applies to the
+          NEXT uploaded batch; already-uploaded images keep their own. */}
+      {requireTimeframe && canManage && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">Timeframe:</span>
+          {timeframeOptions.map((tf) => (
+            <button
+              key={tf}
+              type="button"
+              onClick={() => setTimeframe(tf)}
+              aria-pressed={timeframe === tf}
+              className={cn(
+                "rounded-md border px-2 py-0.5 text-xs transition-colors",
+                timeframe === tf
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-background/50 text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {tf}
+            </button>
           ))}
         </div>
       )}

@@ -152,7 +152,7 @@ export interface RBucket {
   count: number;
 }
 
-const R_BUCKETS: Omit<RBucket, "count">[] = [
+export const R_BUCKETS: Omit<RBucket, "count">[] = [
   { label: "≤ −3R", min: -Infinity, max: -3 },
   { label: "−3…−2R", min: -3, max: -2 },
   { label: "−2…−1R", min: -2, max: -1 },

@@ -9,7 +9,7 @@ import { SquareArrowOutUpRight, Target, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { minutesToTimeString } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
-import { Tag, colorForName } from "@/components/ui/tag";
+import { Tag, TAG_STYLES, colorForName } from "@/components/ui/tag";
 import { TradeQualityBadge } from "@/components/journal/adherence-score";
 import { RatingBadge } from "@/components/journal/setup-score-card";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,32 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { archiveTrade } from "@/actions/trades.actions";
 import { GRADE_VARIANT } from "@/lib/grade-variant";
 import { parseSymbol, formatTargetPrice } from "@/domain/trade-plan/instrument-catalog";
+import { PRE_TRADE_MOOD_TAG_LABELS, type PreTradeMoodTagValue } from "@/domain/psychology/pre-trade-mood";
 import type { TradeListItemDTO, TradeDiscrepancyDTO } from "@/types/trades";
+
+const LIFECYCLE_LABEL: Record<string, string> = {
+  FULLY_CLOSED: "Fully closed",
+  PARTIALLY_CLOSED: "Partially closed",
+  STILL_HOLDING: "Still holding",
+  CANCELLED_NEVER_TRIGGERED: "Cancelled",
+};
+const LIFECYCLE_CLASS: Record<string, string> = {
+  FULLY_CLOSED: "border-border bg-muted/40 text-muted-foreground",
+  PARTIALLY_CLOSED: "border-warning/30 bg-warning/10 text-warning",
+  STILL_HOLDING: "border-primary/30 bg-primary/10 text-primary",
+  // Deliberately neutral, never red/danger — a cancelled idea is not a loss.
+  CANCELLED_NEVER_TRIGGERED: "border-border bg-muted/40 text-muted-foreground",
+};
+const VALIDATION_LABEL: Record<string, string> = {
+  VALIDATED: "Validated",
+  OVERRIDDEN: "Overridden",
+  NOT_VALIDATED: "Not validated",
+};
+const VALIDATION_CLASS: Record<string, string> = {
+  VALIDATED: "border-success/30 bg-success/10 text-success",
+  OVERRIDDEN: "border-danger/30 bg-danger/10 text-danger",
+  NOT_VALIDATED: "border-warning/30 bg-warning/10 text-warning",
+};
 
 // Per-trade discrepancy badge (Counterfactual model): clean = neutral/positive,
 // avoidable leakage = danger, a breach with no measurable R = warning.
@@ -62,7 +87,8 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
     <div className="glass space-y-3 rounded-2xl p-4">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground tabular-nums">#{trade.tradeNumber}</span>
             <span className="font-semibold">{trade.assetSymbol}</span>
             <Badge variant={trade.direction === "LONG" ? "success" : "danger"}>
               {trade.direction === "LONG" ? "Long" : "Short"}
@@ -70,43 +96,74 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
             <span className="text-xs text-muted-foreground">
               {minutesToTimeString(trade.executionMinutes)}
             </span>
+            {trade.reviewLifecycleStatus && (
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                  LIFECYCLE_CLASS[trade.reviewLifecycleStatus],
+                )}
+              >
+                {LIFECYCLE_LABEL[trade.reviewLifecycleStatus]}
+              </span>
+            )}
+            {trade.validationState && (
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                  VALIDATION_CLASS[trade.validationState],
+                )}
+              >
+                {VALIDATION_LABEL[trade.validationState]}
+              </span>
+            )}
           </div>
           <p className="text-xs text-muted-foreground">
             {trade.higherTimeframeBias === "BULLISH" ? "Bullish" : "Bearish"} bias ·{" "}
             {trade.biasConfidencePercent}% confidence
           </p>
-          {trade.strategyName &&
-            (trade.strategyId ? (
-              <Link
-                href={`/strategy-lab/${trade.strategyId}`}
-                className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
-              >
-                <Target className="size-3" />
-                {trade.strategyName}
-              </Link>
-            ) : (
-              <span className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
-                <Target className="size-3" />
-                {trade.strategyName}
-              </span>
-            ))}
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            {trade.strategyName &&
+              (trade.strategyId ? (
+                <Link
+                  href={`/strategy-lab/${trade.strategyId}`}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  <Target className="size-3" />
+                  {trade.strategyName}
+                </Link>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <Target className="size-3" />
+                  {trade.strategyName}
+                </span>
+              ))}
+            {trade.setupTypeName && (
+              <span className="text-xs text-muted-foreground">Setup: {trade.setupTypeName}</span>
+            )}
+          </div>
         </div>
         <div className="text-right">
-          <div className="text-xs text-muted-foreground">Expected / Actual RR</div>
-          <div className="font-medium">
-            {trade.expectedRR != null ? `${trade.expectedRR.toFixed(2)}R` : "—"} /{" "}
-            <span
-              className={cn(
-                trade.actualRR == null
-                  ? "text-muted-foreground"
-                  : trade.actualRR >= 0
-                    ? "text-success"
-                    : "text-danger",
-              )}
-            >
-              {trade.actualRR == null ? "Open" : percent(trade.actualRR)}
-            </span>
-          </div>
+          {trade.reviewLifecycleStatus === "CANCELLED_NEVER_TRIGGERED" ? (
+            <div className="font-medium text-muted-foreground">Never triggered</div>
+          ) : (
+            <>
+              <div className="text-xs text-muted-foreground">Expected / Actual RR</div>
+              <div className="font-medium">
+                {trade.expectedRR != null ? `${trade.expectedRR.toFixed(2)}R` : "—"} /{" "}
+                <span
+                  className={cn(
+                    trade.actualRR == null
+                      ? "text-muted-foreground"
+                      : trade.actualRR >= 0
+                        ? "text-success"
+                        : "text-danger",
+                  )}
+                >
+                  {trade.actualRR == null ? "Open" : percent(trade.actualRR)}
+                </span>
+              </div>
+            </>
+          )}
           {trade.psychology && (
             <div className="mt-1 flex items-center justify-end gap-1.5">
               <Badge variant={GRADE_VARIANT[trade.psychology.grade]}>
@@ -134,6 +191,31 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
           </div>
         ))}
       </div>
+
+      {(trade.preTradeMoodTags.length > 0 || trade.behaviourLabels.length > 0) && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {trade.preTradeMoodTags.map((tag) => (
+            <span
+              key={`mood-${tag}`}
+              className="rounded-full border border-border bg-background/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+            >
+              {PRE_TRADE_MOOD_TAG_LABELS[tag as PreTradeMoodTagValue] ?? tag}
+            </span>
+          ))}
+          {trade.behaviourLabels.map((label) => {
+            const s = TAG_STYLES[label.color];
+            return (
+              <span
+                key={`behaviour-${label.name}`}
+                className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium", s.chip)}
+              >
+                <span className={cn("size-1 shrink-0 rounded-full", s.dot)} />
+                {label.name}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       {(trade.entryModelName != null ||
         trade.confluenceLabels.length > 0 ||

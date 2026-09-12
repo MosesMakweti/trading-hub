@@ -42,6 +42,7 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     sessionColor,
     higherTimeframeBias: trade.higherTimeframeBias,
     biasConfidencePercent: trade.biasConfidencePercent,
+    dailyBiasSnapshot: trade.dailyBiasSnapshot as TradeWorkspaceDTO["dailyBiasSnapshot"],
     expectedRR: trade.expectedRR ? trade.expectedRR.toNumber() : null,
     actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
     targets: trade.plannedTargets.map((pt) => ({
@@ -91,6 +92,7 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     whatWentWell: trade.whatWentWell,
     whatWentWrong: trade.whatWentWrong,
     whatSurprisedMe: trade.whatSurprisedMe,
+    whatCouldImprove: trade.whatCouldImprove,
     wouldTakeAgain: trade.wouldTakeAgain,
     tradeIntent: trade.tradeIntent,
     psychology: trade.psychology
@@ -104,6 +106,11 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
       (trade.psychology?.answers as Record<string, string | number> | undefined) ?? {},
     adherenceAnswers: (trade.adherenceAnswers as Record<string, boolean> | null) ?? {},
     adherencePercent: trade.adherencePercent,
+    reviewLifecycleStatus: trade.reviewLifecycleStatus,
+    cancellationReason: trade.cancellationReason,
+    preTradeMoodTags: trade.preTradeMoodTags,
+    preTradeMoodIntensity: trade.preTradeMoodIntensity,
+    preTradeMoodNote: trade.preTradeMoodNote,
     status: trade.status,
     createdAt: trade.createdAt.toISOString(),
     updatedAt: trade.updatedAt.toISOString(),

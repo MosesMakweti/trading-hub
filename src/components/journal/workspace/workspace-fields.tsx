@@ -30,6 +30,7 @@ type NoteField = Extract<
   | "whatWentWell"
   | "whatWentWrong"
   | "whatSurprisedMe"
+  | "whatCouldImprove"
 >;
 
 type PriceField = Extract<

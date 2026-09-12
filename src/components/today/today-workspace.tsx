@@ -8,12 +8,13 @@ import {
   BarChart3,
   BookOpenCheck,
   CandlestickChart,
-  ClipboardList,
+  Compass,
   FlagOff,
   Lightbulb,
   ListChecks,
   Loader2,
   Lock,
+  NotebookText,
   Sun,
   Zap,
 } from "lucide-react";
@@ -21,7 +22,8 @@ import {
 import { formatDateKeyLong } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { endDay, reopenDay } from "@/actions/today.actions";
+import { reopenDay } from "@/actions/today.actions";
+import { CloseDayDialog } from "@/components/today/close-day-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/shared/empty-state";
 import {
@@ -29,7 +31,7 @@ import {
   type DayRoutineDTO,
 } from "@/components/today/pre-session-routine-section";
 import { allMandatoryComplete } from "@/domain/today/routine-snapshot";
-import { TodaysPlanSection } from "@/components/today/todays-plan-section";
+import { DailyMarketPlanSection } from "@/components/today/daily-market-plan-section";
 import { DailyAnalyticsSection } from "@/components/today/daily-analytics-section";
 import { TodayTradeBar } from "@/components/today/today-trade-bar";
 import { AddTradeDialog } from "@/components/today/add-trade-dialog";
@@ -45,7 +47,12 @@ import {
   type WorkflowStep,
 } from "@/components/dashboard/workflow-progress";
 import type { WorkflowStepKey, WorkflowStepStatus } from "@/domain/today/workflow";
-import type { DailyAnalyticsDTO, TodaysPlanDTO, TradingDayDTO } from "@/types/today";
+import type {
+  DailyAnalyticsDTO,
+  DailyAssetAnalysisDTO,
+  TodaysPlanDTO,
+  TradingDayDTO,
+} from "@/types/today";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
 
@@ -54,7 +61,7 @@ import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-fi
 const ROUTINE_TAB = "pre-session-routine";
 const SECTIONS: { value: string; label: string; icon: LucideIcon }[] = [
   { value: ROUTINE_TAB, label: "Pre-Session Routine", icon: ListChecks },
-  { value: "todays-plan", label: "Today's Plan", icon: ClipboardList },
+  { value: "daily-market-plan", label: "Daily Market Plan", icon: NotebookText },
   { value: "trade-idea", label: "Trade Idea", icon: Lightbulb },
   { value: "trade-execution", label: "Trade Execution", icon: Zap },
   { value: "trade-review", label: "Trade Review", icon: BookOpenCheck },
@@ -73,6 +80,7 @@ export function TodayWorkspace({
   tradeFormAccounts,
   tradeFormStrategies,
   opportunities,
+  dailyAssetAnalyses,
   linkableTrades,
 }: {
   day: TradingDayDTO;
@@ -91,6 +99,7 @@ export function TodayWorkspace({
   // Opportunities (spotted setups / Discrepancy Gap) — surfaced in the Trade
   // Idea tab so missed setups get logged without leaving Today.
   opportunities: OpportunityListItemDTO[];
+  dailyAssetAnalyses: DailyAssetAnalysisDTO[];
   linkableTrades: LinkableTrade[];
 }) {
   const router = useRouter();
@@ -124,14 +133,14 @@ export function TodayWorkspace({
 
   const isArchived = day.status === "ARCHIVED";
   const [archiving, startArchive] = useTransition();
-  function toggleArchive() {
+  function reopen() {
     startArchive(async () => {
-      const result = isArchived ? await reopenDay(day.dateKey) : await endDay(day.dateKey);
+      const result = await reopenDay(day.dateKey);
       if (!result.success) {
         toast.error(result.error);
         return;
       }
-      toast.success(isArchived ? "Day reopened." : "Day ended — archived to your journal.");
+      toast.success("Day reopened.");
       router.refresh();
     });
   }
@@ -148,8 +157,6 @@ export function TodayWorkspace({
           todayKey={day.dateKey}
           accounts={tradeFormAccounts}
           strategies={tradeFormStrategies}
-          planBias={todaysPlan.bias}
-          planConviction={todaysPlan.conviction}
         />
         {focusedTrade ? (
           // key = tradeId: remount the whole section when the focused trade
@@ -162,6 +169,12 @@ export function TodayWorkspace({
                 trade={focusedTrade}
                 propFirmAccounts={propFirmAccounts}
                 executions={executionsByTradeId[focusedTrade.id] ?? []}
+                dailyMarketContext={
+                  (() => {
+                    const a = dailyAssetAnalyses.find((x) => x.assetSymbol === focusedTrade.assetSymbol);
+                    return a ? { finalBias: a.finalBias, evidenceSummary: a.evidenceSummary } : null;
+                  })()
+                }
               />
             ) : section === "execution" ? (
               <TradeExecutionSection trade={focusedTrade} />
@@ -169,6 +182,21 @@ export function TodayWorkspace({
               <TradeReviewSection trade={focusedTrade} />
             )}
           </div>
+        ) : section === "idea" && dailyAssetAnalyses.length > 0 ? (
+          // Analysis is done and there's nothing to do until the market presents
+          // a setup — a presentational state only (no workflow-state column).
+          <EmptyState
+            icon={Compass}
+            title="Waiting for setup"
+            description="Your asset analysis is complete. There's nothing to do until the market presents one of your setups — add a trade idea the moment it does."
+            action={
+              <AddTradeDialog
+                dateKey={day.dateKey}
+                accounts={tradeFormAccounts}
+                strategies={tradeFormStrategies}
+              />
+            }
+          />
         ) : (
           <EmptyState
             icon={CandlestickChart}
@@ -179,8 +207,6 @@ export function TodayWorkspace({
                 dateKey={day.dateKey}
                 accounts={tradeFormAccounts}
                 strategies={tradeFormStrategies}
-                planBias={todaysPlan.bias}
-                planConviction={todaysPlan.conviction}
               />
             }
           />
@@ -220,23 +246,14 @@ export function TodayWorkspace({
           <Badge variant={isArchived ? "secondary" : "success"}>
             {isArchived ? "Archived" : "Active"}
           </Badge>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={toggleArchive}
-            disabled={archiving}
-          >
-            {archiving ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : isArchived ? (
-              <FlagOff className="size-3.5" />
-            ) : (
-              <Lock className="size-3.5" />
-            )}
-            {isArchived ? "Reopen day" : "End day"}
-          </Button>
+          {isArchived ? (
+            <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={reopen} disabled={archiving}>
+              {archiving ? <Loader2 className="size-3.5 animate-spin" /> : <FlagOff className="size-3.5" />}
+              Reopen day
+            </Button>
+          ) : (
+            <CloseDayDialog dateKey={day.dateKey} />
+          )}
         </div>
       </div>
 
@@ -271,14 +288,15 @@ export function TodayWorkspace({
                 routine={routine}
                 onReadyChange={(ready) => {
                   setOptimisticReady(ready);
-                  if (ready) advanceTo("todays-plan");
+                  if (ready) advanceTo("daily-market-plan");
                   else setActiveTab(ROUTINE_TAB);
                 }}
               />
-            ) : s.value === "todays-plan" ? (
-              <TodaysPlanSection
+            ) : s.value === "daily-market-plan" ? (
+              <DailyMarketPlanSection
                 dateKey={day.dateKey}
                 plan={todaysPlan}
+                analyses={dailyAssetAnalyses}
                 onComplete={() => advanceTo("trade-idea")}
               />
             ) : s.value === "trade-idea" ? (

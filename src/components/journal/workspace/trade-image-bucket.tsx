@@ -7,19 +7,26 @@ import { ImageAttachments } from "@/components/media/image-attachments";
  * A single-category image bucket for a trade, wired into the workspace's
  * editable context so it follows the same read-only rule as the inline fields
  * (an archived day disables upload/delete; uploads are also blocked server-side).
- * Before-Trade images live in the Trade Idea section, After-Trade in Execution —
- * they never mix, because each bucket is scoped to its own category.
+ * Before-Trade images live in the Trade Idea section, After-Trade in Trade
+ * Review (Stage 7 §6) — they never mix, because each bucket is scoped to its
+ * own category.
  */
 export function TradeImageBucket({
   tradeId,
   category,
   label,
   max = 8,
+  requireTimeframe = false,
 }: {
   tradeId: string;
   category: "BEFORE" | "AFTER";
   label: string;
   max?: number;
+  /** After-Trade only (Stage 7 §6) — reuses Stage 2's generic timeframe
+   *  picker so the trader can optionally label what chart timeframe a
+   *  screenshot shows. Not enforced server-side for TRADE (unlike
+   *  DAILY_ASSET_ANALYSIS) — purely an optional label here. */
+  requireTimeframe?: boolean;
 }) {
   const editable = useWorkspaceEditable();
   return (
@@ -30,6 +37,7 @@ export function TradeImageBucket({
       label={label}
       max={max}
       disabled={!editable}
+      requireTimeframe={requireTimeframe}
     />
   );
 }

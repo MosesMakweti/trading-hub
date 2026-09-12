@@ -5,19 +5,19 @@ import type { WeekProps, WeekdaysProps } from "react-day-picker";
 
 import { cn } from "@/lib/utils";
 import { localDateToKey } from "@/lib/date";
-import { formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
+import { deriveDayResultState } from "@/domain/trades/day-result-state";
+import { formatRR, formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
 
-interface DailyPnl {
-  pnl: number;
-  percent: number;
-  tradeCount: number;
+interface DailyPerformance {
+  executedTradeCount: number;
+  totalRealizedR: number;
+  totalPnl: number;
 }
 
-// A week's background tint scales with how big the week was (in % return, so
-// it's comparable across weeks/accounts without needing the account balance):
-// ±GRADIENT_CAP_PERCENT or beyond reaches full intensity, smaller weeks fade
-// toward transparent — a gradient, not a flat win/loss color.
-const GRADIENT_CAP_PERCENT = 3;
+// A week's background tint scales with how big the week's realized R was:
+// ±GRADIENT_CAP_R or beyond reaches full intensity, smaller weeks fade toward
+// transparent — a gradient, not a flat win/loss color.
+const GRADIENT_CAP_R = 3;
 const MIN_ALPHA = 8;
 const MAX_ALPHA = 60;
 
@@ -42,24 +42,24 @@ export function JournalWeekRow({
   week,
   children,
   className,
-  dailyPnl,
+  dailyPerformance,
   ...props
-}: WeekProps & { dailyPnl: Map<string, DailyPnl> }) {
-  let total = 0;
-  let percent = 0;
+}: WeekProps & { dailyPerformance: Map<string, DailyPerformance> }) {
+  let totalR = 0;
+  let totalPnl = 0;
   let tradeCount = 0;
   for (const day of week.days) {
-    const entry = dailyPnl.get(localDateToKey(day.date));
+    const entry = dailyPerformance.get(localDateToKey(day.date));
     if (!entry) continue;
-    total += entry.pnl;
-    percent += entry.percent;
-    tradeCount += entry.tradeCount;
+    totalR += entry.totalRealizedR;
+    totalPnl += entry.totalPnl;
+    tradeCount += entry.executedTradeCount;
   }
-  const hasTrades = tradeCount > 0;
-  const tone = !hasTrades ? "muted" : total > 0 ? "success" : total < 0 ? "danger" : "muted";
+  const state = deriveDayResultState(tradeCount, totalR);
+  const tone = state === "WIN" ? "success" : state === "LOSS" ? "danger" : "muted";
 
-  // Gradient background: only win/loss weeks get a tint, scaled by |percent|.
-  const intensity = Math.min(Math.abs(percent) / GRADIENT_CAP_PERCENT, 1);
+  // Gradient background: only win/loss weeks get a tint, scaled by |R|.
+  const intensity = Math.min(Math.abs(totalR) / GRADIENT_CAP_R, 1);
   const alpha = MIN_ALPHA + intensity * (MAX_ALPHA - MIN_ALPHA);
   const bgStyle: CSSProperties | undefined =
     tone === "success" || tone === "danger"
@@ -75,7 +75,7 @@ export function JournalWeekRow({
           WEEK_COL,
           "flex flex-col items-center justify-center gap-0.5 border-l border-foreground/10 px-1 text-center transition-colors",
         )}
-        aria-label={hasTrades ? `Week total: ${formatSignedCurrency(total)}` : "Week total: no trades"}
+        aria-label={tradeCount > 0 ? `Week total: ${formatRR(totalR)}, ${formatSignedCurrency(totalPnl)}` : "Week total: no trades"}
       >
         <span className="text-[9px] leading-none tracking-wide text-muted-foreground uppercase">Week</span>
         <span
@@ -86,8 +86,13 @@ export function JournalWeekRow({
             tone === "muted" && "text-muted-foreground",
           )}
         >
-          {hasTrades ? formatSignedCurrency(total) : "—"}
+          {tradeCount > 0 ? formatRR(totalR) : "—"}
         </span>
+        {tradeCount > 0 && (
+          <span className="text-[9px] leading-none text-muted-foreground/70 tabular-nums">
+            {formatSignedCurrency(totalPnl)}
+          </span>
+        )}
       </td>
     </tr>
   );

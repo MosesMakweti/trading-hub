@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 
 const SECTIONS = [
   { id: "section-overview", label: "Overview" },
-  { id: "section-equity", label: "Equity" },
+  { id: "section-performance-curve", label: "Performance" },
+  { id: "section-account-equity", label: "Account Equity" },
   { id: "section-discrepancy", label: "Discrepancy" },
   { id: "section-strategy", label: "Strategy" },
   { id: "section-adherence", label: "Adherence" },

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
-import { dayEditableGuard } from "@/actions/day-guard";
+import { dayEditableGuard, tradeExecutionEditableGuard } from "@/actions/day-guard";
 import { tradeSchema, tradeWorkspaceSectionSchema } from "@/lib/validation/trades";
 import * as tradesService from "@/server/services/trades.service";
 import { getStrategyReference } from "@/server/services/strategies.service";
@@ -76,7 +76,7 @@ export async function updateTradeSection(
   input: unknown,
 ): Promise<SimpleResult> {
   const user = await requireUser();
-  const blocked = await dayEditableGuard(user.id, dateKey);
+  const blocked = await tradeExecutionEditableGuard(user.id, dateKey, tradeId);
   if (blocked) return blocked;
 
   const parsed = tradeWorkspaceSectionSchema.safeParse(input);

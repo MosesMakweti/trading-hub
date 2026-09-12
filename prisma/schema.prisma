@@ -24,18 +24,22 @@ model User {
   accounts Account[]
   sessions Session[]
 
-  tradingAccounts        TradingAccount[]
-  dailyNotes             DailyNote[]
-  tradingDays            TradingDay[]
-  weeklyReviews          WeeklyReview[]
-  trades                 Trade[]
-  opportunities          TradeOpportunity[]
-  strategies             Strategy[]
-  routineSections        RoutineSection[]
-  routineItems           RoutineItem[]
-  strategySessions       StrategySession[]
-  strategyChecklistItems StrategyChecklistItem[]
-  mediaAssets            MediaAsset[]
+  tradingAccounts          TradingAccount[]
+  dailyNotes               DailyNote[]
+  tradingDays              TradingDay[]
+  dailyAssetAnalyses       DailyAssetAnalysis[]
+  directionalEvidenceItems DirectionalEvidenceItem[]
+  weeklyReviews            WeeklyReview[]
+  trades                   Trade[]
+  opportunities            TradeOpportunity[]
+  strategies               Strategy[]
+  routineSections          RoutineSection[]
+  routineItems             RoutineItem[]
+  strategySessions         StrategySession[]
+  strategyChecklistItems   StrategyChecklistItem[]
+  strategySetupTypes       StrategySetupType[]
+  mediaAssets              MediaAsset[]
+  behaviourLabels          BehaviourLabel[]
 
   userPropFirms            UserPropFirm[]
   propFirmAccounts         PropFirmAccount[]
@@ -116,20 +120,152 @@ model TradingDay {
   routineSnapshot Json?
   routineReadyAt  DateTime?
 
-  // Today's Trading Plan (P4). Day intentions: higher-timeframe bias
-  // (BULLISH/BEARISH/NEUTRAL) + 1–5 conviction, key levels / areas of interest
-  // (Tiptap JSON), and the day's intended risk budget (% — defaults from the
-  // plan's daily limit). (Watchlist focus was dropped with the global Asset list.)
+  // ── LEGACY (Stage 11 Daily Market Plan refinement) ──────────────────────
+  // `bias`/`conviction`/`keyLevels` were a day-level "Today's Plan" HTF bias +
+  // areas-of-interest, which duplicated DailyAssetAnalysis's per-asset
+  // htfBias/finalBias/keyLevels — a day-level HTF bias doesn't make sense once
+  // every asset can have its own read, and it invited contradictory data (e.g.
+  // day BULLISH vs one asset's htfBias BEARISH). The new Daily Market Plan no
+  // longer writes these three columns; DailyAssetAnalysis is now the single
+  // source for bias and areas of interest. Columns are kept, never dropped or
+  // migrated into DailyAssetAnalysis rows (that would fabricate per-asset
+  // history the trader never actually recorded) — historical days that used
+  // them still read back correctly via the Journal's legacy fallback.
+  // Likewise `watchlist` no longer drives "Today's Assets" (see
+  // DailyAssetAnalysis below, which is now directly the source of truth for
+  // which assets are being analyzed today) — kept only for old days' history.
   bias              String?
   conviction        Int?
   keyLevels         Json?
   riskBudgetPercent Decimal? @db.Decimal(6, 2)
+  watchlist         String[] @default([])
+
+  // Daily Outlook / Daily Market Plan — General Session Context (day-level,
+  // asset-independent): free-form focus for the session, sessions in play,
+  // and conditions worth noting going in vs. conditions that should keep the
+  // trader flat.
+  lookingFor          Json?
+  activeSessions      String[] @default([])
+  importantConditions Json?
+  stayOutConditions   Json?
+
+  // Risk / Boundaries — riskBudgetPercent (above) already covers the % risk
+  // limit; maxTradesPerDay adds the trade-count limit alongside it.
+  maxTradesPerDay Int?
+
+  // News & Fundamentals. newsNotes is deliberately free-text for now — a later
+  // stage may introduce a structured per-event model (event/time/currency/
+  // impact/affected assets) without needing to migrate this field, since it's
+  // additive. dailyFundamentalOutlook is a GENERAL macro/fundamental note for
+  // the day — intentionally NOT a single bullish/neutral/bearish bias, since
+  // different assets can carry different fundamental views (that per-asset
+  // bias belongs to DailyAssetAnalysis, a later stage).
+  newsAcknowledged        Boolean @default(false)
+  newsNotes               Json?
+  dailyFundamentalOutlook Json?
+
+  // Close Trading Day (Stage 8) — a short end-of-session reflection, plain
+  // text like Trade's own review prompts (whatWentWell etc.) rather than
+  // Tiptap JSON, deliberately kept concise and autosave-friendly. Saved
+  // independently of the archive step itself (closeTradingDay persists
+  // these, then reconciles trade lifecycle, then reuses endDay — see
+  // close-day.service.ts), so a reflection survives even if the trader
+  // never actually clicks through to closing.
+  dayWentWell     String?
+  dayToImprove    String?
+  dayMainLesson   String?
+  dayCarryForward String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  dailyAssetAnalyses DailyAssetAnalysis[]
+
   @@unique([userId, date])
   @@index([userId, status])
+}
+
+// Today ↔ Journal refinement (Stage 2; Stage 11 Daily Market Plan
+// consolidation) — one analysis per asset per trading day, and — since Stage
+// 11 — the SINGLE source of truth for "Today's Assets" (selecting an asset
+// for today IS creating/opening its row here; there is no separate watchlist
+// driving this anymore) and for that asset's areas of interest / bias. Bias
+// philosophy: htfBias/sessionBias/fundamentalBias (BULLISH/BEARISH/NEUTRAL —
+// a plain validated String rather than a DB enum, so a future bias vocabulary
+// change never needs a migration) are three INDEPENDENT reads the trader is
+// never forced to reconcile; finalBias (LONG/SHORT/NEUTRAL — a different
+// vocabulary, since it's a trading decision, not a market read) is never
+// derived from them, though the OPTIONAL directionalEvidenceItems below may
+// *suggest* one (see domain/today/directional-evidence.ts) — the trader can
+// still disagree. fundamentalBias/fundamentalNotes here are THIS asset's own
+// view — deliberately separate from TradingDay.dailyFundamentalOutlook, which
+// stays a general, day-level macro note the trader is never forced to make
+// asset-specific. keyLevels is this asset's Areas of Interest — the ONE place
+// they live (Stage 11 retired the day-level TradingDay.keyLevels duplicate).
+// Screenshots attach via the universal media system (MediaAttachment.ownerType
+// = DAILY_ASSET_ANALYSIS, ownerId = this row's id), each carrying its own
+// `timeframe`. Soft-deleted, never hard-deleted, so a closed historical day's
+// analyses are permanent; cascades only if its parent TradingDay ever did (it
+// doesn't — a day is archived, never deleted).
+model DailyAssetAnalysis {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradingDayId String
+  tradingDay   TradingDay @relation(fields: [tradingDayId], references: [id], onDelete: Cascade)
+
+  assetSymbol String
+
+  marketStructure Json? // rich text
+
+  htfBias          String? // BULLISH | BEARISH | NEUTRAL
+  sessionBias      String? // BULLISH | BEARISH | NEUTRAL
+  fundamentalBias  String? // BULLISH | BEARISH | NEUTRAL — asset-specific, independent of the day's general outlook
+  fundamentalNotes Json? // rich text — asset-specific fundamental evidence (e.g. USD strength, yields, geopolitical risk)
+
+  finalBias String? // LONG | SHORT | NEUTRAL — the trader's conclusion; may be informed by the evidence below, never derived from it
+
+  notes     Json?
+  keyLevels Json? // Areas of Interest — support/resistance/supply/demand/liquidity/highs-lows/FVG/session levels/custom, free-form by design
+
+  directionalEvidenceItems DirectionalEvidenceItem[]
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([tradingDayId, assetSymbol])
+  @@index([userId, tradingDayId, deletedAt, sortOrder])
+}
+
+// Stage 11 — OPTIONAL, per-asset bullish/bearish evidence checklist backing
+// the Daily Market Plan's suggested-bias feature (domain/today/
+// directional-evidence.ts computes the summary; this table only stores the
+// trader's own trader-defined items, never a fixed methodology). Entirely
+// separate from Strategy Lab's setup-validation checklist architecture — this
+// represents "what's my market thesis today", not "is this specific setup
+// valid" (Stage 4). Hard-deleted on removal (no soft-delete): these are fast,
+// disposable day-prep checkmarks, not historical trade data; `finalBias`
+// above and, once a trade exists, `Trade.dailyBiasSnapshot` remain the
+// durable historical record.
+model DirectionalEvidenceItem {
+  id                   String             @id @default(cuid())
+  userId               String
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dailyAssetAnalysisId String
+  dailyAssetAnalysis   DailyAssetAnalysis @relation(fields: [dailyAssetAnalysisId], references: [id], onDelete: Cascade)
+
+  label     String
+  direction String // BULLISH | BEARISH
+  checked   Boolean @default(true)
+  note      String?
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dailyAssetAnalysisId, sortOrder])
 }
 
 enum AccountKind {
@@ -362,13 +498,42 @@ enum MediaOwnerType {
   // Prop Firms module (see AccountMilestone) — certificates/evidence attached
   // to a milestone (payout proof, pass certificate, breach screenshot, …).
   PROP_FIRM_MILESTONE
+  // Today ↔ Journal refinement (Stage 2) — chart-analysis screenshots attached
+  // to a DailyAssetAnalysis. Always carries MediaAttachment.timeframe.
+  DAILY_ASSET_ANALYSIS
+}
+
+// ── Trade Idea Validation Shield (Stage 4) ──────────────────────────────────
+// NOT_VALIDATED = the selected Setup Type scenario's mandatory conditions are
+// not (yet) all confirmed. VALIDATED = every eligible mandatory condition is
+// checked — computed authoritatively server-side, never trusted from the
+// client. OVERRIDDEN = the trader knowingly took the trade anyway, with a
+// required reason (Trade.overrideReason/overrideNote). Null on Trade = no
+// Setup Type was selected for this trade (the legacy flat-confluence flow),
+// not a fourth state.
+enum TradeValidationState {
+  NOT_VALIDATED
+  VALIDATED
+  OVERRIDDEN
+}
+
+// Fast-pick reasons for taking a trade whose Setup Type scenario didn't fully
+// validate (spec: "not to police the trader... to create data showing
+// whether overrides help or hurt performance"). OTHER requires Trade.overrideNote.
+enum TradeValidationOverrideReason {
+  ANTICIPATING_CONFIRMATION
+  DISCRETIONARY_OVERRIDE
+  FOMO
+  MOMENTUM_FAST_MARKET
+  NEWS_DRIVEN
+  OTHER
 }
 
 model Trade {
-  id                       String       @id @default(cuid())
+  id                       String                      @id @default(cuid())
   userId                   String
-  user                     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tradeDate                DateTime     @db.Date
+  user                     User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeDate                DateTime                    @db.Date
   executionMinutes         Int
   direction                Direction
   higherTimeframeBias      Bias
@@ -377,19 +542,30 @@ model Trade {
   // in sync from the TradingView Trade Plan's confirmed weighted planned R
   // (savePlan in trade-plan.service.ts) once that plan is confirmed; null
   // until then ("not planned yet", never a misleading 0R placeholder).
-  expectedRR               Decimal?     @db.Decimal(8, 2)
-  actualRR                 Decimal?     @db.Decimal(8, 2)
+  expectedRR               Decimal?                    @db.Decimal(8, 2)
+  actualRR                 Decimal?                    @db.Decimal(8, 2)
   psychPreTradeMindset     String?
   psychPostTradeReflection String?
   psychLessonsLearned      String?
   psychWhatToWorkOn        String?
+  // Pre-Trade Mood Snapshot (Stage 5) — a fast, moment-in-time emotional
+  // check deliberately separate from the deep Post-Trade Honest Questionnaire
+  // above/psychology.service.ts's scored PsychologyQuestionnaireResponse:
+  // multi-select tags + 1-5 intensity + an optional short note, meant to be
+  // filled in seconds while a setup is still developing. Plain mutable scalar
+  // columns (like the psych* free text above) — no freeze/versioning, since
+  // this is a quick check-in the trader may reasonably revisit while a
+  // pending order hasn't triggered yet, not a locked historical artifact.
+  preTradeMoodTags         PreTradeMoodTag[]           @default([])
+  preTradeMoodIntensity    Int? // 1-5
+  preTradeMoodNote         String?
   // Trade Workspace case-file fields (Phase 2) — all nullable, edited inline
   // in the workspace sections; the /edit form leaves them untouched. Prices
   // use Decimal(18,8) for FX/crypto precision. wouldTakeAgain is tri-state
   // (null = not answered yet).
-  plannedEntry             Decimal?     @db.Decimal(18, 8)
-  plannedStopLoss          Decimal?     @db.Decimal(18, 8)
-  plannedTarget            Decimal?     @db.Decimal(18, 8)
+  plannedEntry             Decimal?                    @db.Decimal(18, 8)
+  plannedStopLoss          Decimal?                    @db.Decimal(18, 8)
+  plannedTarget            Decimal?                    @db.Decimal(18, 8)
   // TradingView Screenshot Trade Plan — chart timeframe of the plan (e.g. "15m").
   // Sits alongside the plannedEntry/StopLoss/Target trio above; kept as a plain
   // string (not an enum) since TradingView's own timeframe labels vary by asset
@@ -398,18 +574,23 @@ model Trade {
   marketContext            String?
   areasOfInterest          String?
   reasonForTrade           String?
-  actualEntry              Decimal?     @db.Decimal(18, 8)
-  actualExit               Decimal?     @db.Decimal(18, 8)
+  actualEntry              Decimal?                    @db.Decimal(18, 8)
+  actualExit               Decimal?                    @db.Decimal(18, 8)
   // The stop actually in place at execution, entered explicitly by the
   // trader — never inferred from actualExit (checkpoint 2 §4: "do not infer
   // an actual stop from the final exit unless the execution explicitly
   // confirms it was a stop-loss exit"). Null = not recorded, which the
   // comparison service must report as missing data, not guess at.
-  actualStopLoss           Decimal?     @db.Decimal(18, 8)
+  actualStopLoss           Decimal?                    @db.Decimal(18, 8)
   executionNotes           String?
   whatWentWell             String?
   whatWentWrong            String?
   whatSurprisedMe          String?
+  // Trade Review overhaul (Stage 7) — "What could I have done better?",
+  // deliberately distinct from whatSurprisedMe (a market-behavior surprise,
+  // not a self-improvement prompt) and from whatWentWell/whatWentWrong
+  // (reused as-is for "What did I do right?"/"What did I do wrong?").
+  whatCouldImprove         String?
   wouldTakeAgain           Boolean?
   // Behavioral intent tag for the Counterfactual (Discrepancy Gap) engine. Null on
   // historical rows → the engine infers behavior from other signals. FOMO/REVENGE/
@@ -421,13 +602,28 @@ model Trade {
   // executionMinutes), and updatedAt is the last edit.
   closedAt                 DateTime?
   reviewedAt               DateTime?
+  // Trade Review overhaul (Stage 7) — the trader's own answer to "what's the
+  // current state of this trade?", set at the start of Trade Review. Null =
+  // not yet reviewed. Deliberately a SEPARATE axis from `status`
+  // (OPEN/CLOSED/REVIEWED, above) rather than a replacement for it: `status`
+  // is the workflow stage (has a result been recorded / has it been
+  // reflected on) derived from closedAt/reviewedAt, while this describes the
+  // POSITION's real-world state — a still-holding or partially-closed trade
+  // can be OPEN *and* already have a `reviewLifecycleStatus`, mid-review,
+  // without forcing a premature win/loss or a fake "done" status.
+  // CANCELLED_NEVER_TRIGGERED never gets a computed realized R/PnL — it's
+  // gated the same way as everywhere else, on `actualEntry` staying null.
+  reviewLifecycleStatus    TradeReviewLifecycleStatus?
+  // Free text, only meaningful when reviewLifecycleStatus is
+  // CANCELLED_NEVER_TRIGGERED (e.g. "news event, invalidated before trigger").
+  cancellationReason       String?
   // Strategy Lab reference + historical snapshots (Phase 4). strategyId is a live
   // reference (SetNull on strategy delete so the trade survives); the *Snapshot
   // columns freeze the strategy's name/version and the entry-model names at save
   // time, so a completed trade always shows the strategy as it was when taken,
   // even after the strategy is versioned, renamed, or deleted.
   strategyId               String?
-  strategy                 Strategy?    @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  strategy                 Strategy?                   @relation(fields: [strategyId], references: [id], onDelete: SetNull)
   strategyNameSnapshot     String?
   strategyVersionSnapshot  Int?
   // Phase 5 (polish extras). tradeNumber is a stable, per-user monotonic counter
@@ -437,7 +633,7 @@ model Trade {
   // strategy-adherence self-scoring: answers as a {key: bool} Json map, plus the
   // denormalized percent computed by the pure scorer.
   tradeNumber              Int?
-  status                   TradeStatus  @default(OPEN)
+  status                   TradeStatus                 @default(OPEN)
   adherenceAnswers         Json?
   adherencePercent         Float?
 
@@ -469,6 +665,45 @@ model Trade {
   setupValid         Boolean?
   missingConfluences Json?
 
+  // ── Trade Idea Validation Shield (Stage 4) — additive, entirely separate
+  // from the weighted setupScore/setupValid above. That engine scores THIS
+  // TRADE against the WHOLE strategy checklist (a discipline/probability
+  // measure); this one gates a narrower, optional question — "does this
+  // specific Setup Type's scenario say this is really one of my setups?" —
+  // scoped to a Setup Type's curated conditions only. Both can be present on
+  // the same trade at once; neither replaces the other. Null setupTypeId =
+  // the trader didn't use a Setup Type for this trade (legacy flow, exactly
+  // as before). setupScenarioId is resolved server-side from
+  // (setupTypeId, direction): LONG -> BULLISH, SHORT -> BEARISH — never
+  // submitted directly, so it can't drift from the trade's own direction.
+  setupTypeId             String?
+  setupType               StrategySetupType?             @relation(fields: [setupTypeId], references: [id], onDelete: SetNull)
+  setupScenarioId         String?
+  setupScenario           StrategySetupScenario?         @relation(fields: [setupScenarioId], references: [id], onDelete: SetNull)
+  // The checklistItemIds the trader checked in the live validation checklist —
+  // owned entirely by this trade (never shared with another Trade, the
+  // Strategy Lab definition, or another trading day/user — see StrategyLab's
+  // StrategySetupScenarioCondition, which this only ever references by id).
+  selectedSetupConditions Json?
+  // Frozen at the moment of validation/override (see domain/trades/setup-validation.ts):
+  // the resolved scenario's conditions with their effective mandatory/weight,
+  // each one's checked state, the mandatory-gate result, the score, and the
+  // final validationState — a self-contained historical record a later
+  // Strategy Lab edit to the Setup Type can never alter. Recomputed on every
+  // save UNTIL the trade has an actualEntry (spec: "before the trade has been
+  // finalized/entered... may recompute"), then frozen forever, exactly like
+  // performanceRiskPercentOverride's lock (see buildAllocations).
+  setupValidationSnapshot Json?
+  validationState         TradeValidationState?
+  overrideReason          TradeValidationOverrideReason?
+  overrideNote            String?
+  // Contextual only (Stage 4 §10) — DailyAssetAnalysis.finalBias for this
+  // trade's asset/day, frozen at the same time as the setup validation
+  // snapshot above so later analytics (Stage 5) can ask "did this trade align
+  // with the day's bias?" without re-joining live TradingDay data. Never
+  // blocks the trade; null when no analysis existed for that asset/day.
+  dailyBiasSnapshot       String?
+
   // Trade Opportunity architecture: the valid setup this executed trade came from
   // (when logged via the opportunity flow). Optional — trades logged directly have
   // no opportunity. @unique enforces one executed trade per opportunity (no
@@ -493,10 +728,13 @@ model Trade {
   planVersions            TradePlanVersion[]
   actualPartialExits      TradeActualPartialExit[]
   performanceRiskSnapshot PerformanceRiskSnapshot?
+  // Trade Review overhaul (Stage 7) — see BehaviourLabel below.
+  behaviourLabels         TradeBehaviourLabel[]
 
   @@unique([userId, tradeNumber])
   @@index([userId, tradeDate])
   @@index([userId, status])
+  @@index([userId, reviewLifecycleStatus])
 }
 
 enum TradeStatus {
@@ -515,6 +753,35 @@ enum TradeIntent {
   BOREDOM
   IMPULSE
   MANUAL_OVERRIDE
+}
+
+// Pre-Trade Mood Snapshot (Stage 5) — a closed vocabulary so it stays easy to
+// aggregate later (spec: "FOMO-tagged trades expectancy vs Calm-tagged
+// trades expectancy"). Multi-select on Trade.preTradeMoodTags; distinct from
+// TradeIntent (a single behavioral tag on the executed trade, not a felt
+// emotion) and from the scored Post-Trade Honest Questionnaire.
+enum PreTradeMoodTag {
+  CALM
+  FOCUSED
+  CONFIDENT
+  PATIENT
+  HESITANT
+  FEARFUL
+  IMPATIENT
+  EXCITED
+  FOMO
+  FRUSTRATED
+  REVENGE_MINDED
+}
+
+// Trade Review overhaul (Stage 7) — the trader's own answer to "what's the
+// current state of this trade?" at review time. See Trade.reviewLifecycleStatus
+// for how this coexists with the existing TradeStatus workflow enum.
+enum TradeReviewLifecycleStatus {
+  FULLY_CLOSED
+  PARTIALLY_CLOSED
+  STILL_HOLDING
+  CANCELLED_NEVER_TRIGGERED
 }
 
 // ── Trade Opportunity architecture ───────────────────────────────────────────
@@ -833,6 +1100,13 @@ model MediaAttachment {
   ownerType MediaOwnerType
   ownerId   String
   category  String?
+  // Chart timeframe for a DAILY_ASSET_ANALYSIS screenshot (e.g. "Daily", "4H",
+  // "15M") — null for every other owner type. Kept as a generic optional column
+  // on the shared table rather than a new per-feature image model, same as
+  // `category`/`caption` above; required (enforced in the upload route, not the
+  // schema) whenever ownerType = DAILY_ASSET_ANALYSIS so it's always available
+  // historically.
+  timeframe String?
   caption   String?
   sortOrder Int            @default(0)
   createdAt DateTime       @default(now())
@@ -958,6 +1232,7 @@ model Strategy {
   tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (1:1 + partial TPs, custom rules)
   sessions        StrategySession[] // Section — Trading Sessions (SOT refactor)
   checklistItems  StrategyChecklistItem[] // Sections — Confluences + Execution Confirmations (SOT)
+  setupTypes      StrategySetupType[] // Section — Setup Types (Today ↔ Journal refinement, Stage 3)
   // Journal link: a trade references a strategy (not a copy). onDelete: SetNull
   // on the Trade side keeps completed trades (with their snapshots) intact.
   trades          Trade[]
@@ -1154,17 +1429,17 @@ model StrategyChecklistItem {
   strategyId String
   strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
 
-  kind               StrategyChecklistKind
-  name               String
-  color              TagColor              @default(GRAY)
-  icon               String? // optional lucide icon name
-  category           String?
-  description        String?
-  weight             Int? // probability weight (0-100) used by the weighted setup-scoring engine
+  kind                   StrategyChecklistKind
+  name                   String
+  color                  TagColor              @default(GRAY)
+  icon                   String? // optional lucide icon name
+  category               String?
+  description            String?
+  weight                 Int? // probability weight (0-100) used by the weighted setup-scoring engine
   // CONFLUENCE only: which trade direction this confluence is eligible for.
   // Filters BEFORE scoring so bull-only weights never enter a long denominator
   // (and vice-versa). Always BOTH for EXECUTION items and for pre-existing rows.
-  directionApplicability ConfluenceDirection @default(BOTH)
+  directionApplicability ConfluenceDirection   @default(BOTH)
   // Optional organizational link between opposite versions of the same condition
   // (e.g. "Bullish MSB" / "Bearish MSB" share a pairId). Display-only — never a
   // substitute for `directionApplicability`, and pairing is not required.
@@ -1173,16 +1448,111 @@ model StrategyChecklistItem {
   // setup missing any mandatory confluence is "Invalid Setup". Optional items only
   // add to the weighted probability score. validationCriteria is the objective test
   // for "is this confluence actually present?".
-  mandatory          Boolean               @default(false)
-  validationCriteria String?
-  enabled            Boolean               @default(true)
+  mandatory              Boolean               @default(false)
+  validationCriteria     String?
+  enabled                Boolean               @default(true)
 
   sortOrder Int       @default(0)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  setupScenarioConditions StrategySetupScenarioCondition[]
+
   @@index([userId, strategyId, kind, sortOrder])
+}
+
+// ── Setup Types (Today ↔ Journal refinement, Stage 3) ────────────────────────
+// A Setup Type is a named, recognizable setup structure (e.g. "Type A") that
+// curates a SCOPED subset of the strategy's own StrategyChecklistItem catalog
+// into a Bullish and a Bearish scenario, rather than the trader re-picking from
+// the full flat confluence list every time. Deliberately additive and NEVER
+// duplicates a checklist item's name/weight — StrategySetupScenarioCondition
+// only ever REFERENCES an existing StrategyChecklistItem, with optional
+// per-scenario overrides. A strategy with no Setup Types works exactly as
+// before (Stage 4's fallback path); this is an optional lens on top of the
+// existing flat confluence/scoring engine, never a replacement for it.
+model StrategySetupType {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategyId String
+  strategy   Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  scenarios StrategySetupScenario[]
+  // Trade Idea Validation Shield (Stage 4) — trades whose idea was validated
+  // against this Setup Type. SetNull so deleting the Setup Type never deletes
+  // a trade; its frozen setupValidationSnapshot survives regardless.
+  trades    Trade[]
+
+  // Case-sensitive defense-in-depth; the service also enforces a
+  // case-insensitive duplicate-name check for a friendlier error message.
+  @@unique([strategyId, name])
+  @@index([strategyId, deletedAt, sortOrder])
+}
+
+enum SetupScenarioDirection {
+  BULLISH
+  BEARISH
+}
+
+// Exactly one BULLISH and one BEARISH scenario per Setup Type — both rows are
+// always created together (see strategy-setup-types.service.ts), so "the
+// trader doesn't trade this side" is expressed as a scenario with zero
+// conditions, never a missing scenario. No soft delete: a scenario's lifetime
+// is its parent Setup Type's.
+model StrategySetupScenario {
+  id          String                 @id @default(cuid())
+  setupTypeId String
+  setupType   StrategySetupType      @relation(fields: [setupTypeId], references: [id], onDelete: Cascade)
+  direction   SetupScenarioDirection
+
+  description String? // optional short notes for this scenario
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conditions StrategySetupScenarioCondition[]
+  // Trade Idea Validation Shield (Stage 4) — see StrategySetupType.trades.
+  trades     Trade[]
+
+  @@unique([setupTypeId, direction])
+  @@index([setupTypeId])
+}
+
+// One curated confluence/execution item within a scenario. References an
+// existing StrategyChecklistItem by id (never a copy) — mandatoryOverride/
+// weightOverride are null by default, meaning "inherit the checklist item's
+// own mandatory/weight"; a non-null override applies ONLY within this
+// scenario, and removing this row never touches the underlying checklist
+// item. No soft delete: removing a condition from a Setup Type is a plain
+// delete of this join row, not a data-loss event for the strategy.
+model StrategySetupScenarioCondition {
+  id         String                @id @default(cuid())
+  scenarioId String
+  scenario   StrategySetupScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  checklistItemId String
+  checklistItem   StrategyChecklistItem @relation(fields: [checklistItemId], references: [id], onDelete: Cascade)
+
+  mandatoryOverride Boolean? // null = inherit checklistItem.mandatory
+  weightOverride    Int? // null = inherit checklistItem.weight
+
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scenarioId, checklistItemId])
+  @@index([scenarioId, sortOrder])
+  @@index([checklistItemId])
 }
 
 // Strategy Lab — Trading Sessions owned by a strategy (colored). Replaces the global
@@ -2093,6 +2463,65 @@ model TradeActualPartialExit {
   @@index([plannedTargetId])
 }
 
+// ── Behaviour Labels (Trade Review overhaul, Stage 7) ────────────────────────
+// A reusable, per-user catalog of trader-behaviour tags — deliberately NOT
+// strategy-specific (they describe conduct across the whole system, not one
+// strategy's rules) and NOT the same thing as TradeIntent (a single
+// Counterfactual-engine classification) or a Setup Type confluence. Seeded
+// with sensible defaults per user on first use (see behaviour-labels.service.ts
+// listBehaviourLabels — same lazy-per-user pattern as getOrCreatePerformanceAccount),
+// then freely extended with custom labels. Soft-deleted like every other
+// user-owned catalog in this schema (StrategyChecklistItem, RoutineItem, …).
+enum BehaviourLabelPolarity {
+  POSITIVE
+  NEGATIVE
+}
+
+model BehaviourLabel {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  polarity  BehaviourLabelPolarity
+  color     TagColor               @default(GRAY)
+  // True for the seeded starter set (informational only — a trader may edit
+  // or archive a default label exactly like a custom one).
+  isDefault Boolean                @default(false)
+
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  trades TradeBehaviourLabel[]
+
+  // Case-sensitive defense-in-depth; the service also enforces a
+  // case-insensitive duplicate-name check (mirrors StrategySetupType).
+  @@unique([userId, name])
+  @@index([userId, deletedAt, polarity, sortOrder])
+}
+
+// Join row (Trade <-> BehaviourLabel, many-to-many). A plain presence marker —
+// no per-pair fields needed today, but kept explicit (like every other join
+// table in this schema, e.g. StrategySetupScenarioCondition) rather than an
+// implicit Prisma m:n, so it stays a first-class, directly queryable row for
+// later pattern-recognition analytics (Stage 7 §10: "expectancy when FOMO is
+// tagged", "override + behaviour-label combinations", …).
+model TradeBehaviourLabel {
+  id               String         @id @default(cuid())
+  tradeId          String
+  trade            Trade          @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  behaviourLabelId String
+  behaviourLabel   BehaviourLabel @relation(fields: [behaviourLabelId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([tradeId, behaviourLabelId])
+  @@index([tradeId])
+  @@index([behaviourLabelId])
+}
+
 // ── Prop Firm CSV Import (Phase 1: Generic CSV, MT4, MT5) ───────────────────
 // Entirely separate from the Journal / global Trade model. Imported data only
 // ever creates PropFirmImportedExecution/PropFirmImportedTrade/
@@ -2159,16 +2588,16 @@ model PropFirmImportBatch {
   accountId String
   account   PropFirmAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
-  platform      PropFirmImportPlatform
-  fileFormat    PropFirmImportFileFormat
-  fileName      String
-  fileSizeBytes Int
+  platform         PropFirmImportPlatform
+  fileFormat       PropFirmImportFileFormat
+  fileName         String
+  fileSizeBytes    Int
   // Browser-reported MIME type of the upload (may be empty/generic) + the
   // worksheet / HTML table / statement section the rows were taken from —
   // both kept for audit.
   sourceMimeType   String?
   sheetOrTableName String?
-  timezone      String // IANA zone, user-confirmed before parsing
+  timezone         String // IANA zone, user-confirmed before parsing
 
   status PropFirmImportBatchStatus @default(CONFIRMED)
 

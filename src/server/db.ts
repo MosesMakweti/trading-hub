@@ -18,9 +18,12 @@ const SOFT_DELETE_MODELS = new Set([
   "PartialTakeProfit",
   "TradeManagementRule",
   "TradeOpportunity",
+  "DailyAssetAnalysis",
+  "StrategySetupType",
   "UserPropFirm",
   "PropFirmAccount",
   "TradeAccountExecution",
+  "BehaviourLabel",
 ]);
 
 function withSoftDelete(client: PrismaClient) {

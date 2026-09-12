@@ -7,15 +7,13 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { localDateToKey } from "@/lib/date";
-import { calendarColorForPercent } from "@/domain/performance/rr";
+import { deriveDayResultState } from "@/domain/trades/day-result-state";
+import { formatRR } from "@/components/journal/workspace/workspace-ui";
 
-interface DailyPnl {
-  percent: number;
-  tradeCount: number;
-}
-
-function formatPercent(n: number) {
-  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
+interface DailyPerformance {
+  executedTradeCount: number;
+  cancelledCount: number;
+  totalRealizedR: number;
 }
 
 export function JournalDayButton({
@@ -23,17 +21,17 @@ export function JournalDayButton({
   modifiers,
   className,
   noteDates,
-  dailyPnl,
+  dailyPerformance,
   ...props
 }: ComponentProps<typeof DayButton> & {
   noteDates: Set<string>;
-  dailyPnl: Map<string, DailyPnl>;
+  dailyPerformance: Map<string, DailyPerformance>;
 }) {
   const router = useRouter();
   const dateKey = localDateToKey(day.date);
   const hasNote = noteDates.has(dateKey);
-  const pnl = dailyPnl.get(dateKey);
-  const color = pnl ? calendarColorForPercent(pnl.percent, pnl.tradeCount) : "gray";
+  const entry = dailyPerformance.get(dateKey);
+  const state = entry ? deriveDayResultState(entry.executedTradeCount, entry.totalRealizedR) : "NONE";
 
   return (
     <Button
@@ -43,30 +41,35 @@ export function JournalDayButton({
         "relative flex aspect-square size-auto w-full flex-col items-center justify-center gap-0.5 border border-foreground/10 font-normal transition-colors hover:border-foreground/25",
         modifiers.today && "ring-1 ring-inset ring-primary/50",
         modifiers.outside && "text-muted-foreground opacity-40",
-        color === "green" && "bg-success/10 hover:bg-success/15",
-        color === "red" && "bg-danger/10 hover:bg-danger/15",
+        state === "WIN" && "bg-success/10 hover:bg-success/15",
+        state === "LOSS" && "bg-danger/10 hover:bg-danger/15",
         className,
       )}
       onClick={() => router.push(`/journal/${dateKey}`)}
       {...props}
     >
       <span className="text-sm tabular-nums">{day.date.getDate()}</span>
-      {pnl && pnl.tradeCount > 0 && (
+      {entry && entry.executedTradeCount > 0 && (
         <>
           <span
             className={cn(
               "text-[10px] font-semibold leading-none tabular-nums",
-              color === "green" && "text-success",
-              color === "red" && "text-danger",
-              color === "gray" && "text-muted-foreground",
+              state === "WIN" && "text-success",
+              state === "LOSS" && "text-danger",
+              state === "BREAKEVEN" && "text-muted-foreground",
             )}
           >
-            {formatPercent(pnl.percent)}
+            {formatRR(entry.totalRealizedR)}
           </span>
           <span className="text-[9px] leading-none text-muted-foreground">
-            {pnl.tradeCount} trade{pnl.tradeCount === 1 ? "" : "s"}
+            {entry.executedTradeCount} trade{entry.executedTradeCount === 1 ? "" : "s"}
           </span>
         </>
+      )}
+      {entry && entry.cancelledCount > 0 && (
+        <span className="text-[8px] leading-none text-muted-foreground/60">
+          {entry.cancelledCount} cancelled
+        </span>
       )}
       {hasNote && <span className="absolute top-1.5 right-1.5 size-1 rounded-full bg-primary" />}
     </Button>

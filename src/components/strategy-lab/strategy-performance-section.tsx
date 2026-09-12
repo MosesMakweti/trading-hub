@@ -3,10 +3,11 @@ import { LineChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { StrategyPerformanceSummary } from "@/domain/performance/strategy-performance";
 
-function pct(n: number | null, signed = false) {
-  if (n == null) return "—";
-  const s = signed && n >= 0 ? "+" : "";
-  return `${s}${n.toFixed(2)}%`;
+function pct(n: number | null) {
+  return n == null ? "—" : `${n.toFixed(0)}%`;
+}
+function rr(n: number | null) {
+  return n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
 }
 
 function Stat({
@@ -38,9 +39,9 @@ function Stat({
 }
 
 /**
- * Per-strategy performance (Future integration). Every number is derived from the
- * Performance Account contribution %, exactly like the global analytics, but over
- * only the trades linked to this strategy.
+ * Per-strategy performance. Stage 10.5: every R number here comes from the
+ * canonical, R-primary dataset (`toStrategyPerformanceSummary`) — a real
+ * R-multiple, not the legacy Performance Account contribution %.
  */
 export function StrategyPerformanceSection({
   performance,
@@ -69,8 +70,8 @@ export function StrategyPerformanceSection({
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         Across <span className="font-medium text-foreground">{p.totalTrades}</span> trade
-        {p.totalTrades === 1 ? "" : "s"} taken under this strategy. Returns are normalized as each
-        trade&apos;s contribution to the Performance Account.
+        {p.totalTrades === 1 ? "" : "s"} taken under this strategy. R is each trade&apos;s realized
+        R-multiple.
       </p>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -79,16 +80,16 @@ export function StrategyPerformanceSection({
           value={pct(p.winRate)}
           sub={`${p.winningTrades}W · ${p.losingTrades}L`}
         />
-        <Stat label="Avg / trade" value={pct(p.averageRR, true)} tone={returnTone(p.averageRR)} />
-        <Stat label="Total return" value={pct(p.totalRR, true)} tone={returnTone(p.totalRR)} />
+        <Stat label="Avg R / trade" value={rr(p.averageRR)} tone={returnTone(p.averageRR)} />
+        <Stat label="Total realized R" value={rr(p.totalRR)} tone={returnTone(p.totalRR)} />
         <Stat
           label="Profit factor"
           value={p.profitFactor == null ? "—" : p.profitFactor.toFixed(2)}
           tone={p.profitFactor == null ? undefined : p.profitFactor >= 1 ? "success" : "danger"}
         />
-        <Stat label="Expectancy" value={pct(p.expectancy, true)} tone={returnTone(p.expectancy)} />
-        <Stat label="Best trade" value={pct(p.bestRR, true)} tone={returnTone(p.bestRR)} />
-        <Stat label="Worst trade" value={pct(p.worstRR, true)} tone={returnTone(p.worstRR)} />
+        <Stat label="Expectancy" value={rr(p.expectancy)} tone={returnTone(p.expectancy)} />
+        <Stat label="Best trade" value={rr(p.bestRR)} tone={returnTone(p.bestRR)} />
+        <Stat label="Worst trade" value={rr(p.worstRR)} tone={returnTone(p.worstRR)} />
         <Stat
           label="Streaks"
           value={`${p.longestWinStreak}W`}

@@ -27,6 +27,9 @@ import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 import { scoreSetup } from "@/domain/trades/setup-score";
 import { PsychologyQuestionnaire } from "@/components/journal/psychology-questionnaire";
 import { StrategyReferencePanel } from "@/components/journal/strategy-reference-panel";
+import { TradeSetupValidationSection, DailyBiasBadge } from "@/components/journal/trade-setup-validation";
+import { PreTradeMood } from "@/components/journal/pre-trade-mood";
+import { PendingBeforeScreenshots, uploadPendingBeforeScreenshots } from "@/components/journal/pending-before-screenshot";
 import { minutesToTimeString, timeStringToMinutes } from "@/lib/date";
 import { tradeSchema, type TradeFormValues, type TradeInput } from "@/lib/validation/trades";
 import { createTrade, updateTrade, loadStrategyReference } from "@/actions/trades.actions";
@@ -127,6 +130,13 @@ const emptyDefaults: TradeFormValues = {
   selectedExecution: [],
   selectedEntryModel: null,
   psychologyAnswers: {},
+  setupTypeId: null,
+  selectedSetupConditions: [],
+  setupOverrideReason: null,
+  setupOverrideNote: null,
+  preTradeMoodTags: [],
+  preTradeMoodIntensity: null,
+  preTradeMoodNote: null,
 };
 
 interface TradeFormProps {
@@ -153,6 +163,16 @@ interface TradeFormProps {
   // starts aligned with what the trader decided this morning (create only).
   initialBias?: "BULLISH" | "BEARISH";
   initialBiasConfidence?: number;
+  // Stage 6 — Today's live "Add Trade Idea" dialog passes false to declutter
+  // fast, in-the-moment decision-making: the Performance Account risk
+  // override and the Other Participating Accounts picker are both account-
+  // allocation UI, not part of "is this my setup + how am I executing it."
+  // Hidden, NOT removed — the automatic Performance Account allocation still
+  // happens server-side either way (buildAllocations in trades.service.ts
+  // always creates it, using the account's configured default risk% when no
+  // override is given), and every other TradeForm caller (the standalone
+  // /journal/[date]/trades/new and .../edit pages) keeps the full UI.
+  showAccountAllocation?: boolean;
 }
 
 export function TradeForm({
@@ -168,6 +188,7 @@ export function TradeForm({
   onCancel,
   initialBias,
   initialBiasConfidence,
+  showAccountAllocation = true,
 }: TradeFormProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -263,6 +284,10 @@ export function TradeForm({
   const [planStopLoss, setPlanStopLoss] = useState("");
   const [planTargets, setPlanTargets] = useState<PlanTargetRow[]>([emptyPlanTarget(1)]);
 
+  // Before-Trade screenshots (Stage 5) — create-time fast path only; staged
+  // locally until the trade actually exists (see pending-before-screenshot.tsx).
+  const [pendingScreenshots, setPendingScreenshots] = useState<File[]>([]);
+
   const planSpec = parseSymbol(watchedAsset || "").spec;
   const planEntryNum = planEntry.trim() === "" ? null : Number(planEntry);
   const planStopNum = planStopLoss.trim() === "" ? null : Number(planStopLoss);
@@ -338,7 +363,8 @@ export function TradeForm({
 
   // When the strategy changes, clear the entry model — a model belongs to exactly
   // one strategy, so the previous selection can't carry over. Skip the very first
-  // run so an edit-mode trade keeps its saved entry model on load.
+  // run so an edit-mode trade keeps its saved entry model on load. Same for the
+  // Setup Type (Stage 4) — it belongs to exactly one strategy too.
   const strategyInitialised = useRef(false);
   useEffect(() => {
     if (!strategyInitialised.current) {
@@ -346,6 +372,10 @@ export function TradeForm({
       return;
     }
     setValue("selectedEntryModel", null);
+    setValue("setupTypeId", null);
+    setValue("selectedSetupConditions", []);
+    setValue("setupOverrideReason", null);
+    setValue("setupOverrideNote", null);
   }, [selectedStrategyId, setValue]);
 
   // When the trader flips direction, drop any selected confluences that no longer
@@ -440,6 +470,16 @@ export function TradeForm({
       });
       if (!planResult.success) {
         toast.error(`Trade saved, but the plan couldn't be saved: ${planResult.error}`);
+      }
+    }
+
+    // Before-Trade screenshots (Stage 5) — same "collect now, persist once
+    // the trade exists" deferral as the plan above. A failed upload must
+    // never fail the trade save that already succeeded.
+    if (mode === "create" && pendingScreenshots.length > 0) {
+      const uploadError = await uploadPendingBeforeScreenshots(result.tradeId, pendingScreenshots);
+      if (uploadError) {
+        toast.error(`Trade saved, but the screenshot couldn't be uploaded: ${uploadError}`);
       }
     }
 
@@ -656,10 +696,18 @@ export function TradeForm({
           </div>
         </div>
 
+        <DailyBiasBadge control={control} dateKey={dateKey} />
+
         {(referenceLoading || strategyReference) && (
           <StrategyReferencePanel reference={strategyReference} loading={referenceLoading} />
         )}
       </section>
+
+      <TradeSetupValidationSection
+        control={control}
+        setValue={setValue}
+        setupTypes={strategyReference?.setupTypes ?? []}
+      />
 
       <section className="glass space-y-2 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Entry Model</h2>
@@ -851,9 +899,11 @@ export function TradeForm({
 
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground">
             <span>
-              Weighted planned R:{" "}
+              Planned Realized R:{" "}
               <span className="font-medium text-foreground">
-                {planWeighted.weightedR != null ? `${planWeighted.weightedR.toFixed(2)}R` : "—"}
+                {planWeighted.weightedR != null
+                  ? `${planWeighted.weightedR.greaterThanOrEqualTo(0) ? "+" : ""}${planWeighted.weightedR.toFixed(2)}R`
+                  : "—"}
               </span>
             </span>
             <span>
@@ -886,71 +936,81 @@ export function TradeForm({
         </section>
       )}
 
+      {mode === "create" && (
+        <PendingBeforeScreenshots files={pendingScreenshots} onChange={setPendingScreenshots} />
+      )}
+
+      <PreTradeMood control={control} />
+
       {/* Phase 2 — Trade Execution: what actually happened. */}
       <div className="space-y-1 pt-2">
         <h1 className="text-base font-semibold tracking-tight">Trade Execution</h1>
         <p className="text-xs text-muted-foreground">What I actually did.</p>
       </div>
 
-      <section className="glass space-y-3 rounded-2xl p-4">
-        <h2 className="text-sm font-medium text-muted-foreground">Performance Account — Risk</h2>
-        <p className="text-xs text-muted-foreground">
-          {performanceRiskLocked
-            ? "This trade already has an actual entry, so its risk is locked and its PnL is now calculated automatically from the realized result — this override can no longer change it."
-            : "Optional override of the account's default risk% for this trade only. Leave blank to use the configured default. PnL is calculated automatically from the realized result once the trade closes — never entered manually."}
-        </p>
-        <div className="max-w-[12rem] space-y-1.5">
-          <Label className="text-xs">Risk override (%)</Label>
-          <Input
-            type="number"
-            step="0.01"
-            min="0"
-            disabled={performanceRiskLocked}
-            placeholder="Account default"
-            {...register("performanceRiskPercentOverride")}
-          />
-        </div>
-      </section>
-
-      <section className="glass space-y-3 rounded-2xl p-4">
-        <h2 className="text-sm font-medium text-muted-foreground">
-          Other Participating Accounts &amp; Risk
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          Optional — select any prop-firm/brokerage accounts this trade also affects. Each has its
-          own risk% and its own PnL, entered independently of the Performance Account.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {accounts.map((a) => (
-            <label
-              key={a.id}
-              className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-sm"
-            >
-              <Checkbox
-                checked={isAccountSelected(a.id)}
-                onCheckedChange={() => toggleAccount(a.id)}
+      {showAccountAllocation && (
+        <>
+          <section className="glass space-y-3 rounded-2xl p-4">
+            <h2 className="text-sm font-medium text-muted-foreground">Performance Account — Risk</h2>
+            <p className="text-xs text-muted-foreground">
+              {performanceRiskLocked
+                ? "This trade already has an actual entry, so its risk is locked and its PnL is now calculated automatically from the realized result — this override can no longer change it."
+                : "Optional override of the account's default risk% for this trade only. Leave blank to use the configured default. PnL is calculated automatically from the realized result once the trade closes — never entered manually."}
+            </p>
+            <div className="max-w-[12rem] space-y-1.5">
+              <Label className="text-xs">Risk override (%)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                disabled={performanceRiskLocked}
+                placeholder="Account default"
+                {...register("performanceRiskPercentOverride")}
               />
-              {a.name}
-            </label>
-          ))}
-        </div>
-        {errors.allocations && (
-          <p className="text-xs text-danger">
-            {errors.allocations.message ?? errors.allocations.root?.message}
-          </p>
-        )}
-        <div className="space-y-2">
-          {fields.map((field, index) => (
-            <TradeAccountRow
-              key={field.id}
-              control={control}
-              index={index}
-              accountName={accounts.find((a) => a.id === field.tradingAccountId)?.name ?? ""}
-              onRemove={() => remove(index)}
-            />
-          ))}
-        </div>
-      </section>
+            </div>
+          </section>
+
+          <section className="glass space-y-3 rounded-2xl p-4">
+            <h2 className="text-sm font-medium text-muted-foreground">
+              Other Participating Accounts &amp; Risk
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Optional — select any prop-firm/brokerage accounts this trade also affects. Each has its
+              own risk% and its own PnL, entered independently of the Performance Account.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {accounts.map((a) => (
+                <label
+                  key={a.id}
+                  className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-sm"
+                >
+                  <Checkbox
+                    checked={isAccountSelected(a.id)}
+                    onCheckedChange={() => toggleAccount(a.id)}
+                  />
+                  {a.name}
+                </label>
+              ))}
+            </div>
+            {errors.allocations && (
+              <p className="text-xs text-danger">
+                {errors.allocations.message ?? errors.allocations.root?.message}
+              </p>
+            )}
+            <div className="space-y-2">
+              {fields.map((field, index) => (
+                <TradeAccountRow
+                  key={field.id}
+                  control={control}
+                  index={index}
+                  accountName={accounts.find((a) => a.id === field.tradingAccountId)?.name ?? ""}
+                  onRemove={() => remove(index)}
+                />
+              ))}
+            </div>
+          </section>
+        </>
+      )}
 
       <section className="glass space-y-2 rounded-2xl p-4">
         <h2 className="text-sm font-medium text-muted-foreground">Execution Confirmation</h2>

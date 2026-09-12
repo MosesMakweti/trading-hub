@@ -11,6 +11,7 @@ import {
   Clock,
   Crosshair,
   GitCommitVertical,
+  Layers,
   LineChart,
   ListOrdered,
   Settings2,
@@ -41,6 +42,7 @@ import {
   StrategySessionsSection,
   type StrategySessionDTO,
 } from "@/components/strategy-lab/sot/strategy-sessions-section";
+import { SetupTypesSection } from "@/components/strategy-lab/setup-types-section";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { updateStrategySettings } from "@/actions/strategies.actions";
 import type { StrategyPerformanceSummary } from "@/domain/performance/strategy-performance";
@@ -50,6 +52,7 @@ import type {
   EntryModelDTO,
   FrameworkStepDTO,
   StrategyDTO,
+  StrategySetupTypeDTO,
   StrategyVersionDTO,
   TimeframeDTO,
   TradeManagementDTO,
@@ -132,6 +135,14 @@ const SECTIONS = [
     plannedFeatures: [],
   },
   {
+    value: "setup-types",
+    label: "Setup Types",
+    icon: Layers,
+    phase: "Stage 3",
+    description: "Named setup structures — a Bullish and Bearish scenario built from this strategy's own confluences.",
+    plannedFeatures: [],
+  },
+  {
     value: "trade-management",
     label: "Trade Management",
     icon: SlidersHorizontal,
@@ -158,6 +169,7 @@ export function StrategyWorkspace({
   sessions,
   confluences,
   execution,
+  setupTypes,
 }: {
   strategy: StrategyDTO;
   arsenalConcepts: ArsenalConceptDTO[];
@@ -171,6 +183,7 @@ export function StrategyWorkspace({
   sessions: StrategySessionDTO[];
   confluences: StrategyChecklistItemDTO[];
   execution: StrategyChecklistItemDTO[];
+  setupTypes: StrategySetupTypeDTO[];
 }) {
   const [settings, setSettings] = useState<StrategySettingsState>({
     name: strategy.name,
@@ -308,6 +321,13 @@ export function StrategyWorkspace({
         </TabsContent>
         <TabsContent value="execution" className="mt-4">
           <StrategyChecklistSection strategyId={strategy.id} kind="EXECUTION" initialItems={execution} />
+        </TabsContent>
+        <TabsContent value="setup-types" className="mt-4">
+          <SetupTypesSection
+            strategyId={strategy.id}
+            initialSetupTypes={setupTypes}
+            availableConditions={[...confluences, ...execution]}
+          />
         </TabsContent>
       </Tabs>
     </div>

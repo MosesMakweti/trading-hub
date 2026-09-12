@@ -2,10 +2,28 @@ import { z } from "zod";
 
 import { partialPsychologyAnswersSchema } from "@/lib/validation/psychology";
 import { propFirmExecutionsSchema } from "@/lib/validation/prop-firms";
+import {
+  PRE_TRADE_MOOD_MAX_INTENSITY,
+  PRE_TRADE_MOOD_MIN_INTENSITY,
+  PRE_TRADE_MOOD_TAGS,
+} from "@/domain/psychology/pre-trade-mood";
 
 export const directionSchema = z.enum(["LONG", "SHORT"]);
 export const biasSchema = z.enum(["BULLISH", "BEARISH"]);
 export const riskInputTypeSchema = z.enum(["PERCENT", "AMOUNT"]);
+
+// Trade Idea Validation Shield (Stage 4).
+export const setupOverrideReasonSchema = z.enum([
+  "ANTICIPATING_CONFIRMATION",
+  "DISCRETIONARY_OVERRIDE",
+  "FOMO",
+  "MOMENTUM_FAST_MARKET",
+  "NEWS_DRIVEN",
+  "OTHER",
+]);
+
+// Pre-Trade Mood Snapshot (Stage 5).
+export const preTradeMoodTagSchema = z.enum(PRE_TRADE_MOOD_TAGS);
 
 // Participating REAL accounts (prop-firm/brokerage TradingAccounts, never
 // the Performance benchmark) — independent of the Performance Account and
@@ -72,10 +90,41 @@ export const tradeSchema = z
     // answers ARE present the service scores & persists them (trades.service.ts
     // scorePsychologyAnswers); a partial/empty set persists nothing.
     psychologyAnswers: partialPsychologyAnswersSchema.default({}),
+    // Trade Idea Validation Shield (Stage 4) — entirely optional, additive to
+    // everything above. Null setupTypeId = the legacy flat-confluence flow,
+    // unchanged. The scenario (Bullish/Bearish) is never submitted directly —
+    // the save layer resolves it from (setupTypeId, direction) so it can never
+    // disagree with the trade's own direction.
+    setupTypeId: z.string().nullable().default(null),
+    // checklistItemIds checked in the live validation checklist — matched by
+    // id (not name) so a renamed condition can't silently lose its state.
+    selectedSetupConditions: z.array(z.string()).default([]),
+    // Non-null = the trader hit "Take Anyway". Validated authoritatively
+    // server-side against the actual mandatory-gate result — a client cannot
+    // force VALIDATED/OVERRIDDEN by sending this alone.
+    setupOverrideReason: setupOverrideReasonSchema.nullable().default(null),
+    setupOverrideNote: z.string().trim().max(1000).nullable().default(null),
+    // Pre-Trade Mood Snapshot (Stage 5) — fast, unscored, optional. Multiple
+    // tags allowed at once (e.g. "Focused" + "Impatient" are not mutually
+    // exclusive in the moment).
+    preTradeMoodTags: z.array(preTradeMoodTagSchema).default([]),
+    preTradeMoodIntensity: z.coerce
+      .number()
+      .int()
+      .min(PRE_TRADE_MOOD_MIN_INTENSITY)
+      .max(PRE_TRADE_MOOD_MAX_INTENSITY)
+      .nullable()
+      .default(null),
+    preTradeMoodNote: z.string().trim().max(500).nullable().default(null),
   })
   .refine(
     (data) => new Set(data.allocations.map((a) => a.tradingAccountId)).size === data.allocations.length,
     { message: "Each account can only be selected once.", path: ["allocations"] },
+  )
+  .refine(
+    (data) =>
+      data.setupOverrideReason !== "OTHER" || (data.setupOverrideNote?.trim().length ?? 0) > 0,
+    { message: "Describe the override reason.", path: ["setupOverrideNote"] },
   );
 
 export type TradeInput = z.infer<typeof tradeSchema>;
@@ -123,6 +172,8 @@ export const tradeWorkspaceSectionSchema = z
     whatWentWell: workspaceNote,
     whatWentWrong: workspaceNote,
     whatSurprisedMe: workspaceNote,
+    // Trade Review overhaul (Stage 7) — "What could I have done better?".
+    whatCouldImprove: workspaceNote,
     wouldTakeAgain: z.boolean().nullable(),
     // Behavioral intent tag for the Counterfactual (Discrepancy Gap) engine.
     tradeIntent: z

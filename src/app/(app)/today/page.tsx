@@ -3,12 +3,17 @@ import {
   archivePastActiveDays,
   getOrCreateTradingDay,
   toTradingDayDTO,
+  toTodaysPlanDTO,
 } from "@/server/services/trading-day.service";
 import { getTradeFormOptions, listTradesForDay } from "@/server/services/trades.service";
 import { toTradeWorkspaceDTO } from "@/server/services/trade-workspace.mapper";
 import { getOrCreateDayRoutine } from "@/server/services/today-routine.service";
 import { getDailyAnalytics } from "@/server/services/analytics.service";
 import { listOpportunityDtosForDay } from "@/server/services/opportunity.service";
+import {
+  listDailyAssetAnalyses,
+  toDailyAssetAnalysisDTO,
+} from "@/server/services/daily-asset-analysis.service";
 import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
 import { listExecutionsForTrades } from "@/server/services/trade-executions.service";
 import { toAccountAllocationSelectorDTO, toExecutionDTO } from "@/server/services/prop-firms.mapper";
@@ -29,14 +34,16 @@ export default async function TodayPage() {
   // Create the day once, THEN load everything else — passing the day into the
   // routine service avoids a second concurrent upsert racing the (userId, date) unique.
   const day = await getOrCreateTradingDay(user.id, todayKey);
-  const [trades, routine, dailyPerf, propFirmAccountsRaw, tradeFormOptions, opportunities] = await Promise.all([
-    listTradesForDay(user.id, todayKey),
-    getOrCreateDayRoutine(user.id, day),
-    getDailyAnalytics(user.id, todayKey),
-    listActivePropFirmAccountsForSelector(user.id),
-    getTradeFormOptions(user.id),
-    listOpportunityDtosForDay(user.id, todayKey),
-  ]);
+  const [trades, routine, dailyPerf, propFirmAccountsRaw, tradeFormOptions, opportunities, assetAnalyses] =
+    await Promise.all([
+      listTradesForDay(user.id, todayKey),
+      getOrCreateDayRoutine(user.id, day),
+      getDailyAnalytics(user.id, todayKey),
+      listActivePropFirmAccountsForSelector(user.id),
+      getTradeFormOptions(user.id),
+      listOpportunityDtosForDay(user.id, todayKey),
+      listDailyAssetAnalyses(user.id, todayKey),
+    ]);
   const executionsRaw = await listExecutionsForTrades(user.id, trades.map((t) => t.id));
   const executionsByTradeId: Record<string, ReturnType<typeof toExecutionDTO>[]> = {};
   for (const row of executionsRaw) {
@@ -46,16 +53,7 @@ export default async function TodayPage() {
 
   const dailyAnalytics: DailyAnalyticsDTO = { ...dailyPerf, analyzed: day.analyzedAt != null };
 
-  const todaysPlan: TodaysPlanDTO = {
-    bias: (day.bias as TodaysPlanDTO["bias"]) ?? null,
-    conviction: day.conviction,
-    keyLevels: day.keyLevels,
-    riskBudgetPercent: day.riskBudgetPercent ? day.riskBudgetPercent.toNumber() : null,
-    // Risk limits used to come from the Trading Plan; that's gone (Strategy Lab
-    // owns trade management now). No reference limit until a later phase wires one.
-    planRiskLimit: null,
-    planComplete: day.planCompletedAt != null,
-  };
+  const todaysPlan: TodaysPlanDTO = toTodaysPlanDTO(day);
 
   // Prep/Plan/Analyze are owned by the TradingDay; Trade/Review are derived from
   // the day's trades. Feed both into the shared workflow state machine.
@@ -82,6 +80,7 @@ export default async function TodayPage() {
         tradeFormAccounts={tradeFormOptions.accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind }))}
         tradeFormStrategies={tradeFormOptions.strategies.map((s) => ({ id: s.id, name: s.name, version: s.version }))}
         opportunities={opportunities}
+        dailyAssetAnalyses={assetAnalyses.map(toDailyAssetAnalysisDTO)}
         linkableTrades={trades
           .filter((t) => t.opportunityId == null)
           .map((t) => ({

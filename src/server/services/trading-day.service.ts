@@ -4,7 +4,7 @@ import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { isDayEditable } from "@/domain/today/archive";
 import type { TodaysPlanInput } from "@/lib/validation/today";
-import type { TradingDayDTO } from "@/types/today";
+import type { TodaysPlanDTO, TradingDayDTO } from "@/types/today";
 
 /**
  * Get-or-create the TradingDay record for a user's day (the Today workspace
@@ -47,8 +47,12 @@ export async function assertDayEditable(userId: string, dateKey: string): Promis
 }
 
 /**
- * Applies a Today's Trading Plan patch.
- * `planComplete` toggles the day's planCompletedAt so the workflow advances.
+ * Applies a Daily Market Plan patch (day-level fields only — General Session
+ * Context, News & Fundamentals, Risk Boundaries; Stage 11). `planComplete`
+ * toggles the day's planCompletedAt so the workflow advances. Does not (and,
+ * per the retired `todaysPlanSchema` fields, cannot) write `bias`/
+ * `conviction`/`keyLevels`/`watchlist` anymore — those live on
+ * DailyAssetAnalysis now.
  */
 export async function updateTodaysPlan(
   userId: string,
@@ -58,14 +62,32 @@ export async function updateTodaysPlan(
   const day = await getOrCreateTradingDay(userId, dateKey);
 
   const data: Prisma.TradingDayUpdateInput = {};
-  if ("bias" in input) data.bias = input.bias ?? null;
-  if ("conviction" in input) data.conviction = input.conviction ?? null;
-  if ("keyLevels" in input) {
-    data.keyLevels =
-      input.keyLevels == null ? Prisma.DbNull : (input.keyLevels as Prisma.InputJsonValue);
-  }
   if ("riskBudgetPercent" in input) data.riskBudgetPercent = input.riskBudgetPercent ?? null;
   if ("planComplete" in input) data.planCompletedAt = input.planComplete ? new Date() : null;
+
+  if ("lookingFor" in input) {
+    data.lookingFor = input.lookingFor == null ? Prisma.DbNull : (input.lookingFor as Prisma.InputJsonValue);
+  }
+  if ("activeSessions" in input) data.activeSessions = input.activeSessions ?? [];
+  if ("importantConditions" in input) {
+    data.importantConditions =
+      input.importantConditions == null ? Prisma.DbNull : (input.importantConditions as Prisma.InputJsonValue);
+  }
+  if ("stayOutConditions" in input) {
+    data.stayOutConditions =
+      input.stayOutConditions == null ? Prisma.DbNull : (input.stayOutConditions as Prisma.InputJsonValue);
+  }
+  if ("maxTradesPerDay" in input) data.maxTradesPerDay = input.maxTradesPerDay ?? null;
+  if ("newsAcknowledged" in input) data.newsAcknowledged = input.newsAcknowledged ?? false;
+  if ("newsNotes" in input) {
+    data.newsNotes = input.newsNotes == null ? Prisma.DbNull : (input.newsNotes as Prisma.InputJsonValue);
+  }
+  if ("dailyFundamentalOutlook" in input) {
+    data.dailyFundamentalOutlook =
+      input.dailyFundamentalOutlook == null
+        ? Prisma.DbNull
+        : (input.dailyFundamentalOutlook as Prisma.InputJsonValue);
+  }
 
   return prisma.tradingDay.update({ where: { id: day.id }, data });
 }
@@ -125,5 +147,31 @@ export function toTradingDayDTO(day: TradingDay): TradingDayDTO {
     planCompletedAt: day.planCompletedAt?.toISOString() ?? null,
     analyzedAt: day.analyzedAt?.toISOString() ?? null,
     archivedAt: day.archivedAt?.toISOString() ?? null,
+  };
+}
+
+/**
+ * Today's Trading Plan / Daily Outlook, mapped from the raw TradingDay row.
+ * Shared by the live Today workspace and the Journal's historical day view
+ * (Stage 9 §4) — both read the exact same columns, so the Journal never
+ * needs a second mapping of this data.
+ */
+export function toTodaysPlanDTO(day: TradingDay): TodaysPlanDTO {
+  return {
+    bias: (day.bias as TodaysPlanDTO["bias"]) ?? null,
+    conviction: day.conviction,
+    keyLevels: day.keyLevels,
+    riskBudgetPercent: day.riskBudgetPercent ? day.riskBudgetPercent.toNumber() : null,
+    planRiskLimit: null,
+    planComplete: day.planCompletedAt != null,
+    lookingFor: day.lookingFor,
+    watchlist: day.watchlist,
+    activeSessions: day.activeSessions,
+    importantConditions: day.importantConditions,
+    stayOutConditions: day.stayOutConditions,
+    maxTradesPerDay: day.maxTradesPerDay,
+    newsAcknowledged: day.newsAcknowledged,
+    newsNotes: day.newsNotes,
+    dailyFundamentalOutlook: day.dailyFundamentalOutlook,
   };
 }

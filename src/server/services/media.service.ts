@@ -28,6 +28,11 @@ export interface MediaItemDTO {
   fileSize: number;
   category: string | null;
   caption: string | null;
+  /** Chart timeframe (e.g. "Daily", "4H", "15M") — only meaningful for
+   *  DAILY_ASSET_ANALYSIS attachments; absent/null for every other owner type.
+   *  Optional so pre-existing owner-type mappings (e.g. Prop Firms documents)
+   *  don't need to thread through a field that will never apply to them. */
+  timeframe?: string | null;
 }
 
 /** Uploads are enabled once the R2 bucket credentials are configured. */
@@ -97,6 +102,13 @@ export async function assertOwnsMediaTarget(
           select: { id: true },
         }),
       );
+    case "DAILY_ASSET_ANALYSIS":
+      return Boolean(
+        await prisma.dailyAssetAnalysis.findFirst({
+          where: { id: ownerId, userId },
+          select: { id: true },
+        }),
+      );
     case "PROP_FIRM_MILESTONE":
       // ownerId is either an AccountMilestone or a Payout id — both are
       // evidence targets scoped through their PropFirmAccount's userId.
@@ -134,6 +146,7 @@ export async function attachMedia(args: {
   mimeType: string;
   fileSize: number;
   caption?: string | null;
+  timeframe?: string | null;
 }): Promise<MediaItemDTO> {
   const owns = await assertOwnsMediaTarget(args.userId, args.ownerType, args.ownerId);
   if (!owns) throw new Error("Not found or access denied.");
@@ -162,6 +175,7 @@ export async function attachMedia(args: {
       ownerId: args.ownerId,
       category: args.category,
       caption: args.caption ?? null,
+      timeframe: args.timeframe ?? null,
       sortOrder: count,
     },
   });
@@ -174,6 +188,7 @@ export async function attachMedia(args: {
     fileSize: args.fileSize,
     category: args.category,
     caption: attachment.caption,
+    timeframe: attachment.timeframe,
   };
 }
 
@@ -209,6 +224,7 @@ export async function listMedia(
     fileSize: a.media.fileSize,
     category: a.category,
     caption: a.caption,
+    timeframe: a.timeframe,
   }));
 }
 
@@ -272,6 +288,7 @@ export async function listTradeMediaForTrades(
       fileSize: a.media.fileSize,
       category: a.category,
       caption: a.caption,
+      timeframe: a.timeframe,
     });
     byTrade.set(a.ownerId, list);
   }
@@ -308,6 +325,7 @@ export async function listMediaForOwners(
       fileSize: a.media.fileSize,
       category: a.category,
       caption: a.caption,
+      timeframe: a.timeframe,
     });
     byOwner.set(a.ownerId, list);
   }

@@ -12,8 +12,8 @@ import { formatSignedCurrency } from "@/components/journal/workspace/workspace-u
 import { setDayAnalyzed } from "@/actions/today.actions";
 import type { DailyAnalyticsDTO } from "@/types/today";
 
-const pct = (n: number | null, signed = false) =>
-  n == null ? "—" : `${signed && n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+const pct = (n: number | null) => (n == null ? "—" : `${n.toFixed(0)}%`);
+const rr = (n: number | null) => (n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`);
 const tone = (n: number | null): "success" | "danger" | undefined =>
   n == null ? undefined : n >= 0 ? "success" : "danger";
 
@@ -58,16 +58,15 @@ export function DailyAnalyticsSection({
       <p className="text-sm text-muted-foreground">
         How today went across{" "}
         <span className="font-medium text-foreground">{a.totalTrades}</span> trade
-        {a.totalTrades === 1 ? "" : "s"}. Returns are each trade&apos;s contribution to the
-        Performance Account.
+        {a.totalTrades === 1 ? "" : "s"}. R is each trade&apos;s realized R-multiple — PnL is secondary.
       </p>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <KpiCard label="Trades" value={String(a.totalTrades)} sublabel={`${a.winningTrades}W · ${a.losingTrades}L`} />
         <KpiCard label="Win rate" value={pct(a.winRate)} />
         <KpiCard label="Net PnL" value={formatSignedCurrency(a.netPnl)} tone={tone(a.netPnl)} />
-        <KpiCard label="Total return" value={pct(a.totalRR, true)} tone={tone(a.totalRR)} />
-        <KpiCard label="Avg / trade" value={pct(a.averageRR, true)} tone={tone(a.averageRR)} />
+        <KpiCard label="Total realized R" value={rr(a.totalRR)} tone={tone(a.totalRR)} />
+        <KpiCard label="Avg R / trade" value={rr(a.averageRR)} tone={tone(a.averageRR)} />
         <KpiCard
           label="Profit factor"
           value={a.profitFactor == null ? "—" : a.profitFactor.toFixed(2)}

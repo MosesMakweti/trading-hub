@@ -231,6 +231,8 @@ async function clearSettlement(tx: TransactionClient, tradeId: string, performan
     where: { tradeId, tradingAccountId: performanceAccountId },
     data: { closingPnlGross: 0, closingPnlNet: 0 },
   });
+  // Deliberately does NOT touch Trade.actualRR here — see the write in
+  // settlePerformanceTrade's success branch below for why this is one-way.
 }
 
 /**
@@ -292,6 +294,17 @@ export async function settlePerformanceTrade(userId: string, tradeId: string): P
       where: { tradeId, tradingAccountId: snapshot.performanceAccountId },
       data: { closingPnlGross: pnl.toString(), closingPnlNet: pnl.toString() },
     });
+    // Trade Review overhaul (Stage 7 §3) — mirrors how Trade.expectedRR is
+    // already kept in sync from the confirmed plan's weighted R (savePlan):
+    // once real actual-execution data fully accounts for the position, the
+    // computed realized R becomes Trade.actualRR automatically — the trader
+    // no longer needs to type it manually, and every existing reader of
+    // actualRR (Journal, Dashboard, analytics/discrepancy engines) picks it
+    // up for free. Deliberately one-way (never cleared back to null here,
+    // unlike the Performance snapshot above) — an already-closed trade's
+    // Actual RR must not vanish just because an unrelated, still-in-flight
+    // edit briefly makes exposure look incomplete elsewhere.
+    await tx.trade.update({ where: { id: tradeId }, data: { actualRR: result.realizedR.toString() } });
   });
 }
 

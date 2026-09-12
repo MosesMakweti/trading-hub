@@ -108,6 +108,17 @@ export async function importTrades(
         selectedExecution: record.executionLabels,
         selectedEntryModel: record.entryModelNames[0] ?? null,
         psychologyAnswers: record.psychologyAnswers,
+        // CSV import predates the Trade Idea Validation Shield and carries no
+        // strategy anyway — a Setup Type can never apply to an imported trade.
+        setupTypeId: null,
+        selectedSetupConditions: [],
+        setupOverrideReason: null,
+        setupOverrideNote: null,
+        // CSV import predates the Pre-Trade Mood Snapshot too — historical
+        // imports carry no emotional-state data.
+        preTradeMoodTags: [],
+        preTradeMoodIntensity: null,
+        preTradeMoodNote: null,
       };
 
       await createTrade(userId, record.dateKey, tradeInput);

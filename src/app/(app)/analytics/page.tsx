@@ -4,6 +4,12 @@ import {
   getAnalyticsFilterOptions,
   type AnalyticsFilters,
 } from "@/server/services/analytics.service";
+import {
+  getCanonicalAnalyticsDataset,
+  getCanonicalFilterOptions,
+  summarizeCanonicalAnalytics,
+  type CanonicalAnalyticsFilters,
+} from "@/server/services/analytics-canonical.service";
 import { getPropFirmAnalyticsSummary } from "@/server/services/prop-firms-analytics.service";
 import { isValidDateKey } from "@/lib/date";
 import { presetToRange, type DateRangePreset } from "@/lib/date-ranges";
@@ -24,6 +30,11 @@ type Params = {
   account?: string;
   winLoss?: string;
   status?: string;
+  // Stage 10 — canonical (R-primary) dataset filters.
+  setupType?: string;
+  validationState?: string;
+  behaviourLabel?: string;
+  moodTag?: string;
 };
 
 function parseFilters(p: Params): AnalyticsFilters {
@@ -37,6 +48,28 @@ function parseFilters(p: Params): AnalyticsFilters {
     status:
       p.status === "OPEN" || p.status === "CLOSED" || p.status === "REVIEWED" ? p.status : undefined,
     winLoss: p.winLoss === "win" || p.winLoss === "loss" ? p.winLoss : undefined,
+  };
+}
+
+/** Shares the SAME strategy/asset/direction/session values as parseFilters
+ *  above (Stage 10 §17: filters must drive the whole page consistently) plus
+ *  the additive Setup Type / validation state / behaviour label / mood tag
+ *  dimensions the canonical dataset alone supports. */
+function parseCanonicalFilters(p: Params, from: string, to: string): CanonicalAnalyticsFilters {
+  return {
+    from,
+    to,
+    strategyId: p.strategy || undefined,
+    setupTypeName: p.setupType || undefined,
+    asset: p.asset || undefined,
+    direction: p.direction === "LONG" || p.direction === "SHORT" ? p.direction : undefined,
+    session: p.session || undefined,
+    validationState:
+      p.validationState === "VALIDATED" || p.validationState === "OVERRIDDEN" || p.validationState === "NOT_VALIDATED"
+        ? p.validationState
+        : undefined,
+    behaviourLabel: p.behaviourLabel || undefined,
+    moodTag: p.moodTag || undefined,
   };
 }
 
@@ -58,15 +91,19 @@ export default async function AnalyticsPage({
       : presetToRange(preset === "custom" ? "month" : preset);
 
   const filters = parseFilters(params);
+  const canonicalFilters = parseCanonicalFilters(params, from, to);
 
-  const [data, filterOptions, propFirmAnalytics] = await Promise.all([
+  const [data, filterOptions, propFirmAnalytics, canonicalRows, canonicalFilterOptions] = await Promise.all([
     getAnalyticsData(user.id, from, to, filters),
     getAnalyticsFilterOptions(user.id),
     getPropFirmAnalyticsSummary(user.id, {
       from: isValidDateKey(from) ? new Date(from) : undefined,
       to: isValidDateKey(to) ? new Date(to) : undefined,
     }),
+    getCanonicalAnalyticsDataset(user.id, canonicalFilters),
+    getCanonicalFilterOptions(user.id),
   ]);
+  const canonical = summarizeCanonicalAnalytics(canonicalRows);
 
   return (
     <FadeIn className="mx-auto max-w-6xl">
@@ -78,6 +115,8 @@ export default async function AnalyticsPage({
         psychology={data.psychology}
         filterOptions={filterOptions}
         propFirmAnalytics={propFirmAnalytics}
+        canonical={canonical}
+        canonicalFilterOptions={canonicalFilterOptions}
       />
     </FadeIn>
   );

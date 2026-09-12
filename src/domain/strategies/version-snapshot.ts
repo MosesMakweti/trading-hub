@@ -33,5 +33,6 @@ export function summarizeStrategyVersionSnapshot(
     confluenceCount: confluences.length,
     mandatoryConfluenceCount: confluences.filter((c) => c.mandatory).length,
     executionCount: snapshot.execution?.length ?? 0,
+    setupTypeCount: snapshot.setupTypes?.length ?? 0,
   };
 }

@@ -41,6 +41,22 @@ const full: StrategyVersionSnapshot = {
   execution: [
     { name: "Candle Close", color: "TEAL", category: null, description: null, weight: null, mandatory: false, validationCriteria: null, enabled: true },
   ],
+  setupTypes: [
+    {
+      name: "Type A",
+      description: null,
+      scenarios: [
+        {
+          direction: "BULLISH",
+          description: null,
+          conditions: [
+            { checklistItemId: "cl1", name: "HTF Bias", directionApplicability: "BULLISH", mandatory: true, weight: 30, sortOrder: 0 },
+          ],
+        },
+        { direction: "BEARISH", description: null, conditions: [] },
+      ],
+    },
+  ],
 };
 
 describe("summarizeStrategyVersionSnapshot", () => {
@@ -58,6 +74,7 @@ describe("summarizeStrategyVersionSnapshot", () => {
       confluenceCount: 2,
       mandatoryConfluenceCount: 1,
       executionCount: 1,
+      setupTypeCount: 1,
     });
   });
 
@@ -81,6 +98,7 @@ describe("summarizeStrategyVersionSnapshot", () => {
       confluenceCount: 0,
       mandatoryConfluenceCount: 0,
       executionCount: 0,
+      setupTypeCount: 0,
     });
   });
 });

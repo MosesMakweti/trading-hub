@@ -139,6 +139,49 @@ export interface StrategyReferenceDTO {
     customRules: string[];
     partialTakeProfits: { trigger: string | null; percentToClose: number | null }[];
   } | null;
+  /** Trade Idea Validation Shield (Stage 4) — the strategy's live Setup
+   *  Types, name only. Empty when the strategy has none (legacy flow). */
+  setupTypes: { id: string; name: string }[];
+}
+
+// ── Setup Types (Today ↔ Journal refinement, Stage 3) ────────────────────────
+// A Setup Type curates a scoped subset of the strategy's own checklist items
+// into a Bullish + Bearish scenario. Conditions REFERENCE an existing
+// StrategyChecklistItem (never a copy); base*/override fields are both
+// surfaced so the UI can show "inherited" vs. "overridden for this scenario".
+export interface StrategySetupConditionDTO {
+  id: string; // StrategySetupScenarioCondition id
+  checklistItemId: string;
+  name: string;
+  color: TagColor;
+  kind: "CONFLUENCE" | "EXECUTION";
+  directionApplicability: ConfluenceDirectionValue;
+  baseWeight: number | null;
+  baseMandatory: boolean;
+  weightOverride: number | null;
+  mandatoryOverride: boolean | null;
+  /** Effective values after applying the override, if any — what actually
+   *  feeds the scoring engine. */
+  effectiveWeight: number | null;
+  effectiveMandatory: boolean;
+  sortOrder: number;
+}
+
+export interface StrategySetupScenarioDTO {
+  id: string;
+  direction: "BULLISH" | "BEARISH";
+  description: string | null;
+  conditions: StrategySetupConditionDTO[];
+}
+
+export interface StrategySetupTypeDTO {
+  id: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  /** Always exactly 2 — Bullish and Bearish, one of which may have zero
+   *  conditions if the trader intentionally doesn't trade that side. */
+  scenarios: StrategySetupScenarioDTO[];
 }
 
 // ── Strategy version history (Future integration) ────────────────────────────
@@ -169,6 +212,29 @@ export interface StrategyVersionConfluenceSnapshot {
   enabled: boolean;
 }
 
+// Setup Types frozen at publish time (Stage 3) — enough to reconstruct the
+// setup exactly as it was: condition identity/name, its direction
+// applicability, and its MANDATORY/WEIGHT AFTER any scenario override (never
+// re-resolved from the live checklist item later, per historical integrity).
+export interface StrategyVersionSetupConditionSnapshot {
+  checklistItemId: string;
+  name: string;
+  directionApplicability: ConfluenceDirectionValue;
+  mandatory: boolean;
+  weight: number | null;
+  sortOrder: number;
+}
+export interface StrategyVersionSetupScenarioSnapshot {
+  direction: "BULLISH" | "BEARISH";
+  description: string | null;
+  conditions: StrategyVersionSetupConditionSnapshot[];
+}
+export interface StrategyVersionSetupTypeSnapshot {
+  name: string;
+  description: string | null;
+  scenarios: StrategyVersionSetupScenarioSnapshot[];
+}
+
 export interface StrategyVersionSnapshot {
   name: string;
   description: string | null;
@@ -184,6 +250,8 @@ export interface StrategyVersionSnapshot {
   sessions?: StrategyVersionSessionSnapshot[];
   confluences?: StrategyVersionConfluenceSnapshot[];
   execution?: StrategyVersionConfluenceSnapshot[];
+  // Setup Types (added later — optional so pre-Stage-3 snapshots still read).
+  setupTypes?: StrategyVersionSetupTypeSnapshot[];
 }
 
 // Compact, at-a-glance description of a snapshot (what the history list shows).
@@ -200,6 +268,7 @@ export interface StrategyVersionSummary {
   confluenceCount: number;
   mandatoryConfluenceCount: number;
   executionCount: number;
+  setupTypeCount: number;
 }
 
 export interface StrategyVersionDTO {
@@ -241,6 +310,7 @@ export interface StrategyVersionDiff {
   frameworkSteps: ListDiff & { reordered: boolean };
   timeframes: ListDiff;
   entryModels: ListDiff;
+  setupTypes: ListDiff;
   tradeManagement: {
     maxRiskPercent: ScalarChange<number | null> | null;
     maxHoldingTime: ScalarChange<string | null> | null;

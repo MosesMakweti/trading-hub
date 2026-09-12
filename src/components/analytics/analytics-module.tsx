@@ -1,10 +1,9 @@
-import { CandlestickChart, Activity, TrendingUp, Layers, Brain, CalendarDays, Target, type LucideIcon } from "lucide-react";
+import { CandlestickChart, Activity, TrendingUp, Wallet, Layers, Brain, CalendarDays, Target, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { DateRangeFilter } from "@/components/analytics/date-range-filter";
 import { AnalyticsFilterBar } from "@/components/analytics/analytics-filter-bar";
 import { KpiCard } from "@/components/analytics/kpi-card";
-import type { CountUpConfig } from "@/components/analytics/count-up";
 import { ProgressRing } from "@/components/analytics/progress-ring";
 import { Donut } from "@/components/analytics/donut";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
@@ -13,10 +12,9 @@ import { OpportunityAnalytics } from "@/components/analytics/opportunity-analyti
 import { AdherenceAnalytics } from "@/components/analytics/adherence-analytics";
 import { AnalyticsBreakdowns } from "@/components/analytics/analytics-breakdowns";
 import { PsychologyAnalytics } from "@/components/analytics/psychology-analytics";
-import { BestAssetTable } from "@/components/analytics/best-asset-table";
-import { RowBar } from "@/components/analytics/row-bar";
 import { Heatmap, pnlHeatColor } from "@/components/analytics/heatmap";
 import { PropFirmsAnalyticsSection } from "@/components/analytics/prop-firms-analytics-section";
+import { Card, GroupList, BehaviourLists, RCurveChart, fmtR, fmtUsd, tone as rTone } from "@/components/analytics/canonical-analytics-section";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StaggerList, StaggerItem } from "@/components/shared/motion";
 import { SectionNav } from "@/components/analytics/section-nav";
@@ -25,6 +23,10 @@ import type {
   getAnalyticsData,
 } from "@/server/services/analytics.service";
 import type { PropFirmAnalyticsSummary } from "@/server/services/prop-firms-analytics.service";
+import type {
+  CanonicalAnalyticsSummary,
+  CanonicalFilterOptionsDTO,
+} from "@/server/services/analytics-canonical.service";
 import type { DateRangePreset } from "@/lib/date-ranges";
 
 type Data = Awaited<ReturnType<typeof getAnalyticsData>>;
@@ -34,17 +36,9 @@ type PsychologyData = Data["psychology"];
 const money = (n: number) =>
   n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const moneySigned = (n: number) => `${n >= 0 ? "+" : "−"}${money(Math.abs(n))}`;
-const rr = (v: number | null) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}R`);
 const ratio = (v: number | null) => (v == null ? "—" : v.toFixed(2));
 const toneOf = (n: number): "success" | "danger" | "neutral" =>
   n > 0 ? "success" : n < 0 ? "danger" : "neutral";
-
-/** A `KpiCard.count` config for a nullable metric — `undefined` (no animation,
- *  falls back to the card's static `value`, already formatted as "—") when
- *  there's nothing to count up to. */
-function countOf(v: number | null, config: Omit<CountUpConfig, "value">): CountUpConfig | undefined {
-  return v == null ? undefined : { value: v, ...config };
-}
 
 function SectionHeading({
   title,
@@ -85,11 +79,17 @@ function MiniStat({ label, value, tone }: { label: string; value: string; tone?:
 
 /**
  * The Analytics module — Traditorium's central trading-performance intelligence
- * center. Composes the existing analytics calculations + dataviz primitives into
- * a sectioned, ring-forward terminal (no duplicate calculations; everything
- * derives from `getAnalyticsData`). Phase A: Performance Overview, full-width
- * Equity Curve, Discrepancy Gap, Strategy/Asset, Adherence, Behavioral, Daily
- * heatmap, and a Missed-Trades placeholder (that data isn't captured yet).
+ * center. Stage 10.5 (source-of-truth migration): the canonical, R-primary
+ * dataset (analytics-canonical.service.ts) is now the ONE definition of
+ * trader-performance analytics (Overview KPIs, the Performance Curve,
+ * Strategy/Setup Type/Asset, Validation, Bias, Behaviour, Mood, weekday/
+ * month/direction/session breakdowns). Genuine account/equity accounting —
+ * realized $ balance, drawdown, Discrepancy Gap, Opportunity capture — stays
+ * on the Performance-Account ledger (`trading`, from getAnalyticsData) under
+ * its own clearly-labeled "Account Equity" section, never mixed into the
+ * R-primary KPIs above it. There is no more separate "Realized R Analytics"
+ * section — its widgets are redistributed into the sections below so the
+ * page reads as one coherent Analytics experience.
  */
 export function AnalyticsModule({
   preset,
@@ -99,6 +99,8 @@ export function AnalyticsModule({
   psychology,
   filterOptions,
   propFirmAnalytics,
+  canonical,
+  canonicalFilterOptions,
 }: {
   preset: DateRangePreset;
   from: string;
@@ -107,8 +109,13 @@ export function AnalyticsModule({
   psychology: PsychologyData;
   filterOptions: AnalyticsFilterOptions;
   propFirmAnalytics: PropFirmAnalyticsSummary;
+  /** The canonical, R-primary dataset summary — source of truth for trader
+   *  performance across the whole page (Stage 10.5). */
+  canonical: CanonicalAnalyticsSummary;
+  canonicalFilterOptions: CanonicalFilterOptionsDTO;
 }) {
   const d = trading;
+  const c = canonical;
   const summary = d.counterfactual.summary;
 
   return (
@@ -123,7 +130,7 @@ export function AnalyticsModule({
           </div>
           <DateRangeFilter preset={preset} from={from} to={to} />
         </div>
-        <AnalyticsFilterBar options={filterOptions} />
+        <AnalyticsFilterBar options={filterOptions} canonicalOptions={canonicalFilterOptions} />
       </div>
 
       <StaggerList className="space-y-8">
@@ -146,109 +153,98 @@ export function AnalyticsModule({
           </StaggerItem>
         ) : (
           <>
-            {/* Section A — Performance Overview */}
+            {/* Section A — Performance Overview (canonical, R-primary) */}
             <StaggerItem>
               <section id="section-overview" className="scroll-mt-24 space-y-3">
-                <SectionHeading title="Performance Overview" hint="realized, from your Performance Account ledger" icon={Activity} />
+                <SectionHeading title="Performance Overview" hint="Realized R primary — PnL secondary" icon={Activity} />
 
-                <div className="glass grid grid-cols-2 items-center gap-4 rounded-xl px-4 py-5 sm:grid-cols-4 sm:px-6">
-                  <ProgressRing value={d.winRate} tone="brand" label="Win rate" />
-                  <ProgressRing value={summary.processEfficiencyPercent} tone="success" label="Process eff." />
+                <div className="glass grid grid-cols-1 items-center gap-4 rounded-xl px-4 py-5 sm:grid-cols-3 sm:px-6">
+                  <ProgressRing value={c.overview.winRate} tone="brand" label="Win rate" />
                   <div className="flex flex-col items-center justify-center gap-1 text-center">
                     <span
-                      className={`text-2xl font-semibold tabular-nums ${
-                        summary.totalAvoidableGapR > 0 ? "text-danger" : "text-foreground"
-                      }`}
+                      className={cn(
+                        "text-2xl font-semibold tabular-nums",
+                        rTone(c.overview.totalRealizedR) === "success" && "text-success",
+                        rTone(c.overview.totalRealizedR) === "danger" && "text-danger",
+                      )}
                     >
-                      {summary.totalAvoidableGapR.toFixed(1)}R
+                      {fmtR(c.overview.totalRealizedR)}
                     </span>
-                    <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Avoidable</span>
+                    <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Total Realized R</span>
                   </div>
                   <Donut
                     size={96}
                     stroke={12}
                     segments={[
-                      { label: "Win", value: d.winningTrades, color: "var(--success)" },
-                      { label: "Loss", value: d.losingTrades, color: "var(--danger)" },
-                      { label: "BE", value: d.breakevenTrades, color: "var(--muted-foreground)" },
+                      { label: "Win", value: c.overview.winningTrades, color: "var(--success)" },
+                      { label: "Loss", value: c.overview.losingTrades, color: "var(--danger)" },
+                      { label: "BE", value: c.overview.breakevenTrades, color: "var(--muted-foreground)" },
                     ]}
                   >
-                    <span className="text-lg font-semibold tabular-nums">{d.totalTrades}</span>
+                    <span className="text-lg font-semibold tabular-nums">{c.overview.totalExecutedTrades}</span>
                     <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Trades</span>
                   </Donut>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                   <KpiCard
-                    label="Net P&L"
-                    value={moneySigned(d.netPnl)}
-                    count={{ value: d.netPnl, prefix: "$", decimals: 0, grouping: true, signed: true }}
-                    tone={toneOf(d.netPnl)}
+                    label="Total Realized R"
+                    value={fmtR(c.overview.totalRealizedR)}
+                    sublabel={fmtUsd(c.overview.totalPnl)}
+                    tone={rTone(c.overview.totalRealizedR)}
                     size="lg"
                     className="col-span-2"
                   />
                   <KpiCard
-                    label="Gross Profit"
-                    value={money(d.grossProfit)}
-                    count={{ value: d.grossProfit, prefix: "$", decimals: 0, grouping: true }}
-                    tone="success"
+                    label="Win Rate"
+                    value={c.overview.winRate != null ? `${c.overview.winRate.toFixed(0)}%` : "—"}
+                    sublabel={`n=${c.overview.finalizedTrades}`}
+                  />
+                  <KpiCard label="Profit Factor" value={ratio(c.overview.profitFactor)} />
+                  <KpiCard label="Expectancy" value={fmtR(c.overview.expectancy)} tone={rTone(c.overview.expectancy)} />
+                  <KpiCard label="Avg Win R" value={fmtR(c.overview.averageWinnerR)} tone="success" />
+                  <KpiCard label="Avg Loss R" value={fmtR(c.overview.averageLoserR)} tone="danger" />
+                  <KpiCard
+                    label="Executed Trades"
+                    value={String(c.overview.totalExecutedTrades)}
+                    sublabel={`${c.overview.cancelledCount} cancelled`}
                   />
                   <KpiCard
-                    label="Gross Loss"
-                    value={money(d.grossLoss)}
-                    count={{ value: d.grossLoss, prefix: "$", decimals: 0, grouping: true }}
-                    tone="danger"
+                    label="Override Rate"
+                    value={c.overview.overrideRate != null ? `${c.overview.overrideRate.toFixed(0)}%` : "—"}
+                    tone={c.overview.overrideCount > 0 ? "danger" : "neutral"}
                   />
-                  <KpiCard label="Profit Factor" value={ratio(d.profitFactor)} count={countOf(d.profitFactor, { decimals: 2 })} />
-                  <KpiCard label="Expectancy" value={rr(d.expectancy)} count={countOf(d.expectancy, { decimals: 2, suffix: "R", signed: true })} />
-                  <KpiCard label="Average R" value={rr(d.averageRR)} count={countOf(d.averageRR, { decimals: 2, suffix: "R", signed: true })} />
-                  <KpiCard
-                    label="Average Win"
-                    value={rr(d.averageWinner)}
-                    count={countOf(d.averageWinner, { decimals: 2, suffix: "R", signed: true })}
-                    tone="success"
-                  />
-                  <KpiCard
-                    label="Average Loss"
-                    value={rr(d.averageLoser)}
-                    count={countOf(d.averageLoser, { decimals: 2, suffix: "R", signed: true })}
-                    tone="danger"
-                  />
-                  <KpiCard
-                    label="Largest Win"
-                    value={money(d.largestWin)}
-                    count={{ value: d.largestWin, prefix: "$", decimals: 0, grouping: true }}
-                    tone="success"
-                  />
-                  <KpiCard
-                    label="Largest Loss"
-                    value={money(d.largestLoss)}
-                    count={{ value: d.largestLoss, prefix: "$", decimals: 0, grouping: true }}
-                    tone="danger"
-                  />
-                  <KpiCard
-                    label="Max Drawdown"
-                    value={`${money(d.maxDrawdownAmount)} · ${d.maxDrawdownPercent.toFixed(1)}%`}
-                    tone="danger"
-                  />
-                  <KpiCard label="Recovery Factor" value={ratio(d.recoveryFactor)} count={countOf(d.recoveryFactor, { decimals: 2 })} />
-                  <KpiCard
-                    label="Total Trades"
-                    value={String(d.totalTrades)}
-                    count={{ value: d.totalTrades, decimals: 0 }}
-                    sublabel={`${d.winningTrades}W · ${d.losingTrades}L · ${d.breakevenTrades}BE`}
-                  />
-                  <KpiCard label="Longest Win Streak" value={String(d.longestWinStreak)} count={{ value: d.longestWinStreak, decimals: 0 }} />
-                  <KpiCard label="Longest Loss Streak" value={String(d.longestLossStreak)} count={{ value: d.longestLossStreak, decimals: 0 }} />
-                  <KpiCard label="Avg Trades / Day" value={d.averageTradesPerDay.toFixed(2)} count={{ value: d.averageTradesPerDay, decimals: 2 }} />
+                  <KpiCard label="Longest Win Streak" value={String(c.overview.longestWinStreak)} tone="success" />
+                  <KpiCard label="Longest Loss Streak" value={String(c.overview.longestLossStreak)} tone="danger" />
+                  <KpiCard label="Avg Trades / Day" value={d.averageTradesPerDay.toFixed(2)} />
+                  {/* PnL — secondary, monetary, from the Performance Account ledger. */}
+                  <KpiCard label="Net P&L" value={moneySigned(d.netPnl)} tone={toneOf(d.netPnl)} />
+                  <KpiCard label="Gross Profit" value={money(d.grossProfit)} tone="success" />
+                  <KpiCard label="Gross Loss" value={money(d.grossLoss)} tone="danger" />
+                  <KpiCard label="Largest Win" value={money(d.largestWin)} tone="success" />
+                  <KpiCard label="Largest Loss" value={money(d.largestLoss)} tone="danger" />
                 </div>
               </section>
             </StaggerItem>
 
-            {/* Equity Curve — full width */}
+            {/* Performance Curve — cumulative realized R (trader performance) */}
             <StaggerItem>
-              <section id="section-equity" className="scroll-mt-24 space-y-3">
-                <SectionHeading title="Equity Curve" hint="cumulative return of the Performance Account" icon={TrendingUp} />
+              <section id="section-performance-curve" className="scroll-mt-24 space-y-3">
+                <SectionHeading
+                  title="Performance Curve"
+                  hint="cumulative realized R — cancelled ideas excluded, partials counted once"
+                  icon={TrendingUp}
+                />
+                <div className="glass rounded-2xl p-4">
+                  <RCurveChart curve={c.cumulativeRCurve} />
+                </div>
+              </section>
+            </StaggerItem>
+
+            {/* Account Equity — monetary balance (account accounting, not trader performance) */}
+            <StaggerItem>
+              <section id="section-account-equity" className="scroll-mt-24 space-y-3">
+                <SectionHeading title="Account Equity" hint="monetary balance of the Performance Account" icon={Wallet} />
                 <EquityCurveChart data={d.equityCurve} />
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <MiniStat label="Starting balance" value={money(d.startingBalance)} />
@@ -263,61 +259,126 @@ export function AnalyticsModule({
               </section>
             </StaggerItem>
 
-            {/* Discrepancy Gap (self-titled: Expected vs Actual + causes) */}
+            {/* Discrepancy Gap (execution discrepancy) + Planned vs Actual (review aid — NOT a discrepancy) */}
             <StaggerItem>
-              <div id="section-discrepancy" className="scroll-mt-24">
+              <div id="section-discrepancy" className="scroll-mt-24 space-y-4">
                 <DiscrepancyAnalytics
                   curve={d.counterfactual.curve}
                   summary={summary}
                   avgStrategyAdherence={d.adherence.avgTradeQuality}
                   avgRuleAdherence={d.ruleAdherenceAverage}
                 />
+                <Card
+                  title="Planned vs Actual"
+                  hint="a review aid, separate from the Discrepancy Engine above — a correctly-executed loss is normal variance, not a discrepancy"
+                >
+                  {c.plannedVsActual.sampleSize === 0 ? (
+                    <p className="text-xs text-muted-foreground/60 italic">
+                      No fully-closed trades with both a confirmed plan and a determined result yet.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <div className="space-y-0.5">
+                        <div className="text-[11px] text-muted-foreground">Avg planned R</div>
+                        <div className="text-sm font-semibold tabular-nums">{fmtR(c.plannedVsActual.averagePlannedR)}</div>
+                      </div>
+                      <div className="space-y-0.5">
+                        <div className="text-[11px] text-muted-foreground">Avg realized R</div>
+                        <div className={cn("text-sm font-semibold tabular-nums", rTone(c.plannedVsActual.averageRealizedR) === "success" ? "text-success" : "text-danger")}>
+                          {fmtR(c.plannedVsActual.averageRealizedR)}
+                        </div>
+                      </div>
+                      <div className="space-y-0.5">
+                        <div className="text-[11px] text-muted-foreground">Gap (realized − planned)</div>
+                        <div className={cn("text-sm font-semibold tabular-nums", rTone(c.plannedVsActual.averageGap) === "success" ? "text-success" : "text-danger")}>
+                          {fmtR(c.plannedVsActual.averageGap)}
+                        </div>
+                      </div>
+                      <div className="space-y-0.5">
+                        <div className="text-[11px] text-muted-foreground">Met/exceeded plan</div>
+                        <div className="text-sm font-semibold tabular-nums">
+                          {c.plannedVsActual.meetOrExceedRate != null ? `${c.plannedVsActual.meetOrExceedRate.toFixed(0)}%` : "—"}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </Card>
               </div>
             </StaggerItem>
 
-            {/* Strategy & Asset performance */}
+            {/* Strategy, Setup Type & Asset performance (frozen historical identity) */}
             <StaggerItem>
               <section id="section-strategy" className="scroll-mt-24 space-y-3">
-                <SectionHeading title="Strategy & Asset Performance" hint="trade count shown — small samples aren't reliable" icon={Layers} />
+                <SectionHeading
+                  title="Strategy, Setup Type & Asset"
+                  hint="frozen historical identity — never re-derived from live Strategy Lab config"
+                  icon={Layers}
+                />
                 <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="glass space-y-3 rounded-2xl p-4">
-                    <h3 className="text-sm font-medium text-muted-foreground">By strategy</h3>
-                    <StrategyTable stats={d.statsByStrategy} />
-                  </div>
-                  <div className="glass space-y-3 rounded-2xl p-4">
-                    <h3 className="text-sm font-medium text-muted-foreground">By asset</h3>
-                    <BestAssetTable stats={d.statsByAsset} />
-                  </div>
+                  <Card title="By strategy">
+                    <GroupList stats={c.byStrategy} emptyLabel="No strategy-linked trades in this range." />
+                  </Card>
+                  <Card title="By Setup Type">
+                    <GroupList stats={c.bySetupType} emptyLabel="No Setup Type used in this range." />
+                  </Card>
+                </div>
+                <Card title="By asset">
+                  <GroupList stats={c.byAsset} emptyLabel="No trades in this range yet." />
+                </Card>
+              </section>
+            </StaggerItem>
+
+            {/* Strategy Adherence + Confluences, plus Validated/Overridden and Daily Bias alignment */}
+            <StaggerItem>
+              <div id="section-adherence" className="scroll-mt-24 space-y-4">
+                <AdherenceAnalytics data={d.adherence} />
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <Card title="Validated vs Overridden">
+                    <GroupList stats={c.byValidationState} emptyLabel="No Setup Type used in this range." />
+                    {c.byOverrideReason.length > 0 && (
+                      <div className="mt-3 space-y-2 border-t border-border pt-3">
+                        <span className="text-[11px] font-medium text-muted-foreground uppercase">By override reason</span>
+                        <GroupList stats={c.byOverrideReason} emptyLabel="No overrides." />
+                      </div>
+                    )}
+                  </Card>
+                  <Card title="Daily Bias Alignment" hint="observational — alignment isn't inherently correct">
+                    <GroupList stats={c.byBiasAlignment} emptyLabel="No daily-bias data in this range." />
+                  </Card>
+                </div>
+              </div>
+            </StaggerItem>
+
+            {/* Weekday / month / direction / session / hour / risk breakdowns */}
+            <StaggerItem>
+              <div id="section-breakdowns" className="scroll-mt-24">
+                <AnalyticsBreakdowns trading={d} canonical={c} />
+              </div>
+            </StaggerItem>
+
+            {/* Behavioral analytics: psychology questionnaire + behaviour labels + mood */}
+            <StaggerItem>
+              <section id="section-behavioral" className="scroll-mt-24 space-y-4">
+                <SectionHeading title="Behavioral Analytics" hint="historical patterns — not causation" icon={Brain} />
+                <PsychologyAnalytics data={psychology} />
+                <Card title="Behaviour Label Performance" hint="what behaviours co-occur with the biggest R gains/costs — correlation, not causation">
+                  <BehaviourLists stats={c.byBehaviourLabel} />
+                </Card>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <Card title="Pre-Trade Mood Performance">
+                    <GroupList stats={c.byMoodTag} emptyLabel="No mood tags recorded in this range." />
+                  </Card>
+                  <Card title="Mood Intensity vs Performance" hint="1 (low) – 5 (high)">
+                    <GroupList stats={c.byMoodIntensity} emptyLabel="No mood intensity recorded." />
+                  </Card>
                 </div>
               </section>
             </StaggerItem>
 
-            {/* Strategy Adherence + Confluences (self-titled) */}
-            <StaggerItem>
-              <div id="section-adherence" className="scroll-mt-24">
-                <AdherenceAnalytics data={d.adherence} />
-              </div>
-            </StaggerItem>
-
-            {/* Phase B: day-of-week, monthly, risk, and distribution breakdowns */}
-            <StaggerItem>
-              <div id="section-breakdowns" className="scroll-mt-24">
-                <AnalyticsBreakdowns trading={d} />
-              </div>
-            </StaggerItem>
-
-            {/* Behavioral analytics (self-titled inside) */}
-            <StaggerItem>
-              <section id="section-behavioral" className="scroll-mt-24 space-y-3">
-                <SectionHeading title="Behavioral Analytics" hint="historical patterns from your post-trade questionnaire — not causation" icon={Brain} />
-                <PsychologyAnalytics data={psychology} />
-              </section>
-            </StaggerItem>
-
-            {/* Daily performance heatmap */}
+            {/* Daily account return heatmap */}
             <StaggerItem>
               <section id="section-daily" className="scroll-mt-24 space-y-3">
-                <SectionHeading title="Daily Performance" icon={CalendarDays} />
+                <SectionHeading title="Daily Account Return" hint="% of balance per day — account accounting, not R" icon={CalendarDays} />
                 <div className="glass rounded-2xl p-4">
                   <Heatmap
                     points={d.dailyPercents.map((p) => ({
@@ -345,54 +406,6 @@ export function AnalyticsModule({
           </>
         )}
       </StaggerList>
-    </div>
-  );
-}
-
-function StrategyTable({ stats }: { stats: TradingData["statsByStrategy"] }) {
-  if (stats.length === 0) {
-    return <p className="py-8 text-center text-sm text-muted-foreground">No trades in this range yet.</p>;
-  }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-xs text-muted-foreground">
-            <th className="py-2 pr-4 font-normal">Strategy</th>
-            <th className="py-2 pr-4 text-right font-normal">Trades</th>
-            <th className="py-2 pr-4 font-normal">Win Rate</th>
-            <th className="py-2 pr-4 text-right font-normal">Avg R</th>
-            <th className="py-2 text-right font-normal">Total Return</th>
-          </tr>
-        </thead>
-        <tbody>
-          {stats.map((s) => (
-            <tr
-              key={s.strategyLabel}
-              className="border-b border-border/50 transition-colors last:border-0 hover:bg-accent/50"
-            >
-              <td className="py-2.5 pr-4 font-medium">{s.strategyLabel}</td>
-              <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">{s.totalTrades}</td>
-              <td className="py-2.5 pr-4">
-                <RowBar percent={s.winRate} />
-              </td>
-              <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">
-                {s.averageRR == null ? "—" : `${s.averageRR.toFixed(2)}R`}
-              </td>
-              <td
-                className={cn(
-                  "py-2.5 text-right font-medium tabular-nums",
-                  s.totalReturnPercent > 0 && "text-success",
-                  s.totalReturnPercent < 0 && "text-danger",
-                )}
-              >
-                {s.totalReturnPercent >= 0 ? "+" : ""}
-                {s.totalReturnPercent.toFixed(2)}%
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

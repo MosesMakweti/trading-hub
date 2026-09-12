@@ -3,7 +3,7 @@ import { BarChart3, Images, PlaySquare } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
 import { listNoteDateKeys } from "@/server/services/journal.service";
-import { listDailyPnl } from "@/server/services/trades.service";
+import { listDailyPerformanceSummaries } from "@/server/services/close-day.service";
 import { Button } from "@/components/ui/button";
 import { JournalCalendar } from "@/components/journal/journal-calendar";
 import { FadeIn } from "@/components/shared/motion";
@@ -11,9 +11,9 @@ import { FadeIn } from "@/components/shared/motion";
 export default async function JournalPage() {
   const user = await requireUser();
 
-  const [noteDates, dailyPnl] = await Promise.all([
+  const [noteDates, dailyPerformance] = await Promise.all([
     listNoteDateKeys(user.id),
-    listDailyPnl(user.id),
+    listDailyPerformanceSummaries(user.id),
   ]);
 
   return (
@@ -53,7 +53,7 @@ export default async function JournalPage() {
           </Button>
         </div>
       </div>
-      <JournalCalendar noteDates={noteDates} dailyPnl={dailyPnl} />
+      <JournalCalendar noteDates={noteDates} dailyPerformance={dailyPerformance} />
     </FadeIn>
   );
 }

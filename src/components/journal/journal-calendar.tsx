@@ -10,26 +10,21 @@ import { JournalDayButton } from "@/components/journal/journal-day-button";
 import { JournalWeekdaysRow, JournalWeekRow } from "@/components/journal/journal-week-column";
 import { YearView } from "@/components/journal/year-view";
 import { localDateToKey } from "@/lib/date";
-
-interface DailyPnl {
-  dateKey: string;
-  percent: number;
-  pnl: number;
-  tradeCount: number;
-  wins: number;
-  losses: number;
-}
+import type { DailyPerformanceSummaryDTO } from "@/server/services/close-day.service";
 
 export function JournalCalendar({
   noteDates,
-  dailyPnl,
+  dailyPerformance,
 }: {
   noteDates: string[];
-  dailyPnl: DailyPnl[];
+  dailyPerformance: DailyPerformanceSummaryDTO[];
 }) {
   const router = useRouter();
   const noteDateSet = useMemo(() => new Set(noteDates), [noteDates]);
-  const dailyPnlMap = useMemo(() => new Map(dailyPnl.map((d) => [d.dateKey, d])), [dailyPnl]);
+  const dailyPerformanceMap = useMemo(
+    () => new Map(dailyPerformance.map((d) => [d.dateKey, d])),
+    [dailyPerformance],
+  );
   const [view, setView] = useState<"month" | "year">("month");
   const [month, setMonth] = useState<Date>(new Date());
 
@@ -64,16 +59,16 @@ export function JournalCalendar({
           classNames={{ months: "w-full", month: "w-full", month_grid: "w-full" }}
           components={{
             DayButton: (props) => (
-              <JournalDayButton {...props} noteDates={noteDateSet} dailyPnl={dailyPnlMap} />
+              <JournalDayButton {...props} noteDates={noteDateSet} dailyPerformance={dailyPerformanceMap} />
             ),
             Weekdays: JournalWeekdaysRow,
-            Week: (props) => <JournalWeekRow {...props} dailyPnl={dailyPnlMap} />,
+            Week: (props) => <JournalWeekRow {...props} dailyPerformance={dailyPerformanceMap} />,
           }}
         />
       ) : (
         <YearView
           year={month.getFullYear()}
-          dailyPnl={dailyPnlMap}
+          dailyPerformance={dailyPerformanceMap}
           onSelectDay={goToDayKey}
           onSelectMonth={(i) => {
             setMonth(new Date(month.getFullYear(), i, 1));

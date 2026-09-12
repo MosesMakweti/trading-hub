@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { AnalyticsFilterOptions } from "@/server/services/analytics.service";
+import type { CanonicalFilterOptionsDTO } from "@/server/services/analytics-canonical.service";
 
 const ALL = "__all__";
 
@@ -25,6 +26,11 @@ const PARAMS = [
   "account",
   "winLoss",
   "status",
+  // Stage 10 — additive filters for the canonical (R-primary) dataset.
+  "setupType",
+  "validationState",
+  "behaviourLabel",
+  "moodTag",
 ] as const;
 type FilterParam = (typeof PARAMS)[number];
 
@@ -35,7 +41,16 @@ type Option = { value: string; label: string };
  * are shareable/bookmarkable and every section re-derives together on the server
  * (getAnalyticsData applies them). Date range stays in the separate DateRangeFilter.
  */
-export function AnalyticsFilterBar({ options }: { options: AnalyticsFilterOptions }) {
+export function AnalyticsFilterBar({
+  options,
+  canonicalOptions,
+}: {
+  options: AnalyticsFilterOptions;
+  /** Stage 10 — Setup Type / behaviour label / mood tag options, additive to
+   *  the existing filter dimensions above (undefined = hide those selects,
+   *  so any other caller of this bar is unaffected). */
+  canonicalOptions?: CanonicalFilterOptionsDTO;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -107,6 +122,47 @@ export function AnalyticsFilterBar({ options }: { options: AnalyticsFilterOption
         value={searchParams.get("status")}
         onChange={setFilter}
       />
+
+      {canonicalOptions && canonicalOptions.setupTypes.length > 0 && (
+        <FilterSelect
+          param="setupType"
+          label="Setup Type"
+          options={selfOpts(canonicalOptions.setupTypes)}
+          value={searchParams.get("setupType")}
+          onChange={setFilter}
+        />
+      )}
+      {canonicalOptions && (
+        <FilterSelect
+          param="validationState"
+          label="Validation"
+          options={[
+            { value: "VALIDATED", label: "Validated" },
+            { value: "OVERRIDDEN", label: "Overridden" },
+            { value: "NOT_VALIDATED", label: "Not validated" },
+          ]}
+          value={searchParams.get("validationState")}
+          onChange={setFilter}
+        />
+      )}
+      {canonicalOptions && canonicalOptions.behaviourLabels.length > 0 && (
+        <FilterSelect
+          param="behaviourLabel"
+          label="Behaviour"
+          options={selfOpts(canonicalOptions.behaviourLabels)}
+          value={searchParams.get("behaviourLabel")}
+          onChange={setFilter}
+        />
+      )}
+      {canonicalOptions && canonicalOptions.moodTags.length > 0 && (
+        <FilterSelect
+          param="moodTag"
+          label="Mood"
+          options={selfOpts(canonicalOptions.moodTags)}
+          value={searchParams.get("moodTag")}
+          onChange={setFilter}
+        />
+      )}
 
       {activeCount > 0 && (
         <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground" onClick={clearAll}>

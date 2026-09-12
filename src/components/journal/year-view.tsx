@@ -7,12 +7,14 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { localDateToKey, formatDateKeyShort } from "@/lib/date";
-import { formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
+import { formatRR, formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
+import { deriveDayResultState } from "@/domain/trades/day-result-state";
 
-interface DailyPnl {
-  percent: number;
-  pnl: number;
-  tradeCount: number;
+interface DailyPerformance {
+  executedTradeCount: number;
+  cancelledCount: number;
+  totalRealizedR: number;
+  totalPnl: number;
   wins: number;
   losses: number;
 }
@@ -24,13 +26,13 @@ interface DayCell {
   dateKey: string;
   state: DayState;
   isToday: boolean;
-  entry: DailyPnl | undefined;
+  entry: DailyPerformance | undefined;
 }
 
 interface MonthData {
   index: number;
   name: string;
-  percentTotal: number;
+  totalR: number;
   leadingBlanks: number;
   cells: DayCell[];
 }
@@ -56,35 +58,32 @@ function pad(n: number) {
   return String(n).padStart(2, "0");
 }
 
-function formatPercent(n: number) {
-  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
-}
-
-function buildMonths(year: number, dailyPnl: Map<string, DailyPnl>, todayKey: string): MonthData[] {
+function buildMonths(year: number, dailyPerformance: Map<string, DailyPerformance>, todayKey: string): MonthData[] {
   return MONTH_NAMES.map((name, index) => {
     const daysInMonth = new Date(year, index + 1, 0).getDate();
     const leadingBlanks = new Date(year, index, 1).getDay();
 
-    let percentTotal = 0;
+    let totalR = 0;
     const cells: DayCell[] = [];
     for (let day = 1; day <= daysInMonth; day += 1) {
       const dateKey = `${year}-${pad(index + 1)}-${pad(day)}`;
-      const entry = dailyPnl.get(dateKey);
+      const entry = dailyPerformance.get(dateKey);
       const isFuture = dateKey > todayKey;
+      const resultState = deriveDayResultState(entry?.executedTradeCount ?? 0, entry?.totalRealizedR ?? 0);
       const state: DayState = isFuture
         ? "future"
-        : !entry || entry.tradeCount === 0
+        : resultState === "NONE"
           ? "none"
-          : entry.pnl > 0
+          : resultState === "WIN"
             ? "win"
-            : entry.pnl < 0
+            : resultState === "LOSS"
               ? "loss"
               : "breakeven";
-      if (entry) percentTotal += entry.percent;
+      if (entry) totalR += entry.totalRealizedR;
       cells.push({ day, dateKey, state, isToday: dateKey === todayKey, entry });
     }
 
-    return { index, name, percentTotal, leadingBlanks, cells };
+    return { index, name, totalR, leadingBlanks, cells };
   });
 }
 
@@ -131,7 +130,7 @@ function YearDayCell({ cell, onSelectDay }: { cell: DayCell; onSelectDay: (dateK
   }
 
   const { entry } = cell;
-  const hasTrades = !!entry && entry.tradeCount > 0;
+  const hasTrades = !!entry && entry.executedTradeCount > 0;
 
   return (
     <Tooltip>
@@ -139,7 +138,7 @@ function YearDayCell({ cell, onSelectDay }: { cell: DayCell; onSelectDay: (dateK
         type="button"
         onClick={() => onSelectDay(cell.dateKey)}
         className={cn(base, "cursor-pointer font-medium")}
-        aria-label={`${formatDateKeyShort(cell.dateKey)}${hasTrades ? `, ${formatSignedCurrency(entry.pnl)}` : ", no trades"}`}
+        aria-label={`${formatDateKeyShort(cell.dateKey)}${hasTrades ? `, ${formatRR(entry.totalRealizedR)}` : ", no trades"}`}
       >
         {cell.day}
       </TooltipTrigger>
@@ -148,8 +147,10 @@ function YearDayCell({ cell, onSelectDay }: { cell: DayCell; onSelectDay: (dateK
           <div className="font-medium">{formatDateKeyShort(cell.dateKey)}</div>
           <div className="text-[11px] opacity-90">
             {hasTrades
-              ? `${formatSignedCurrency(entry.pnl)} · ${entry.tradeCount} trade${entry.tradeCount === 1 ? "" : "s"} · ${entry.wins}W / ${entry.losses}L`
-              : "No trades"}
+              ? `${formatRR(entry.totalRealizedR)} (${formatSignedCurrency(entry.totalPnl)}) · ${entry.executedTradeCount} trade${entry.executedTradeCount === 1 ? "" : "s"} · ${entry.wins}W / ${entry.losses}L`
+              : entry && entry.cancelledCount > 0
+                ? `No executed trades · ${entry.cancelledCount} cancelled`
+                : "No trades"}
           </div>
         </div>
       </TooltipContent>
@@ -167,19 +168,19 @@ const LEGEND: { state: DayState; label: string }[] = [
 
 export function YearView({
   year,
-  dailyPnl,
+  dailyPerformance,
   onSelectMonth,
   onSelectDay,
   onChangeYear,
 }: {
   year: number;
-  dailyPnl: Map<string, DailyPnl>;
+  dailyPerformance: Map<string, DailyPerformance>;
   onSelectMonth: (monthIndex: number) => void;
   onSelectDay: (dateKey: string) => void;
   onChangeYear: (year: number) => void;
 }) {
   const todayKey = useMemo(() => localDateToKey(new Date()), []);
-  const months = useMemo(() => buildMonths(year, dailyPnl, todayKey), [year, dailyPnl, todayKey]);
+  const months = useMemo(() => buildMonths(year, dailyPerformance, todayKey), [year, dailyPerformance, todayKey]);
 
   return (
     <div className="glass space-y-5 rounded-2xl p-4">
@@ -212,14 +213,14 @@ export function YearView({
               className="mb-2 flex w-full items-center justify-between gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-accent"
             >
               <span className="text-sm font-medium">{m.name}</span>
-              {m.percentTotal !== 0 && (
+              {m.totalR !== 0 && (
                 <span
                   className={cn(
                     "text-xs font-semibold tabular-nums",
-                    m.percentTotal > 0 ? "text-success" : "text-danger",
+                    m.totalR > 0 ? "text-success" : "text-danger",
                   )}
                 >
-                  {formatPercent(m.percentTotal)}
+                  {formatRR(m.totalR)}
                 </span>
               )}
             </button>

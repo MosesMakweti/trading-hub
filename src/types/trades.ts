@@ -46,6 +46,7 @@ export interface AdherenceScoresDTO {
 
 export interface TradeListItemDTO {
   id: string;
+  tradeNumber: number;
   assetSymbol: string;
   executionMinutes: number;
   direction: "LONG" | "SHORT";
@@ -81,6 +82,16 @@ export interface TradeListItemDTO {
     percent: number;
     grade: "A" | "B" | "C" | "D" | "F";
   } | null;
+
+  // Journal rebuild (Stage 9 §7) — Setup Type / Validation Shield (frozen,
+  // Stage 4), lifecycle state (Stage 7/8), pre-trade mood (Stage 5), and
+  // behaviour labels (Stage 7) — enough to scan a trade's whole story from
+  // the Journal's day-level list without opening it.
+  reviewLifecycleStatus: "FULLY_CLOSED" | "PARTIALLY_CLOSED" | "STILL_HOLDING" | "CANCELLED_NEVER_TRIGGERED" | null;
+  setupTypeName: string | null;
+  validationState: "NOT_VALIDATED" | "VALIDATED" | "OVERRIDDEN" | null;
+  preTradeMoodTags: string[];
+  behaviourLabels: { name: string; polarity: "POSITIVE" | "NEGATIVE"; color: TagColor }[];
 }
 
 // ── Trade Workspace (case-file view) ─────────────────────────────────────────
@@ -115,6 +126,10 @@ export interface TradeWorkspaceDTO {
   sessionColor: TagColor | null; // the session's assigned color (from the strategy snapshot)
   higherTimeframeBias: "BULLISH" | "BEARISH";
   biasConfidencePercent: number;
+  /** Frozen at first entry (Stage 4 §10) — the day's DailyAssetAnalysis
+   *  finalBias for this asset at the moment the trade was created. Never
+   *  re-resolved from a since-changed live analysis. */
+  dailyBiasSnapshot: "LONG" | "SHORT" | "NEUTRAL" | null;
 
   expectedRR: number | null;
   actualRR: number | null;
@@ -167,6 +182,7 @@ export interface TradeWorkspaceDTO {
   whatWentWell: string | null;
   whatWentWrong: string | null;
   whatSurprisedMe: string | null;
+  whatCouldImprove: string | null;
   wouldTakeAgain: boolean | null;
   tradeIntent: "PLANNED" | "FOMO" | "REVENGE" | "BOREDOM" | "IMPULSE" | "MANUAL_OVERRIDE" | null;
 
@@ -188,6 +204,16 @@ export interface TradeWorkspaceDTO {
   // where the gallery needs it (see listTradePreviewImages); the mapper leaves it
   // undefined since media lives in the universal attachment system, not on Trade.
   previewImageUrl?: string | null;
+
+  // Trade Review overhaul (Stage 7) — see Trade.reviewLifecycleStatus's schema
+  // doc comment for why this is a separate axis from `status` below.
+  reviewLifecycleStatus: "FULLY_CLOSED" | "PARTIALLY_CLOSED" | "STILL_HOLDING" | "CANCELLED_NEVER_TRIGGERED" | null;
+  cancellationReason: string | null;
+
+  // Pre-Trade Mood Snapshot (Stage 5).
+  preTradeMoodTags: string[];
+  preTradeMoodIntensity: number | null;
+  preTradeMoodNote: string | null;
 
   status: TradeStatus;
   createdAt: string; // ISO — trade logged

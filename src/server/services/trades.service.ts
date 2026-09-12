@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
-import { dateKeyToUtcDate } from "@/lib/date";
+import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import { scorePsychology, type PsychologyAnswer } from "@/domain/psychology/scoring";
 import { deriveStatus, nextClosedAt, nextReviewedAt } from "@/domain/trades/lifecycle";
@@ -16,6 +16,13 @@ import {
 import { getStrategyReference, listStrategies } from "@/server/services/strategies.service";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 import { scoreSetup } from "@/domain/trades/setup-score";
+import {
+  buildSetupValidationSnapshot,
+  type OverrideReasonValue,
+  type TradeValidationStateValue,
+} from "@/domain/trades/setup-validation";
+import { getEffectiveScenario } from "@/server/services/strategy-setup-types.service";
+import { getFinalBiasForAsset } from "@/server/services/daily-asset-analysis.service";
 import { syncExecutionsWithinTx } from "@/server/services/trade-executions.service";
 import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
 import { lockPlanIfConfirmedAndUnlocked } from "@/server/services/trade-plan.service";
@@ -107,6 +114,7 @@ const REVIEW_TEXT_FIELDS = [
   "whatWentWell",
   "whatWentWrong",
   "whatSurprisedMe",
+  "whatCouldImprove",
 ] as const;
 
 function hasText(value: unknown): boolean {
@@ -125,6 +133,11 @@ function tradeScalarData(data: TradeInput) {
     psychPostTradeReflection: data.psychPostTradeReflection,
     psychLessonsLearned: data.psychLessonsLearned,
     psychWhatToWorkOn: data.psychWhatToWorkOn,
+    // Pre-Trade Mood Snapshot (Stage 5) — a plain mutable scalar, like the
+    // psych* free text above: written fresh on every save, no freeze/history.
+    preTradeMoodTags: data.preTradeMoodTags,
+    preTradeMoodIntensity: data.preTradeMoodIntensity,
+    preTradeMoodNote: data.preTradeMoodNote,
   };
 }
 
@@ -330,6 +343,116 @@ async function buildStrategyExecution(
   };
 }
 
+// ── Trade Idea Validation Shield (Stage 4) ───────────────────────────────────
+
+interface SetupValidationResult {
+  setupTypeId: string | null;
+  setupScenarioId: string | null;
+  selectedSetupConditions: Prisma.InputJsonValue | typeof Prisma.DbNull;
+  setupValidationSnapshot: Prisma.InputJsonValue | typeof Prisma.DbNull;
+  validationState: TradeValidationStateValue | null;
+  overrideReason: OverrideReasonValue | null;
+  overrideNote: string | null;
+}
+
+const emptySetupValidation: SetupValidationResult = {
+  setupTypeId: null,
+  setupScenarioId: null,
+  selectedSetupConditions: Prisma.DbNull,
+  setupValidationSnapshot: Prisma.DbNull,
+  validationState: null,
+  overrideReason: null,
+  overrideNote: null,
+};
+
+interface ExistingSetupValidation {
+  setupTypeId: string | null;
+  setupScenarioId: string | null;
+  selectedSetupConditions: Prisma.JsonValue | null;
+  setupValidationSnapshot: Prisma.JsonValue | null;
+  validationState: TradeValidationStateValue | null;
+  overrideReason: OverrideReasonValue | null;
+  overrideNote: string | null;
+  actualEntry: Prisma.Decimal | null;
+}
+
+/**
+ * Resolves setupTypeId -> the live effective scenario for (setupTypeId,
+ * direction), scores what the trader checked, and freezes the result —
+ * mirroring buildStrategyExecution's own freeze/recompute split. Entirely
+ * additive: a trade with no setupTypeId gets the all-null result and the
+ * legacy flat-confluence flow (selectedConfluences/setupScore above) is
+ * completely unaffected either way.
+ *
+ * Once the trade has an actualEntry it's historically frozen — like
+ * performanceRiskPercentOverride, ANY resubmitted setup-validation fields are
+ * ignored from that point on, so an unrelated later edit (or a live Strategy
+ * Lab change to the Setup Type) can never alter a trade's historical setup
+ * evidence. Before that point every save recomputes fresh against the LIVE
+ * scenario, so the trader can keep checking boxes — and switch strategy /
+ * direction / Setup Type — right up until execution.
+ */
+async function buildSetupValidation(
+  userId: string,
+  data: TradeInput,
+  strategySnapshot: { strategyNameSnapshot: string | null; strategyVersionSnapshot: number | null },
+  existing?: ExistingSetupValidation,
+): Promise<SetupValidationResult> {
+  if (existing && existing.actualEntry != null) {
+    return {
+      setupTypeId: existing.setupTypeId,
+      setupScenarioId: existing.setupScenarioId,
+      selectedSetupConditions: (existing.selectedSetupConditions ?? Prisma.DbNull) as Prisma.InputJsonValue,
+      setupValidationSnapshot: (existing.setupValidationSnapshot ?? Prisma.DbNull) as Prisma.InputJsonValue,
+      validationState: existing.validationState,
+      overrideReason: existing.overrideReason,
+      overrideNote: existing.overrideNote,
+    };
+  }
+
+  if (!data.setupTypeId) return emptySetupValidation;
+
+  // A Setup Type always belongs to a specific strategy — a freeform trade (no
+  // strategy) or a setupTypeId from a DIFFERENT strategy than the one
+  // selected is an invalid combination, rejected rather than silently ignored.
+  if (!data.strategyId) {
+    throw new Error("A strategy must be selected to use a Setup Type.");
+  }
+  const owns = await prisma.strategySetupType.findFirst({
+    where: { id: data.setupTypeId, userId, strategyId: data.strategyId },
+    select: { id: true },
+  });
+  if (!owns) throw new Error("Setup type not found for the selected strategy.");
+
+  // LONG -> BULLISH, SHORT -> BEARISH. The trader never picks the scenario
+  // side directly (spec §1) — getEffectiveScenario is also the userId-scoped
+  // read path, so a cross-user setupTypeId resolves to null here.
+  const scenarioDirection = data.direction === "LONG" ? "BULLISH" : "BEARISH";
+  const effective = await getEffectiveScenario(userId, data.setupTypeId, scenarioDirection);
+  if (!effective) throw new Error("Setup type scenario not found.");
+
+  const { snapshot, validationState, overrideReason, overrideNote } = buildSetupValidationSnapshot({
+    strategyName: strategySnapshot.strategyNameSnapshot,
+    strategyVersion: strategySnapshot.strategyVersionSnapshot,
+    setupType: effective.setupType,
+    scenario: { id: effective.scenario.id, direction: effective.scenario.direction },
+    conditions: effective.conditions,
+    selectedChecklistItemIds: data.selectedSetupConditions,
+    overrideReason: data.setupOverrideReason,
+    overrideNote: data.setupOverrideNote,
+  });
+
+  return {
+    setupTypeId: effective.setupType.id,
+    setupScenarioId: effective.scenario.id,
+    selectedSetupConditions: data.selectedSetupConditions as unknown as Prisma.InputJsonValue,
+    setupValidationSnapshot: snapshot as unknown as Prisma.InputJsonValue,
+    validationState,
+    overrideReason,
+    overrideNote,
+  };
+}
+
 export async function listTradesForDay(userId: string, dateKey: string) {
   return prisma.trade.findMany({
     where: { userId, tradeDate: dateKeyToUtcDate(dateKey) },
@@ -393,6 +516,8 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
   const allocations = await buildAllocations(userId, data);
   const snapshots = await buildTradeSnapshots(userId, data);
   const strategyExec = await buildStrategyExecution(userId, data);
+  const setupValidation = await buildSetupValidation(userId, data, snapshots);
+  const dailyBiasSnapshot = await getFinalBiasForAsset(userId, dateKey, data.assetSymbol);
   const assetLink = tradeMarketData(data);
   const tradeNumber = await nextTradeNumber(userId);
 
@@ -416,6 +541,8 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
         reviewedAt,
         status: deriveStatus(closedAt, reviewedAt),
         ...strategyExec,
+        ...setupValidation,
+        dailyBiasSnapshot,
         allocations: { create: allocations },
         ...(psychology ? { psychology: { create: psychology } } : {}),
       },
@@ -452,6 +579,23 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
       strategyId: existing.strategyId,
       strategyExecutionSnapshot: existing.strategyExecutionSnapshot,
     });
+    const setupValidation = await buildSetupValidation(userId, data, snapshots, {
+      setupTypeId: existing.setupTypeId,
+      setupScenarioId: existing.setupScenarioId,
+      selectedSetupConditions: existing.selectedSetupConditions,
+      setupValidationSnapshot: existing.setupValidationSnapshot,
+      validationState: existing.validationState,
+      overrideReason: existing.overrideReason,
+      overrideNote: existing.overrideNote,
+      actualEntry: existing.actualEntry,
+    });
+    // Contextual daily-bias snapshot (Stage 4 §10) — frozen the same way as
+    // the setup validation above: recomputed while the idea is still in
+    // flight, then locked once the trade has an actual entry.
+    const dailyBiasSnapshot =
+      existing.actualEntry != null
+        ? existing.dailyBiasSnapshot
+        : await getFinalBiasForAsset(userId, utcDateToKey(existing.tradeDate), data.assetSymbol);
 
     await tx.tradeAccountAllocation.deleteMany({ where: { tradeId } });
     // Prop Firms module (System B) — diffed (upsert-or-remove per account),
@@ -494,6 +638,8 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
         reviewedAt,
         status: deriveStatus(closedAt, reviewedAt),
         ...strategyExec,
+        ...setupValidation,
+        dailyBiasSnapshot,
         allocations: { create: allocations },
         // Only (re)write the questionnaire when it's fully answered; an
         // incomplete set leaves any existing score untouched.

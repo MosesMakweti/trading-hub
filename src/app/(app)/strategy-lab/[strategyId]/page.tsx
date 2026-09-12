@@ -9,6 +9,7 @@ import { listEntryModels } from "@/server/services/strategy-entry-models.service
 import { getOrCreateTradeManagement } from "@/server/services/strategy-trade-management.service";
 import { getStrategyExpectancy, getStrategyPerformance } from "@/server/services/analytics.service";
 import { listStrategyChecklist, listStrategySessions } from "@/server/services/strategy-sot.service";
+import { listSetupTypesWithScenarios } from "@/server/services/strategy-setup-types.service";
 import { FadeIn } from "@/components/shared/motion";
 import { StrategyWorkspace } from "@/components/strategy-lab/strategy-workspace";
 import type { StrategyChecklistItemDTO } from "@/components/strategy-lab/sot/strategy-checklist-section";
@@ -18,6 +19,7 @@ import type {
   EntryModelDTO,
   FrameworkStepDTO,
   StrategyDTO,
+  StrategySetupTypeDTO,
   TimeframeDTO,
   TradeManagementDTO,
 } from "@/types/strategies";
@@ -44,6 +46,7 @@ export default async function StrategyWorkspacePage({
     sessionRows,
     confluenceRows,
     executionRows,
+    setupTypeRows,
   ] = await Promise.all([
     listArsenalConcepts(user.id, strategyId),
     listFrameworkSteps(user.id, strategyId),
@@ -56,6 +59,7 @@ export default async function StrategyWorkspacePage({
     listStrategySessions(user.id, strategyId),
     listStrategyChecklist(user.id, strategyId, "CONFLUENCE"),
     listStrategyChecklist(user.id, strategyId, "EXECUTION"),
+    listSetupTypesWithScenarios(user.id, strategyId),
   ]);
 
   const sessions: StrategySessionDTO[] = sessionRows.map((s) => ({
@@ -81,6 +85,33 @@ export default async function StrategyWorkspacePage({
   });
   const confluences = confluenceRows.map(toChecklistDto);
   const execution = executionRows.map(toChecklistDto);
+
+  const setupTypes: StrategySetupTypeDTO[] = setupTypeRows.map((st) => ({
+    id: st.id,
+    name: st.name,
+    description: st.description,
+    sortOrder: st.sortOrder,
+    scenarios: st.scenarios.map((sc) => ({
+      id: sc.id,
+      direction: sc.direction,
+      description: sc.description,
+      conditions: sc.conditions.map((c) => ({
+        id: c.id,
+        checklistItemId: c.checklistItemId,
+        name: c.checklistItem.name,
+        color: c.checklistItem.color,
+        kind: c.checklistItem.kind,
+        directionApplicability: c.checklistItem.directionApplicability,
+        baseWeight: c.checklistItem.weight,
+        baseMandatory: c.checklistItem.mandatory,
+        weightOverride: c.weightOverride,
+        mandatoryOverride: c.mandatoryOverride,
+        effectiveWeight: c.weightOverride ?? c.checklistItem.weight,
+        effectiveMandatory: c.mandatoryOverride ?? c.checklistItem.mandatory,
+        sortOrder: c.sortOrder,
+      })),
+    })),
+  }));
 
   const dto: StrategyDTO = {
     id: strategy.id,
@@ -176,6 +207,7 @@ export default async function StrategyWorkspacePage({
         sessions={sessions}
         confluences={confluences}
         execution={execution}
+        setupTypes={setupTypes}
       />
     </FadeIn>
   );
