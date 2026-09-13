@@ -11,6 +11,7 @@ import {
   type CanonicalAnalyticsFilters,
 } from "@/server/services/analytics-canonical.service";
 import { getPropFirmAnalyticsSummary } from "@/server/services/prop-firms-analytics.service";
+import { buildImprovementAnalytics } from "@/server/services/edge-review-commitment.service";
 import { isValidDateKey } from "@/lib/date";
 import { presetToRange, type DateRangePreset } from "@/lib/date-ranges";
 import { AnalyticsModule } from "@/components/analytics/analytics-module";
@@ -93,7 +94,7 @@ export default async function AnalyticsPage({
   const filters = parseFilters(params);
   const canonicalFilters = parseCanonicalFilters(params, from, to);
 
-  const [data, filterOptions, propFirmAnalytics, canonicalRows, canonicalFilterOptions] = await Promise.all([
+  const [data, filterOptions, propFirmAnalytics, canonicalRows, canonicalFilterOptions, improvementWeekly, improvementMonthly] = await Promise.all([
     getAnalyticsData(user.id, from, to, filters),
     getAnalyticsFilterOptions(user.id),
     getPropFirmAnalyticsSummary(user.id, {
@@ -102,6 +103,8 @@ export default async function AnalyticsPage({
     }),
     getCanonicalAnalyticsDataset(user.id, canonicalFilters),
     getCanonicalFilterOptions(user.id),
+    buildImprovementAnalytics(user.id, "WEEKLY"),
+    buildImprovementAnalytics(user.id, "MONTHLY"),
   ]);
   const canonical = summarizeCanonicalAnalytics(canonicalRows);
 
@@ -117,6 +120,7 @@ export default async function AnalyticsPage({
         propFirmAnalytics={propFirmAnalytics}
         canonical={canonical}
         canonicalFilterOptions={canonicalFilterOptions}
+        improvement={{ weekly: improvementWeekly, monthly: improvementMonthly }}
       />
     </FadeIn>
   );

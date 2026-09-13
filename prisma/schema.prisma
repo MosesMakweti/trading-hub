@@ -34,9 +34,11 @@ model User {
   replayTradePlannedTargets       ReplayTradePlannedTarget[]
   replayTradePartialExits         ReplayTradePartialExit[]
   replayTradeExecutionEvents      ReplayTradeExecutionEvent[]
+  replayChartAnnotations          ReplayChartAnnotation[]
   replayComparisonLinks           ReplayComparisonLink[]
   edgeReviewCommitments           EdgeReviewCommitment[]
   edgeReviewCommitmentDailyStates EdgeReviewCommitmentDailyState[]
+  aiReviewAnalystReports          AiReviewAnalystReport[]
   weeklyReviews                   WeeklyReview[]
   trades                          Trade[]
   opportunities                   TradeOpportunity[]
@@ -2892,6 +2894,8 @@ model ReplayReviewSession {
   // actually sign off on this period's findings?" (`reviewFinalizedAt`).
   reviewFinalizedAt DateTime?
 
+  aiAnalystReports AiReviewAnalystReport[]
+
   // Stage 17B §13 — market-data provenance, FROZEN ONCE per asset the first
   // time this session ever fetches its candles. Shape:
   // `Record<canonicalSymbol, CandleProvenance & { frozenAt: string }>` (see
@@ -2903,9 +2907,10 @@ model ReplayReviewSession {
   // `actualBaselineSnapshot.schemaVersion`.
   marketDataProvenance Json?
 
-  replayTrades    ReplayTrade[]
-  comparisonLinks ReplayComparisonLink[]
-  commitments     EdgeReviewCommitment[]
+  replayTrades     ReplayTrade[]
+  chartAnnotations ReplayChartAnnotation[]
+  comparisonLinks  ReplayComparisonLink[]
+  commitments      EdgeReviewCommitment[]
 
   @@index([userId, status])
   @@index([userId, startDate])
@@ -3122,6 +3127,53 @@ model ReplayTradeExecutionEvent {
   @@index([replayTradeId, historicalTimestamp])
 }
 
+// Stage 18 §15-18 — minimal Replay chart annotation layer. A REVIEW artifact
+// only: it must never mutate a real Trade, historical Strategy, Today Market
+// Plan, or Journal, and is never read by anything outside the Replay
+// workspace. Deliberately NOT `TradePlanAnnotation` — that model stores
+// NORMALIZED IMAGE coordinates (0-1 x/y) against an uploaded
+// TradePlanScreenshot bitmap, a completely different coordinate system and
+// FK shape from a chart drawing anchored to real price/time values; reusing
+// it here would be a semantic misuse, not a shortcut. Deliberately ONE
+// generic model rather than one table per shape (`geometry` carries
+// whatever the `type` needs) — the same "small JSON payload over lots of
+// nullable columns" discipline as `ReplayTradeExecutionEvent.data`.
+// `timeframe` is optional: null means the drawing applies across every
+// timeframe of this asset (most annotations are anchored to price/time, not
+// a specific bar width); a non-null value scopes it to one timeframe only
+// for a trader who wants a note that's only relevant on, say, the 1h view.
+enum ReplayAnnotationType {
+  HORIZONTAL_LINE
+  TREND_LINE
+  RECTANGLE
+  TEXT
+}
+
+model ReplayChartAnnotation {
+  id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId String
+  session   ReplayReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  assetSymbol String
+  timeframe   String? // null = applies across every timeframe for this asset
+
+  type     ReplayAnnotationType
+  // Shape-specific price/time coordinates — NEVER trusted raw; validated
+  // against `type` in the service layer before every write (Stage 18 §18).
+  // HORIZONTAL_LINE: {price}. TREND_LINE/RECTANGLE: {p1:{time,price},
+  // p2:{time,price}}. TEXT: {time,price}.
+  geometry Json
+  text     String? // TEXT annotations' note content; also an optional caption on other shapes
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([sessionId, assetSymbol])
+}
+
 // Stage 15.1 §16 — manual correction architecture for Actual-vs-Replay
 // matching. The deterministic matcher (domain/replay-comparison/
 // decision-matching.ts) computes AUTO pairings on every read from frozen
@@ -3264,11 +3316,36 @@ model EdgeReviewCommitment {
   status      EdgeReviewCommitmentStatus   @default(ACTIVE)
   source      EdgeReviewCommitmentSource   @default(MANUAL)
 
-  // Set only for a SUGGESTED-origin commitment — the deterministic rule key
-  // (e.g. "STOP_WIDENING_PATTERN") and a frozen copy of the evidence lines
-  // shown at Accept time (§10, §28). Never re-derived later.
+  // Set for a SUGGESTED-origin commitment (the deterministic rule key, e.g.
+  // "STOP_WIDENING_PATTERN", and a frozen copy of the evidence lines shown
+  // at Accept time — §10, §28, never re-derived later) OR, since Stage 19.1
+  // §24, optionally opted into on a MANUAL commitment when the trader picks
+  // one of the known automatic-evidence rule keys. `source` and
+  // `sourceFindingType` are orthogonal: one records who authored the
+  // commitment, the other records whether a deterministic rule can supply
+  // its evidence.
   sourceFindingType String?
   evidenceSnapshot  Json?
+
+  // Stage 19 §3/§6/§7 — cross-period continuity for "the same behavioral
+  // objective," WITHOUT a generic graph system. `previousCommitmentId`
+  // points to the commitment this one continues/refines (self-relation,
+  // SetNull — deleting a commitment must never cascade-delete its whole
+  // future lineage). `lineageId` is null on a lineage'S ROOT commitment
+  // (meaning "I am my own root") and, on every continuation, is set to
+  // `previous.lineageId ?? previous.id` — i.e. it always inherits the
+  // ORIGINAL root's id, so "every commitment in this lineage" is a single
+  // indexed `WHERE lineageId = X OR id = X` query, never a graph walk.
+  // Continuing/refining RETIRES the previous row (§4 — reusing the
+  // existing status rather than inventing a CARRIED_FORWARD value); the
+  // UI distinguishes "superseded by a continuation" from "genuinely
+  // dismissed" by checking whether any other commitment's
+  // `previousCommitmentId` points back to it (domain/improvements
+  // computes this — no extra column needed for that distinction either).
+  previousCommitmentId String?
+  previousCommitment   EdgeReviewCommitment?  @relation("CommitmentLineage", fields: [previousCommitmentId], references: [id], onDelete: SetNull)
+  continuations        EdgeReviewCommitment[] @relation("CommitmentLineage")
+  lineageId            String?
 
   completedAt DateTime?
   retiredAt   DateTime?
@@ -3279,6 +3356,7 @@ model EdgeReviewCommitment {
 
   @@index([userId, status])
   @@index([userId, reviewType, periodStart])
+  @@index([userId, lineageId])
 }
 
 // Stage 16 §18 — lightweight, OPTIONAL daily acknowledgement of an active
@@ -3292,6 +3370,19 @@ enum EdgeReviewCommitmentDailyStatus {
   BREACHED
 }
 
+// Stage 19 §16/§17/§39 — WHO/WHAT produced this day's state. Extending this
+// existing per-day row (rather than adding a parallel
+// `EdgeReviewCommitmentObservation` model) is a deliberate minimal-schema
+// choice: the one-row-per-(commitment,day) shape already matches the
+// granularity Stage 19 needs, and MANUAL always wins — a SYSTEM-derived
+// write is only ever performed when no row exists yet for that day (see
+// domain/improvements/commitment-adherence.ts's aggregation policy); it
+// never overwrites an existing MANUAL row.
+enum EdgeReviewCommitmentDailyStateSource {
+  MANUAL
+  SYSTEM
+}
+
 model EdgeReviewCommitmentDailyState {
   id     String @id @default(cuid())
   userId String
@@ -3303,9 +3394,67 @@ model EdgeReviewCommitmentDailyState {
   dateKey DateTime                        @db.Date
   status  EdgeReviewCommitmentDailyStatus
 
+  // Stage 19 §16/§17 — provenance. `source` defaults MANUAL (the existing
+  // Stage 16 behavior is unchanged for every pre-existing row). `evidence`
+  // is a small structured explanation ONLY set for `source: SYSTEM` (e.g.
+  // which discrepancy category/rule fired) — never fabricated for a manual
+  // self-report. `relatedTradeId` is a PLAIN id reference, deliberately NOT
+  // a foreign key (mirrors `ReplayComparisonLink.actualTradeId`'s own
+  // stance) — this table must never gain a hard dependency on the real
+  // Trade table. `note` is the optional short breach note (§19).
+  source         EdgeReviewCommitmentDailyStateSource @default(MANUAL)
+  note           String?
+  evidence       Json?
+  relatedTradeId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([commitmentId, dateKey])
   @@index([userId, dateKey])
+}
+
+// Stage 20 — the persisted output of the AI Review Analyst for one
+// FINALIZED Edge Review period. Deliberately NEVER overwritten: each
+// generation (first-time or explicit Regenerate) inserts a new row, so a
+// historical report stays exactly as generated even if the trader
+// regenerates later or the provider/model changes (§34-36). "The current
+// report" for a session is simply the most recent row by `generatedAt`;
+// older rows remain queryable as generation history.
+//
+// `evidenceFingerprint` is a deterministic hash of the evidence package
+// that produced `reportJson` (domain/ai-review/evidence-fingerprint.ts) —
+// used to detect staleness (underlying evidence changed since this report
+// was generated) without ever asking the AI itself. `evidencePackageVersion`
+// and `promptVersion` are separate from the fingerprint so a schema/prompt
+// upgrade can be distinguished from an evidence change.
+//
+// `reportJson` is the validated `TraderReviewAnalystReport` shape — never
+// raw model output, and never contains secrets/PII (§42-43).
+model AiReviewAnalystReport {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  replayReviewSessionId String
+  replayReviewSession   ReplayReviewSession @relation(fields: [replayReviewSessionId], references: [id], onDelete: Cascade)
+
+  evidenceFingerprint    String
+  evidencePackageVersion String
+  promptVersion          String
+  provider               String
+  model                  String
+  reportJson             Json
+  // The evidence package's flat citation index ONLY (id -> {strength,
+  // category, statement}) — never the full package, and never raw
+  // Prisma/database internals. Persisted alongside the report so a
+  // historical report's evidence citations stay inspectable even if the
+  // live data they were computed from later changes (§34 historical
+  // stability) — the evidence drawer reads from THIS, never a live
+  // re-derivation, for a persisted report.
+  evidenceIndexJson      Json
+
+  generatedAt DateTime @default(now())
+
+  @@index([userId, replayReviewSessionId, generatedAt])
 }

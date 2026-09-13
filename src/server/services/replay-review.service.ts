@@ -14,7 +14,7 @@ import { pickVersionAtTime } from "@/domain/replay/historical-strategy-version";
 import * as metrics from "@/domain/performance/metrics";
 import { summarizePsychologyAdherence, toMetricInputs } from "@/domain/analytics/canonical-aggregations";
 import { buildActualTradeComparisonSnapshot } from "@/domain/replay/actual-trade-comparison-snapshot";
-import { getHistoricalCandles, getProviderById, resolveMarketDataProvider } from "@/server/services/market-data.service";
+import { getHistoricalCandles, getProviderById, isProviderDisplayPermitted, resolveMarketDataProvider } from "@/server/services/market-data.service";
 import type { SetupValidationSnapshot } from "@/domain/trades/setup-validation";
 import type { CreateReplayReviewSessionInput } from "@/lib/validation/replay";
 import type { Candle } from "@/domain/market-data/candle";
@@ -418,6 +418,14 @@ export async function finalizeEdgeReview(userId: string, id: string): Promise<vo
   if (session.reviewFinalizedAt) return;
 
   await prisma.replayReviewSession.update({ where: { id }, data: { reviewFinalizedAt: new Date() } });
+
+  // Stage 19 §10-11 — runs exactly once per finalization (guarded by the
+  // idempotency check above), deriving automatic evidence for this period
+  // for any commitment with a deterministic rule mapping. Never blocks
+  // finalization: a failure here must not prevent "Finish Review" from
+  // completing, since evidence sync is a byproduct, not the trader action.
+  const { syncSystemEvidenceForSession } = await import("@/server/services/edge-review-commitment.service");
+  await syncSystemEvidenceForSession(userId, id).catch(() => undefined);
 }
 
 export async function updateReplayReviewNotes(userId: string, id: string, notes: unknown): Promise<void> {
@@ -560,12 +568,22 @@ async function recordMarketDataProvenance(sessionId: string, canonicalSymbol: st
 
 /**
  * The ONLY path Replay's candle-fetching should go through once a session
- * exists (Stage 17B §13) — enforces freeze-once: the first provider ever
- * used for a given asset in this session is pinned for the rest of the
- * session's life, never silently re-resolved from current config and never
- * automatically substituted if that provider later becomes unavailable
- * (surfaces a clear `PROVIDER_ERROR` instead — see the schema's own doc
- * comment on `marketDataProvenance`).
+ * exists (Stage 17B §13, corrected Stage 17B.1 §10/§11) — enforces
+ * freeze-once: the first provider ever used for a given asset in this
+ * session is pinned for the rest of the session's life, never silently
+ * re-resolved from current config and never automatically substituted if
+ * that provider later becomes unavailable (surfaces a clear
+ * `PROVIDER_ERROR` instead — see the schema's own doc comment on
+ * `marketDataProvenance`). Freeze-once covers WHICH provider a session
+ * used, historically — it does NOT override current licensing policy: a
+ * session pinned to a licensed provider (Databento or, since Stage 17C.2,
+ * Twelve Data) while that provider's own display flag is later turned off
+ * gets a `PROVIDER_DISPLAY_DISABLED` refusal, not a silent Fixture fallback
+ * and not an override of the disabled flag. Its provenance record is
+ * untouched either way. This function is fully provider-agnostic — adding
+ * Twelve Data required zero changes here, only a second entry in
+ * `market-data.service.ts`'s `getProviderById`/`resolveMarketDataProvider`/
+ * `isProviderDisplayPermitted`.
  */
 export async function fetchReplayCandlesWithProvenance(
   userId: string,
@@ -603,6 +621,23 @@ export async function fetchReplayCandlesWithProvenance(
         error: {
           code: "PROVIDER_ERROR",
           message: `This session's ${canonicalSymbol} data came from ${pinned.displayName}, which is no longer configured. Restore its credentials to keep replaying this asset — Traditorium never silently switches data sources mid-session.`,
+        },
+      };
+    }
+    // Stage 17B.1 §10/§11 (extended Stage 17C.2 §21) — historical
+    // provenance staying frozen does NOT override current licensing
+    // policy. A session pinned to a licensed/gated provider (Databento or
+    // Twelve Data) whose display is currently disabled gets a structured,
+    // non-destructive refusal: the frozen provenance record is left
+    // untouched (no write happens below), no fetch is attempted, and there
+    // is no silent fallback to Fixture or any
+    // other provider substitution.
+    if (!isProviderDisplayPermitted(pinned.id)) {
+      return {
+        ok: false,
+        error: {
+          code: "PROVIDER_DISPLAY_DISABLED",
+          message: `This session's ${canonicalSymbol} data is sourced from ${pinned.displayName}, which is currently disabled for display (licensing policy). The original provenance is preserved — it will resume once display is re-enabled.`,
         },
       };
     }

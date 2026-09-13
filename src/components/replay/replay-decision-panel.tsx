@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -34,8 +34,20 @@ import {
   getReplayHistoricalStrategyContext,
   moveReplayTradeStopLoss,
   resolveReplayTradeAmbiguity,
+  updateReplayTradeReasoningNote,
 } from "@/actions/replay.actions";
 import type { HistoricalStrategyContextDTO, ReplayTradeDTO } from "@/types/replay";
+import { Crosshair, Clock3 } from "lucide-react";
+
+/** Stage 18 §12 — a field currently "armed" to receive its next value from a
+ *  chart click, and the point the chart last delivered once one lands.
+ *  `nonce` changes on every click so the effect that consumes `point` fires
+ *  even if the trader clicks the exact same price twice in a row. */
+export interface ChartPriceSelection {
+  armedField: "entry" | "stop" | `target-${number}` | null;
+  point: { time: number; price: number } | null;
+  nonce: number;
+}
 
 const NO_STRATEGY = "__none__";
 const NO_SETUP = "__none__";
@@ -66,9 +78,12 @@ export function ReplayDecisionPanel({
   asset,
   currentTime,
   executionPrice,
+  unrealizedR,
   strategies,
   activeTrade,
   onTradeChanged,
+  priceSelection,
+  onArmField,
 }: {
   sessionId: string;
   asset: string;
@@ -76,12 +91,20 @@ export function ReplayDecisionPanel({
   /** The finest-data currently-available Replay price (§11/§13) — the ONLY
    *  price a MARKET order may fill at. Null while base data hasn't loaded. */
   executionPrice: number | null;
+  /** Stage 18 §21-22 — strictly derived server-side from `executionPrice`
+   *  (never computed here — §41). Null when flat/pending/closed. */
+  unrealizedR: number | null;
   strategies: { id: string; name: string }[];
   activeTrade: ReplayTradeDTO | null;
   onTradeChanged: (trade: ReplayTradeDTO) => void;
+  /** Stage 18 §12 — chart-assisted price selection state, owned by the
+   *  parent (which also owns the chart's click handler) so a click can
+   *  reach whichever field is currently armed. */
+  priceSelection: ChartPriceSelection;
+  onArmField: (field: ChartPriceSelection["armedField"]) => void;
 }) {
   if (activeTrade && ACTIVE_LIFECYCLES.has(activeTrade.lifecycle)) {
-    return <ReplayPositionPanel trade={activeTrade} currentTime={currentTime} onTradeChanged={onTradeChanged} />;
+    return <ReplayPositionPanel trade={activeTrade} currentTime={currentTime} unrealizedR={unrealizedR} onTradeChanged={onTradeChanged} />;
   }
   return (
     <ReplayNewDecisionForm
@@ -91,6 +114,8 @@ export function ReplayDecisionPanel({
       executionPrice={executionPrice}
       strategies={strategies}
       onTradeChanged={onTradeChanged}
+      priceSelection={priceSelection}
+      onArmField={onArmField}
     />
   );
 }
@@ -102,6 +127,8 @@ function ReplayNewDecisionForm({
   executionPrice,
   strategies,
   onTradeChanged,
+  priceSelection,
+  onArmField,
 }: {
   sessionId: string;
   asset: string;
@@ -109,6 +136,8 @@ function ReplayNewDecisionForm({
   executionPrice: number | null;
   strategies: { id: string; name: string }[];
   onTradeChanged: (trade: ReplayTradeDTO) => void;
+  priceSelection: ChartPriceSelection;
+  onArmField: (field: ChartPriceSelection["armedField"]) => void;
 }) {
   const [direction, setDirection] = useState<"LONG" | "SHORT">("LONG");
   const [strategyId, setStrategyId] = useState<string | null>(null);
@@ -135,6 +164,30 @@ function ReplayNewDecisionForm({
   // price. Derived directly from props/state rather than mirrored into a
   // second piece of state via an effect.
   const entryPrice = orderType === "MARKET" ? (executionPrice != null ? String(executionPrice) : "") : pendingEntryPrice;
+
+  // Stage 18 §12 — consume a chart-click price the moment one arrives for
+  // whichever field is currently armed. This is React's documented
+  // "adjusting state when a prop changes" pattern (applied DURING render,
+  // not inside a useEffect, and using useState rather than a ref — refs
+  // must never be read/written during render) — `nonce` is compared
+  // against the last-seen value so a repeat click on the same price still
+  // registers exactly once, without an effect+setState cascade.
+  const [lastConsumedNonce, setLastConsumedNonce] = useState(-1);
+  if (priceSelection.nonce !== lastConsumedNonce) {
+    setLastConsumedNonce(priceSelection.nonce);
+    if (priceSelection.point && priceSelection.armedField) {
+      const price = priceSelection.point.price;
+      if (priceSelection.armedField === "entry") {
+        if (orderType === "PENDING") setPendingEntryPrice(String(price));
+      } else if (priceSelection.armedField === "stop") {
+        setStopLoss(String(price));
+      } else if (priceSelection.armedField.startsWith("target-")) {
+        const idx = Number(priceSelection.armedField.slice("target-".length));
+        updateTarget(idx, "price", String(price));
+      }
+      onArmField(null); // one shot — the trader re-arms explicitly for another pick
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -274,6 +327,10 @@ function ReplayNewDecisionForm({
         <h3 className="text-sm font-semibold">Replay Decision</h3>
         <span className="text-[11px] text-muted-foreground/70">Only what was known at this moment</span>
       </div>
+      {/* Stage 18 §21 — explicit "flat" state, since this form itself IS
+       *  what "flat" looks like (no open/pending simulated position for
+       *  this asset yet). */}
+      <p className="text-[11px] text-muted-foreground/60">No open replay position — plan a decision below.</p>
 
       {/* Direction */}
       <div className="grid grid-cols-2 gap-1.5">
@@ -402,19 +459,35 @@ function ReplayNewDecisionForm({
         <div className="grid grid-cols-2 gap-2">
           <label className="space-y-1 text-xs text-muted-foreground">
             Entry
-            <Input
-              type="number"
-              step="any"
-              value={entryPrice}
-              disabled={orderType === "MARKET"}
-              onChange={(e) => setPendingEntryPrice(e.target.value)}
-              placeholder={orderType === "MARKET" ? "current price" : "trigger price"}
-              className="h-8 text-xs"
-            />
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                step="any"
+                value={entryPrice}
+                disabled={orderType === "MARKET"}
+                onChange={(e) => setPendingEntryPrice(e.target.value)}
+                placeholder={orderType === "MARKET" ? "current price" : "trigger price"}
+                className="h-8 text-xs"
+              />
+              {orderType === "PENDING" && (
+                <ChartSelectButton
+                  active={priceSelection.armedField === "entry"}
+                  onClick={() => onArmField(priceSelection.armedField === "entry" ? null : "entry")}
+                  label="Set entry from chart"
+                />
+              )}
+            </div>
           </label>
           <label className="space-y-1 text-xs text-muted-foreground">
             Stop Loss
-            <Input type="number" step="any" value={stopLoss} onChange={(e) => setStopLoss(e.target.value)} className="h-8 text-xs" />
+            <div className="flex items-center gap-1">
+              <Input type="number" step="any" value={stopLoss} onChange={(e) => setStopLoss(e.target.value)} className="h-8 text-xs" />
+              <ChartSelectButton
+                active={priceSelection.armedField === "stop"}
+                onClick={() => onArmField(priceSelection.armedField === "stop" ? null : "stop")}
+                label="Set stop from chart"
+              />
+            </div>
           </label>
         </div>
 
@@ -434,6 +507,11 @@ function ReplayNewDecisionForm({
                   value={t.price}
                   onChange={(e) => updateTarget(i, "price", e.target.value)}
                   className="h-8 text-xs"
+                />
+                <ChartSelectButton
+                  active={priceSelection.armedField === `target-${i}`}
+                  onClick={() => onArmField(priceSelection.armedField === `target-${i}` ? null : `target-${i}`)}
+                  label={`Set target ${i + 1} from chart`}
                 />
                 <Input
                   type="number"
@@ -484,6 +562,25 @@ function ReplayNewDecisionForm({
   );
 }
 
+/** Stage 18 §12 — "activate selection mode and click the chart" toggle.
+ *  Typed entry always remains available (this is purely additive) — the
+ *  trader can ignore this button entirely and type a price instead. */
+function ChartSelectButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+  return (
+    <Button
+      type="button"
+      variant={active ? "default" : "outline"}
+      size="icon-sm"
+      className="shrink-0"
+      aria-label={label}
+      title={active ? "Click the chart to set this price (Esc to cancel)" : label}
+      onClick={onClick}
+    >
+      <Crosshair className="size-3.5" />
+    </Button>
+  );
+}
+
 function ConditionGroup({
   label,
   items,
@@ -528,18 +625,45 @@ function ValidationBanner({ state, score }: { state: "NOT_VALIDATED" | "VALIDATE
 function ReplayPositionPanel({
   trade,
   currentTime,
+  unrealizedR,
   onTradeChanged,
 }: {
   trade: ReplayTradeDTO;
   currentTime: number;
+  unrealizedR: number | null;
   onTradeChanged: (trade: ReplayTradeDTO) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [newStopLoss, setNewStopLoss] = useState(trade.currentStopLoss != null ? String(trade.currentStopLoss) : "");
   const [closePrice, setClosePrice] = useState(trade.simulatedEntry != null ? String(trade.simulatedEntry) : "");
   const [closePercent, setClosePercent] = useState("100");
+  const [reasoningNote, setReasoningNote] = useState(() => {
+    const notes = trade.notes as Record<string, unknown> | null;
+    return typeof notes?.reasoning === "string" ? notes.reasoning : "";
+  });
+  const [showTimeline, setShowTimeline] = useState(false);
+  const noteSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const rColor = trade.realizedReplayR > 0 ? "text-success" : trade.realizedReplayR < 0 ? "text-danger" : "text-muted-foreground";
+  const showUnrealized = (trade.lifecycle === "OPEN" || trade.lifecycle === "PARTIALLY_CLOSED") && unrealizedR != null;
+  const unrealizedColor = unrealizedR != null && unrealizedR > 0 ? "text-success" : unrealizedR != null && unrealizedR < 0 ? "text-danger" : "text-muted-foreground";
+
+  // Stage 18 §19 — lightweight autosave, debounced (never on every
+  // keystroke) — same throttled-write discipline as the Clock checkpoint.
+  function onReasoningChange(value: string) {
+    setReasoningNote(value);
+    if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
+    noteSaveTimer.current = setTimeout(() => {
+      void updateReplayTradeReasoningNote(trade.id, { note: value }).then((result) => {
+        if (!result.success) toast.error(result.error);
+      });
+    }, 800);
+  }
+  useEffect(() => {
+    return () => {
+      if (noteSaveTimer.current) clearTimeout(noteSaveTimer.current);
+    };
+  }, []);
 
   function run(action: () => Promise<{ success: true; trade: ReplayTradeDTO } | { success: false; error: string }>) {
     startTransition(async () => {
@@ -560,21 +684,32 @@ function ReplayPositionPanel({
           {trade.assetSymbol}
           <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-secondary-foreground">{trade.lifecycle}</span>
         </div>
-        <span className={cn("text-sm font-semibold tabular-nums", rColor)}>{trade.realizedReplayR >= 0 ? "+" : ""}{trade.realizedReplayR.toFixed(2)}R</span>
+        <div className="text-right">
+          <div className={cn("text-sm font-semibold tabular-nums", rColor)}>{trade.realizedReplayR >= 0 ? "+" : ""}{trade.realizedReplayR.toFixed(2)}R</div>
+          {showUnrealized && (
+            <div className={cn("text-[10px] tabular-nums", unrealizedColor)}>
+              {unrealizedR! >= 0 ? "+" : ""}
+              {unrealizedR!.toFixed(2)}R unrealized
+            </div>
+          )}
+        </div>
       </div>
 
       {trade.pendingAmbiguity != null && (
         <div className="space-y-2 rounded-lg border border-warning/30 bg-warning/10 p-2.5 text-xs text-warning">
           <div className="flex items-center gap-1.5 font-medium">
-            <AlertTriangle className="size-3.5" /> Ambiguous candle — stop and a target both touched
+            <AlertTriangle className="size-3.5" /> Ambiguous candle
           </div>
-          <p className="opacity-90">The base candle&apos;s OHLC can&apos;t tell which happened first. Choose how to resolve it:</p>
+          {/* Stage 18 §24 — exact required copy, verbatim. */}
+          <p className="opacity-90">
+            Both stop and target were touched within the same 1-minute candle, so exact order cannot be determined.
+          </p>
           <div className="grid grid-cols-2 gap-1.5">
             <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => run(() => resolveReplayTradeAmbiguity(trade.id, { resolution: "SL_FIRST" }))}>
-              Stop hit first
+              Stop first
             </Button>
             <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => run(() => resolveReplayTradeAmbiguity(trade.id, { resolution: "TARGET_FIRST" }))}>
-              Target hit first
+              Target first
             </Button>
           </div>
         </div>
@@ -655,6 +790,58 @@ function ReplayPositionPanel({
           </Button>
         </div>
       )}
+
+      {/* Stage 18 §19 — lightweight reasoning notes, debounced autosave. */}
+      <div className="space-y-1 border-t border-border/60 pt-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">Reasoning</span>
+        <Textarea
+          rows={2}
+          placeholder="Why am I waiting / why I think this is invalid / what I noticed differently…"
+          value={reasoningNote}
+          onChange={(e) => onReasoningChange(e.target.value)}
+          className="text-xs"
+        />
+      </div>
+
+      {/* Stage 18 §20 — decision timeline, reusing ReplayTradeExecutionEvent
+       *  rows already recorded by the execution engine (never duplicated
+       *  here — this only formats what the server already computed). */}
+      {trade.executionEvents.length > 0 && (
+        <div className="border-t border-border/60 pt-2">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70"
+            onClick={() => setShowTimeline((v) => !v)}
+            aria-expanded={showTimeline}
+          >
+            <span className="flex items-center gap-1">
+              <Clock3 className="size-3" /> Timeline ({trade.executionEvents.length})
+            </span>
+            <span>{showTimeline ? "Hide" : "Show"}</span>
+          </button>
+          {showTimeline && (
+            <ul className="mt-1.5 space-y-1">
+              {trade.executionEvents.map((event) => (
+                <li key={event.id} className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>{EXECUTION_EVENT_LABELS[event.eventType]}</span>
+                  <span className="tabular-nums">{new Date(event.historicalTimestamp).toISOString().slice(0, 16).replace("T", " ")}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
+const EXECUTION_EVENT_LABELS: Record<string, string> = {
+  ORDER_PLACED: "Order placed",
+  ORDER_FILLED: "Order filled",
+  SL_MOVED: "Stop moved",
+  PARTIAL_CLOSE: "Partial close",
+  FULL_CLOSE: "Trade closed",
+  ORDER_CANCELLED: "Order cancelled",
+  AMBIGUOUS_CANDLE: "Ambiguous candle",
+  AMBIGUITY_RESOLVED: "Ambiguity resolved",
+};

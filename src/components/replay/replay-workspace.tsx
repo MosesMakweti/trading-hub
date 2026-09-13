@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RichTextEditor } from "@/components/plan/rich-text-editor";
 import { TAG_STYLES, colorForName } from "@/components/ui/tag";
-import { formatDateKeyLong, formatDateKeyShort } from "@/lib/date";
+import { dateKeyToUtcDate, formatDateKeyLong, formatDateKeyShort } from "@/lib/date";
 import { completeReplayReviewSession, startReplayReviewSession, updateReplayReviewNotes } from "@/actions/replay.actions";
 import { ReplayActualPeriodPanel } from "@/components/replay/replay-actual-period-panel";
 import { ReplayStrategyPanel } from "@/components/replay/replay-strategy-panel";
@@ -169,10 +169,15 @@ export function ReplayWorkspace({
         <TabsContent value="market-replay" className="mt-4">
           <ReplayMarketPanel session={session} assetOptions={assetOptions} strategies={strategies} initialReplayTrades={replayTrades} />
 
+          {/* Stage 18 §6 — the inline, read-only Daily Market Plan panel
+           *  (rendered inside ReplayMarketPanel, keyed to the Clock's OWN
+           *  current day) replaces the need to read plan content here; this
+           *  strip stays only as a quick jump to any OTHER day's full
+           *  Journal page for deeper reference. */}
           {dailyPlanDateKeys.length > 0 && (
             <div className="mt-4 space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase">
-                Daily Market Plan — historical reference
+                Jump to a day&apos;s full plan page
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {dailyPlanDateKeys.map((dk) => (
@@ -185,15 +190,16 @@ export function ReplayWorkspace({
                   </Link>
                 ))}
               </div>
-              <p className="text-[11px] text-muted-foreground/60 italic">
-                Your original analysis — reference only. Replay exists partly to discover it may have been wrong.
-              </p>
             </div>
           )}
         </TabsContent>
 
         <TabsContent value="strategy" className="mt-4">
-          <ReplayStrategyPanel context={historicalStrategyContext} />
+          <ReplayStrategyPanel
+            initialContext={historicalStrategyContext}
+            strategyId={session.strategyId}
+            atTime={session.replayResumePoint?.currentTime ?? dateKeyToUtcDate(session.startDate).getTime()}
+          />
         </TabsContent>
 
         <TabsContent value="actual" className="mt-4">

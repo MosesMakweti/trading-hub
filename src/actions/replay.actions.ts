@@ -6,12 +6,15 @@ import { requireUser } from "@/server/guards";
 import {
   advanceReplayExecutionSchema,
   cancelReplayPendingSchema,
+  clearReplayAnnotationsSchema,
   closeReplayPartialSchema,
   closeReplayRemainingSchema,
   createManualComparisonLinkSchema,
+  createReplayAnnotationSchema,
   createReplayDecisionSchema,
   createReplayReviewSessionSchema,
   deleteManualComparisonLinkSchema,
+  deleteReplayAnnotationSchema,
   getReplayCandlesSchema,
   moveReplayStopLossSchema,
   resolveReplayAmbiguitySchema,
@@ -19,13 +22,17 @@ import {
   startReplayReviewForPeriodSchema,
   updateReplayProgressSchema,
   updateReplayReviewNotesSchema,
+  updateReplayTradeReasoningNoteSchema,
 } from "@/lib/validation/replay";
 import * as replayReviewService from "@/server/services/replay-review.service";
 import * as replayTradeService from "@/server/services/replay-trade.service";
+import * as replayAnnotationService from "@/server/services/replay-annotation.service";
 import * as replayComparisonLinkService from "@/server/services/replay-comparison-link.service";
+import { listDailyAssetAnalyses, toDailyAssetAnalysisDTO } from "@/server/services/daily-asset-analysis.service";
 import type { Candle } from "@/domain/market-data/candle";
 import type { MarketDataError } from "@/domain/market-data/provider-types";
-import type { HistoricalStrategyContextDTO, ReplayTradeDTO } from "@/types/replay";
+import type { HistoricalStrategyContextDTO, ReplayAnnotationDTO, ReplayTradeDTO } from "@/types/replay";
+import type { DailyAssetAnalysisDTO } from "@/types/today";
 
 type ActionResult = { success: true } | { success: false; error: string };
 type CreateSessionResult = { success: true; id: string } | { success: false; error: string };
@@ -289,17 +296,43 @@ export async function updateReplayProgress(sessionId: string, input: unknown): P
 
 type CandlesResult = { success: true; candles: Candle[]; sourceLabel: string | null } | { success: false; error: MarketDataError };
 
-/** Stage 17B §18 — a short, honest label for the dev-safety data-source
- *  indicator ("Data: Databento · ESZ6" vs "Data: Synthetic Fixture"),
- *  derived from whichever segment was actually fetched LAST (the one
- *  closest to the requested range's end) — never guessed, never leaking
- *  more than a provider name + literal contract symbol into the UI. */
-function buildSourceLabel(provenance: { providerId: string; segments: { contractSymbol: string }[] }[]): string | null {
+/** Stage 17B §18, extended Stage 17C.2 §32, corrected Stage 17D §2 — a
+ *  short, honest label for the dev-safety data-source indicator
+ *  ("Data: Databento · ESZ6" / "Data: Twelve Data · XAU/USD · Aggregated"
+ *  vs "Data: Synthetic Fixture"), derived from whichever segment was
+ *  actually fetched LAST (the one closest to the requested range's end) —
+ *  never guessed, never leaking more than a provider name + symbol (+
+ *  price basis, for an OTC/aggregated source) into the UI, and never
+ *  implying "broker-exact" for an OTC provider. Twelve Data's basis reads
+ *  "Aggregated," not "MID" — Stage 17D found the "mid-price" wording in
+ *  Twelve Data's own docs is confirmed only for their WebSocket feed, not
+ *  the REST endpoint this app actually calls, so the badge must not assert
+ *  a fact the evidence doesn't support (see twelve-data-provider.ts's own
+ *  doc comment). */
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  databento: "Databento",
+  twelvedata: "Twelve Data",
+};
+
+/** Price bases worth surfacing in the badge — Databento's "raw-unadjusted"
+ *  and Fixture's "synthetic" are internal/informational labels, not
+ *  something a trader needs to see next to the symbol. "MID"/"BID"/"ASK"
+ *  are kept as forward-compatible values for a possible future
+ *  BID/ASK/MID-capable provider (Stage 17C.1's documented V2 upgrade
+ *  path) — no current adapter produces them. */
+const DISPLAYED_PRICE_BASES = new Set(["MID", "BID", "ASK", "AGGREGATED"]);
+
+function buildSourceLabel(
+  provenance: { providerId: string; priceBasis?: string; segments: { contractSymbol: string }[] }[],
+): string | null {
   const last = provenance[provenance.length - 1];
   if (!last) return null;
   if (last.providerId === "fixture") return "Synthetic Fixture";
+  const providerName = PROVIDER_DISPLAY_NAMES[last.providerId] ?? last.providerId;
   const lastSegment = last.segments[last.segments.length - 1];
-  return lastSegment ? `Databento · ${lastSegment.contractSymbol}` : "Databento";
+  const symbolPart = lastSegment ? ` · ${lastSegment.contractSymbol}` : "";
+  const basisPart = last.priceBasis && DISPLAYED_PRICE_BASES.has(last.priceBasis) ? ` · ${last.priceBasis}` : "";
+  return `${providerName}${symbolPart}${basisPart}`;
 }
 
 /**
@@ -397,4 +430,95 @@ export async function reopenReplayReviewSession(sessionId: string): Promise<Acti
   }
   revalidatePath("/edge");
   return { success: true };
+}
+
+// ── Chart annotations (Stage 18 §15-18) ─────────────────────────────────────
+
+type AnnotationResult = { success: true; annotation: ReplayAnnotationDTO } | { success: false; error: string };
+
+export async function listReplayAnnotations(sessionId: string, assetSymbol: string): Promise<ReplayAnnotationDTO[]> {
+  const user = await requireUser();
+  return replayAnnotationService.listReplayAnnotations(user.id, sessionId, assetSymbol);
+}
+
+export async function createReplayAnnotation(input: unknown): Promise<AnnotationResult> {
+  const user = await requireUser();
+  const parsed = createReplayAnnotationSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  try {
+    const annotation = await replayAnnotationService.createReplayAnnotation(user.id, parsed.data);
+    return { success: true, annotation };
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to save drawing.") };
+  }
+}
+
+export async function deleteReplayAnnotation(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  const parsed = deleteReplayAnnotationSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  try {
+    await replayAnnotationService.deleteReplayAnnotation(user.id, parsed.data.id);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to delete drawing.") };
+  }
+}
+
+export async function clearReplayAnnotations(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  const parsed = clearReplayAnnotationsSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  try {
+    await replayAnnotationService.clearReplayAnnotations(user.id, parsed.data.sessionId, parsed.data.assetSymbol);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to clear drawings.") };
+  }
+}
+
+// ── Unrealized R / reasoning notes (Stage 18 §19/§21-22) ────────────────────
+
+/** Strictly derived from a caller-supplied price — the caller (the chart
+ *  component) is responsible for that price coming from the latest VISIBLE
+ *  candle only, exactly like `advanceReplayTradeExecution`'s candle input
+ *  (§22 — never prefetched/future data). Returns `null` (never 0-as-unknown)
+ *  when the trade has no meaningful unrealized figure (flat/pending/closed). */
+export async function getReplayTradeUnrealizedR(replayTradeId: string, atPrice: number): Promise<{ success: true; r: number | null } | { success: false; error: string }> {
+  const user = await requireUser();
+  if (!Number.isFinite(atPrice)) return { success: false, error: "Invalid price." };
+  try {
+    const r = await replayTradeService.getReplayTradeUnrealizedR(user.id, replayTradeId, atPrice);
+    return { success: true, r };
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to compute unrealized R.") };
+  }
+}
+
+export async function updateReplayTradeReasoningNote(replayTradeId: string, input: unknown): Promise<TradeResult> {
+  const user = await requireUser();
+  const parsed = updateReplayTradeReasoningNoteSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  try {
+    const trade = await replayTradeService.updateReplayTradeReasoningNote(user.id, replayTradeId, parsed.data.note);
+    return { success: true, trade };
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to save note.") };
+  }
+}
+
+// ── Historical Daily Market Plan (Stage 18 §6) ──────────────────────────────
+
+/** Read-only historical planning context for one day — the SAME
+ *  `DailyAssetAnalysis` data "Today" reads, keyed by whatever `dateKey` the
+ *  Replay Clock is currently on (never "today's" live data implicitly —
+ *  the caller always passes the historical date explicitly). */
+export async function getReplayDailyMarketPlan(dateKey: string): Promise<DailyAssetAnalysisDTO[]> {
+  const user = await requireUser();
+  const rows = await listDailyAssetAnalyses(user.id, dateKey);
+  return rows.map(toDailyAssetAnalysisDTO);
 }

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, History, Loader2, TrendingUp } from "lucide-react";
+import { ChevronLeft, ChevronRight, History, Loader2, Sparkles, TrendingUp } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { ReplayWorkspace } from "@/components/replay/replay-workspace";
 import { EdgeOverviewPanel } from "@/components/edge/edge-overview-panel";
 import { EdgeComparisonPanel } from "@/components/edge/edge-comparison-panel";
 import { EdgeImprovementsPanel } from "@/components/edge/edge-improvements-panel";
+import { EdgeAnalystPanel } from "@/components/edge/edge-analyst-panel";
 import type {
   HistoricalStrategyContextDTO,
   ReplayActualBaseline,
@@ -61,6 +62,7 @@ export function EdgeReviewWorkspace({
   comparison,
   improvementsSynthesis,
   commitments,
+  carryForwardCandidates,
   weeklyReview,
   strategies,
   assets,
@@ -82,12 +84,13 @@ export function EdgeReviewWorkspace({
   comparison: ActualVsReplayComparison;
   improvementsSynthesis: ImprovementsSynthesis;
   commitments: EdgeReviewCommitmentDTO[];
+  carryForwardCandidates: EdgeReviewCommitmentDTO[];
   weeklyReview: { wentWell: unknown; toImprove: unknown; focusNextWeek: unknown };
   strategies: { id: string; name: string }[];
   assets: string[];
   strategyId: string | null;
   assetSymbols: string[];
-  initialTab: "overview" | "replay" | "comparison" | "improvements";
+  initialTab: "overview" | "replay" | "comparison" | "improvements" | "analyst";
 }) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -234,6 +237,10 @@ export function EdgeReviewWorkspace({
           </TabsTrigger>
           <TabsTrigger value="comparison">Comparison</TabsTrigger>
           <TabsTrigger value="improvements">Improvements</TabsTrigger>
+          <TabsTrigger value="analyst" className="gap-1.5">
+            <Sparkles className="size-3.5" />
+            Analyst
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
@@ -276,8 +283,13 @@ export function EdgeReviewWorkspace({
             comparison={comparison}
             synthesis={improvementsSynthesis}
             commitments={commitments}
+            carryForwardCandidates={carryForwardCandidates}
             weeklyReview={weeklyReview}
           />
+        </TabsContent>
+
+        <TabsContent value="analyst" className="mt-4">
+          <EdgeAnalystPanel sessionId={session?.id ?? null} finalized={session?.reviewFinalizedAt != null} />
         </TabsContent>
       </Tabs>
     </div>

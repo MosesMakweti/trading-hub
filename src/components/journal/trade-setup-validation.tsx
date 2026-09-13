@@ -18,6 +18,7 @@ import {
 import { buildSetupValidationSnapshot } from "@/domain/trades/setup-validation";
 import { loadEffectiveScenario } from "@/actions/strategy-setup-types.actions";
 import { getDailyAssetAnalysisBias } from "@/actions/daily-asset-analysis.actions";
+import { ContextualCommitmentReminder } from "@/components/journal/contextual-commitment-reminder";
 import type { EffectiveSetupScenario } from "@/server/services/strategy-setup-types.service";
 import type { TradeFormValues } from "@/lib/validation/trades";
 
@@ -205,6 +206,10 @@ export function TradeSetupValidationSection({
 
       {setupTypeId && !loading && scenario && preview?.validationState === "NOT_VALIDATED" && (
         <div className="space-y-2">
+          {/* Stage 19.1 §3-7 — shown right where the shield turns non-green,
+           *  the exact moment a discretionary override becomes a live
+           *  option. Purely informational: never blocks "Take Anyway". */}
+          <ContextualCommitmentReminder ruleKeys={["OVERRIDE_DISCIPLINE"]} />
           {!showOverride ? (
             <Button type="button" variant="outline" size="sm" onClick={() => setShowOverride(true)}>
               Take Anyway

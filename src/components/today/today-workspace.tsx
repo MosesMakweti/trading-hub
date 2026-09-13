@@ -56,7 +56,7 @@ import type {
 } from "@/types/today";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
-import type { EdgeReviewCommitmentDailyStatus, TodayCommitmentsDTO } from "@/types/edge-improvements";
+import type { AdherenceResultDTO, AdherenceTrend, EdgeReviewCommitmentDailyStatus, TodayCommitmentsDTO } from "@/types/edge-improvements";
 
 // The Today workflow section tabs. The Pre-Session Routine is first; the rest stay
 // locked until the "I am ready to trade" gate is confirmed.
@@ -86,6 +86,7 @@ export function TodayWorkspace({
   linkableTrades,
   reviewCommitments,
   commitmentDailyStates,
+  commitmentAdherence,
 }: {
   day: TradingDayDTO;
   // Only serializable data crosses the server→client boundary; the icon-bearing
@@ -107,6 +108,7 @@ export function TodayWorkspace({
   linkableTrades: LinkableTrade[];
   reviewCommitments: TodayCommitmentsDTO;
   commitmentDailyStates: Record<string, EdgeReviewCommitmentDailyStatus>;
+  commitmentAdherence: Record<string, { current: AdherenceResultDTO; trend: AdherenceTrend }>;
 }) {
   const router = useRouter();
   // The Pre-Session Routine gates the rest of the day: the trader must have confirmed
@@ -263,7 +265,12 @@ export function TodayWorkspace({
         </div>
       </div>
 
-      <TodayFocusFromReview commitments={reviewCommitments} todayKey={day.dateKey} initialDailyStates={commitmentDailyStates} />
+      <TodayFocusFromReview
+        commitments={reviewCommitments}
+        todayKey={day.dateKey}
+        initialDailyStates={commitmentDailyStates}
+        adherence={commitmentAdherence}
+      />
 
       <WorkflowProgress steps={steps} title="Workflow" />
 

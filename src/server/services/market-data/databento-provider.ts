@@ -64,21 +64,25 @@ export const DATABENTO_DATASET = "GLBX.MDP3";
 const DAY_MS = 86_400_000;
 
 /**
- * Canonical futures symbol → Databento root symbol. Deliberately only the
- * THREE distinct canonical roots that exist in Traditorium's own instrument
- * catalog for this stage's required list — see this module's top-level doc
- * comment and the Stage 17B completion report for why "MGC, GC, MES, ES,
- * MNQ, NQ" (six strings in the stage prompt) collapses to three canonical
- * symbols here: `instrument-catalog.ts`'s ALIASES table already canonicalizes
- * MES→ES and MNQ→NQ (same underlying price series, differ only in contract
- * size/tick value), and this stage adds the missing symmetric MGC→GC alias.
- * A trade/plan/session tagged with any of the six always resolves to one of
- * these three canonical symbols before it ever reaches this provider.
+ * Canonical futures symbol → Databento root symbol. Stage 17B.1 §1/§4:
+ * EXACTLY the six distinct canonical symbols the stage requires, each
+ * mapped to its OWN literal Databento root — never collapsed onto a
+ * sibling's root. `instrument-catalog.ts` keeps MES/MNQ/MGC as fully
+ * separate `canonicalSymbol`s from ES/NQ/GC (linked only via
+ * `instrumentFamily` for analytics grouping, never for market-data
+ * resolution), and this map mirrors that 1:1: MES always resolves
+ * `MES.v.0`/`MESZ6`-shaped contracts, never `ES.v.0`/`ESZ6` — a Replay
+ * session for a trader's actual MES fill must reconstruct the MES order
+ * book, not the ES one (different exchange-traded instrument, different
+ * tick value/contract multiplier, separate volume/rollover schedule).
  */
 const FUTURES_ROOT_BY_CANONICAL: Record<string, string> = {
   GC: "GC",
+  MGC: "MGC",
   ES: "ES",
+  MES: "MES",
   NQ: "NQ",
+  MNQ: "MNQ",
 };
 
 /**
@@ -107,18 +111,35 @@ function dateStringToUtcMs(dateStr: string): number {
   );
 }
 
+/** A `ts_event` that converts to a date outside this window is treated as
+ *  unparseable rather than trusted (Stage 17B.1 §16's "fail safely rather
+ *  than guessing" policy applied to timestamps too) — GLBX.MDP3 coverage
+ *  starts 2010, and no Replay session reviews the far future. */
+const MIN_PLAUSIBLE_MS = Date.UTC(2000, 0, 1);
+const MAX_PLAUSIBLE_MS = Date.UTC(2100, 0, 1);
+
+function isPlausibleTimestampMs(ms: number): boolean {
+  return Number.isFinite(ms) && ms >= MIN_PLAUSIBLE_MS && ms < MAX_PLAUSIBLE_MS;
+}
+
 /** Parses `ts_event` whether Databento returned an ISO 8601 string
  *  (`pretty_ts=true` honored) or a raw nanosecond-since-epoch integer/string
  *  (not honored) — a plain JSON number that large would already have lost
  *  precision by the time it reached us, so a numeric value is only trusted
  *  when it's still within `Number.isSafeInteger` range; anything else must
- *  arrive as a string so we can route it through `BigInt`. */
+ *  arrive as a string so we can route it through `BigInt`. Nanosecond
+ *  conversion is a fixed, documented unit (Databento's raw `ts_event` is
+ *  always nanoseconds-since-epoch — confirmed, not guessed, per this
+ *  module's top-level doc comment), so this is unit conversion, not
+ *  magnitude-guessing; a result outside the plausible date window is still
+ *  rejected rather than trusted (§16). */
 function parseTsEventToMs(raw: unknown): number | null {
   if (typeof raw === "string") {
     const iso = Date.parse(raw);
-    if (!Number.isNaN(iso)) return iso;
+    if (!Number.isNaN(iso)) return isPlausibleTimestampMs(iso) ? iso : null;
     try {
-      return Number(BigInt(raw) / BigInt(1_000_000));
+      const ms = Number(BigInt(raw) / BigInt(1_000_000));
+      return isPlausibleTimestampMs(ms) ? ms : null;
     } catch {
       return null;
     }
@@ -126,24 +147,45 @@ function parseTsEventToMs(raw: unknown): number | null {
   if (typeof raw === "number" && Number.isFinite(raw)) {
     // A JSON number this large already lost sub-ms precision, but treat it
     // as best-effort nanoseconds since epoch rather than silently discarding it.
-    return Math.round(raw / 1e6);
+    const ms = Math.round(raw / 1e6);
+    return isPlausibleTimestampMs(ms) ? ms : null;
   }
   return null;
 }
 
-/** Parses a price field whether `pretty_px=true` was honored (decimal
- *  string/number) or not (fixed-point integer × 1e-9). */
+/**
+ * Stage 17B.1 §16 — a genuine price for every futures root this adapter
+ * supports (GC/MGC/ES/MES/NQ/MNQ) stays well under six figures; a raw
+ * fixed-point-scaled integer (×1e9) routinely lands in the billions. This
+ * bound exists ONLY to reject an implausible value outright — it is
+ * deliberately NOT used to silently rescale a value (the exact bug this
+ * stage's audit called out: turning `6000` into `0.000006` or vice versa by
+ * guessing). This adapter requests `pretty_px=true` and trusts that request
+ * deterministically: every numeric/string price field is parsed as an
+ * already-scaled decimal, never divided. If Databento silently ignores
+ * `pretty_px` and returns raw fixed-point integers instead, that price
+ * exceeds this bound and the record is rejected as malformed (§17) rather
+ * than "corrected" by a guess — a real API key is required to confirm
+ * `pretty_px` is honored at all (§14), so this adapter refuses to paper
+ * over that unverified assumption with a heuristic.
+ */
+const MAX_PLAUSIBLE_FUTURES_PRICE = 1_000_000;
+
+/** Parses a price field assuming `pretty_px=true` was honored (this
+ *  adapter's only supported mode — see the doc comment above); rejects
+ *  (returns null) rather than guess-rescales when the value is not a finite
+ *  number in the plausible range. */
 function parsePrice(raw: unknown): number | null {
+  let value: number | null = null;
   if (typeof raw === "string") {
     const n = Number(raw);
-    return Number.isFinite(n) ? n : null;
+    value = Number.isFinite(n) ? n : null;
+  } else if (typeof raw === "number" && Number.isFinite(raw)) {
+    value = raw;
   }
-  if (typeof raw === "number" && Number.isFinite(raw)) {
-    // Heuristic: a genuine instrument price for these futures never
-    // reaches 1e6; a fixed-point-scaled integer routinely does.
-    return Math.abs(raw) > 1_000_000 ? raw / 1e9 : raw;
-  }
-  return null;
+  if (value == null) return null;
+  if (Math.abs(value) > MAX_PLAUSIBLE_FUTURES_PRICE) return null;
+  return value;
 }
 
 function authHeader(apiKey: string): string {
@@ -162,6 +204,19 @@ class DatabentoHttpError extends Error {
     super(message);
   }
 }
+
+/**
+ * Stage 17B.1 §17 — a corrupt/unparseable OHLCV line or a record that
+ * parses as JSON but fails to produce a valid candle (bad timestamp, bad
+ * price, non-finite field, high<low, etc.) FAILS THE WHOLE CHUNK rather
+ * than being silently skipped. Silently dropping a malformed price bar
+ * would create a fake gap Replay's gap-handling can't distinguish from a
+ * genuine holiday/thin-liquidity gap, and could let simulated execution
+ * skip past a bar that actually existed. A blank line (a pure NDJSON
+ * formatting artifact, never a price record) is the only thing tolerated —
+ * see `parseOhlcvResponse`.
+ */
+class MalformedMarketDataError extends Error {}
 
 /** Bounded retry/backoff for TRANSIENT failures only (429/5xx/network) —
  *  never for 4xx (bad request, auth, not-found), which retrying can't fix. */
@@ -268,28 +323,33 @@ interface OhlcvRecord {
 }
 
 /** Accepts either a JSON array of records or newline-delimited JSON — see
- *  this module's top-level doc comment on why both are handled defensively. */
+ *  this module's top-level doc comment on why both are handled defensively.
+ *  A blank line is tolerated (pure NDJSON formatting artifact); any line
+ *  that fails to parse as JSON is a corrupt provider line and fails the
+ *  whole chunk (§17) — never silently dropped. */
 function parseOhlcvResponse(text: string): OhlcvRecord[] {
   const trimmed = text.trim();
   if (trimmed.length === 0) return [];
   if (trimmed.startsWith("[")) {
     try {
       const arr = JSON.parse(trimmed);
-      return Array.isArray(arr) ? arr : [];
-    } catch {
-      return [];
+      if (!Array.isArray(arr)) {
+        throw new MalformedMarketDataError("Databento response was valid JSON but not an array of OHLCV records.");
+      }
+      return arr;
+    } catch (error) {
+      if (error instanceof MalformedMarketDataError) throw error;
+      throw new MalformedMarketDataError("Unrecognized Databento OHLCV response (not valid JSON array).");
     }
   }
   const records: OhlcvRecord[] = [];
   for (const line of trimmed.split("\n")) {
     const l = line.trim();
-    if (l.length === 0) continue;
+    if (l.length === 0) continue; // NDJSON formatting artifact, never a price record
     try {
       records.push(JSON.parse(l));
     } catch {
-      // Skip an unparseable line rather than fail the whole day's fetch —
-      // gaps are preserved (never fabricated), just not silently masked
-      // either; a corrupt line is simply a missing candle.
+      throw new MalformedMarketDataError(`Corrupt/unparseable OHLCV line from Databento: ${l.slice(0, 200)}`);
     }
   }
   return records;
@@ -303,13 +363,19 @@ function recordsToCandles(records: OhlcvRecord[]): Candle[] {
     const high = parsePrice(r.high);
     const low = parsePrice(r.low);
     const close = parsePrice(r.close);
-    if (timestamp == null || open == null || high == null || low == null || close == null) continue;
+    if (timestamp == null || open == null || high == null || low == null || close == null) {
+      throw new MalformedMarketDataError(`Malformed OHLCV record from Databento (unparseable field): ${JSON.stringify(r).slice(0, 200)}`);
+    }
     const volumeNum = typeof r.volume === "string" ? Number(r.volume) : typeof r.volume === "number" ? r.volume : null;
     const candle: Candle = { timestamp, open, high, low, close, volume: volumeNum != null && Number.isFinite(volumeNum) ? volumeNum : null };
-    if (isValidCandle(candle)) candles.push(candle);
+    if (!isValidCandle(candle)) {
+      throw new MalformedMarketDataError(`Invalid OHLCV values from Databento: ${JSON.stringify(r).slice(0, 200)}`);
+    }
+    candles.push(candle);
   }
   // Sort + dedup by timestamp (§13/§14) — never trust upstream ordering,
-  // never fabricate a missing minute to fill a gap.
+  // never fabricate a missing minute to fill a gap. An exact duplicate
+  // record (same timestamp) is a benign re-send, not corruption.
   candles.sort(compareCandles);
   const deduped: Candle[] = [];
   for (const c of candles) {
@@ -432,7 +498,10 @@ export class DatabentoHistoricalMarketDataProvider implements HistoricalMarketDa
   }
 }
 
-function mapError(error: unknown): { code: "UNSUPPORTED_SYMBOL" | "OUT_OF_COVERAGE" | "PROVIDER_ERROR"; message: string } {
+function mapError(error: unknown): { code: "UNSUPPORTED_SYMBOL" | "OUT_OF_COVERAGE" | "PROVIDER_ERROR" | "PROVIDER_DATA_ERROR"; message: string } {
+  if (error instanceof MalformedMarketDataError) {
+    return { code: "PROVIDER_DATA_ERROR", message: error.message };
+  }
   if (error instanceof DatabentoHttpError) {
     if (error.status === 401 || error.status === 403) {
       return { code: "PROVIDER_ERROR", message: "Databento authentication failed — check DATABENTO_API_KEY." };

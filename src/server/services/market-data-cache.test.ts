@@ -182,6 +182,31 @@ describe("market-data-cache — R2 L2 cache (Stage 17B §21)", () => {
       await expect(writeCachedDay("GLBX.MDP3", "ESU6", "2026-08-03", [])).resolves.toBeUndefined();
     });
   });
+
+  describe("micro/full-size contract keys never collide (Stage 17B.1 §18)", () => {
+    it.each([
+      ["GC", "GCQ6", "MGC", "MGCQ6"],
+      ["ES", "ESU6", "MES", "MESU6"],
+      ["NQ", "NQU6", "MNQ", "MNQU6"],
+    ])("%s (%s) and %s (%s) on the same date write/read completely independent keys", async (_full, fullContract, _micro, microContract) => {
+      vi.stubEnv("DATABENTO_R2_CACHE_ENABLED", "true");
+      sendMock.mockResolvedValueOnce({});
+      sendMock.mockResolvedValueOnce({});
+      await writeCachedDay("GLBX.MDP3", fullContract, "2026-08-03", [{ timestamp: 1000, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }]);
+      await writeCachedDay("GLBX.MDP3", microContract, "2026-08-03", [{ timestamp: 1000, open: 9, high: 9, low: 9, close: 9, volume: 1 }]);
+
+      const keys = sendMock.mock.calls.map((call) => call[0].input.Key);
+      expect(keys[0]).toBe(`market-data/databento/GLBX.MDP3/${fullContract}/1m/2026-08-03.json`);
+      expect(keys[1]).toBe(`market-data/databento/GLBX.MDP3/${microContract}/1m/2026-08-03.json`);
+      expect(keys[0]).not.toBe(keys[1]);
+
+      // A read for the micro's key must never be satisfied by the full-size envelope, and vice versa.
+      sendMock.mockReset();
+      sendMock.mockResolvedValueOnce(bodyOf(validEnvelope({ contractSymbol: fullContract })));
+      const crossRead = await readCachedDay("GLBX.MDP3", microContract, "2026-08-03");
+      expect(crossRead).toBeNull(); // envelope's contractSymbol (full) mismatches the requested key (micro)
+    });
+  });
 });
 
 void DAY_MS;

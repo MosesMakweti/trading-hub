@@ -1,32 +1,72 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TAG_STYLES } from "@/components/ui/tag";
 import { EmptyState } from "@/components/shared/empty-state";
+import { getReplayHistoricalStrategyContext } from "@/actions/replay.actions";
 import type { HistoricalStrategyContextDTO } from "@/types/replay";
 
 type StrategyPanelTab = "framework" | "entry-models" | "confluences" | "setup-types" | "management";
 
 /**
- * Strategy / Process Panel (Stage 12 §8-9) — the frozen `StrategyVersion.
- * snapshot` for the exact version active at the time being reviewed, NEVER
- * today's live Strategy Lab config. Purely a reference read model; no
- * checklist interaction is wired yet (that arrives with the candle replay
- * engine, once there's a moment in market time to check conditions AT).
+ * Strategy / Process Panel (Stage 12 §8-9, time-pinning corrected Stage 18
+ * §7) — the frozen `StrategyVersion.snapshot` for the exact version active
+ * AT A SPECIFIC HISTORICAL MOMENT, never today's live Strategy Lab config.
+ * `initialContext` (server-resolved, "most recent published version" — the
+ * original Stage 12 behavior) renders immediately to avoid a loading flash;
+ * once mounted, this re-resolves the TIME-PINNED version via the same
+ * `getReplayHistoricalStrategyContext(strategyId, atTime)` the decision
+ * form already uses correctly, using `atTime` (typically the session's own
+ * Replay Clock checkpoint) as the historical anchor. Never silently keeps
+ * showing "most recent" once a real pinned answer is available — and shows
+ * a clear "no historical version" state rather than falling back to
+ * current config if `atTime` predates every published version.
  */
-export function ReplayStrategyPanel({ context }: { context: HistoricalStrategyContextDTO | null }) {
+export function ReplayStrategyPanel({
+  initialContext,
+  strategyId,
+  atTime,
+}: {
+  initialContext: HistoricalStrategyContextDTO | null;
+  /** Null when the review has no Strategy scope — skips the re-fetch entirely. */
+  strategyId: string | null;
+  /** UTC ms — the historical moment to pin the strategy version to. */
+  atTime: number;
+}) {
   const [tab, setTab] = useState<StrategyPanelTab>("framework");
+  const [pinnedContext, setPinnedContext] = useState<HistoricalStrategyContextDTO | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!strategyId) return;
+    let cancelled = false;
+    void getReplayHistoricalStrategyContext(strategyId, atTime).then((ctx) => {
+      if (!cancelled) setPinnedContext(ctx);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [strategyId, atTime]);
+
+  // Once the pinned resolution completes, it's authoritative — even if that
+  // means "no version existed yet at this moment" (null), which must NEVER
+  // silently fall back to initialContext's "most recent" answer.
+  const context = pinnedContext !== undefined ? pinnedContext : initialContext;
+  const isPinned = pinnedContext !== undefined;
 
   if (!context) {
     return (
       <EmptyState
         icon={Info}
         title="No Strategy scoped"
-        description="This review covers All Trading, or the scoped strategy has no published version to show as historical reference."
+        description={
+          strategyId && isPinned
+            ? "No published version of this strategy existed yet at this historical moment."
+            : "This review covers All Trading, or the scoped strategy has no published version to show as historical reference."
+        }
       />
     );
   }
@@ -39,7 +79,9 @@ export function ReplayStrategyPanel({ context }: { context: HistoricalStrategyCo
         <span>
           Reference: <span className="font-medium text-foreground">{context.strategyName}</span> · v{context.version}
         </span>
-        <span className="italic">most recent published version — not necessarily pinned to a specific historical moment yet</span>
+        <span className="italic">
+          {isPinned ? "pinned to this review's historical moment" : "most recent published version — resolving historical pin…"}
+        </span>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>

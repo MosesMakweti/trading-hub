@@ -13,7 +13,7 @@ import { listTradingDayKeysInRange } from "@/server/services/trading-day.service
 import { computeReviewPeriod } from "@/domain/replay/review-period";
 import { buildActualVsReplayComparison } from "@/domain/replay-comparison/comparison";
 import { synthesizeImprovements } from "@/domain/replay-improvements/synthesis";
-import { listCommitmentsForSession } from "@/server/services/edge-review-commitment.service";
+import { listCarryForwardCandidates, listCommitmentsForSession } from "@/server/services/edge-review-commitment.service";
 import { isValidDateKey, localDateToKey } from "@/lib/date";
 import { EdgeReviewWorkspace } from "@/components/edge/edge-review-workspace";
 import { FadeIn } from "@/components/shared/motion";
@@ -81,12 +81,13 @@ export default async function EdgeReviewPage({
   // Improvements (Stage 16) — findings/suggestions are DERIVED, never
   // persisted (see synthesis.ts's own doc comment); commitments are the one
   // durable record, fetched per-session.
-  const [improvementsSynthesis, commitments] = await Promise.all([
+  const [improvementsSynthesis, commitments, carryForwardCandidates] = await Promise.all([
     Promise.resolve(synthesizeImprovements(comparison)),
     session ? listCommitmentsForSession(user.id, session.id) : Promise.resolve([]),
+    listCarryForwardCandidates(user.id, reviewType, session?.id ?? null),
   ]);
 
-  const validTab = ["overview", "replay", "comparison", "improvements"] as const;
+  const validTab = ["overview", "replay", "comparison", "improvements", "analyst"] as const;
   const initialTab = validTab.includes(params.tab as (typeof validTab)[number])
     ? (params.tab as (typeof validTab)[number])
     : "overview";
@@ -108,6 +109,7 @@ export default async function EdgeReviewPage({
         comparison={comparison}
         improvementsSynthesis={improvementsSynthesis}
         commitments={commitments}
+        carryForwardCandidates={carryForwardCandidates}
         weeklyReview={{
           wentWell: weeklyReviewRow?.wentWell ?? null,
           toImprove: weeklyReviewRow?.toImprove ?? null,

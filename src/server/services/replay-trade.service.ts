@@ -440,6 +440,45 @@ export async function getReplayTrade(userId: string, id: string): Promise<Replay
   return row ? toReplayTradeDTO(row) : null;
 }
 
+/**
+ * Stage 18 §21-22 — unrealized R for an OPEN/PARTIALLY_CLOSED position,
+ * strictly at a caller-supplied price. Reuses the exact same
+ * `rMultipleAt` domain function realized R is derived from elsewhere
+ * (Stage 14) — no duplicate R math in the UI (§41). Returns `null` for any
+ * lifecycle other than OPEN/PARTIALLY_CLOSED (flat/pending/closed trades
+ * have no meaningful "unrealized" figure). The CALLER is responsible for
+ * `atPrice` being derived strictly from the latest visible replay candle
+ * (never a future one) — this function has no clock/visibility awareness
+ * of its own, exactly like `advanceReplayTradeExecution` trusts its caller
+ * for candle visibility.
+ */
+export async function getReplayTradeUnrealizedR(userId: string, id: string, atPrice: number): Promise<number | null> {
+  const row = await getOwnedTradeFull(userId, id);
+  if (row.lifecycle !== "OPEN" && row.lifecycle !== "PARTIALLY_CLOSED") return null;
+  const state = toPositionState(row);
+  return rMultipleAt(state, atPrice);
+}
+
+/**
+ * Stage 18 §19 — lightweight reasoning notes, merged into `ReplayTrade`'s
+ * existing `notes: Json?` field under a `reasoning` key so this never
+ * clobbers `skipReason` (written by the decision-creation flow) or any
+ * other key a future flow adds to the same JSON object. Deliberately no
+ * new column/model — the smallest existing-compatible architecture, per
+ * the stage's own instruction.
+ */
+export async function updateReplayTradeReasoningNote(userId: string, id: string, note: string): Promise<ReplayTradeDTO> {
+  const row = await getOwnedTradeFull(userId, id);
+  await assertSessionMutable(row.sessionId);
+  const existingNotes = (row.notes as Record<string, unknown> | null) ?? {};
+  const updated = await prisma.replayTrade.update({
+    where: { id },
+    data: { notes: { ...existingNotes, reasoning: note } as Prisma.InputJsonValue },
+    include: tradeInclude,
+  });
+  return toReplayTradeDTO(updated);
+}
+
 export async function deleteReplayTrade(userId: string, id: string): Promise<void> {
   const row = await getOwnedTradeFull(userId, id);
   await assertSessionMutable(row.sessionId);

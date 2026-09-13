@@ -23,7 +23,7 @@ describe.skipIf(!process.env.DATABENTO_API_KEY)("Databento LIVE smoke test — M
     // A known, unambiguous, long-past trading day — never "yesterday" (avoids
     // Databento's own publication-lag edge case making this flaky).
     const day = Date.UTC(2026, 5, 1); // 2026-06-01, a Monday
-    const result = await provider.fetchCandles({ canonicalSymbol: "ES", from: day, to: day + DAY_MS - 1 });
+    const result = await provider.fetchCandles({ canonicalSymbol: "MES", from: day, to: day + DAY_MS - 1 });
 
     console.log("[databento-live-smoke] result:", {
       ok: result.ok,

@@ -20,20 +20,26 @@ describe("FixtureMarketDataProvider — symbol resolution (§4)", () => {
     expect(provider.resolveSymbol("XAUUSD")).toEqual({ supported: true, providerSymbol: "XAUUSD", priceBasis: "synthetic" });
   });
 
-  it("resolves a known alias (e.g. a futures continuous-contract root) to its canonical symbol", () => {
-    const resolution = provider.resolveSymbol("MES"); // alias -> ES in the instrument catalog
+  it("resolves a micro future to ITS OWN canonical symbol — never its full-size sibling (Stage 17B.1 §1)", () => {
+    const resolution = provider.resolveSymbol("MES");
     expect(resolution.supported).toBe(true);
-    expect(resolution.providerSymbol).toBe("ES");
+    expect(resolution.providerSymbol).toBe("MES");
   });
 
   it("reports an unknown symbol as unsupported rather than guessing", () => {
     expect(provider.resolveSymbol("NOT_A_REAL_SYMBOL")).toEqual({ supported: false, providerSymbol: null, priceBasis: "synthetic" });
   });
 
-  it("resolves the new MGC alias to its canonical GC symbol (Stage 17B)", () => {
+  it("resolves MGC to its own canonical symbol, never GC's (Stage 17B.1 §1)", () => {
     const resolution = provider.resolveSymbol("MGC");
     expect(resolution.supported).toBe(true);
-    expect(resolution.providerSymbol).toBe("GC");
+    expect(resolution.providerSymbol).toBe("MGC");
+  });
+
+  it("resolves MNQ to its own canonical symbol, never NQ's (Stage 17B.1 §1)", () => {
+    const resolution = provider.resolveSymbol("MNQ");
+    expect(resolution.supported).toBe(true);
+    expect(resolution.providerSymbol).toBe("MNQ");
   });
 
   it("getSupportedRange is null for an unsupported symbol", () => {

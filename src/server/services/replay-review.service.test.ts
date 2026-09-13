@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/server/db";
 import { createTrade, updateTradeSections } from "@/server/services/trades.service";
@@ -811,5 +811,344 @@ describe("fetchReplayCandlesWithProvenance — market-data freeze-once (Stage 17
     const session = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
     const reloaded = await getReplayReviewSession(user.id, session.id);
     expect(reloaded!.marketDataProvenance).toBeNull();
+  });
+});
+
+describe("licensing kill switch vs. frozen provenance (Stage 17B.1 §10/§11)", () => {
+  const DAY_MS = 86_400_000;
+  const MONDAY = Date.UTC(2026, 7, 3);
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function freezeDatabentoProvenance(sessionId: string) {
+    const frozenSegment = { contractSymbol: "MESU6", from: MONDAY, to: MONDAY + DAY_MS - 1 };
+    await prisma.replayReviewSession.update({
+      where: { id: sessionId },
+      data: {
+        marketDataProvenance: {
+          MES: {
+            providerId: "databento",
+            datasetId: "GLBX.MDP3",
+            priceBasis: "raw-unadjusted",
+            retrievedAt: new Date().toISOString(),
+            frozenAt: new Date().toISOString(),
+            segments: [frozenSegment],
+          },
+        },
+      },
+    });
+    return frozenSegment;
+  }
+
+  it("a session frozen to Databento with display currently disabled returns PROVIDER_DISPLAY_DISABLED, never Fixture, never mutating provenance", async () => {
+    const user = await makeUser("licensing-frozen-disabled");
+    const session = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    await freezeDatabentoProvenance(session.id);
+
+    // Databento IS configured (so the provider itself is "available") but
+    // display is NOT permitted — the two must be checked independently.
+    vi.stubEnv("DATABENTO_API_KEY", "test-key");
+    vi.stubEnv("MARKET_DATA_EXTERNAL_DISPLAY_ENABLED", "");
+
+    const before = await getReplayReviewSession(user.id, session.id);
+    const result = await fetchReplayCandlesWithProvenance(user.id, session.id, "MES", MONDAY, MONDAY + 60_000);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("PROVIDER_DISPLAY_DISABLED");
+
+    // Provenance must be byte-for-byte unchanged — no silent fallback, no mutation.
+    const after = await getReplayReviewSession(user.id, session.id);
+    expect(after!.marketDataProvenance).toEqual(before!.marketDataProvenance);
+    expect(after!.marketDataProvenance!.MES.providerId).toBe("databento");
+  });
+
+  it("the same frozen session resumes Databento once display is re-enabled — provenance was never lost", async () => {
+    const user = await makeUser("licensing-frozen-reenabled");
+    const session = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    await freezeDatabentoProvenance(session.id);
+
+    vi.stubEnv("DATABENTO_API_KEY", "test-key");
+    vi.stubEnv("MARKET_DATA_EXTERNAL_DISPLAY_ENABLED", "true");
+
+    // Mock the real Databento HTTP calls the pinned provider will now make —
+    // this test's point is that the LICENSING gate no longer blocks the
+    // request, not that a real network call succeeds.
+    const fetchMock = vi.fn();
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: { "MES.v.0": [{ d0: "2026-08-01", d1: "2026-09-01", s: "MESU6" }] } }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ ts_event: new Date(MONDAY).toISOString(), open: "5000", high: "5001", low: "4999", close: "5000.5", volume: "5" }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchReplayCandlesWithProvenance(user.id, session.id, "MES", MONDAY, MONDAY + 60_000);
+    vi.unstubAllGlobals();
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.provenance[0]?.providerId).toBe("databento");
+  });
+
+  it("a brand-new session with display disabled falls back to Fixture at first-fetch time (not a licensing error — no provenance exists yet to violate)", async () => {
+    const user = await makeUser("licensing-first-fetch-disabled");
+    const session = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    vi.stubEnv("DATABENTO_API_KEY", "test-key");
+    vi.stubEnv("MARKET_DATA_EXTERNAL_DISPLAY_ENABLED", "");
+
+    const result = await fetchReplayCandlesWithProvenance(user.id, session.id, "MES", MONDAY, MONDAY + 60_000);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.provenance[0]?.providerId).toBe("fixture");
+  });
+});
+
+describe("Twelve Data provenance/licensing — same freeze-once discipline as Databento (Stage 17C.2 §20/§21/§41)", () => {
+  const DAY_MS = 86_400_000;
+  const MONDAY = Date.UTC(2026, 7, 3);
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  async function freezeTwelveDataProvenance(sessionId: string, canonicalSymbol: string, providerSymbol: string) {
+    const frozenSegment = { contractSymbol: providerSymbol, from: MONDAY, to: MONDAY + DAY_MS - 1 };
+    await prisma.replayReviewSession.update({
+      where: { id: sessionId },
+      data: {
+        marketDataProvenance: {
+          [canonicalSymbol]: {
+            providerId: "twelvedata",
+            priceBasis: "AGGREGATED",
+            retrievedAt: new Date().toISOString(),
+            frozenAt: new Date().toISOString(),
+            segments: [frozenSegment],
+          },
+        },
+      },
+    });
+    return frozenSegment;
+  }
+
+  it("Twelve Data refuses a futures symbol (MES) even if a provenance record were ever inconsistent (§41 provider isolation)", async () => {
+    // Not a realistic scenario (Twelve Data would never legitimately freeze
+    // this combination) — this is a defense-in-depth check that the
+    // ADAPTER itself, not just the routing layer, enforces its own symbol
+    // boundary: even handed a futures canonical symbol directly, Twelve
+    // Data's resolveSymbol still refuses it rather than silently accepting
+    // an asset outside its OTC-only domain.
+    const user = await makeUser("twelvedata-isolation-mes");
+    const session = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    await freezeTwelveDataProvenance(session.id, "MES", "MES.v.0");
+    vi.stubEnv("TWELVE_DATA_API_KEY", "test-key");
+    vi.stubEnv("TWELVE_DATA_EXTERNAL_DISPLAY_ENABLED", "true");
+
+    const result = await fetchReplayCandlesWithProvenance(user.id, session.id, "MES", MONDAY, MONDAY + 60_000);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("UNSUPPORTED_SYMBOL");
+  });
+
+  it("a session frozen to Twelve Data with display currently disabled returns PROVIDER_DISPLAY_DISABLED, never Fixture, never mutating provenance", async () => {
+    const user = await makeUser("twelvedata-frozen-disabled");
+    const session = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    await freezeTwelveDataProvenance(session.id, "XAUUSD", "XAU/USD");
+
+    vi.stubEnv("TWELVE_DATA_API_KEY", "test-key");
+    vi.stubEnv("TWELVE_DATA_EXTERNAL_DISPLAY_ENABLED", "");
+
+    const before = await getReplayReviewSession(user.id, session.id);
+    const result = await fetchReplayCandlesWithProvenance(user.id, session.id, "XAUUSD", MONDAY, MONDAY + 60_000);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("PROVIDER_DISPLAY_DISABLED");
+
+    const after = await getReplayReviewSession(user.id, session.id);
+    expect(after!.marketDataProvenance).toEqual(before!.marketDataProvenance);
+    expect(after!.marketDataProvenance!.XAUUSD.providerId).toBe("twelvedata");
+  });
+
+  it("the same frozen session resumes Twelve Data once display is re-enabled — provenance was never lost", async () => {
+    const user = await makeUser("twelvedata-frozen-reenabled");
+    const session = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    await freezeTwelveDataProvenance(session.id, "XAUUSD", "XAU/USD");
+
+    vi.stubEnv("TWELVE_DATA_API_KEY", "test-key");
+    vi.stubEnv("TWELVE_DATA_EXTERNAL_DISPLAY_ENABLED", "true");
+
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          meta: { symbol: "XAU/USD" },
+          values: [{ datetime: "2026-08-03 00:00:00", open: "2400", high: "2401", low: "2399", close: "2400.5", volume: "5" }],
+          status: "ok",
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchReplayCandlesWithProvenance(user.id, session.id, "XAUUSD", MONDAY, MONDAY + 60_000);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.provenance[0]?.providerId).toBe("twelvedata");
+      expect(result.provenance[0]?.priceBasis).toBe("AGGREGATED");
+    }
+  });
+
+  it("a brand-new OTC session with display disabled falls back to Fixture at first-fetch time (no provenance exists yet to violate)", async () => {
+    const user = await makeUser("twelvedata-first-fetch-disabled");
+    const session = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    vi.stubEnv("TWELVE_DATA_API_KEY", "test-key");
+    vi.stubEnv("TWELVE_DATA_EXTERNAL_DISPLAY_ENABLED", "");
+
+    const result = await fetchReplayCandlesWithProvenance(user.id, session.id, "EURUSD", MONDAY, MONDAY + 60_000);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.provenance[0]?.providerId).toBe("fixture");
+  });
+
+  it("Fixture never silently replaces a frozen Twelve Data provenance when the API key disappears mid-session (§41)", async () => {
+    const user = await makeUser("twelvedata-key-revoked");
+    const session = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    await freezeTwelveDataProvenance(session.id, "XAUUSD", "XAU/USD");
+    // TWELVE_DATA_API_KEY deliberately NOT set — simulates the key having been revoked/removed after the freeze.
+
+    const result = await fetchReplayCandlesWithProvenance(user.id, session.id, "XAUUSD", MONDAY, MONDAY + 60_000);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("PROVIDER_ERROR");
+      expect(result.error.message).toMatch(/no longer configured/i);
+    }
+  });
+});
+
+describe("End-to-end Replay session path (Stage 17D §9/§10) — real session creation, not just the adapter in isolation", () => {
+  const DAY_MS = 86_400_000;
+  const MONDAY = Date.UTC(2026, 7, 3);
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * Stage 17D §9's research finding: `ReplayReviewSession.assetSymbols` is
+   * CLIENT-supplied and only `.trim().toUpperCase()`-normalized at session
+   * creation (`replay-review.service.ts`'s `createReplayReviewSession`) —
+   * it is NEVER derived by querying `Trade` rows, and NEVER run through
+   * `parseSymbol`'s broker-suffix stripping at that layer. Canonicalization
+   * only happens downstream, inside `resolveMarketDataProvider`/the
+   * provider's own `resolveSymbol`, when candles are actually fetched. This
+   * test proves the raw, uppercased-but-unstripped symbol still resolves
+   * correctly end-to-end through the REAL `createReplayReviewSession` →
+   * `fetchReplayCandlesWithProvenance` path — not just at the adapter/catalog
+   * unit-test level (Stage 17C.2 covered that; this covers the session path
+   * Stage 17C.2 explicitly left unverified).
+   */
+  it("a session created with the raw broker-suffixed symbol XAUUSD.a resolves to Twelve Data's XAU/USD end-to-end", async () => {
+    const user = await makeUser("e2e-broker-suffix-xauusd");
+    // A real Trade row keeps the exact broker-displayed text — proves it's
+    // never rewritten anywhere in this flow, even though the session's own
+    // assetSymbols array is a separate, client-supplied list (§9's finding).
+    const trade = await createTrade(user.id, "2026-08-03", minimalTradeInput({ assetSymbol: "XAUUSD.a" }));
+    expect(trade.assetSymbol).toBe("XAUUSD.a");
+
+    const session = await createReplayReviewSession(user.id, {
+      reviewType: "WEEKLY",
+      startDate: "2026-08-03",
+      endDate: "2026-08-09",
+      assetSymbols: ["XAUUSD.a"],
+    });
+    // Session-level normalization is uppercase-only, NOT broker-suffix stripping (§9 finding).
+    expect(session.assetSymbols).toEqual(["XAUUSD.A"]);
+
+    vi.stubEnv("TWELVE_DATA_API_KEY", "test-key");
+    vi.stubEnv("TWELVE_DATA_EXTERNAL_DISPLAY_ENABLED", "true");
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          meta: { symbol: "XAU/USD" },
+          values: [{ datetime: "2026-08-03 00:00:00", open: "2400", high: "2401", low: "2399", close: "2400.5", volume: "5" }],
+          status: "ok",
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    // The client passes the session's OWN asset string (here "XAUUSD.A") as canonicalSymbol — this is the real call shape.
+    const result = await fetchReplayCandlesWithProvenance(user.id, session.id, "XAUUSD.A", MONDAY, MONDAY + 60_000);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candles).toHaveLength(1);
+    expect(result.provenance[0]?.providerId).toBe("twelvedata");
+    expect(result.provenance[0]?.segments[0]?.contractSymbol).toBe("XAU/USD"); // resolved to the REAL provider symbol, not a literal "XAUUSD.A" ticker
+
+    // The original Trade row's raw text is still completely untouched.
+    const reloadedTrade = await prisma.trade.findUnique({ where: { id: trade.id } });
+    expect(reloadedTrade?.assetSymbol).toBe("XAUUSD.a");
+  });
+
+  /**
+   * Stage 17D §10 — the same end-to-end proof for exact futures identity:
+   * a session whose asset is literally "MES" must reconstruct MES's own
+   * contract, never ES's, all the way through the real session-creation +
+   * candle-fetch path (Stage 17B.1 fixed the catalog; this confirms nothing
+   * upstream of it — session creation, provider routing — re-collapses it).
+   */
+  it("a session created with MES resolves its OWN literal contract end-to-end, never ES's", async () => {
+    // A day distinct from other tests' MES/MONDAY fixture — the module-level
+    // L1 `dayCache` in market-data.service.ts is a shared, process-lifetime
+    // cache keyed by (provider, symbol, day) with no reset hook, so reusing
+    // MONDAY here could be silently served from another test's cached entry
+    // instead of exercising a real fetch. This IS the real, intended
+    // cross-session warm-cache-sharing behavior (§16) — just something this
+    // specific test must route around to assert on the actual network call.
+    const tuesday = MONDAY + DAY_MS;
+    const user = await makeUser("e2e-futures-identity-mes");
+    const trade = await createTrade(user.id, "2026-08-04", minimalTradeInput({ assetSymbol: "MES" }));
+    expect(trade.assetSymbol).toBe("MES");
+
+    const session = await createReplayReviewSession(user.id, {
+      reviewType: "WEEKLY",
+      startDate: "2026-08-03",
+      endDate: "2026-08-09",
+      assetSymbols: ["MES"],
+    });
+    expect(session.assetSymbols).toEqual(["MES"]);
+
+    vi.stubEnv("DATABENTO_API_KEY", "test-key");
+    vi.stubEnv("MARKET_DATA_EXTERNAL_DISPLAY_ENABLED", "true");
+    const fetchMock = vi.fn();
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: { "MES.v.0": [{ d0: "2026-08-01", d1: "2026-09-01", s: "MESU6" }] } }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ ts_event: new Date(tuesday).toISOString(), open: "5000", high: "5001", low: "4999", close: "5000.5", volume: "5" }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchReplayCandlesWithProvenance(user.id, session.id, "MES", tuesday, tuesday + DAY_MS - 1);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.provenance[0]?.providerId).toBe("databento");
+    expect(result.provenance[0]?.segments[0]?.contractSymbol).toBe("MESU6"); // literal MES contract, never ESU6/ESZ6
+
+    // Prove the resolve step queried MES's OWN continuous symbol, never ES's.
+    const [resolveUrl] = fetchMock.mock.calls[0] as [string];
+    expect(resolveUrl).toContain("symbols=MES.v.0");
+    expect(resolveUrl).not.toContain("symbols=ES.v.0");
+
+    const reloadedTrade = await prisma.trade.findUnique({ where: { id: trade.id } });
+    expect(reloadedTrade?.assetSymbol).toBe("MES");
   });
 });

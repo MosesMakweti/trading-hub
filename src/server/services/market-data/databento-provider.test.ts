@@ -32,6 +32,13 @@ describe("DatabentoHistoricalMarketDataProvider", () => {
     vi.unstubAllGlobals();
   });
 
+  function stubResolveThenTimeseries(contractSymbol: string, records: unknown[]) {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ result: { "ES.v.0": [{ d0: "2026-07-01", d1: "2026-09-01", s: contractSymbol }] } }),
+    );
+    fetchMock.mockResolvedValueOnce(ndjsonResponse(records));
+  }
+
   describe("availability / symbol support (§4/§6)", () => {
     it("is unavailable without DATABENTO_API_KEY", () => {
       const provider = new DatabentoHistoricalMarketDataProvider();
@@ -44,14 +51,18 @@ describe("DatabentoHistoricalMarketDataProvider", () => {
       expect(provider.isAvailable()).toBe(true);
     });
 
-    it("supports GC/ES/NQ (and their micro aliases resolve to these at the catalog layer)", () => {
+    it("supports GC/MGC/ES/MES/NQ/MNQ as SIX INDEPENDENT roots — no micro collapses onto its full-size sibling (Stage 17B.1 §1/§4)", () => {
       const provider = new DatabentoHistoricalMarketDataProvider();
-      for (const sym of ["GC", "ES", "NQ"]) {
+      for (const sym of ["GC", "MGC", "ES", "MES", "NQ", "MNQ"]) {
         const r = provider.resolveSymbol(sym);
         expect(r.supported).toBe(true);
-        expect(r.providerSymbol).toBe(`${sym}.v.0`);
+        expect(r.providerSymbol).toBe(`${sym}.v.0`); // e.g. MES resolves "MES.v.0", never "ES.v.0"
         expect(r.priceBasis).toBe("raw-unadjusted");
       }
+      // Explicitly assert no cross-contamination between a micro and its full-size sibling.
+      expect(provider.resolveSymbol("MGC").providerSymbol).not.toBe(provider.resolveSymbol("GC").providerSymbol);
+      expect(provider.resolveSymbol("MES").providerSymbol).not.toBe(provider.resolveSymbol("ES").providerSymbol);
+      expect(provider.resolveSymbol("MNQ").providerSymbol).not.toBe(provider.resolveSymbol("NQ").providerSymbol);
     });
 
     it("does not support forex/metals — Stage 17B is futures-only", () => {
@@ -136,6 +147,35 @@ describe("DatabentoHistoricalMarketDataProvider", () => {
       expect(a).toEqual(b);
     });
 
+    it("resolves each of the six roots against ITS OWN continuous symbol — never a sibling's (Stage 17B.1 §4)", async () => {
+      const cases: Array<[string, string]> = [
+        ["GC", "GCQ6"],
+        ["MGC", "MGCQ6"],
+        ["ES", "ESU6"],
+        ["MES", "MESU6"],
+        ["NQ", "NQU6"],
+        ["MNQ", "MNQU6"],
+      ];
+      for (const [canonical, literal] of cases) {
+        fetchMock.mockReset();
+        fetchMock.mockResolvedValueOnce(
+          jsonResponse({ result: { [`${canonical}.v.0`]: [{ d0: "2026-07-01", d1: "2026-09-01", s: literal }] } }),
+        );
+        const segments = await resolveContract(canonical, MONDAY, MONDAY + DAY_MS - 1, "key123");
+        expect(segments).toEqual([{ contractSymbol: literal, from: MONDAY, to: MONDAY + DAY_MS - 1 }]);
+        const [url] = fetchMock.mock.calls[0] as [string];
+        expect(url).toContain(`symbols=${canonical}.v.0`);
+      }
+    });
+
+    it("a micro root's symbology.resolve request never queries its full-size sibling's continuous symbol", async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ result: { "MES.v.0": [{ d0: "2026-07-01", d1: "2026-09-01", s: "MESU6" }] } }));
+      await resolveContract("MES", MONDAY, MONDAY + DAY_MS - 1, "key123");
+      const [url] = fetchMock.mock.calls[0] as [string];
+      expect(url).toContain("symbols=MES.v.0");
+      expect(url).not.toContain("symbols=ES.v.0");
+    });
+
     it("sends Basic Auth with the API key as username and an empty password", async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ result: { "GC.v.0": [{ d0: "2026-07-01", d1: "2026-09-01", s: "GCQ6" }] } }));
       await resolveContract("GC", MONDAY, MONDAY + DAY_MS - 1, "my-secret-key");
@@ -146,13 +186,6 @@ describe("DatabentoHistoricalMarketDataProvider", () => {
   });
 
   describe("candle conversion (§13/§14/§17)", () => {
-    function stubResolveThenTimeseries(contractSymbol: string, records: unknown[]) {
-      fetchMock.mockResolvedValueOnce(
-        jsonResponse({ result: { "ES.v.0": [{ d0: "2026-07-01", d1: "2026-09-01", s: contractSymbol }] } }),
-      );
-      fetchMock.mockResolvedValueOnce(ndjsonResponse(records));
-    }
-
     it("maps ts_event (ISO string) directly to Candle.timestamp — no shift (§17)", async () => {
       vi.stubEnv("DATABENTO_API_KEY", "key123");
       const provider = new DatabentoHistoricalMarketDataProvider();
@@ -167,18 +200,35 @@ describe("DatabentoHistoricalMarketDataProvider", () => {
       expect(result.candles[0]).toMatchObject({ open: 5000, high: 5005, low: 4995, close: 5002, volume: 120 });
     });
 
-    it("falls back to fixed-point (×1e-9) price parsing when pretty_px isn't honored", async () => {
+    it("Stage 17B.1 §16: fails safely (never guess-rescales) when a price looks like unscaled fixed-point despite requesting pretty_px", async () => {
       vi.stubEnv("DATABENTO_API_KEY", "key123");
       const provider = new DatabentoHistoricalMarketDataProvider();
       const openTime = new Date(MONDAY + 60_000).toISOString();
+      // If Databento silently ignored pretty_px=true, these would be raw
+      // fixed-point-scaled integers, not real prices. The adapter must NOT
+      // divide by 1e9 and quietly accept a guessed value — it rejects the
+      // record and fails the chunk with a structured provider-data error,
+      // since a live API key is required to confirm which mode is real
+      // (§14) and turning 6000 into 0.000006 (or vice versa) by guessing is
+      // exactly the bug this stage's audit called out.
       stubResolveThenTimeseries("ESU6", [
         { ts_event: openTime, open: 5000_000000000, high: 5005_000000000, low: 4995_000000000, close: 5002_000000000, volume: 10 },
       ]);
       const result = await provider.fetchCandles({ canonicalSymbol: "ES", from: MONDAY, to: MONDAY + DAY_MS - 1 });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("PROVIDER_DATA_ERROR");
+    });
+
+    it("accepts a plausible pretty_px decimal price as-is, with no rescaling", async () => {
+      vi.stubEnv("DATABENTO_API_KEY", "key123");
+      const provider = new DatabentoHistoricalMarketDataProvider();
+      const openTime = new Date(MONDAY + 60_000).toISOString();
+      stubResolveThenTimeseries("ESU6", [ohlcvRecord(openTime, 5000.25, 5005.5, 4995.75, 5002, 10)]);
+      const result = await provider.fetchCandles({ canonicalSymbol: "ES", from: MONDAY, to: MONDAY + DAY_MS - 1 });
       expect(result.ok).toBe(true);
       if (!result.ok) return;
-      expect(result.candles[0].open).toBeCloseTo(5000, 6);
-      expect(result.candles[0].close).toBeCloseTo(5002, 6);
+      expect(result.candles[0]).toMatchObject({ open: 5000.25, high: 5005.5, low: 4995.75, close: 5002 });
     });
 
     it("parses ts_event as a raw nanosecond string when pretty_ts isn't honored", async () => {
@@ -238,6 +288,49 @@ describe("DatabentoHistoricalMarketDataProvider", () => {
       if (!result.ok) return;
       expect(result.candles).toHaveLength(1);
       expect(result.candles[0].timestamp).toBe(to);
+    });
+  });
+
+  describe("malformed provider data (Stage 17B.1 §17) — fail the chunk, never silently skip a bad bar", () => {
+    it("fails the chunk with PROVIDER_DATA_ERROR on a corrupt/unparseable NDJSON line", async () => {
+      vi.stubEnv("DATABENTO_API_KEY", "key123");
+      const provider = new DatabentoHistoricalMarketDataProvider();
+      const t0 = new Date(MONDAY).toISOString();
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse({ result: { "ES.v.0": [{ d0: "2026-07-01", d1: "2026-09-01", s: "ESU6" }] } }))
+        .mockResolvedValueOnce(jsonResponse(`${JSON.stringify(ohlcvRecord(t0, 5000, 5001, 4999, 5000.5, 5))}\nnot valid json{{{`));
+      const result = await provider.fetchCandles({ canonicalSymbol: "ES", from: MONDAY, to: MONDAY + DAY_MS - 1 });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("PROVIDER_DATA_ERROR");
+    });
+
+    it("fails the chunk with PROVIDER_DATA_ERROR on a record with an unparseable OHLCV field, rather than dropping it", async () => {
+      vi.stubEnv("DATABENTO_API_KEY", "key123");
+      const provider = new DatabentoHistoricalMarketDataProvider();
+      const t0 = new Date(MONDAY).toISOString();
+      stubResolveThenTimeseries("ESU6", [{ ts_event: t0, open: "not-a-number", high: 5001, low: 4999, close: 5000.5, volume: 5 }]);
+      const result = await provider.fetchCandles({ canonicalSymbol: "ES", from: MONDAY, to: MONDAY + DAY_MS - 1 });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("PROVIDER_DATA_ERROR");
+    });
+
+    it("tolerates a blank NDJSON line between records (formatting artifact, not a data record)", async () => {
+      vi.stubEnv("DATABENTO_API_KEY", "key123");
+      const provider = new DatabentoHistoricalMarketDataProvider();
+      const t0 = new Date(MONDAY).toISOString();
+      const t1 = new Date(MONDAY + 60_000).toISOString();
+      const body = [JSON.stringify(ohlcvRecord(t0, 5000, 5001, 4999, 5000.5, 5)), "", JSON.stringify(ohlcvRecord(t1, 5001, 5002, 5000, 5001.5, 5))].join(
+        "\n",
+      );
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse({ result: { "ES.v.0": [{ d0: "2026-07-01", d1: "2026-09-01", s: "ESU6" }] } }))
+        .mockResolvedValueOnce(jsonResponse(body));
+      const result = await provider.fetchCandles({ canonicalSymbol: "ES", from: MONDAY, to: MONDAY + DAY_MS - 1 });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.candles).toHaveLength(2);
     });
   });
 

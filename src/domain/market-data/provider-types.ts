@@ -74,7 +74,22 @@ export type MarketDataErrorCode =
   | "UNSUPPORTED_SYMBOL"
   | "UNSUPPORTED_TIMEFRAME"
   | "OUT_OF_COVERAGE"
-  | "PROVIDER_ERROR";
+  | "PROVIDER_ERROR"
+  /** Stage 17B.1 §17 — a provider returned a corrupt/unparseable line or a
+   *  record that fails to produce a valid candle. The whole chunk fails
+   *  rather than silently dropping the bad bar (which would create a fake
+   *  gap indistinguishable from a real one). */
+  | "PROVIDER_DATA_ERROR"
+  /**
+   * Stage 17B.1 §10/§11 — a session's frozen provenance names a provider
+   * (e.g. Databento) that current deployment policy
+   * (`MARKET_DATA_EXTERNAL_DISPLAY_ENABLED`) does not permit displaying to
+   * this user right now. Historical provenance is preserved untouched; this
+   * is a distinct, non-destructive "not permitted right now" state — never
+   * silently substituted with Fixture and never allowed to mutate the
+   * stored provenance.
+   */
+  | "PROVIDER_DISPLAY_DISABLED";
 
 export interface MarketDataError {
   code: MarketDataErrorCode;

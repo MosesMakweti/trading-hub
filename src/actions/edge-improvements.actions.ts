@@ -5,15 +5,18 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/server/guards";
 import {
   acceptSuggestedCommitmentSchema,
+  continueCommitmentSchema,
   createManualCommitmentSchema,
+  refineCommitmentSchema,
   setCommitmentDailyStateSchema,
   setCommitmentStatusSchema,
   updateCommitmentSchema,
 } from "@/lib/validation/edge";
 import { dateKeyToUtcDate } from "@/lib/date";
+import { AUTOMATIC_EVIDENCE_RULE_KEYS, type AutomaticEvidenceRuleKey } from "@/domain/improvements/commitment-adherence";
 import * as commitmentService from "@/server/services/edge-review-commitment.service";
 import { finalizeEdgeReview } from "@/server/services/replay-review.service";
-import type { EdgeReviewCommitmentDTO, TodayCommitmentsDTO } from "@/types/edge-improvements";
+import type { CommitmentLineageDTO, ContextualReminderDTO, EdgeReviewCommitmentDTO, TodayCommitmentsDTO } from "@/types/edge-improvements";
 
 type ActionResult = { success: true } | { success: false; error: string };
 type CommitmentResult = { success: true; commitment: EdgeReviewCommitmentDTO } | { success: false; error: string };
@@ -104,7 +107,13 @@ export async function setCommitmentDailyState(commitmentId: string, input: unkno
   if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
 
   try {
-    await commitmentService.setCommitmentDailyState(user.id, commitmentId, dateKeyToUtcDate(parsed.data.dateKey), parsed.data.status);
+    await commitmentService.setCommitmentDailyState(
+      user.id,
+      commitmentId,
+      dateKeyToUtcDate(parsed.data.dateKey),
+      parsed.data.status,
+      parsed.data.note ?? null,
+    );
   } catch (error) {
     return { success: false, error: errorMessage(error, "Failed to save.") };
   }
@@ -115,4 +124,66 @@ export async function setCommitmentDailyState(commitmentId: string, input: unkno
 export async function getTodayCommitments(): Promise<TodayCommitmentsDTO> {
   const user = await requireUser();
   return commitmentService.getActiveCommitmentsForToday(user.id);
+}
+
+/**
+ * Stage 19.1 §3-7 — Trade Idea contextual reminder. `ruleKeys` is restricted
+ * server-side to the fixed deterministic rule set (never arbitrary text
+ * from the caller), so a component can only ever ask for a reminder tied
+ * to a known, stable rule identity.
+ */
+export async function getContextualReminder(ruleKeys: AutomaticEvidenceRuleKey[]): Promise<ContextualReminderDTO | null> {
+  const user = await requireUser();
+  const validKeys = ruleKeys.filter((k) => (AUTOMATIC_EVIDENCE_RULE_KEYS as readonly string[]).includes(k));
+  if (validKeys.length === 0) return null;
+  return commitmentService.getContextualReminder(user.id, validKeys);
+}
+
+/** Stage 19 §29-30 — full cross-period history/adherence for one commitment's
+ *  lineage, used by the Improvements tab's result cards and history view. */
+export async function getCommitmentLineage(commitmentId: string): Promise<{ success: true; lineage: CommitmentLineageDTO } | { success: false; error: string }> {
+  const user = await requireUser();
+  try {
+    const lineage = await commitmentService.getCommitmentLineage(user.id, commitmentId);
+    return { success: true, lineage };
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to load commitment history.") };
+  }
+}
+
+/** §4 "Continue" — same objective, unchanged, carried into a new period. */
+export async function continueCommitment(input: unknown): Promise<CommitmentResult> {
+  const user = await requireUser();
+  const parsed = continueCommitmentSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  try {
+    const commitment = await commitmentService.continueCommitment(user.id, parsed.data.previousCommitmentId, parsed.data.sessionId);
+    revalidatePath("/edge");
+    revalidatePath("/today");
+    return { success: true, commitment };
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to continue the commitment.") };
+  }
+}
+
+/** §4 "Refine" — same lineage, trader-edited wording/scope. */
+export async function refineCommitment(input: unknown): Promise<CommitmentResult> {
+  const user = await requireUser();
+  const parsed = refineCommitmentSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  try {
+    const commitment = await commitmentService.refineCommitment(user.id, parsed.data.previousCommitmentId, parsed.data.sessionId, {
+      category: parsed.data.category,
+      title: parsed.data.title,
+      description: parsed.data.description,
+      priority: parsed.data.priority,
+    });
+    revalidatePath("/edge");
+    revalidatePath("/today");
+    return { success: true, commitment };
+  } catch (error) {
+    return { success: false, error: errorMessage(error, "Failed to refine the commitment.") };
+  }
 }

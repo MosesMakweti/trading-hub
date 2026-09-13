@@ -17,13 +17,13 @@ import {
 import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
 import { listExecutionsForTrades } from "@/server/services/trade-executions.service";
 import { toAccountAllocationSelectorDTO, toExecutionDTO } from "@/server/services/prop-firms.mapper";
-import { getActiveCommitmentsForToday, getCommitmentDailyStates } from "@/server/services/edge-review-commitment.service";
+import { getActiveCommitmentsForToday, getAdherenceSummaries, getCommitmentDailyStates } from "@/server/services/edge-review-commitment.service";
 import { dateKeyToUtcDate, localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 import { FadeIn } from "@/components/shared/motion";
 import { TodayWorkspace } from "@/components/today/today-workspace";
 import type { DailyAnalyticsDTO, TodaysPlanDTO } from "@/types/today";
-import type { EdgeReviewCommitmentDailyStatus } from "@/types/edge-improvements";
+import type { AdherenceResultDTO, AdherenceTrend, EdgeReviewCommitmentDailyStatus } from "@/types/edge-improvements";
 
 export default async function TodayPage() {
   const user = await requireUser();
@@ -49,9 +49,15 @@ export default async function TodayPage() {
     ]);
 
   // Stage 16 §18 — daily acknowledgement, keyed by commitment id, for today only.
-  const allCommitmentIds = [...reviewCommitments.weekly, ...reviewCommitments.monthly].map((c) => c.id);
-  const dailyStatesMap = await getCommitmentDailyStates(user.id, allCommitmentIds, dateKeyToUtcDate(todayKey));
+  const allSurfacedCommitments = [...reviewCommitments.weekly, ...reviewCommitments.monthly];
+  const allCommitmentIds = allSurfacedCommitments.map((c) => c.id);
+  const [dailyStatesMap, adherenceSummaries] = await Promise.all([
+    getCommitmentDailyStates(user.id, allCommitmentIds, dateKeyToUtcDate(todayKey)),
+    getAdherenceSummaries(user.id, allSurfacedCommitments.map((c) => ({ id: c.id, lineageId: c.lineageId }))),
+  ]);
   const dailyStates: Record<string, EdgeReviewCommitmentDailyStatus> = Object.fromEntries(dailyStatesMap);
+  // Stage 19 §12 — compact adherence context for Today, never full analytics.
+  const commitmentAdherence: Record<string, { current: AdherenceResultDTO; trend: AdherenceTrend }> = Object.fromEntries(adherenceSummaries);
   const executionsRaw = await listExecutionsForTrades(user.id, trades.map((t) => t.id));
   const executionsByTradeId: Record<string, ReturnType<typeof toExecutionDTO>[]> = {};
   for (const row of executionsRaw) {
@@ -91,6 +97,7 @@ export default async function TodayPage() {
         dailyAssetAnalyses={assetAnalyses.map(toDailyAssetAnalysisDTO)}
         reviewCommitments={reviewCommitments}
         commitmentDailyStates={dailyStates}
+        commitmentAdherence={commitmentAdherence}
         linkableTrades={trades
           .filter((t) => t.opportunityId == null)
           .map((t) => ({

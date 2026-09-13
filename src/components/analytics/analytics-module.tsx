@@ -1,4 +1,4 @@
-import { CandlestickChart, Activity, TrendingUp, Wallet, Layers, Brain, CalendarDays, Target, type LucideIcon } from "lucide-react";
+import { CandlestickChart, Activity, TrendingUp, Wallet, Layers, Brain, CalendarDays, ClipboardList, Target, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { DateRangeFilter } from "@/components/analytics/date-range-filter";
@@ -14,6 +14,7 @@ import { AnalyticsBreakdowns } from "@/components/analytics/analytics-breakdowns
 import { PsychologyAnalytics } from "@/components/analytics/psychology-analytics";
 import { Heatmap, pnlHeatColor } from "@/components/analytics/heatmap";
 import { PropFirmsAnalyticsSection } from "@/components/analytics/prop-firms-analytics-section";
+import { AnalyticsImprovementSection } from "@/components/analytics/analytics-improvement-section";
 import { Card, GroupList, BehaviourLists, RCurveChart, fmtR, fmtUsd, tone as rTone } from "@/components/analytics/canonical-analytics-section";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StaggerList, StaggerItem } from "@/components/shared/motion";
@@ -28,6 +29,7 @@ import type {
   CanonicalFilterOptionsDTO,
 } from "@/server/services/analytics-canonical.service";
 import type { DateRangePreset } from "@/lib/date-ranges";
+import type { ImprovementAnalyticsDTO } from "@/types/edge-improvements";
 
 type Data = Awaited<ReturnType<typeof getAnalyticsData>>;
 type TradingData = Data["trading"];
@@ -101,6 +103,7 @@ export function AnalyticsModule({
   propFirmAnalytics,
   canonical,
   canonicalFilterOptions,
+  improvement,
 }: {
   preset: DateRangePreset;
   from: string;
@@ -113,6 +116,10 @@ export function AnalyticsModule({
    *  performance across the whole page (Stage 10.5). */
   canonical: CanonicalAnalyticsSummary;
   canonicalFilterOptions: CanonicalFilterOptionsDTO;
+  /** Stage 19.1 — commitment adherence over time, weekly/monthly kept as
+   *  separate series (never merged — §20). Independent of the date-range
+   *  filters above; commitments have their own review periods. */
+  improvement: { weekly: ImprovementAnalyticsDTO; monthly: ImprovementAnalyticsDTO };
 }) {
   const d = trading;
   const c = canonical;
@@ -139,6 +146,16 @@ export function AnalyticsModule({
             closed System-A trades in range. */}
         <StaggerItem>
           <PropFirmsAnalyticsSection data={propFirmAnalytics} />
+        </StaggerItem>
+
+        {/* Improvement (Stage 19.1) — commitment adherence over time, a
+            separate question from realized performance, so it renders
+            independent of the date-range/trade filters above. */}
+        <StaggerItem>
+          <section id="section-improvement" className="scroll-mt-24 space-y-3">
+            <SectionHeading title="Improvement" hint="behavioral change — never profitability" icon={ClipboardList} />
+            <AnalyticsImprovementSection weekly={improvement.weekly} monthly={improvement.monthly} />
+          </section>
         </StaggerItem>
 
         {d.totalTrades > 0 && <SectionNav />}

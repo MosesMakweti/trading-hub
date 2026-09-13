@@ -92,3 +92,38 @@ describe("buildHigherTimeframeView — higher-timeframe future-leakage preventio
     expect(view.partial).toBeNull();
   });
 });
+
+describe("prefetch never leaks future data (Stage 17B.1 §13) — download-ahead is fine, reveal-ahead is not", () => {
+  const DAY_MS = 1440 * MIN;
+
+  it("candles for days already downloaded past the Clock are entirely absent from what's visible", () => {
+    // Simulate the WHOLE multi-day review period already sitting in memory
+    // (background prefetch has finished, or even raced ahead) — this is
+    // exactly the shape `baseCandlesByAsset` takes in replay-market-panel.tsx
+    // once prefetch has run. Three days of 1m candles, all already "loaded."
+    const wholePeriod: Candle[] = [];
+    for (let day = 0; day < 3; day += 1) {
+      for (let m = 0; m < 1440; m += 1) {
+        wholePeriod.push(candle(day * 1440 + m, 100 + day * 1000 + m));
+      }
+    }
+    // Replay Clock sits early on day 0 — day 1 and day 2 are fully "in the future" from the trader's vantage point.
+    const replayTime = DAY_START + 5 * MIN;
+    const visible = visibleCandles(wholePeriod, replayTime, "1m");
+
+    expect(visible).toHaveLength(5); // only :00,:01,:02,:03,:04 of day 0 have closed by 00:05
+    expect(visible.every((c) => c.timestamp < DAY_START + DAY_MS)).toBe(true); // not one candle from day 1/2 leaks through
+    expect(visible[visible.length - 1].timestamp + MIN).toBeLessThanOrEqual(replayTime);
+  });
+
+  it("the same downstream filter execution reads from (watermark-bounded visibleCandles) never exposes a next-day candle at a day boundary", () => {
+    // Mirrors replay-market-panel.tsx's advanceExecutionIfNeeded: candles
+    // strictly after a watermark, intersected with visibleCandles(newTime).
+    const wholePeriod: Candle[] = [candle(1438, 500), candle(1439, 501), candle(1440, 502), candle(1441, 503)]; // last two are day 1, 00:00/00:01
+    const watermark = DAY_START + 1437 * MIN;
+    const replayTime = DAY_START + 1440 * MIN; // exactly midnight — day 1's 00:00 candle has NOT closed yet (closes at 00:01)
+    const executionFeed = visibleCandles(wholePeriod, replayTime, "1m").filter((c) => c.timestamp > watermark);
+    expect(executionFeed.map((c) => c.timestamp)).toEqual([DAY_START + 1438 * MIN, DAY_START + 1439 * MIN]);
+    expect(executionFeed.some((c) => c.timestamp >= DAY_START + 1440 * MIN)).toBe(false);
+  });
+});

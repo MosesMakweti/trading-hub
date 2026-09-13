@@ -223,3 +223,17 @@ export interface ReplayTradeDTO {
   partialExits: ReplayTradePartialExitDTO[];
   executionEvents: ReplayExecutionEventDTO[];
 }
+
+/** Stage 18 §15-18 — a Replay chart drawing. Review-only; never linked to a
+ *  real Trade/Strategy/Journal — see `ReplayChartAnnotation`'s own schema
+ *  doc comment. */
+export interface ReplayAnnotationDTO {
+  id: string;
+  assetSymbol: string;
+  timeframe: string | null;
+  type: "HORIZONTAL_LINE" | "TREND_LINE" | "RECTANGLE" | "TEXT";
+  geometry: unknown; // shape-specific — see ReplayChartAnnotation's schema doc comment
+  text: string | null;
+  createdAt: string;
+  updatedAt: string;
+}

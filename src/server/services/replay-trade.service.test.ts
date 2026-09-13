@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/server/db";
 import { createTrade } from "@/server/services/trades.service";
@@ -14,10 +14,13 @@ import {
   createReplayDecision,
   deleteReplayTrade,
   getReplayTrade,
+  getReplayTradeUnrealizedR,
   listReplayTrades,
   moveReplayTradeStopLoss,
   resolveReplayTradeAmbiguity,
+  updateReplayTradeReasoningNote,
 } from "@/server/services/replay-trade.service";
+import { TwelveDataHistoricalMarketDataProvider } from "@/server/services/market-data/twelve-data-provider";
 import type { Candle } from "@/domain/market-data/candle";
 import type { TradeInput } from "@/lib/validation/trades";
 
@@ -725,5 +728,174 @@ describe("Stage 15.2 §26 — COMPLETED session immutability", () => {
 
     const after = await prisma.replayReviewSession.findUniqueOrThrow({ where: { id: session.id } });
     expect(after.actualBaselineSnapshot).toEqual(before.actualBaselineSnapshot);
+  });
+});
+
+describe("execution engine with REAL provider-parsed candles (Stage 17D §18)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * The domain execution engine (`processCandles`) takes a plain `Candle[]`
+   * — it has zero knowledge of which provider produced it (Databento,
+   * Twelve Data, or Fixture all satisfy the exact same `Candle` interface,
+   * `domain/market-data/candle.ts`). This test proves that structural
+   * guarantee end-to-end rather than just asserting it from the type
+   * system: candles are parsed by the REAL `TwelveDataHistoricalMarketDataProvider`
+   * from a mocked HTTP response (going through its actual datetime/price
+   * parsing, sorting, and validation — the same code path a live session
+   * would use), then fed directly into `advanceReplayTradeExecution`,
+   * reproducing the exact same market-fill + stop-loss + realized-R
+   * outcome as the Fixture-shaped `candle()` helper's equivalent test
+   * above ("closes at the stop loss and computes realized R = -1") —
+   * without changing any execution math.
+   */
+  it("a market order fills and closes at the stop loss using candles the REAL Twelve Data adapter parsed from a mocked HTTP response", async () => {
+    vi.stubEnv("TWELVE_DATA_API_KEY", "key123");
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          meta: { symbol: "XAU/USD" },
+          values: [{ datetime: "2026-08-04 14:01:00", open: "1900", high: "1902", low: "1888", close: "1889", volume: "120" }],
+          status: "ok",
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new TwelveDataHistoricalMarketDataProvider();
+    const dayStart = Date.UTC(2026, 7, 4);
+    const fetchResult = await provider.fetchCandles({ canonicalSymbol: "XAUUSD", from: dayStart, to: dayStart + 86_400_000 - 1 });
+    expect(fetchResult.ok).toBe(true);
+    if (!fetchResult.ok) return;
+    expect(fetchResult.candles).toHaveLength(1);
+    expect(fetchResult.candles[0].timestamp).toBe(T0 + 60_000); // aligns with candle(1, ...)'s timestamp below
+
+    const user = await makeUser("real-candles-execution");
+    const session = await inProgressSession(user.id);
+    const trade = await createReplayDecision(user.id, session.id, {
+      historicalTimestamp: T0,
+      assetSymbol: "XAUUSD",
+      direction: "LONG",
+      decisionType: "TAKEN",
+      selectedConditionIds: [],
+      orderType: "MARKET",
+      entryPrice: 1900,
+      initialStopLoss: 1890,
+      targets: [
+        { price: 1910, percentToClose: 30 },
+        { price: 1920, percentToClose: 30 },
+        { price: 1930, percentToClose: 40 },
+      ],
+    });
+
+    // Real, adapter-parsed candles — not the literal candle() test helper.
+    const updated = await advanceReplayTradeExecution(user.id, trade.id, fetchResult.candles);
+    expect(updated.lifecycle).toBe("CLOSED");
+    expect(updated.closeReason).toBe("STOP_LOSS");
+    expect(updated.realizedReplayR).toBeCloseTo(-1, 4);
+    expect(updated.simulatedExit).toBe(1890);
+  });
+});
+
+describe("getReplayTradeUnrealizedR (Stage 18 §21-22)", () => {
+  async function openTrade(userId: string, sessionId: string) {
+    return createReplayDecision(userId, sessionId, {
+      historicalTimestamp: T0,
+      assetSymbol: "XAUUSD",
+      direction: "LONG",
+      decisionType: "TAKEN",
+      selectedConditionIds: [],
+      orderType: "MARKET",
+      entryPrice: 1900,
+      initialStopLoss: 1890,
+      targets: [{ price: 1910, percentToClose: 100 }],
+    });
+  }
+
+  it("returns null for a flat (PLANNED) trade — no order placed yet", async () => {
+    const user = await makeUser("unrealized-flat");
+    const session = await inProgressSession(user.id);
+    const trade = await createReplayDecision(user.id, session.id, {
+      historicalTimestamp: T0,
+      assetSymbol: "XAUUSD",
+      direction: "LONG",
+      decisionType: "SKIPPED",
+      selectedConditionIds: [],
+    });
+    expect(await getReplayTradeUnrealizedR(user.id, trade.id, 1905)).toBeNull();
+  });
+
+  it("computes unrealized R for an OPEN LONG position using the exact same 1R definition as realized R", async () => {
+    const user = await makeUser("unrealized-open");
+    const session = await inProgressSession(user.id);
+    const trade = await openTrade(user.id, session.id);
+    const filled = await advanceReplayTradeExecution(user.id, trade.id, [candle(1, 1900, 1901, 1899, 1900)]);
+    expect(filled.lifecycle).toBe("OPEN");
+
+    // Risk = 1900-1890 = 10. At 1905, unrealized = (1905-1900)/10 = 0.5R.
+    const r = await getReplayTradeUnrealizedR(user.id, trade.id, 1905);
+    expect(r).toBeCloseTo(0.5, 4);
+  });
+
+  it("returns null once the trade is CLOSED — realizedReplayR is the authoritative figure at that point, not a stale unrealized one", async () => {
+    const user = await makeUser("unrealized-closed");
+    const session = await inProgressSession(user.id);
+    const trade = await openTrade(user.id, session.id);
+    const closed = await advanceReplayTradeExecution(user.id, trade.id, [candle(1, 1900, 1902, 1888, 1889)]);
+    expect(closed.lifecycle).toBe("CLOSED");
+    expect(await getReplayTradeUnrealizedR(user.id, trade.id, 1905)).toBeNull();
+  });
+
+  it("never touches future candle data — it's a pure function of a caller-supplied price, not a query against upcoming candles", async () => {
+    const user = await makeUser("unrealized-no-hindsight");
+    const session = await inProgressSession(user.id);
+    const trade = await openTrade(user.id, session.id);
+    await advanceReplayTradeExecution(user.id, trade.id, [candle(1, 1900, 1901, 1899, 1900)]);
+    // Two different caller-supplied prices produce two different answers —
+    // proving the function has no independent access to "the real current
+    // price," it only ever reflects whatever the caller (the chart's own
+    // no-hindsight-filtered visible price) hands it.
+    const rAt1905 = await getReplayTradeUnrealizedR(user.id, trade.id, 1905);
+    const rAt1895 = await getReplayTradeUnrealizedR(user.id, trade.id, 1895);
+    expect(rAt1905).toBeCloseTo(0.5, 4);
+    expect(rAt1895).toBeCloseTo(-0.5, 4);
+  });
+});
+
+describe("updateReplayTradeReasoningNote (Stage 18 §19)", () => {
+  it("stores a reasoning note under notes.reasoning without touching an existing skipReason", async () => {
+    const user = await makeUser("reasoning-note");
+    const session = await inProgressSession(user.id);
+    const trade = await createReplayDecision(user.id, session.id, {
+      historicalTimestamp: T0,
+      assetSymbol: "XAUUSD",
+      direction: "LONG",
+      decisionType: "SKIPPED",
+      selectedConditionIds: [],
+      notes: { skipReason: "Waited for confirmation, price ran without me." },
+    });
+
+    const updated = await updateReplayTradeReasoningNote(user.id, trade.id, "In hindsight the HTF bias was already clear here.");
+    expect((updated.notes as Record<string, unknown>).reasoning).toBe("In hindsight the HTF bias was already clear here.");
+    expect((updated.notes as Record<string, unknown>).skipReason).toBe("Waited for confirmation, price ran without me.");
+  });
+
+  it("rejects updating a reasoning note on a completed session", async () => {
+    const user = await makeUser("reasoning-note-locked");
+    const session = await inProgressSession(user.id);
+    const trade = await createReplayDecision(user.id, session.id, {
+      historicalTimestamp: T0,
+      assetSymbol: "XAUUSD",
+      direction: "LONG",
+      decisionType: "SKIPPED",
+      selectedConditionIds: [],
+    });
+    await completeReplayReviewSession(user.id, session.id);
+
+    await expect(updateReplayTradeReasoningNote(user.id, trade.id, "too late")).rejects.toThrow(/completed/i);
   });
 });

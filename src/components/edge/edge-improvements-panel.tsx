@@ -33,6 +33,7 @@ export function EdgeImprovementsPanel({
   comparison,
   synthesis,
   commitments,
+  carryForwardCandidates,
   weeklyReview,
 }: {
   session: ReplayReviewSessionDTO | null;
@@ -41,6 +42,7 @@ export function EdgeImprovementsPanel({
   comparison: ActualVsReplayComparison;
   synthesis: ImprovementsSynthesis;
   commitments: EdgeReviewCommitmentDTO[];
+  carryForwardCandidates: EdgeReviewCommitmentDTO[];
   weeklyReview: { wentWell: unknown; toImprove: unknown; focusNextWeek: unknown };
 }) {
   const router = useRouter();
@@ -123,7 +125,12 @@ export function EdgeImprovementsPanel({
 
         {/* Right */}
         {session ? (
-          <EdgeCommitmentsPanel sessionId={session.id} commitments={commitments} suggestions={synthesis.suggestions} />
+          <EdgeCommitmentsPanel
+            sessionId={session.id}
+            commitments={commitments}
+            carryForwardCandidates={carryForwardCandidates}
+            suggestions={synthesis.suggestions}
+          />
         ) : (
           <div className="glass rounded-2xl p-4 text-xs text-muted-foreground">Start the review to create commitments.</div>
         )}

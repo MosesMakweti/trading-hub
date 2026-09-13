@@ -152,6 +152,47 @@ export const getReplayCandlesSchema = z.object({
   to: z.number().int().positive(),
 });
 
+const replayTimeframeSchema = z.enum(["1m", "5m", "15m", "30m", "1h", "4h", "1D"]);
+
+/**
+ * Stage 18 §18 — geometry is validated AT THE BOUNDARY, per `type`, via a
+ * discriminated union — never trusted as opaque JSON. `time` values are UTC
+ * epoch ms (matching `Candle.timestamp`'s own convention throughout this
+ * app), not a trader-typed date string.
+ */
+const annotationPointSchema = z.object({ time: z.number().int().nonnegative(), price: z.number() });
+const horizontalLineGeometrySchema = z.object({ price: z.number() });
+const twoPointGeometrySchema = z.object({ p1: annotationPointSchema, p2: annotationPointSchema });
+
+const annotationCommonFields = {
+  sessionId: z.string().min(1),
+  assetSymbol: assetSymbolSchema,
+  timeframe: replayTimeframeSchema.nullable().optional(),
+};
+
+export const createReplayAnnotationSchema = z.discriminatedUnion("type", [
+  z.object({ ...annotationCommonFields, type: z.literal("HORIZONTAL_LINE"), geometry: horizontalLineGeometrySchema, text: z.string().trim().max(500).nullable().optional() }),
+  z.object({ ...annotationCommonFields, type: z.literal("TREND_LINE"), geometry: twoPointGeometrySchema, text: z.string().trim().max(500).nullable().optional() }),
+  z.object({ ...annotationCommonFields, type: z.literal("RECTANGLE"), geometry: twoPointGeometrySchema, text: z.string().trim().max(500).nullable().optional() }),
+  z.object({ ...annotationCommonFields, type: z.literal("TEXT"), geometry: annotationPointSchema, text: z.string().trim().min(1).max(500) }),
+]);
+
+export const deleteReplayAnnotationSchema = z.object({ id: z.string().min(1) });
+
+export const clearReplayAnnotationsSchema = z.object({
+  sessionId: z.string().min(1),
+  assetSymbol: assetSymbolSchema,
+});
+
+/** Stage 18 §19 — lightweight reasoning notes on a `ReplayTrade`, reusing
+ *  its existing `notes: Json?` field (already used for `skipReason`) rather
+ *  than a new column/model — the service layer merges `{reasoning: note}`
+ *  into that JSON object, never clobbering a `skipReason` key written by a
+ *  different flow. */
+export const updateReplayTradeReasoningNoteSchema = z.object({
+  note: z.string().trim().max(2000),
+});
+
 export type CreateReplayReviewSessionInput = z.infer<typeof createReplayReviewSessionSchema>;
 export type CreateReplayDecisionInput = z.infer<typeof createReplayDecisionSchema>;
 export type MoveReplayStopLossInput = z.infer<typeof moveReplayStopLossSchema>;
@@ -160,3 +201,4 @@ export type CloseReplayRemainingInput = z.infer<typeof closeReplayRemainingSchem
 export type CancelReplayPendingInput = z.infer<typeof cancelReplayPendingSchema>;
 export type ResolveReplayAmbiguityInput = z.infer<typeof resolveReplayAmbiguitySchema>;
 export type AdvanceReplayExecutionInput = z.infer<typeof advanceReplayExecutionSchema>;
+export type CreateReplayAnnotationInput = z.infer<typeof createReplayAnnotationSchema>;
