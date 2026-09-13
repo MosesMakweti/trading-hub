@@ -34,6 +34,7 @@ import { allMandatoryComplete } from "@/domain/today/routine-snapshot";
 import { DailyMarketPlanSection } from "@/components/today/daily-market-plan-section";
 import { DailyAnalyticsSection } from "@/components/today/daily-analytics-section";
 import { TodayTradeBar } from "@/components/today/today-trade-bar";
+import { TodayFocusFromReview } from "@/components/today/today-focus-from-review";
 import { AddTradeDialog } from "@/components/today/add-trade-dialog";
 import { OpportunitiesSection } from "@/components/journal/opportunity/opportunities-section";
 import type { LinkableTrade } from "@/components/journal/opportunity/opportunity-card";
@@ -55,6 +56,7 @@ import type {
 } from "@/types/today";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
+import type { EdgeReviewCommitmentDailyStatus, TodayCommitmentsDTO } from "@/types/edge-improvements";
 
 // The Today workflow section tabs. The Pre-Session Routine is first; the rest stay
 // locked until the "I am ready to trade" gate is confirmed.
@@ -82,6 +84,8 @@ export function TodayWorkspace({
   opportunities,
   dailyAssetAnalyses,
   linkableTrades,
+  reviewCommitments,
+  commitmentDailyStates,
 }: {
   day: TradingDayDTO;
   // Only serializable data crosses the server→client boundary; the icon-bearing
@@ -101,6 +105,8 @@ export function TodayWorkspace({
   opportunities: OpportunityListItemDTO[];
   dailyAssetAnalyses: DailyAssetAnalysisDTO[];
   linkableTrades: LinkableTrade[];
+  reviewCommitments: TodayCommitmentsDTO;
+  commitmentDailyStates: Record<string, EdgeReviewCommitmentDailyStatus>;
 }) {
   const router = useRouter();
   // The Pre-Session Routine gates the rest of the day: the trader must have confirmed
@@ -256,6 +262,8 @@ export function TodayWorkspace({
           )}
         </div>
       </div>
+
+      <TodayFocusFromReview commitments={reviewCommitments} todayKey={day.dateKey} initialDailyStates={commitmentDailyStates} />
 
       <WorkflowProgress steps={steps} title="Workflow" />
 

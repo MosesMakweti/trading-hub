@@ -1,184 +1,123 @@
-import Link from "next/link";
-import { ChevronLeft, ChevronRight, TrendingUp } from "lucide-react";
-
 import { requireUser } from "@/server/guards";
-import { getAnalyticsData } from "@/server/services/analytics.service";
 import { getWeeklyReview } from "@/server/services/edge.service";
+import { getAnalyticsFilterOptions } from "@/server/services/analytics.service";
 import {
-  addDaysToKey,
-  formatDateKeyShort,
-  isValidDateKey,
-  localDateToKey,
-  weekStartKey,
-} from "@/lib/date";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { KpiCard } from "@/components/analytics/kpi-card";
-import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
-import { WeeklyReflection } from "@/components/edge/weekly-reflection";
+  buildActualBaseline,
+  findReplayReviewSessionForPeriod,
+  getHistoricalStrategyContext,
+} from "@/server/services/replay-review.service";
+import { listReplayTrades } from "@/server/services/replay-trade.service";
+import { getReplayComparison } from "@/server/services/replay-comparison.service";
+import { listStrategyVersions } from "@/server/services/strategies.service";
+import { listTradingDayKeysInRange } from "@/server/services/trading-day.service";
+import { computeReviewPeriod } from "@/domain/replay/review-period";
+import { buildActualVsReplayComparison } from "@/domain/replay-comparison/comparison";
+import { synthesizeImprovements } from "@/domain/replay-improvements/synthesis";
+import { listCommitmentsForSession } from "@/server/services/edge-review-commitment.service";
+import { isValidDateKey, localDateToKey } from "@/lib/date";
+import { EdgeReviewWorkspace } from "@/components/edge/edge-review-workspace";
 import { FadeIn } from "@/components/shared/motion";
+import type { ReplayReviewType } from "@/types/replay";
 
-const pct = (n: number | null) => (n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
-const tone = (n: number | null): "success" | "danger" | undefined =>
-  n == null ? undefined : n >= 0 ? "success" : "danger";
+type Params = {
+  period?: string;
+  type?: string;
+  tab?: string;
+  strategy?: string;
+  assets?: string;
+};
 
-export default async function EdgePage({
+/**
+ * Edge Review (Stage 12.5) — Overview / Replay / Comparison / Improvements,
+ * one continuous review process over an explicit WEEKLY/MONTHLY period. The
+ * period, type, and scope are all URL state (bookmarkable, shareable) so a
+ * trader never has to separately "create a review" before seeing it — the
+ * corresponding ReplayReviewSession (if any) is resolved automatically from
+ * that exact period+scope (Stage 12.5 §7-8).
+ */
+export default async function EdgeReviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ week?: string }>;
+  searchParams: Promise<Params>;
 }) {
   const user = await requireUser();
-  const { week } = await searchParams;
+  const params = await searchParams;
 
-  const base = week && isValidDateKey(week) ? week : localDateToKey(new Date());
-  const start = weekStartKey(base);
-  const end = addDaysToKey(start, 6);
+  const reviewType: ReplayReviewType = params.type === "MONTHLY" ? "MONTHLY" : "WEEKLY";
+  const anchor = params.period && isValidDateKey(params.period) ? params.period : localDateToKey(new Date());
+  const { startDate, endDate } = computeReviewPeriod(reviewType, anchor);
 
-  const [analytics, review] = await Promise.all([
-    getAnalyticsData(user.id, start, end),
-    getWeeklyReview(user.id, start),
+  const strategyId = params.strategy || null;
+  const assetSymbols = params.assets ? params.assets.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean) : [];
+
+  const [filterOptions, weeklyReviewRow, session] = await Promise.all([
+    getAnalyticsFilterOptions(user.id),
+    getWeeklyReview(user.id, startDate, reviewType),
+    findReplayReviewSessionForPeriod(user.id, { reviewType, startDate, endDate, strategyId, assetSymbols }),
   ]);
-  const t = analytics.trading;
-  const best = t.statsByAsset[0] ?? null;
-  const isCurrent = start === weekStartKey(localDateToKey(new Date()));
+
+  const [baseline, historicalStrategyContext, dailyPlanDateKeys, replayTrades, comparisonFromService] = await Promise.all([
+    session?.actualBaselineSnapshot
+      ? Promise.resolve(session.actualBaselineSnapshot)
+      : buildActualBaseline(user.id, { startDate, endDate, strategyId, assetSymbols }),
+    strategyId
+      ? listStrategyVersions(user.id, strategyId).then((versions) =>
+          versions[0] ? getHistoricalStrategyContext(user.id, strategyId, versions[0].version) : null,
+        )
+      : Promise.resolve(null),
+    listTradingDayKeysInRange(user.id, startDate, endDate),
+    session ? listReplayTrades(user.id, session.id) : Promise.resolve([]),
+    session ? getReplayComparison(user.id, session.id) : Promise.resolve(null),
+  ]);
+
+  const isLive = session?.actualBaselineSnapshot == null;
+  // Comparison (Stage 15, upgraded Stage 15.1, completed Stage 15.2) —
+  // `getReplayComparison` already wires the frozen baseline + ReplayTrade
+  // list + manual links + missed-opportunity confirmations + session status
+  // together; for a not-yet-started review (no session/baseline frozen yet)
+  // fall back to the pure builder directly against the live preview
+  // baseline, with no matches to speak of yet.
+  const comparison = comparisonFromService ?? buildActualVsReplayComparison(baseline, replayTrades, [], [], new Map(), "DRAFT");
+  // Improvements (Stage 16) — findings/suggestions are DERIVED, never
+  // persisted (see synthesis.ts's own doc comment); commitments are the one
+  // durable record, fetched per-session.
+  const [improvementsSynthesis, commitments] = await Promise.all([
+    Promise.resolve(synthesizeImprovements(comparison)),
+    session ? listCommitmentsForSession(user.id, session.id) : Promise.resolve([]),
+  ]);
+
+  const validTab = ["overview", "replay", "comparison", "improvements"] as const;
+  const initialTab = validTab.includes(params.tab as (typeof validTab)[number])
+    ? (params.tab as (typeof validTab)[number])
+    : "overview";
 
   return (
-    <FadeIn className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className="bg-brand-gradient inline-flex size-8 items-center justify-center rounded-lg text-white shadow-glow">
-            <TrendingUp className="size-4" />
-          </span>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Edge — Weekly Review</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {formatDateKeyShort(start)} – {formatDateKeyShort(end)}
-              {isCurrent && " · this week"}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Previous week"
-            nativeButton={false}
-            render={<Link href={`/edge?week=${addDaysToKey(start, -7)}`} />}
-          >
-            <ChevronLeft />
-          </Button>
-          {!isCurrent && (
-            <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/edge" />}>
-              This week
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Next week"
-            nativeButton={false}
-            render={<Link href={`/edge?week=${addDaysToKey(start, 7)}`} />}
-          >
-            <ChevronRight />
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <KpiCard label="Trades" value={String(t.totalTrades)} sublabel={`${t.winningTrades}W · ${t.losingTrades}L`} />
-        <KpiCard label="Win rate" value={t.winRate == null ? "—" : `${t.winRate.toFixed(1)}%`} />
-        <KpiCard label="Avg / trade" value={pct(t.averageRR)} tone={tone(t.averageRR)} />
-        <KpiCard
-          label="Profit factor"
-          value={t.profitFactor == null ? "—" : t.profitFactor.toFixed(2)}
-          tone={t.profitFactor == null ? undefined : t.profitFactor >= 1 ? "success" : "danger"}
-        />
-        <KpiCard label="Expectancy" value={pct(t.expectancy)} tone={tone(t.expectancy)} />
-        <KpiCard
-          label="Avg psychology"
-          value={analytics.psychology.averagePercent == null ? "—" : `${analytics.psychology.averagePercent.toFixed(0)}%`}
-        />
-        <KpiCard
-          label="Rule adherence"
-          value={t.ruleAdherenceAverage == null ? "—" : `${t.ruleAdherenceAverage.toFixed(0)}%`}
-        />
-        <KpiCard
-          label="Best asset"
-          value={best?.assetSymbol ?? "—"}
-          sublabel={best ? pct(best.totalReturnPercent) : undefined}
-          tone={best ? tone(best.totalReturnPercent) : undefined}
-        />
-      </div>
-
-      {t.totalTrades > 0 ? (
-        <>
-          <EquityCurveChart data={t.equityCurve} />
-
-          <section className="space-y-2">
-            <h2 className="text-sm font-medium text-muted-foreground">By asset</h2>
-            <div className="glass divide-y divide-border/60 rounded-2xl">
-              {t.statsByAsset.map((a) => (
-                <div
-                  key={a.assetSymbol}
-                  className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm"
-                >
-                  <span className="font-medium">{a.assetSymbol}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {a.totalTrades} trade{a.totalTrades === 1 ? "" : "s"} ·{" "}
-                    {a.winRate == null ? "—" : `${a.winRate.toFixed(0)}% WR`}
-                  </span>
-                  <span
-                    className={cn(
-                      "font-medium tabular-nums",
-                      a.totalReturnPercent >= 0 ? "text-success" : "text-danger",
-                    )}
-                  >
-                    {pct(a.totalReturnPercent)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="space-y-2">
-            <h2 className="text-sm font-medium text-muted-foreground">By strategy</h2>
-            <div className="glass divide-y divide-border/60 rounded-2xl">
-              {t.statsByStrategy.map((s) => (
-                <div
-                  key={s.strategyLabel}
-                  className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm"
-                >
-                  <span className="truncate font-medium">{s.strategyLabel}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {s.totalTrades} trade{s.totalTrades === 1 ? "" : "s"} ·{" "}
-                    {s.winRate == null ? "—" : `${s.winRate.toFixed(0)}% WR`}
-                  </span>
-                  <span
-                    className={cn(
-                      "shrink-0 font-medium tabular-nums",
-                      s.totalReturnPercent >= 0 ? "text-success" : "text-danger",
-                    )}
-                  >
-                    {pct(s.totalReturnPercent)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-        </>
-      ) : (
-        <p className="glass rounded-2xl p-6 text-center text-sm text-muted-foreground">
-          No trades this week — a quiet week is still worth reflecting on.
-        </p>
-      )}
-
-      <WeeklyReflection
-        weekStartKey={start}
-        initial={{
-          wentWell: review?.wentWell ?? null,
-          toImprove: review?.toImprove ?? null,
-          focusNextWeek: review?.focusNextWeek ?? null,
+    <FadeIn className="mx-auto max-w-5xl">
+      <EdgeReviewWorkspace
+        reviewType={reviewType}
+        period={anchor}
+        startDate={startDate}
+        endDate={endDate}
+        session={session}
+        baseline={baseline}
+        isLive={isLive}
+        historicalStrategyContext={historicalStrategyContext}
+        dailyPlanDateKeys={dailyPlanDateKeys}
+        replayTradeCount={replayTrades.length}
+        replayTrades={replayTrades}
+        comparison={comparison}
+        improvementsSynthesis={improvementsSynthesis}
+        commitments={commitments}
+        weeklyReview={{
+          wentWell: weeklyReviewRow?.wentWell ?? null,
+          toImprove: weeklyReviewRow?.toImprove ?? null,
+          focusNextWeek: weeklyReviewRow?.focusNextWeek ?? null,
         }}
+        strategies={filterOptions.strategies}
+        assets={filterOptions.assets}
+        strategyId={strategyId}
+        assetSymbols={assetSymbols}
+        initialTab={initialTab}
       />
     </FadeIn>
   );

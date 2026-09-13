@@ -100,6 +100,7 @@ const ALIASES: Record<string, string> = {
   CL1: "CL",
   MNQ: "NQ", // Micro E-mini — same price/tick convention, different contract size only
   MES: "ES",
+  MGC: "GC", // Micro Gold — same underlying/price series as GC, different contract size only (Stage 17B)
   BTC: "BTCUSD",
   XBTUSD: "BTCUSD",
   ETH: "ETHUSD",

@@ -17,6 +17,7 @@ import {
   aggregateByWeekday,
   buildCumulativeRealizedRCurve,
   summarizePlannedVsActual,
+  summarizePsychologyAdherence,
   toStrategyPerformanceSummary,
 } from "@/domain/analytics/canonical-aggregations";
 
@@ -451,5 +452,64 @@ describe("toStrategyPerformanceSummary", () => {
     const summary = toStrategyPerformanceSummary([cancelled]);
     expect(summary.totalTrades).toBe(0);
     expect(summary.totalRR).toBe(0);
+  });
+});
+
+describe("summarizePsychologyAdherence", () => {
+  it("averages psychology and rule-adherence across executed rows only", () => {
+    const rows = [
+      closedTrade({ tradeId: "a", psychologyPercent: 80, executionPercent: 90 }),
+      closedTrade({ tradeId: "b", psychologyPercent: 60, executionPercent: 70 }),
+    ];
+    const summary = summarizePsychologyAdherence(rows);
+    expect(summary.averagePsychologyPercent).toBe(70);
+    expect(summary.averageAdherencePercent).toBe(80);
+    expect(summary.sampleSize).toBe(2);
+  });
+
+  it("is null-safe when nothing is recorded", () => {
+    const summary = summarizePsychologyAdherence([]);
+    expect(summary.averagePsychologyPercent).toBeNull();
+    expect(summary.averageAdherencePercent).toBeNull();
+    expect(summary.sampleSize).toBe(0);
+  });
+
+  it("excludes cancelled ideas from the average", () => {
+    const cancelled = buildCanonicalTradeRow({
+      tradeId: "c",
+      dateKey: "2026-03-04",
+      direction: "LONG",
+      assetSymbol: "XAUUSD",
+      strategyId: null,
+      strategyName: null,
+      session: null,
+      reviewLifecycleStatus: "CANCELLED_NEVER_TRIGGERED",
+      validationState: null,
+      overrideReason: null,
+      setupTypeName: null,
+      validationScore: null,
+      dailyBiasSnapshot: null,
+      plannedR: null,
+      actualRR: null,
+      actualEntry: null,
+      actualStopLoss: null,
+      actualExit: null,
+      resolvedInitialStop: null,
+      partials: [],
+      settled: false,
+      settledRealizedR: null,
+      settledPnl: null,
+      preTradeMoodTags: [],
+      moodIntensity: null,
+      behaviourLabels: [],
+      adherencePercent: null,
+      confluencePercent: null,
+      executionPercent: 50,
+      tradeQualityPercent: null,
+      psychologyPercent: 20,
+    });
+    const summary = summarizePsychologyAdherence([cancelled]);
+    expect(summary.sampleSize).toBe(0);
+    expect(summary.averagePsychologyPercent).toBeNull();
   });
 });

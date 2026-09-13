@@ -26,6 +26,22 @@ export async function getTradingDay(userId: string, dateKey: string): Promise<Tr
   return prisma.tradingDay.findFirst({ where: { userId, date: dateKeyToUtcDate(dateKey) } });
 }
 
+/** Every date (as a key, ascending) with a TradingDay row in range — Replay
+ *  foundation (Stage 12 §14): a day can have a Daily Market Plan worth
+ *  showing as historical reference even with no trades that day. Read-only. */
+export async function listTradingDayKeysInRange(
+  userId: string,
+  from: string,
+  to: string,
+): Promise<string[]> {
+  const days = await prisma.tradingDay.findMany({
+    where: { userId, date: { gte: dateKeyToUtcDate(from), lte: dateKeyToUtcDate(to) } },
+    select: { date: true },
+    orderBy: { date: "asc" },
+  });
+  return days.map((d) => utcDateToKey(d.date));
+}
+
 /** Thrown by {@link assertDayEditable} when a mutation targets an archived day. */
 export class DayArchivedError extends Error {
   constructor() {

@@ -37,6 +37,7 @@
     "decimal.js": "^10.6.0",
     "exceljs": "^4.4.0",
     "fast-xml-parser": "^5.11.1",
+    "lightweight-charts": "^5.2.1",
     "lucide-react": "^1.23.0",
     "motion": "^12.42.2",
     "next": "16.2.10",

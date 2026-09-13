@@ -305,6 +305,35 @@ export function distributionByRealizedR(rows: CanonicalAnalyticsTradeRow[]): RBu
  * FULLY_CLOSED rows with a determined `finalizedR`, exactly like every other
  * canonical aggregator in this module.
  */
+export interface PsychologyAdherenceSummary {
+  averagePsychologyPercent: number | null;
+  /** Mean of executed rows' `executionPercent` — the same SOT rule-adherence
+   *  definition Edge Review used before Stage 12.5 (previously computed from
+   *  the legacy contribution-% engine's `t.executionPercent`). */
+  averageAdherencePercent: number | null;
+  sampleSize: number;
+}
+
+function mean(xs: number[]): number | null {
+  return xs.length === 0 ? null : xs.reduce((s, v) => s + v, 0) / xs.length;
+}
+
+/** Edge Review's psychology/rule-adherence averages (Stage 12.5 §6) — kept
+ *  separate from `CanonicalAnalyticsSummary.overview` (analytics-canonical.
+ *  service.ts) rather than added to that shared shape, since Analytics
+ *  itself doesn't need these two; Replay's baseline builder is the only
+ *  caller. Same executed-row population as every other overview stat. */
+export function summarizePsychologyAdherence(rows: CanonicalAnalyticsTradeRow[]): PsychologyAdherenceSummary {
+  const executed = rows.filter((r) => r.isExecuted);
+  const psych = executed.map((r) => r.psychologyPercent).filter((v): v is number => v != null);
+  const adherence = executed.map((r) => r.executionPercent).filter((v): v is number => v != null);
+  return {
+    averagePsychologyPercent: mean(psych),
+    averageAdherencePercent: mean(adherence),
+    sampleSize: executed.length,
+  };
+}
+
 export function toStrategyPerformanceSummary(rows: CanonicalAnalyticsTradeRow[]): StrategyPerformanceSummary {
   const executed = rows.filter((r) => r.isExecuted);
   const metricInputs = toMetricInputs(executed);

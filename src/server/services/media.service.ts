@@ -109,6 +109,14 @@ export async function assertOwnsMediaTarget(
           select: { id: true },
         }),
       );
+    case "REPLAY_TRADE":
+      // Replay foundation (Stage 12) — readiness only, no upload UI yet.
+      return Boolean(
+        await prisma.replayTrade.findFirst({
+          where: { id: ownerId, userId },
+          select: { id: true },
+        }),
+      );
     case "PROP_FIRM_MILESTONE":
       // ownerId is either an AccountMilestone or a Payout id — both are
       // evidence targets scoped through their PropFirmAccount's userId.

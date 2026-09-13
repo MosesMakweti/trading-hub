@@ -24,22 +24,30 @@ model User {
   accounts Account[]
   sessions Session[]
 
-  tradingAccounts          TradingAccount[]
-  dailyNotes               DailyNote[]
-  tradingDays              TradingDay[]
-  dailyAssetAnalyses       DailyAssetAnalysis[]
-  directionalEvidenceItems DirectionalEvidenceItem[]
-  weeklyReviews            WeeklyReview[]
-  trades                   Trade[]
-  opportunities            TradeOpportunity[]
-  strategies               Strategy[]
-  routineSections          RoutineSection[]
-  routineItems             RoutineItem[]
-  strategySessions         StrategySession[]
-  strategyChecklistItems   StrategyChecklistItem[]
-  strategySetupTypes       StrategySetupType[]
-  mediaAssets              MediaAsset[]
-  behaviourLabels          BehaviourLabel[]
+  tradingAccounts                 TradingAccount[]
+  dailyNotes                      DailyNote[]
+  tradingDays                     TradingDay[]
+  dailyAssetAnalyses              DailyAssetAnalysis[]
+  directionalEvidenceItems        DirectionalEvidenceItem[]
+  replayReviewSessions            ReplayReviewSession[]
+  replayTrades                    ReplayTrade[]
+  replayTradePlannedTargets       ReplayTradePlannedTarget[]
+  replayTradePartialExits         ReplayTradePartialExit[]
+  replayTradeExecutionEvents      ReplayTradeExecutionEvent[]
+  replayComparisonLinks           ReplayComparisonLink[]
+  edgeReviewCommitments           EdgeReviewCommitment[]
+  edgeReviewCommitmentDailyStates EdgeReviewCommitmentDailyState[]
+  weeklyReviews                   WeeklyReview[]
+  trades                          Trade[]
+  opportunities                   TradeOpportunity[]
+  strategies                      Strategy[]
+  routineSections                 RoutineSection[]
+  routineItems                    RoutineItem[]
+  strategySessions                StrategySession[]
+  strategyChecklistItems          StrategyChecklistItem[]
+  strategySetupTypes              StrategySetupType[]
+  mediaAssets                     MediaAsset[]
+  behaviourLabels                 BehaviourLabel[]
 
   userPropFirms            UserPropFirm[]
   propFirmAccounts         PropFirmAccount[]
@@ -82,12 +90,21 @@ enum TradingDayStatus {
 // user per ISO-ish week (keyed by the week's Monday, stored date-only). The
 // week's metrics are derived read-only from analytics; only the reflection
 // (Tiptap rich text) is persisted here. Additive; no soft delete.
+// Edge Review's final reflection (Stage 12.5 "Improvements" stage) — kept as
+// the ONE durable home for "what went well / what to improve / focus next",
+// never duplicated into ReplayReviewSession.notes (which stays *working*
+// notes during Replay; see that model's doc comment). `weekStart` also
+// serves as the generic period-start for a MONTHLY review (added Stage
+// 12.5, default WEEKLY for every pre-existing row) — `reviewType` was added
+// to the unique key because a month's day-1 can itself land on a Monday,
+// which would otherwise collide with that week's own reflection.
 model WeeklyReview {
   id     String @id @default(cuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  weekStart DateTime @db.Date
+  weekStart  DateTime         @db.Date
+  reviewType ReplayReviewType @default(WEEKLY)
 
   wentWell      Json?
   toImprove     Json?
@@ -96,7 +113,7 @@ model WeeklyReview {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([userId, weekStart])
+  @@unique([userId, weekStart, reviewType])
 }
 
 model TradingDay {
@@ -501,6 +518,9 @@ enum MediaOwnerType {
   // Today ↔ Journal refinement (Stage 2) — chart-analysis screenshots attached
   // to a DailyAssetAnalysis. Always carries MediaAttachment.timeframe.
   DAILY_ASSET_ANALYSIS
+  // Replay foundation (Stage 12) — screenshots for a ReplayTrade. Readiness
+  // only; no upload UI wired yet (see ReplayTrade's own doc comment).
+  REPLAY_TRADE
 }
 
 // ── Trade Idea Validation Shield (Stage 4) ──────────────────────────────────
@@ -1225,19 +1245,21 @@ model Strategy {
   deletedAt DateTime? // soft delete (registered in server/db.ts); Archive is a status, Delete sets this
 
   // ── Workspace sections ─────────────────────────────────────────────────────
-  arsenalConcepts ArsenalConcept[] // Section 1 — Arsenal (expandable concept cards)
-  frameworkSteps  StrategyFrameworkStep[] // Section 2 — Framework (ordered decision steps)
-  timeframes      StrategyTimeframe[] // Section 3 — Timeframe workspace (each has checkpoints)
-  entryModels     StrategyEntryModel[] // Section 4 — Entry Models
-  tradeManagement StrategyTradeManagement? // Section 5 — Trade Management (1:1 + partial TPs, custom rules)
-  sessions        StrategySession[] // Section — Trading Sessions (SOT refactor)
-  checklistItems  StrategyChecklistItem[] // Sections — Confluences + Execution Confirmations (SOT)
-  setupTypes      StrategySetupType[] // Section — Setup Types (Today ↔ Journal refinement, Stage 3)
+  arsenalConcepts      ArsenalConcept[] // Section 1 — Arsenal (expandable concept cards)
+  frameworkSteps       StrategyFrameworkStep[] // Section 2 — Framework (ordered decision steps)
+  timeframes           StrategyTimeframe[] // Section 3 — Timeframe workspace (each has checkpoints)
+  entryModels          StrategyEntryModel[] // Section 4 — Entry Models
+  tradeManagement      StrategyTradeManagement? // Section 5 — Trade Management (1:1 + partial TPs, custom rules)
+  sessions             StrategySession[] // Section — Trading Sessions (SOT refactor)
+  checklistItems       StrategyChecklistItem[] // Sections — Confluences + Execution Confirmations (SOT)
+  setupTypes           StrategySetupType[] // Section — Setup Types (Today ↔ Journal refinement, Stage 3)
   // Journal link: a trade references a strategy (not a copy). onDelete: SetNull
   // on the Trade side keeps completed trades (with their snapshots) intact.
-  trades          Trade[]
-  opportunities   TradeOpportunity[] // valid setups spotted under this strategy (executed or missed)
-  versions        StrategyVersion[] // published, immutable snapshots of the tree
+  trades               Trade[]
+  opportunities        TradeOpportunity[] // valid setups spotted under this strategy (executed or missed)
+  versions             StrategyVersion[] // published, immutable snapshots of the tree
+  replayReviewSessions ReplayReviewSession[] // optional scope narrowing (Replay foundation, Stage 12)
+  replayTrades         ReplayTrade[]
 
   @@index([userId, deletedAt, sortOrder])
 }
@@ -2764,4 +2786,526 @@ model PropFirmImportMappingTemplate {
   batches PropFirmImportBatch[]
 
   @@unique([userId, name])
+}
+
+// ── Replay foundation (Stage 12) ────────────────────────────────────────────
+// Replay is post-period REVIEW, not a generic backtester: "what actually
+// happened vs what should have happened if I'd followed my process." It is a
+// separate review artifact — it references and compares ACTUAL data
+// (TradingDay/Trade/Journal/canonical Analytics) but never mutates it. See
+// ReplayReviewSession/ReplayTrade doc comments below for the actual/replay
+// boundary and the baseline-snapshot decision.
+
+enum ReplayReviewType {
+  WEEKLY
+  MONTHLY
+}
+
+enum ReplayReviewStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+}
+
+// TAKEN = the trader replayed placing the trade. SKIPPED = the trader
+// evaluated the opportunity during replay and chose not to take it (an
+// intentional decision). MISSED = a valid opportunity existed but wasn't
+// acted on — deliberately NOT auto-detected in this stage (see
+// domain/replay's doc comments): assigning MISSED requires tying it to real
+// strategy-valid opportunity evidence, which Stage 12 doesn't build yet. The
+// enum value exists so future stages don't need a schema change.
+enum ReplayDecisionType {
+  TAKEN
+  SKIPPED
+  MISSED
+}
+
+// One review of one historical period. `startDate`/`endDate` are the exact,
+// explicit interval being reviewed (never a lazy "last week" pointer — see
+// domain/replay/review-period.ts for the WEEKLY=Mon-Sun/MONTHLY=calendar-month
+// validation, using the SAME date-key/UTC-date conventions as TradingDay).
+//
+// Baseline semantics (Stage 12 §7): `actualBaselineSnapshot` is FROZEN once,
+// when the review actually moves to IN_PROGRESS (`startedAt`) — not
+// recomputed live on every read, and not computed at DRAFT creation (the
+// trader may still be adjusting scope then). This matters because a carried
+// trade (PARTIALLY_CLOSED/STILL_HOLDING at week's end) can close weeks later;
+// "what was known when I actually reviewed this week" and "the eventual
+// final outcome" are legitimately different facts, and only the frozen
+// snapshot preserves the former. The live canonical dataset (via
+// `getCanonicalAnalyticsDataset`) can still be queried for drill-down/
+// resync by date range at any time — original Trades are referenced by id
+// inside the snapshot, never copied into a second mutable ledger.
+model ReplayReviewSession {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  reviewType ReplayReviewType
+  startDate  DateTime           @db.Date
+  endDate    DateTime           @db.Date
+  status     ReplayReviewStatus @default(DRAFT)
+
+  // Scope — narrows the historical trading universe this session reviews.
+  // Empty/null = All Trading. SetNull (not Cascade): deleting the strategy
+  // later must never delete a past review of it.
+  strategyId   String?
+  strategy     Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  assetSymbols String[]  @default([])
+
+  // Review Notes (Stage 12 §17) — autosaved observations, not yet the
+  // improvement/change-log (that follows once Replay comparison exists).
+  notes Json?
+
+  // Frozen ACTUAL baseline (ReplayActualBaseline shape — see
+  // server/services/replay-review.service.ts) — null until startedAt.
+  actualBaselineSnapshot Json?
+
+  // Replay Clock resume point (Stage 13 §10) — a CHECKPOINT, not a live
+  // clock: written on pause/asset-switch/timeframe-switch/navigating away,
+  // never on every animation frame or candle tick. `replayCurrentTime` is
+  // the historical market instant (UTC), not this row's own createdAt/
+  // updatedAt. Transient playback state (PLAYING/PAUSED, speed) is
+  // deliberately NOT persisted here — it always resets to
+  // PAUSED/1x on reload; only "where was I" survives.
+  replayCurrentTime      DateTime?
+  replayCurrentAsset     String?
+  replayCurrentTimeframe String?
+
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  // Stage 16 §27 — DELIBERATELY separate from `completedAt`/`status`
+  // COMPLETED above. `status: COMPLETED` means Replay itself is finished
+  // (locks ReplayTrade mutation — see replay-trade.service.ts's
+  // `assertSessionMutable`); it says nothing about whether the trader has
+  // actually reviewed Comparison and closed out Improvements. This field is
+  // the second, independent finalization: set only via `finalizeEdgeReview`
+  // (requires `status: COMPLETED` first), and is what "Finish Review" in
+  // Improvements sets. Never inferred from `completedAt` — a session can
+  // stay COMPLETED (Replay locked) for a long time before the trader gets
+  // around to finishing the review, and Improvements Carry-Forward
+  // (EdgeReviewCommitment) is what actually needs to know both booleans:
+  // "is the underlying comparison stable?" (`status`) and "did the trader
+  // actually sign off on this period's findings?" (`reviewFinalizedAt`).
+  reviewFinalizedAt DateTime?
+
+  // Stage 17B §13 — market-data provenance, FROZEN ONCE per asset the first
+  // time this session ever fetches its candles. Shape:
+  // `Record<canonicalSymbol, CandleProvenance & { frozenAt: string }>` (see
+  // domain/market-data/provider-types.ts's `CandleProvenance`). Null on
+  // every session created before this stage, and NEVER backfilled — a
+  // session with no entry for an asset it already has candles for is
+  // treated as "Legacy / source not recorded" (see
+  // replay-review.service.ts), exactly the same discipline as
+  // `actualBaselineSnapshot.schemaVersion`.
+  marketDataProvenance Json?
+
+  replayTrades    ReplayTrade[]
+  comparisonLinks ReplayComparisonLink[]
+  commitments     EdgeReviewCommitment[]
+
+  @@index([userId, status])
+  @@index([userId, startDate])
+}
+
+// A SIMULATED decision point inside a ReplayReviewSession — NOT a real Trade,
+// and must never be mistaken for one: it has no allocation, no Performance
+// Account entry, no Journal presence, no effect on canonical Analytics. It
+// exists solely to let the trader reconstruct "what I should have decided"
+// against the frozen historical market/strategy context.
+//
+// Follows the same live-reference + frozen-snapshot pattern as Trade itself
+// (strategyId + strategyNameSnapshot/strategyVersionSnapshot): the strategy
+// used during replay must reflect the version that existed AT THE HISTORICAL
+// MOMENT being reviewed (StrategyVersion.snapshot), never today's Strategy
+// Lab config. `replayValidationSnapshot` reuses the Stage 3/4 scoring SHAPE
+// (SetupValidationSnapshotCondition) but is a wholly separate record from any
+// real Trade's own `setupValidationSnapshot` — this is what the trader WOULD
+// have checked, not a rewrite of what they actually did.
+//
+// `plannedTargets` stays JSON (a small, rarely-queried list) — partial exits
+// get their own child table below since they're the concrete extension point
+// future stages need to build on (mirroring TradeActualPartialExit).
+// Stage 14 — simulated execution lifecycle. Deliberately its OWN vocabulary
+// (not Trade's TradeReviewLifecycleStatus): this is an order/position state
+// machine, not a day-based review lifecycle.
+enum ReplayTradeLifecycle {
+  PLANNED // a SKIPPED decision, or a TAKEN one that hasn't placed an order yet
+  PENDING // order placed, waiting for price to reach the entry
+  OPEN
+  PARTIALLY_CLOSED
+  CLOSED
+  CANCELLED
+}
+
+enum ReplayOrderType {
+  MARKET
+  PENDING
+}
+
+enum ReplayCloseReason {
+  STOP_LOSS
+  TARGET
+  MANUAL
+}
+
+// Execution-event history (Stage 14 §20) — the auditable story of what
+// happened to a ReplayTrade over historical time ("moved SL at 10:35, then
+// partially exited at 11:10"), not just the final numbers. Also what makes
+// idempotent candle processing verifiable after the fact.
+enum ReplayExecutionEventType {
+  ORDER_PLACED
+  ORDER_FILLED
+  SL_MOVED
+  PARTIAL_CLOSE
+  FULL_CLOSE
+  ORDER_CANCELLED
+  AMBIGUOUS_CANDLE
+  AMBIGUITY_RESOLVED
+}
+
+enum ReplayPartialExitSource {
+  TARGET_HIT
+  MANUAL
+}
+
+model ReplayTrade {
+  id        String              @id @default(cuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId String
+  session   ReplayReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // The replay "market clock" moment this decision belongs to — distinct
+  // from this row's own createdAt (when the trader actually did the replay).
+  // Trade-management actions (move SL, manual close, cancel) are likewise
+  // always stamped with the current replay clock — never a trader-typed
+  // timestamp (Stage 14 §24), enforced in the service layer.
+  historicalTimestamp DateTime
+
+  assetSymbol String
+  direction   Direction?
+
+  strategyId              String?
+  strategy                Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  strategyNameSnapshot    String?
+  strategyVersionSnapshot Int?
+  setupTypeNameSnapshot   String?
+
+  decisionType ReplayDecisionType
+
+  // ── Setup Validation (Stage 14 §6-7) — isolated from Trade.setupValidationSnapshot ──
+  replayValidationSnapshot Json? // SetupValidationSnapshot shape (domain/trades/setup-validation.ts), reused verbatim
+  validationState          TradeValidationState?
+  overrideReason           TradeValidationOverrideReason?
+  overrideNote             String?
+
+  // ── Order / position (Stage 14 §9-17) ───────────────────────────────────
+  lifecycle       ReplayTradeLifecycle @default(PLANNED)
+  orderType       ReplayOrderType      @default(MARKET)
+  plannedEntry    Decimal?             @db.Decimal(18, 8)
+  // The FROZEN 1R basis — never redefined once the order is placed, even if
+  // currentStopLoss moves (Stage 14 §21).
+  plannedStopLoss Decimal?             @db.Decimal(18, 8)
+  currentStopLoss Decimal?             @db.Decimal(18, 8)
+
+  simulatedEntry Decimal?           @db.Decimal(18, 8) // the actual fill price
+  filledAt       DateTime? // when the order actually filled (may be later than historicalTimestamp for a PENDING order)
+  simulatedExit  Decimal?           @db.Decimal(18, 8) // the FINAL exit price (not an interim partial)
+  closedAt       DateTime?
+  closeReason    ReplayCloseReason?
+
+  remainingPercent Decimal @default(100) @db.Decimal(5, 2)
+  realizedReplayR  Decimal @default(0) @db.Decimal(8, 4)
+
+  // Execution watermark (Stage 14 §26) — candles at or before this instant
+  // have already been processed; re-processing them is always a no-op.
+  lastProcessedTime DateTime?
+  // Set only while a single base candle touched both the stop and an
+  // unfilled target and the base data can't say which happened first
+  // (Stage 14 §12) — processing halts here until manually resolved.
+  pendingAmbiguity  Json?
+
+  notes Json?
+
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plannedTargets  ReplayTradePlannedTarget[]
+  partialExits    ReplayTradePartialExit[]
+  executionEvents ReplayTradeExecutionEvent[]
+  comparisonLinks ReplayComparisonLink[]
+
+  @@index([sessionId, sortOrder])
+  @@index([userId])
+}
+
+// Normalized out of Stage 12's plannedTargets JSON (Stage 14 §8) — durable
+// execution needs a stable per-target `filledAt` watermark (idempotency) and
+// a real id partial exits can reference, neither of which a JSON array gives
+// safely.
+model ReplayTradePlannedTarget {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replayTradeId String
+  replayTrade   ReplayTrade @relation(fields: [replayTradeId], references: [id], onDelete: Cascade)
+
+  targetOrder    Int
+  price          Decimal   @db.Decimal(18, 8)
+  percentToClose Decimal   @db.Decimal(5, 2)
+  filledAt       DateTime?
+
+  createdAt DateTime @default(now())
+
+  partialExits ReplayTradePartialExit[]
+
+  @@index([replayTradeId, targetOrder])
+}
+
+// Mirrors TradeActualPartialExit's shape for ReplayTrade — interim scale-outs
+// only (a target hit, or a manual partial close) BEFORE the trade fully
+// closes; the FINAL exit lives on ReplayTrade.simulatedExit/closedAt/
+// closeReason, exactly mirroring how real Trade separates
+// actualExit from actualPartialExits.
+model ReplayTradePartialExit {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replayTradeId String
+  replayTrade   ReplayTrade @relation(fields: [replayTradeId], references: [id], onDelete: Cascade)
+
+  // Optional — null for a manual partial close with no associated target.
+  plannedTargetId String?
+  plannedTarget   ReplayTradePlannedTarget? @relation(fields: [plannedTargetId], references: [id], onDelete: SetNull)
+  source          ReplayPartialExitSource   @default(MANUAL)
+
+  exitPrice     Decimal   @db.Decimal(18, 8)
+  percentClosed Decimal?  @db.Decimal(5, 2)
+  /**
+   * This portion's R contribution — (exitR × percentClosed/100), using the
+   * trade's ORIGINAL entry/stop risk basis, never a redefined one.
+   */
+  realizedR     Decimal?  @db.Decimal(8, 4)
+  /**
+   * The replay clock's historical time this execution happened at —
+   * distinct from createdAt (real-world row creation time).
+   */
+  executedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([replayTradeId])
+}
+
+// Auditable execution history (Stage 14 §20) — "moved SL at 10:35, then
+// partially exited at 11:10." Minimal by design: `data` carries whatever the
+// event type needs (price, percent, targetId, reason, …) rather than a
+// dozen nullable columns for every event shape.
+model ReplayTradeExecutionEvent {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replayTradeId String
+  replayTrade   ReplayTrade @relation(fields: [replayTradeId], references: [id], onDelete: Cascade)
+
+  eventType           ReplayExecutionEventType
+  historicalTimestamp DateTime
+  data                Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([replayTradeId, historicalTimestamp])
+}
+
+// Stage 15.1 §16 — manual correction architecture for Actual-vs-Replay
+// matching. The deterministic matcher (domain/replay-comparison/
+// decision-matching.ts) computes AUTO pairings on every read from frozen
+// evidence; it never persists them. A row here exists ONLY when a trader
+// explicitly confirms a REVIEW_NEEDED pairing, corrects a wrong one, or
+// marks two candidates as definitely NOT the same decision (`EXCLUDED`) —
+// that correction must survive reloads and take priority over the
+// algorithm's own scoring for that specific pair.
+//
+// Deliberately NOT a foreign key onto Trade (`actualTradeId` is a plain id
+// reference, no relation) — the whole Replay module never gains a hard
+// dependency on the real Trade table (see ReplayTrade's own doc comment),
+// so a real Trade can be deleted without cascading into or orphaning a
+// review's historical link record. `replayTradeId` DOES carry a real FK:
+// ReplayTrade is an internal Replay-domain record, and cascading a link away
+// when its ReplayTrade is deleted is exactly the right lifecycle.
+//
+// SNAPSHOT VS IDENTITY (§17): this table only records WHICH ids are linked
+// and how — comparison facts still come from the frozen
+// ActualTradeComparisonSnapshot / ReplayTradeDTO, never by dereferencing
+// these ids for live Trade values.
+//
+// Stage 15.2 §5-6/§16 extension: `OPPORTUNITY` rows record a trader's
+// confirm/reject decision on a "Potential Missed Opportunity" (a Replay
+// TAKEN decision with no matching Actual trade) — there is no Actual trade
+// to pair with, so `actualTradeId` is nullable for exactly this row shape.
+// `opportunityClassification` holds "CONFIRMED_MISSED" | "NOT_MISSED" for
+// these rows; it stays null for MATCHED/EXCLUDED rows. This is still never
+// a mutation of ReplayTrade/Trade — the confirmation lives here only.
+enum ReplayComparisonLinkType {
+  MATCHED
+  EXCLUDED
+  OPPORTUNITY
+}
+
+enum ReplayComparisonLinkSource {
+  AUTO
+  MANUAL
+}
+
+model ReplayComparisonLink {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  replayReviewSessionId String
+  replayReviewSession   ReplayReviewSession @relation(fields: [replayReviewSessionId], references: [id], onDelete: Cascade)
+
+  // Identity reference only — no relation to Trade (see doc comment above).
+  // Null only for an `OPPORTUNITY` row (§5-6) — no Actual trade exists to
+  // reference for a potential missed opportunity.
+  actualTradeId String?
+  replayTradeId String
+  replayTrade   ReplayTrade @relation(fields: [replayTradeId], references: [id], onDelete: Cascade)
+
+  linkType ReplayComparisonLinkType   @default(MATCHED)
+  source   ReplayComparisonLinkSource @default(MANUAL)
+
+  // "CONFIRMED_MISSED" | "NOT_MISSED" — written only on `OPPORTUNITY` rows.
+  opportunityClassification String?
+
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // NOTE: Postgres treats every NULL as distinct, so this unique index does
+  // NOT by itself prevent duplicate OPPORTUNITY rows for the same
+  // replayTradeId (actualTradeId null in both) — the service layer
+  // find-or-updates by (sessionId, replayTradeId, linkType: OPPORTUNITY)
+  // instead, the same accepted pattern documented on
+  // findReplayReviewSessionForPeriod.
+  @@unique([replayReviewSessionId, actualTradeId, replayTradeId])
+  @@index([replayReviewSessionId])
+  @@index([actualTradeId])
+  @@index([replayTradeId])
+}
+
+// Stage 16 §6-14 — a durable, trader-approved commitment carried forward
+// from a finalized Edge Review into Today (§15). Deliberately its own
+// table, not a field inside `WeeklyReview`'s reflection JSON (§1/§6) — a
+// commitment needs to be independently queryable ("show me active
+// commitments right now") and needs its own lifecycle, which a reflection
+// blob can't give it.
+//
+// `replayReviewSessionId` is kept nullable + SetNull (informational
+// provenance, not a hard dependency — mirrors ReplayComparisonLink's own
+// stance on Trade) and `reviewType`/`periodStart` are denormalized onto the
+// commitment itself so "the latest finalized WEEKLY review's commitments"
+// can be queried without joining through a session that might not exist
+// forever.
+//
+// SUGGESTED commitments (source: SUGGESTED) freeze their originating
+// evidence into `evidenceSnapshot`/`sourceFindingType` at Accept time —
+// Stage 16 §28: "accepted commitments must be durable" even though the
+// suggestion itself is only ever deterministically re-derived, never
+// persisted before acceptance.
+enum EdgeReviewCommitmentCategory {
+  EXECUTION
+  BEHAVIOR
+  PROCESS
+  OPPORTUNITY
+  STRATEGY
+  RISK
+}
+
+enum EdgeReviewCommitmentPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum EdgeReviewCommitmentStatus {
+  ACTIVE
+  COMPLETED
+  RETIRED
+}
+
+enum EdgeReviewCommitmentSource {
+  MANUAL
+  SUGGESTED
+}
+
+model EdgeReviewCommitment {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  replayReviewSessionId String?
+  replayReviewSession   ReplayReviewSession? @relation(fields: [replayReviewSessionId], references: [id], onDelete: SetNull)
+  // Denormalized from the session at creation — survives the session
+  // reference being cleared, and is what Today's carry-forward query
+  // actually filters/orders on (§15-16).
+  reviewType            ReplayReviewType
+  periodStart           DateTime             @db.Date
+
+  category    EdgeReviewCommitmentCategory
+  title       String
+  description String?
+  priority    EdgeReviewCommitmentPriority @default(MEDIUM)
+  status      EdgeReviewCommitmentStatus   @default(ACTIVE)
+  source      EdgeReviewCommitmentSource   @default(MANUAL)
+
+  // Set only for a SUGGESTED-origin commitment — the deterministic rule key
+  // (e.g. "STOP_WIDENING_PATTERN") and a frozen copy of the evidence lines
+  // shown at Accept time (§10, §28). Never re-derived later.
+  sourceFindingType String?
+  evidenceSnapshot  Json?
+
+  completedAt DateTime?
+  retiredAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  dailyStates EdgeReviewCommitmentDailyState[]
+
+  @@index([userId, status])
+  @@index([userId, reviewType, periodStart])
+}
+
+// Stage 16 §18 — lightweight, OPTIONAL daily acknowledgement of an active
+// commitment, kept entirely separate from the commitment record itself
+// (§17: Today must never rewrite historical review data). One row per
+// (commitment, TradingDay) — never overwrites the commitment's own
+// status/lifecycle.
+enum EdgeReviewCommitmentDailyStatus {
+  ACKNOWLEDGED
+  FOLLOWED
+  BREACHED
+}
+
+model EdgeReviewCommitmentDailyState {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  commitmentId String
+  commitment   EdgeReviewCommitment @relation(fields: [commitmentId], references: [id], onDelete: Cascade)
+
+  dateKey DateTime                        @db.Date
+  status  EdgeReviewCommitmentDailyStatus
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([commitmentId, dateKey])
+  @@index([userId, dateKey])
 }

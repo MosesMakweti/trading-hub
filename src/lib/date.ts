@@ -54,6 +54,19 @@ export function weekStartKey(key: string): string {
   return utcDateToKey(d);
 }
 
+/** The first day (UTC calendar month) of the month containing `key`. */
+export function monthStartKey(key: string): string {
+  const d = dateKeyToUtcDate(key);
+  return utcDateToKey(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)));
+}
+
+/** The last day (UTC calendar month) of the month containing `key`. */
+export function monthEndKey(key: string): string {
+  const d = dateKeyToUtcDate(key);
+  // Day 0 of "next month" is the last day of this month.
+  return utcDateToKey(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)));
+}
+
 /** Compact date label (e.g. "Aug 4, 2026") from a date key, in UTC. */
 export function formatDateKeyShort(key: string): string {
   return new Intl.DateTimeFormat("en-US", {

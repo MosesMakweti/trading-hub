@@ -17,11 +17,13 @@ import {
 import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
 import { listExecutionsForTrades } from "@/server/services/trade-executions.service";
 import { toAccountAllocationSelectorDTO, toExecutionDTO } from "@/server/services/prop-firms.mapper";
-import { localDateToKey } from "@/lib/date";
+import { getActiveCommitmentsForToday, getCommitmentDailyStates } from "@/server/services/edge-review-commitment.service";
+import { dateKeyToUtcDate, localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 import { FadeIn } from "@/components/shared/motion";
 import { TodayWorkspace } from "@/components/today/today-workspace";
 import type { DailyAnalyticsDTO, TodaysPlanDTO } from "@/types/today";
+import type { EdgeReviewCommitmentDailyStatus } from "@/types/edge-improvements";
 
 export default async function TodayPage() {
   const user = await requireUser();
@@ -34,7 +36,7 @@ export default async function TodayPage() {
   // Create the day once, THEN load everything else — passing the day into the
   // routine service avoids a second concurrent upsert racing the (userId, date) unique.
   const day = await getOrCreateTradingDay(user.id, todayKey);
-  const [trades, routine, dailyPerf, propFirmAccountsRaw, tradeFormOptions, opportunities, assetAnalyses] =
+  const [trades, routine, dailyPerf, propFirmAccountsRaw, tradeFormOptions, opportunities, assetAnalyses, reviewCommitments] =
     await Promise.all([
       listTradesForDay(user.id, todayKey),
       getOrCreateDayRoutine(user.id, day),
@@ -43,7 +45,13 @@ export default async function TodayPage() {
       getTradeFormOptions(user.id),
       listOpportunityDtosForDay(user.id, todayKey),
       listDailyAssetAnalyses(user.id, todayKey),
+      getActiveCommitmentsForToday(user.id),
     ]);
+
+  // Stage 16 §18 — daily acknowledgement, keyed by commitment id, for today only.
+  const allCommitmentIds = [...reviewCommitments.weekly, ...reviewCommitments.monthly].map((c) => c.id);
+  const dailyStatesMap = await getCommitmentDailyStates(user.id, allCommitmentIds, dateKeyToUtcDate(todayKey));
+  const dailyStates: Record<string, EdgeReviewCommitmentDailyStatus> = Object.fromEntries(dailyStatesMap);
   const executionsRaw = await listExecutionsForTrades(user.id, trades.map((t) => t.id));
   const executionsByTradeId: Record<string, ReturnType<typeof toExecutionDTO>[]> = {};
   for (const row of executionsRaw) {
@@ -81,6 +89,8 @@ export default async function TodayPage() {
         tradeFormStrategies={tradeFormOptions.strategies.map((s) => ({ id: s.id, name: s.name, version: s.version }))}
         opportunities={opportunities}
         dailyAssetAnalyses={assetAnalyses.map(toDailyAssetAnalysisDTO)}
+        reviewCommitments={reviewCommitments}
+        commitmentDailyStates={dailyStates}
         linkableTrades={trades
           .filter((t) => t.opportunityId == null)
           .map((t) => ({
