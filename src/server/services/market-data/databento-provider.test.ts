@@ -441,4 +441,40 @@ describe("DatabentoHistoricalMarketDataProvider", () => {
       expect(result.ok).toBe(true);
     }, 10_000);
   });
+
+  describe("timezone independence (Stage 21.2 §5) — Replay must behave identically regardless of server/browser TZ", () => {
+    it("parses the same ts_event ISO string to the identical UTC ms whether the process TZ is UTC, US Eastern, or a UTC+2 zone", async () => {
+      const target = MONDAY + 60_000; // within the requested [MONDAY, MONDAY+60_000] window
+      const zones = ["UTC", "America/New_York", "Africa/Lusaka", "Pacific/Auckland"];
+      const results: number[] = [];
+      for (const tz of zones) {
+        vi.stubEnv("DATABENTO_API_KEY", "key123");
+        vi.stubEnv("TZ", tz);
+        const provider = new DatabentoHistoricalMarketDataProvider();
+        stubResolveThenTimeseries("ESU6", [ohlcvRecord(new Date(target).toISOString(), 5000, 5001, 4999, 5000.5, 10)]);
+        const result = await provider.fetchCandles({ canonicalSymbol: "ES", from: MONDAY, to: MONDAY + 60_000 });
+        if (!result.ok) throw new Error(`fetchCandles failed under TZ=${tz}: ${result.error.message}`);
+        results.push(result.candles[0].timestamp);
+      }
+      expect(new Set(results).size).toBe(1);
+      expect(results[0]).toBe(target);
+    });
+
+    it("parses a raw nanosecond ts_event identically regardless of process TZ (numeric conversion is inherently TZ-immune, unlike string parsing)", async () => {
+      const target = MONDAY + 60_000; // within the requested [MONDAY, MONDAY+60_000] window
+      const ns = (BigInt(target) * BigInt(1_000_000)).toString();
+      const results: number[] = [];
+      for (const tz of ["UTC", "America/New_York"]) {
+        vi.stubEnv("DATABENTO_API_KEY", "key123");
+        vi.stubEnv("TZ", tz);
+        const provider = new DatabentoHistoricalMarketDataProvider();
+        stubResolveThenTimeseries("ESU6", [{ ts_event: ns, open: "5000", high: "5001", low: "4999", close: "5000.5", volume: "10" }]);
+        const result = await provider.fetchCandles({ canonicalSymbol: "ES", from: MONDAY, to: MONDAY + 60_000 });
+        if (!result.ok) throw new Error(`fetchCandles failed under TZ=${tz}: ${result.error.message}`);
+        results.push(result.candles[0].timestamp);
+      }
+      expect(new Set(results).size).toBe(1);
+      expect(results[0]).toBe(target);
+    });
+  });
 });

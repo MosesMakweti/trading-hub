@@ -35,3 +35,30 @@ export function isValidCandle(c: Candle): boolean {
 export function compareCandles(a: Candle, b: Candle): number {
   return a.timestamp - b.timestamp;
 }
+
+/**
+ * Stage 21.2 §7 — the ONE merge rule for combining a client-side candle
+ * cache (`baseCandlesByAsset` in replay-market-panel.tsx) with a newly
+ * fetched chunk, extracted from what was previously inline (and untested)
+ * component logic so chunk-boundary correctness can be proven
+ * independently of React. Always re-sorts (never trusts arrival order —
+ * background/foreground fetches can resolve out of order) and dedupes by
+ * exact timestamp.
+ *
+ * On a duplicate timestamp, `existing` wins over `incoming` — `existing`
+ * is concatenated FIRST and `Array.prototype.sort` is stable (guaranteed
+ * since ES2019), so a candle already in the cache is never replaced by a
+ * re-fetch of the same minute. This is a deliberate choice (minimize
+ * unnecessary churn to an already-rendered candle), not an accident of
+ * sort order — see `chart-update-plan.ts` for why identity-stability here
+ * matters to the chart's incremental-update decision.
+ */
+export function mergeCandles(existing: Candle[], incoming: Candle[]): Candle[] {
+  const merged = [...existing, ...incoming].sort(compareCandles);
+  const deduped: Candle[] = [];
+  for (const c of merged) {
+    if (deduped.length > 0 && deduped[deduped.length - 1].timestamp === c.timestamp) continue;
+    deduped.push(c);
+  }
+  return deduped;
+}

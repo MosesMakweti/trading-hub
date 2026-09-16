@@ -3,13 +3,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  ClipboardList,
+  FlaskConical,
   Keyboard,
   Loader2,
+  LocateFixed,
   Minus,
+  MousePointer2,
+  NotebookText,
   Pause,
   Play,
   RectangleHorizontal,
@@ -24,8 +30,10 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/shared/empty-state";
+import { RichTextEditor } from "@/components/plan/rich-text-editor";
 import { TAG_STYLES, colorForName } from "@/components/ui/tag";
 import { dateKeyToUtcDate } from "@/lib/date";
 import {
@@ -46,17 +54,19 @@ import {
   type ReplayPriceLine,
 } from "@/components/replay/replay-candlestick-chart";
 import { ReplayDecisionPanel, type ChartPriceSelection } from "@/components/replay/replay-decision-panel";
+import { ReplayStrategyPanel } from "@/components/replay/replay-strategy-panel";
 import { ReplayDailyMarketPlanPanel } from "@/components/replay/replay-daily-market-plan-panel";
 import { utcDateToKey } from "@/lib/date";
 import { aggregateCandles } from "@/domain/market-data/aggregation";
 import { buildHigherTimeframeView, visibleCandles } from "@/domain/market-data/visible-candles";
+import { resolveChartPriceFormat } from "@/domain/market-data/chart-price-precision";
 import {
   computeNextBackgroundChunk,
   computeNextFetchWindow,
   mergeLoadedRange,
   type LoadedRange,
 } from "@/domain/market-data/replay-prefetch-window";
-import { compareCandles } from "@/domain/market-data/candle";
+import { mergeCandles } from "@/domain/market-data/candle";
 import {
   PLAYBACK_SPEEDS,
   advanceToNextCandle,
@@ -73,7 +83,7 @@ import {
 } from "@/domain/market-data/replay-clock";
 import { TIMEFRAMES, timeframeToMs, type Timeframe } from "@/domain/market-data/timeframe";
 import type { Candle } from "@/domain/market-data/candle";
-import type { ReplayAnnotationDTO, ReplayReviewSessionDTO, ReplayTradeDTO } from "@/types/replay";
+import type { HistoricalStrategyContextDTO, ReplayAnnotationDTO, ReplayReviewSessionDTO, ReplayTradeDTO } from "@/types/replay";
 
 const ACTIVE_LIFECYCLES = new Set(["PLANNED", "PENDING", "OPEN", "PARTIALLY_CLOSED"]);
 
@@ -85,6 +95,7 @@ const BASE_TICK_MS = 800;
 const SPEED_KEY_MAP: Record<string, PlaybackSpeed> = { "1": 1, "2": 2, "5": 5, "0": 10 };
 
 type DrawingTool = "HORIZONTAL_LINE" | "TREND_LINE" | "RECTANGLE" | "TEXT" | null;
+type RightPanelTab = "trade" | "strategy" | "market-plan" | "notes";
 
 function isTypingTarget(el: EventTarget | null): boolean {
   return el instanceof HTMLElement && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
@@ -116,27 +127,40 @@ function readPrice(geometry: unknown): number | null {
 }
 
 /**
- * Market Replay tab content (Stage 13) — owns the Replay Clock, fetches the
- * scoped asset's base-timeframe candles for the whole review period ONCE per
- * asset (prefetching is allowed, §20), and renders ONLY what
- * `buildHigherTimeframeView` says is visible at the clock's current time.
- * No component here decides visibility on its own.
+ * Market Replay tab content — the Superchart workspace (Stage 21.1). Owns
+ * the Replay Clock, fetches the scoped asset's base-timeframe candles for
+ * the whole review period (chunked/prefetched, §20 of Stage 17B), and
+ * renders ONLY what `buildHigherTimeframeView` says is visible at the
+ * clock's current time. No component here decides visibility on its own.
  *
- * Stage 18 extends this with: a bottom-dominant clock bar (chart stays
- * visually dominant, §3), a collapsible decision/position panel (§5),
- * keyboard shortcuts (§26), chart-assisted price selection (§12), and a
- * minimal drawing/annotation layer (§15) scoped per (session, asset).
+ * Stage 21.1 restructures the visual hierarchy around the chart (§4): a
+ * slim top toolbar, a left vertical drawing rail (§10, replacing Stage 18's
+ * horizontal tool strip), the chart itself full-height and visually
+ * dominant, a collapsible tabbed right panel (§12 — Trade/Strategy/Market
+ * Plan/Notes, replacing three separate outer tabs + a bottom strip), and a
+ * bottom Replay controller (§14) with auto-follow (§17) and a 0.5x speed
+ * (§15). The chart component itself now applies incremental updates
+ * instead of a full redraw+viewport-reset on every tick (§16 — see
+ * `replay-candlestick-chart.tsx`'s own doc comment for the bug this fixes).
  */
 export function ReplayMarketPanel({
   session,
   assetOptions,
   strategies,
   initialReplayTrades,
+  historicalStrategyContext,
+  notes,
+  notesSaved,
+  onSaveNotes,
 }: {
   session: ReplayReviewSessionDTO;
   assetOptions: string[];
   strategies: { id: string; name: string }[];
   initialReplayTrades: ReplayTradeDTO[];
+  historicalStrategyContext: HistoricalStrategyContextDTO | null;
+  notes: unknown;
+  notesSaved: boolean;
+  onSaveNotes: (content: unknown) => Promise<{ success: boolean; error?: string }>;
 }) {
   const periodStart = dateKeyToUtcDate(session.startDate).getTime();
   const periodEnd = dateKeyToUtcDate(session.endDate).getTime() + DAY_MS - 1;
@@ -162,23 +186,32 @@ export function ReplayMarketPanel({
   const [error, setError] = useState<string | null>(null);
   const [replayTrades, setReplayTrades] = useState<ReplayTradeDTO[]>(initialReplayTrades);
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>("trade");
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [unrealizedR, setUnrealizedR] = useState<number | null>(null);
+  // Stage 21.1 §17 — ON by default: the newest candle stays near the right
+  // edge until the trader manually pans/zooms away (the chart reports that
+  // via `onAutoFollowChange`, never flips this itself).
+  const [autoFollow, setAutoFollow] = useState(true);
 
   // Stage 18 §12 — chart-assisted price selection, owned here since this
   // component also owns the chart's click handler.
   const [priceSelection, setPriceSelection] = useState<ChartPriceSelection>({ armedField: null, point: null, nonce: 0 });
 
   // Stage 18 §15-18 — annotations for the CURRENT asset only (isolated per
-  // session+asset both client-side and server-side).
+  // session+asset both client-side and server-side). Stage 21.1 §11 adds a
+  // selected-drawing id (never persisted — purely a client interaction
+  // state, cleared on asset/tool change).
   const [annotationsByAsset, setAnnotationsByAsset] = useState<Record<string, ReplayAnnotationDTO[]>>({});
   const [drawingTool, setDrawingTool] = useState<DrawingTool>(null);
   const [pendingDrawingPoint, setPendingDrawingPoint] = useState<AnnotationPoint | null>(null);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
 
   const playTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const baseCandles = useMemo(() => baseCandlesByAsset[clock.asset] ?? [], [baseCandlesByAsset, clock.asset]);
   const annotations = useMemo(() => annotationsByAsset[clock.asset] ?? [], [annotationsByAsset, clock.asset]);
+  const priceFormat = useMemo(() => resolveChartPriceFormat(clock.asset), [clock.asset]);
 
   // Refs so the execution-advance side effect (called from imperative event
   // handlers and the play-timer's setInterval closure) always sees the
@@ -268,15 +301,7 @@ export function ReplayMarketPanel({
 
       const nextLoaded = mergeLoadedRange(loaded, window);
       setLoadedRangesByAsset((prev) => ({ ...prev, [asset]: nextLoaded }));
-      setBaseCandlesByAsset((prev) => {
-        const merged = [...(prev[asset] ?? []), ...result.candles].sort(compareCandles);
-        const deduped: Candle[] = [];
-        for (const c of merged) {
-          if (deduped.length > 0 && deduped[deduped.length - 1].timestamp === c.timestamp) continue;
-          deduped.push(c);
-        }
-        return { ...prev, [asset]: deduped };
-      });
+      setBaseCandlesByAsset((prev) => ({ ...prev, [asset]: mergeCandles(prev[asset] ?? [], result.candles) }));
       if (result.sourceLabel) setSourceLabelByAsset((prev) => ({ ...prev, [asset]: result.sourceLabel! }));
       if (priorityPhase && isFreshAsset && computeNextFetchWindow(nextLoaded, clock.currentTime, periodStart, periodEnd) == null) {
         setLoading(false);
@@ -400,20 +425,20 @@ export function ReplayMarketPanel({
     for (const a of annotations) {
       if (a.type !== "HORIZONTAL_LINE") continue;
       const price = readPrice(a.geometry);
-      if (price != null) lines.push({ id: a.id, price, color: "#a78bfa", title: a.text ?? "", lineStyle: 2 });
+      if (price != null) lines.push({ id: a.id, price, color: a.id === selectedAnnotationId ? "#3b82f6" : "#a78bfa", title: a.text ?? "", lineStyle: 2 });
     }
     return lines;
-  }, [annotations]);
+  }, [annotations, selectedAnnotationId]);
 
   const annotationShapes = useMemo<ReplayAnnotationShape[]>(() => {
     const out: ReplayAnnotationShape[] = [];
     for (const a of annotations) {
       if (a.type === "TREND_LINE" || a.type === "RECTANGLE") {
         const points = readTwoPoint(a.geometry);
-        if (points) out.push({ id: a.id, type: a.type, p1: points.p1, p2: points.p2 });
+        if (points) out.push({ id: a.id, type: a.type, p1: points.p1, p2: points.p2, selected: a.id === selectedAnnotationId });
       } else if (a.type === "TEXT") {
         const point = readPoint(a.geometry);
-        if (point) out.push({ id: a.id, type: "TEXT", p1: point, text: a.text });
+        if (point) out.push({ id: a.id, type: "TEXT", p1: point, text: a.text, selected: a.id === selectedAnnotationId });
       }
     }
     // The in-progress first point of a two-point drawing, shown as a small
@@ -422,7 +447,7 @@ export function ReplayMarketPanel({
       out.push({ id: "__pending__", type: drawingTool, p1: pendingDrawingPoint, p2: pendingDrawingPoint, selected: true });
     }
     return out;
-  }, [annotations, pendingDrawingPoint, drawingTool]);
+  }, [annotations, pendingDrawingPoint, drawingTool, selectedAnnotationId]);
 
   const markers = useMemo<ReplayChartMarker[]>(() => {
     if (!assetTrade) return [];
@@ -502,6 +527,7 @@ export function ReplayMarketPanel({
   function cancelChartTool() {
     setDrawingTool(null);
     setPendingDrawingPoint(null);
+    setSelectedAnnotationId(null);
     setPriceSelection((prev) => (prev.armedField ? { ...prev, armedField: null } : prev));
   }
 
@@ -553,6 +579,7 @@ export function ReplayMarketPanel({
       return;
     }
     setAnnotationsByAsset((prev) => ({ ...prev, [clock.asset]: (prev[clock.asset] ?? []).filter((a) => a.id !== id) }));
+    setSelectedAnnotationId((prev) => (prev === id ? null : prev));
   }
 
   async function clearAllAnnotations() {
@@ -562,6 +589,12 @@ export function ReplayMarketPanel({
       return;
     }
     setAnnotationsByAsset((prev) => ({ ...prev, [clock.asset]: [] }));
+    setSelectedAnnotationId(null);
+  }
+
+  function selectDrawingTool(tool: Exclude<DrawingTool, null>) {
+    setSelectedAnnotationId(null);
+    setDrawingTool((t) => (t === tool ? null : tool));
   }
 
   // Playback timer — ticks at BASE_TICK_MS / speed, advancing one candle per
@@ -592,10 +625,11 @@ export function ReplayMarketPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Stage 18 §26 — keyboard shortcuts. Ignored while typing in any
-  // input/textarea/contentEditable (repo-wide convention, see
-  // command-center.tsx's isTypingTarget), and while the session is
-  // completed (no mutating shortcuts should fire on a read-only review).
+  // Stage 18 §26, formalized/extended Stage 21.1 §24 — keyboard shortcuts.
+  // Ignored while typing in any input/textarea/contentEditable (repo-wide
+  // convention, see command-center.tsx's isTypingTarget), and while the
+  // session is completed (no mutating shortcuts should fire on a read-only
+  // review).
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (isTypingTarget(e.target)) return;
@@ -606,6 +640,10 @@ export function ReplayMarketPanel({
       if (e.key === " ") {
         e.preventDefault();
         togglePlay();
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedAnnotationId && !isCompleted) {
+        void removeAnnotation(selectedAnnotationId);
         return;
       }
       if (e.key === "ArrowLeft" && e.shiftKey) {
@@ -639,12 +677,24 @@ export function ReplayMarketPanel({
       }
       if ((e.key === "t" || e.key === "T") && !activeTrade) {
         setPriceSelection((prevSel) => ({ ...prevSel, armedField: prevSel.armedField === "target-0" ? null : "target-0" }));
+        return;
+      }
+      if (e.key === "h" || e.key === "H") {
+        selectDrawingTool("HORIZONTAL_LINE");
+        return;
+      }
+      if (e.key === "l" || e.key === "L") {
+        selectDrawingTool("TREND_LINE");
+        return;
+      }
+      if (e.key === "r" || e.key === "R") {
+        selectDrawingTool("RECTANGLE");
       }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clock, availableTimestamps, activeTrade, isCompleted]);
+  }, [clock, availableTimestamps, activeTrade, isCompleted, selectedAnnotationId]);
 
   if (error) {
     return (
@@ -670,189 +720,247 @@ export function ReplayMarketPanel({
 
   return (
     <div className="space-y-2">
-      <div className={cn("grid gap-2", !rightPanelCollapsed && "lg:grid-cols-[minmax(0,1fr)_300px]")}>
-        {/* Chart stays visually dominant (§3/§34) — the decision/position panel is a collapsible sibling, never a modal over it. */}
-        <div className="glass space-y-2 rounded-2xl p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className={cn("rounded-md border px-2 py-0.5 font-mono text-xs", TAG_STYLES[colorForName(clock.asset)].chip)}>
-                {clock.asset}
-              </span>
-              <span className="text-sm font-medium tabular-nums">{currentTimeLabel}</span>
-              {sourceLabelByAsset[clock.asset] && (
-                <span
-                  className={cn(
-                    "rounded-md border px-1.5 py-0.5 text-[10px] font-medium",
-                    sourceLabelByAsset[clock.asset] === "Synthetic Fixture"
-                      ? "border-dashed border-muted-foreground/30 text-muted-foreground"
-                      : "border-primary/30 bg-primary/10 text-primary",
-                  )}
-                  title={
-                    // Stage 17C.2 §33 — a concise, non-alarming OTC
-                    // disclosure for Twelve Data-sourced assets specifically;
-                    // every other source keeps the original generic tooltip.
-                    // Never implies broker-exact execution for an OTC feed.
-                    sourceLabelByAsset[clock.asset]?.startsWith("Twelve Data")
-                      ? "Historical OTC market data may differ slightly from your broker's chart. Replay uses this feed for market reconstruction and review, not broker-exact execution."
-                      : "Stage 17B — where this chart's candles actually came from."
-                  }
-                >
-                  Data: {sourceLabelByAsset[clock.asset]}
-                </span>
-              )}
-              {clock.playback === "FINISHED" && (
-                <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-secondary-foreground">
-                  End of period
-                </span>
-              )}
-              {isCompleted && (
-                <span className="rounded-md border border-dashed border-muted-foreground/30 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  Read-only — review completed
-                </span>
-              )}
-            </div>
+      {/* Stage 21.1 §5 — slim top toolbar: symbol, timeframe, source, tools. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/50 bg-background/60 px-2.5 py-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          {assetOptions.length > 1 ? (
+            <Select items={assetOptions.map((a) => ({ value: a, label: a }))} value={clock.asset} onValueChange={(v) => v && onAssetChange(v)}>
+              <SelectTrigger className="h-7 w-24 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {assetOptions.map((a) => (
+                  <SelectItem key={a} value={a}>
+                    {a}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <span className={cn("rounded-md border px-2 py-0.5 font-mono text-xs", TAG_STYLES[colorForName(clock.asset)].chip)}>{clock.asset}</span>
+          )}
 
-            <div className="flex items-center gap-2">
-              {assetOptions.length > 1 && (
-                <Select items={assetOptions.map((a) => ({ value: a, label: a }))} value={clock.asset} onValueChange={(v) => v && onAssetChange(v)}>
-                  <SelectTrigger className="h-8 w-24 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assetOptions.map((a) => (
-                      <SelectItem key={a} value={a}>
-                        {a}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Select items={TIMEFRAMES.map((tf) => ({ value: tf, label: tf }))} value={clock.timeframe} onValueChange={(v) => v && onTimeframeChange(v as Timeframe)}>
-                <SelectTrigger className="h-8 w-20 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TIMEFRAMES.map((tf) => (
-                    <SelectItem key={tf} value={tf}>
-                      {tf}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button type="button" variant="ghost" size="icon-sm" aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick={() => setShowShortcutHelp((v) => !v)}>
-                <Keyboard className="size-4" />
-              </Button>
-              <Button
+          {/* §6 — frequently-used timeframes as one quick segmented row instead of a dropdown. */}
+          <div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-background/40 p-0.5">
+            {TIMEFRAMES.map((tf) => (
+              <button
+                key={tf}
                 type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={rightPanelCollapsed ? "Expand decision panel" : "Collapse decision panel"}
-                title={rightPanelCollapsed ? "Expand decision panel" : "Collapse decision panel"}
-                onClick={() => setRightPanelCollapsed((v) => !v)}
-                className="hidden lg:inline-flex"
+                onClick={() => onTimeframeChange(tf)}
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors",
+                  clock.timeframe === tf ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                )}
               >
-                {rightPanelCollapsed ? <ChevronsLeft className="size-4" /> : <ChevronsRight className="size-4" />}
-              </Button>
-            </div>
+                {tf}
+              </button>
+            ))}
           </div>
 
-          {showShortcutHelp && (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-border/60 bg-background/50 p-2 text-[11px] text-muted-foreground sm:grid-cols-3">
-              <span><kbd className="rounded border px-1">Space</kbd> Play/Pause</span>
-              <span><kbd className="rounded border px-1">←</kbd> Prev candle</span>
-              <span><kbd className="rounded border px-1">→</kbd> Next candle</span>
-              <span><kbd className="rounded border px-1">Shift+←</kbd> Prev day</span>
-              <span><kbd className="rounded border px-1">Shift+→</kbd> Next day</span>
-              <span><kbd className="rounded border px-1">1 2 5 0</kbd> Speed</span>
-              <span><kbd className="rounded border px-1">E</kbd> Set entry (chart)</span>
-              <span><kbd className="rounded border px-1">S</kbd> Set stop (chart)</span>
-              <span><kbd className="rounded border px-1">T</kbd> Set target (chart)</span>
-              <span><kbd className="rounded border px-1">Esc</kbd> Cancel tool</span>
-            </div>
-          )}
-
-          {/* Stage 18 §15 — minimal annotation toolbar. */}
-          {!isCompleted && (
-            <div className="flex flex-wrap items-center gap-1.5 border-b border-border/60 pb-2">
-              <ToolButton icon={Minus} label="Horizontal line" active={drawingTool === "HORIZONTAL_LINE"} onClick={() => setDrawingTool((t) => (t === "HORIZONTAL_LINE" ? null : "HORIZONTAL_LINE"))} />
-              <ToolButton icon={Slash} label="Trend line" active={drawingTool === "TREND_LINE"} onClick={() => setDrawingTool((t) => (t === "TREND_LINE" ? null : "TREND_LINE"))} />
-              <ToolButton icon={RectangleHorizontal} label="Rectangle / zone" active={drawingTool === "RECTANGLE"} onClick={() => setDrawingTool((t) => (t === "RECTANGLE" ? null : "RECTANGLE"))} />
-              <ToolButton icon={Type} label="Text note" active={drawingTool === "TEXT"} onClick={() => setDrawingTool((t) => (t === "TEXT" ? null : "TEXT"))} />
-              <DropdownMenu>
-                <DropdownMenuTrigger render={<Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" />}>
-                  Drawings ({annotations.length})
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuLabel>Drawings on {clock.asset}</DropdownMenuLabel>
-                  {annotations.length === 0 && <div className="px-2 py-1.5 text-xs text-muted-foreground">None yet</div>}
-                  {annotations.map((a) => (
-                    <DropdownMenuItem key={a.id} className="flex items-center justify-between gap-2" onSelect={(e) => e.preventDefault()}>
-                      <span className="truncate text-xs">
-                        {a.type === "TEXT" ? a.text || "Note" : a.type.replace("_", " ").toLowerCase()}
-                      </span>
-                      <button type="button" aria-label="Delete drawing" onClick={() => void removeAnnotation(a.id)}>
-                        <Trash2 className="size-3.5 text-muted-foreground hover:text-danger" />
-                      </button>
-                    </DropdownMenuItem>
-                  ))}
-                  {annotations.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-danger" onClick={() => void clearAllAnnotations()}>
-                        Clear all drawings on {clock.asset}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {activeToolLabel && (
-                <span className="flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] text-primary">
-                  {activeToolLabel}
-                  <button type="button" aria-label="Cancel tool" onClick={cancelChartTool}>
-                    <X className="size-3" />
-                  </button>
-                </span>
+          <span className="text-sm font-medium tabular-nums">{currentTimeLabel}</span>
+          {sourceLabelByAsset[clock.asset] && (
+            <span
+              className={cn(
+                "rounded-md border px-1.5 py-0.5 text-[10px] font-medium",
+                sourceLabelByAsset[clock.asset] === "Synthetic Fixture"
+                  ? "border-dashed border-muted-foreground/30 text-muted-foreground"
+                  : "border-primary/30 bg-primary/10 text-primary",
               )}
-            </div>
+              title={
+                // Stage 17C.2 §33 — a concise, non-alarming OTC disclosure
+                // for Twelve Data-sourced assets specifically; every other
+                // source keeps the original generic tooltip. Never implies
+                // broker-exact execution for an OTC feed.
+                sourceLabelByAsset[clock.asset]?.startsWith("Twelve Data")
+                  ? "Historical OTC market data may differ slightly from your broker's chart. Replay uses this feed for market reconstruction and review, not broker-exact execution."
+                  : "Stage 17B — where this chart's candles actually came from."
+              }
+            >
+              Data: {sourceLabelByAsset[clock.asset]}
+            </span>
           )}
-
-          {loading ? (
-            <div className="flex h-[420px] items-center justify-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading historical data…
-            </div>
-          ) : (
-            <ReplayCandlestickChart
-              candles={view.closed}
-              currentTime={clock.currentTime}
-              priceLines={priceLines}
-              drawingLines={drawingLines}
-              markers={markers}
-              annotationShapes={annotationShapes}
-              onChartClick={handleChartClick}
-            />
+          {clock.playback === "FINISHED" && (
+            <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-secondary-foreground">End of period</span>
+          )}
+          {isCompleted && (
+            <span className="rounded-md border border-dashed border-muted-foreground/30 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              Read-only — review completed
+            </span>
           )}
         </div>
 
-        {rightPanelCollapsed ? (
-          <CollapsedPanelSummary asset={clock.asset} trade={assetTrade} onExpand={() => setRightPanelCollapsed(false)} />
-        ) : (
-          <ReplayDecisionPanel
-            sessionId={session.id}
-            asset={clock.asset}
-            currentTime={clock.currentTime}
-            executionPrice={executionPrice}
-            unrealizedR={canShowUnrealized ? unrealizedR : null}
-            strategies={strategies}
-            activeTrade={activeTrade}
-            onTradeChanged={upsertReplayTrade}
-            priceSelection={priceSelection}
-            onArmField={(field) => setPriceSelection((prevSel) => ({ ...prevSel, armedField: field }))}
-          />
-        )}
+        <div className="flex items-center gap-1">
+          {!autoFollow && (
+            <Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]" onClick={() => setAutoFollow(true)}>
+              <LocateFixed className="size-3.5" />
+              Jump to current
+            </Button>
+          )}
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick={() => setShowShortcutHelp((v) => !v)}>
+            <Keyboard className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={rightPanelCollapsed ? "Expand panel" : "Collapse panel"}
+            title={rightPanelCollapsed ? "Expand panel" : "Collapse panel"}
+            onClick={() => setRightPanelCollapsed((v) => !v)}
+            className="hidden lg:inline-flex"
+          >
+            {rightPanelCollapsed ? <ChevronsLeft className="size-4" /> : <ChevronsRight className="size-4" />}
+          </Button>
+        </div>
       </div>
 
-      {/* Stage 18 §4/§25 — bottom-dominant clock/timeline bar, full width. */}
+      {showShortcutHelp && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-border/60 bg-background/50 p-2 text-[11px] text-muted-foreground sm:grid-cols-4">
+          <span><kbd className="rounded border px-1">Space</kbd> Play/Pause</span>
+          <span><kbd className="rounded border px-1">←</kbd> Prev candle</span>
+          <span><kbd className="rounded border px-1">→</kbd> Next candle</span>
+          <span><kbd className="rounded border px-1">Shift+←/→</kbd> Prev/next day</span>
+          <span><kbd className="rounded border px-1">1 2 5 0</kbd> Speed</span>
+          <span><kbd className="rounded border px-1">E</kbd> Set entry (chart)</span>
+          <span><kbd className="rounded border px-1">S</kbd> Set stop (chart)</span>
+          <span><kbd className="rounded border px-1">T</kbd> Set target (chart)</span>
+          <span><kbd className="rounded border px-1">H</kbd> Horizontal line</span>
+          <span><kbd className="rounded border px-1">L</kbd> Trend line</span>
+          <span><kbd className="rounded border px-1">R</kbd> Rectangle</span>
+          <span><kbd className="rounded border px-1">Del</kbd> Delete selected drawing</span>
+          <span><kbd className="rounded border px-1">Esc</kbd> Cancel tool / deselect</span>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        {/* Stage 21.1 §10 — left vertical drawing rail (was a horizontal strip). */}
+        {!isCompleted && (
+          <div className="flex flex-col items-center gap-1 rounded-xl border border-border/50 bg-background/60 p-1">
+            <RailToolButton icon={MousePointer2} label="Select (Esc)" active={!drawingTool && !priceSelection.armedField} onClick={cancelChartTool} />
+            <div className="my-0.5 h-px w-5 bg-border/60" />
+            <RailToolButton icon={Minus} label="Horizontal line (H)" active={drawingTool === "HORIZONTAL_LINE"} onClick={() => selectDrawingTool("HORIZONTAL_LINE")} />
+            <RailToolButton icon={Slash} label="Trend line (L)" active={drawingTool === "TREND_LINE"} onClick={() => selectDrawingTool("TREND_LINE")} />
+            <RailToolButton icon={RectangleHorizontal} label="Rectangle / zone (R)" active={drawingTool === "RECTANGLE"} onClick={() => selectDrawingTool("RECTANGLE")} />
+            <RailToolButton icon={Type} label="Text note" active={drawingTool === "TEXT"} onClick={() => selectDrawingTool("TEXT")} />
+            <div className="my-0.5 h-px w-5 bg-border/60" />
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label={`Drawings (${annotations.length})`} title={`Drawings (${annotations.length})`} />}>
+                <span className="text-[10px] font-semibold">{annotations.length}</span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="right">
+                <DropdownMenuLabel>Drawings on {clock.asset}</DropdownMenuLabel>
+                {annotations.length === 0 && <div className="px-2 py-1.5 text-xs text-muted-foreground">None yet</div>}
+                {annotations.map((a) => (
+                  <DropdownMenuItem
+                    key={a.id}
+                    className={cn("flex items-center justify-between gap-2", a.id === selectedAnnotationId && "bg-primary/10")}
+                    onSelect={(e) => e.preventDefault()}
+                    onClick={() => setSelectedAnnotationId((prev) => (prev === a.id ? null : a.id))}
+                  >
+                    <span className="truncate text-xs">{a.type === "TEXT" ? a.text || "Note" : a.type.replace("_", " ").toLowerCase()}</span>
+                    <button type="button" aria-label="Delete drawing" onClick={(e) => { e.stopPropagation(); void removeAnnotation(a.id); }}>
+                      <Trash2 className="size-3.5 text-muted-foreground hover:text-danger" />
+                    </button>
+                  </DropdownMenuItem>
+                ))}
+                {annotations.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem className="text-danger" onClick={() => void clearAllAnnotations()}>
+                      Clear all drawings on {clock.asset}
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+
+        {/* Chart stays visually dominant (§4) — the tabbed panel is a collapsible sibling, never a modal over it. */}
+        <div className={cn("grid min-w-0 flex-1 gap-2", !rightPanelCollapsed && "lg:grid-cols-[minmax(0,1fr)_320px]")}>
+          <div className="min-w-0 overflow-hidden rounded-xl border border-border/50 bg-background/30">
+            {activeToolLabel && (
+              <div className="flex items-center gap-1.5 border-b border-border/50 bg-primary/5 px-2 py-1 text-[11px] text-primary">
+                {activeToolLabel}
+                <button type="button" aria-label="Cancel tool" onClick={cancelChartTool}>
+                  <X className="size-3" />
+                </button>
+              </div>
+            )}
+            {loading ? (
+              <div className="flex h-[520px] items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Loading historical data…
+              </div>
+            ) : (
+              <ReplayCandlestickChart
+                candles={view.closed}
+                priceFormat={priceFormat}
+                priceLines={priceLines}
+                drawingLines={drawingLines}
+                markers={markers}
+                annotationShapes={annotationShapes}
+                autoFollow={autoFollow}
+                onAutoFollowChange={setAutoFollow}
+                height={520}
+                onChartClick={handleChartClick}
+              />
+            )}
+          </div>
+
+          {rightPanelCollapsed ? (
+            <CollapsedPanelSummary asset={clock.asset} trade={assetTrade} onExpand={() => setRightPanelCollapsed(false)} />
+          ) : (
+            <div className="min-w-0 rounded-xl border border-border/50 bg-background/40 p-2">
+              <Tabs value={rightPanelTab} onValueChange={(v) => setRightPanelTab(v as RightPanelTab)}>
+                <TabsList className="w-full">
+                  <TabsTrigger value="trade" className="gap-1 text-xs" title="Trade">
+                    <ClipboardList className="size-3.5" />
+                  </TabsTrigger>
+                  <TabsTrigger value="strategy" className="gap-1 text-xs" title="Strategy">
+                    <FlaskConical className="size-3.5" />
+                  </TabsTrigger>
+                  <TabsTrigger value="market-plan" className="gap-1 text-xs" title="Market Plan">
+                    <CalendarDays className="size-3.5" />
+                  </TabsTrigger>
+                  <TabsTrigger value="notes" className="gap-1 text-xs" title="Notes">
+                    <NotebookText className="size-3.5" />
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="trade" className="mt-2">
+                  <ReplayDecisionPanel
+                    sessionId={session.id}
+                    asset={clock.asset}
+                    currentTime={clock.currentTime}
+                    executionPrice={executionPrice}
+                    unrealizedR={canShowUnrealized ? unrealizedR : null}
+                    strategies={strategies}
+                    activeTrade={activeTrade}
+                    onTradeChanged={upsertReplayTrade}
+                    priceSelection={priceSelection}
+                    onArmField={(field) => setPriceSelection((prevSel) => ({ ...prevSel, armedField: field }))}
+                  />
+                </TabsContent>
+                <TabsContent value="strategy" className="mt-2">
+                  <ReplayStrategyPanel initialContext={historicalStrategyContext} strategyId={session.strategyId} atTime={clock.currentTime} />
+                </TabsContent>
+                <TabsContent value="market-plan" className="mt-2">
+                  <ReplayDailyMarketPlanPanel dateKey={utcDateToKey(currentDate)} assetSymbol={clock.asset} />
+                </TabsContent>
+                <TabsContent value="notes" className="mt-2 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] text-muted-foreground">Observations, recurring mistakes, questions to investigate.</p>
+                    <span className="text-[10px] text-muted-foreground/60">{notesSaved ? "Saved" : "Saving…"}</span>
+                  </div>
+                  <RichTextEditor initialContent={notes} placeholder="What did you notice reviewing this period?" onSave={onSaveNotes} />
+                </TabsContent>
+              </Tabs>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Stage 21.1 §14 — bottom Replay controller, full width. */}
       <div className="glass flex flex-wrap items-center justify-between gap-3 rounded-2xl p-2.5">
         <div className="flex items-center gap-1">
           <Button type="button" variant="ghost" size="icon-sm" aria-label="Jump to start" onClick={jumpStart}>
@@ -892,8 +1000,6 @@ export function ReplayMarketPanel({
         </div>
       </div>
 
-      <ReplayDailyMarketPlanPanel dateKey={utcDateToKey(currentDate)} assetSymbol={clock.asset} />
-
       <p className="text-[11px] text-muted-foreground/60 italic">
         Closed-candle semantics: only fully-closed {clock.timeframe} candles are shown — nothing still forming at{" "}
         {currentTimeLabel} is revealed.
@@ -902,16 +1008,25 @@ export function ReplayMarketPanel({
   );
 }
 
-function ToolButton({ icon: Icon, label, active, onClick }: { icon: React.ComponentType<{ className?: string }>; label: string; active: boolean; onClick: () => void }) {
+function RailToolButton({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
-    <Button type="button" variant={active ? "default" : "outline"} size="icon-sm" aria-label={label} title={label} onClick={onClick}>
+    <Button type="button" variant={active ? "default" : "ghost"} size="icon-sm" aria-label={label} title={label} onClick={onClick}>
       <Icon className="size-3.5" />
     </Button>
   );
 }
 
-/** Stage 18 §5 — a compact summary badge preserving chart space when the
- *  decision/position panel is collapsed. */
+/** A compact summary badge preserving chart space when the right panel is collapsed. */
 function CollapsedPanelSummary({ asset, trade, onExpand }: { asset: string; trade: ReplayTradeDTO | null; onExpand: () => void }) {
   const label = !trade
     ? "No position"
@@ -922,8 +1037,8 @@ function CollapsedPanelSummary({ asset, trade, onExpand }: { asset: string; trad
     <button
       type="button"
       onClick={onExpand}
-      className="glass hidden w-10 flex-col items-center justify-start gap-2 rounded-2xl p-2 text-center lg:flex"
-      title={`Expand decision panel — ${label}`}
+      className="hidden w-10 flex-col items-center justify-start gap-2 rounded-xl border border-border/50 bg-background/40 p-2 text-center lg:flex"
+      title={`Expand panel — ${label}`}
     >
       <ChevronLeft className="size-4 text-muted-foreground" />
       <span className="rotate-180 text-[10px] font-medium whitespace-nowrap text-muted-foreground [writing-mode:vertical-rl]">

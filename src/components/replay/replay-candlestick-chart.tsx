@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import {
   CandlestickSeries,
@@ -10,12 +10,16 @@ import {
   type IPriceLine,
   type ISeriesApi,
   type ISeriesMarkersPluginApi,
+  type MouseEventParams,
   type SeriesMarker,
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
 
+import { cn } from "@/lib/utils";
 import type { Candle } from "@/domain/market-data/candle";
+import { planCandleUpdate } from "@/domain/market-data/chart-update-plan";
+import type { ChartPriceFormat } from "@/domain/market-data/chart-price-precision";
 import { REPLAY_CHART_COLORS_DARK, getReplayChartColors, type ReplayChartColors } from "@/components/replay/replay-chart-colors";
 import { assertLightweightChartSafeColors } from "@/components/replay/chart-color-safety";
 
@@ -60,26 +64,38 @@ export interface ReplayAnnotationShape {
 }
 
 /**
- * The first real Replay candlestick chart (Stage 13 §18), extended in Stage
- * 14 §9/§31 with simulated-position price lines + fill/partial/close
- * markers, and in Stage 18 §12/§15 with click-to-select-price and a minimal
- * drawing/annotation overlay. Purely presentational: it renders EXACTLY the
- * `candles`/`priceLines`/`markers`/`annotationShapes` it's given — never a
- * real Trade's levels, never anything beyond what the caller already knows.
+ * The Replay candlestick chart (Stage 13 §18; Stage 14 §9/§31 position price
+ * lines/markers; Stage 18 §12/§15 click-to-select-price and drawings; Stage
+ * 21.1 §7/§8/§9/§16/§17 incremental updates, auto-follow, crosshair OHLC
+ * legend, per-instrument price precision). Purely presentational: it renders
+ * EXACTLY the `candles`/`priceLines`/`markers`/`annotationShapes` it's
+ * given — never a real Trade's levels, never anything beyond what the
+ * caller already knows.
+ *
+ * §16 fix: the chart instance/series are long-lived imperative objects,
+ * created once per mount. Data updates go through `planCandleUpdate` so a
+ * plain Replay Clock tick (the overwhelmingly common case) either does
+ * NOTHING (higher-timeframe candle not yet closed) or a single cheap
+ * `series.update(bar)` — never the full `series.setData(...)` + forced
+ * viewport reset the previous implementation ran on every tick, which is
+ * what produced the "jumpy" visual behavior this stage's audit traced it to.
  */
 export function ReplayCandlestickChart({
   candles,
-  currentTime,
+  priceFormat,
   priceLines = [],
   drawingLines = [],
   markers = [],
   annotationShapes = [],
+  autoFollow,
+  onAutoFollowChange,
   height = 420,
   onChartClick,
 }: {
   candles: Candle[];
-  /** UTC ms — rendered as a vertical "now" marker on the time scale. */
-  currentTime: number;
+  /** Stage 21.1 §9 — per-instrument decimals/minMove, resolved by the caller
+   *  from `resolveChartPriceFormat` (never hardcoded here). */
+  priceFormat: ChartPriceFormat;
   priceLines?: ReplayPriceLine[];
   /** HORIZONTAL_LINE drawings — same rendering mechanism as `priceLines`
    *  but kept as a separate prop so plan/position lines and free-hand
@@ -87,6 +103,13 @@ export function ReplayCandlestickChart({
   drawingLines?: ReplayPriceLine[];
   markers?: ReplayChartMarker[];
   annotationShapes?: ReplayAnnotationShape[];
+  /** Stage 21.1 §17 — when true, the chart keeps the newest candle near the
+   *  right edge on every append/replace. When the trader pans/zooms away
+   *  manually, this component calls `onAutoFollowChange(false)` exactly
+   *  once so the caller's toggle UI reflects the real chart state; it never
+   *  flips its own prop internally. */
+  autoFollow: boolean;
+  onAutoFollowChange: (next: boolean) => void;
   height?: number;
   /** Stage 18 §12 — fires on every chart click with the clicked bar's UTC
    *  ms time and the y-coordinate's price. The caller decides what a click
@@ -103,6 +126,11 @@ export function ReplayCandlestickChart({
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const shapesRef = useRef<ReplayAnnotationShape[]>(annotationShapes);
   const onChartClickRef = useRef(onChartClick);
+  const renderedCandlesRef = useRef<Candle[]>([]);
+  const autoFollowRef = useRef(autoFollow);
+  const onAutoFollowChangeRef = useRef(onAutoFollowChange);
+  const programmaticScrollRef = useRef(false);
+  const [hoveredCandle, setHoveredCandle] = useState<Candle | null>(null);
   // An explicit, static, lightweight-charts-safe palette (never a
   // dynamically-resolved CSS color — see `replay-chart-colors.ts`'s own
   // doc comment for why runtime CSS-variable/canvas-serialization
@@ -113,13 +141,41 @@ export function ReplayCandlestickChart({
   const colorsRef = useRef<ReplayChartColors>(REPLAY_CHART_COLORS_DARK);
   const { resolvedTheme } = useTheme();
 
-  // Keep both refs in sync with the latest props — read by imperative
+  // Keep refs in sync with the latest props — read by imperative
   // chart-event callbacks below, never during render (refs must only be
   // written/read outside render).
   useEffect(() => {
     onChartClickRef.current = onChartClick;
     shapesRef.current = annotationShapes;
+    autoFollowRef.current = autoFollow;
+    onAutoFollowChangeRef.current = onAutoFollowChange;
   });
+
+  // O(1) time -> {candle, index} lookup for the crosshair legend, rebuilt
+  // only when the candle array actually changes (not on every hover move).
+  const candleIndexByTime = useMemo(() => {
+    const map = new Map<number, number>();
+    candles.forEach((c, i) => map.set(Math.floor(c.timestamp / 1000), i));
+    return map;
+  }, [candles]);
+
+  // Refs the crosshair handler (registered once, in the mount effect below)
+  // closes over — declared here, before that effect, and kept current by
+  // the effect right after it.
+  const candlesRef = useRef(candles);
+  const candleIndexByTimeRef = useRef(candleIndexByTime);
+  useEffect(() => {
+    candlesRef.current = candles;
+    candleIndexByTimeRef.current = candleIndexByTime;
+  }, [candles, candleIndexByTime]);
+
+  function scrollToLatest(chart: IChartApi) {
+    programmaticScrollRef.current = true;
+    chart.timeScale().scrollToPosition(2, false);
+    setTimeout(() => {
+      programmaticScrollRef.current = false;
+    }, 0);
+  }
 
   useEffect(() => {
     const container = containerRef.current;
@@ -150,6 +206,7 @@ export function ReplayCandlestickChart({
       borderVisible: false,
       wickUpColor: colors.upColor,
       wickDownColor: colors.downColor,
+      priceFormat: { type: "price", precision: priceFormat.precision, minMove: priceFormat.minMove },
     });
 
     chartRef.current = chart;
@@ -161,6 +218,30 @@ export function ReplayCandlestickChart({
     const redraw = () => drawAnnotationShapes(canvasRef.current, chart, series, shapesRef.current, colorsRef.current);
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw);
     chart.subscribeCrosshairMove(redraw); // cheap, but keeps shapes in sync during a hover/drag without a separate render loop
+
+    // Stage 21.1 §17 — a visible-range change NOT caused by our own
+    // `scrollToLatest` call means the trader panned/zoomed manually; turn
+    // auto-follow off exactly once so the "Jump to current" affordance
+    // appears. `programmaticScrollRef` distinguishes the two cases.
+    const onVisibleRangeChange = () => {
+      if (programmaticScrollRef.current) return;
+      if (autoFollowRef.current) onAutoFollowChangeRef.current(false);
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRangeChange);
+
+    // Stage 21.1 §8 — crosshair-driven OHLC legend, purely local UI state
+    // (never Replay Clock state). Falls back to the last candle in the
+    // array (handled by the caller via `hoveredCandle ?? lastCandle`) when
+    // the mouse isn't over the chart.
+    const onCrosshairMove = (param: MouseEventParams<Time>) => {
+      if (!param.time) {
+        setHoveredCandle(null);
+        return;
+      }
+      const idx = candleIndexByTimeRef.current.get(param.time as number);
+      setHoveredCandle(idx != null ? candlesRef.current[idx] : null);
+    };
+    chart.subscribeCrosshairMove(onCrosshairMove);
 
     const clickHandler = (param: Parameters<Parameters<IChartApi["subscribeClick"]>[0]>[0]) => {
       const callback = onChartClickRef.current;
@@ -178,18 +259,19 @@ export function ReplayCandlestickChart({
       resizeObserver.disconnect();
       chart.unsubscribeClick(clickHandler);
       chart.timeScale().unsubscribeVisibleTimeRangeChange(redraw);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRangeChange);
       chart.unsubscribeCrosshairMove(redraw);
+      chart.unsubscribeCrosshairMove(onCrosshairMove);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
       priceLines.clear();
       drawingLines.clear();
       markersPluginRef.current = null;
+      renderedCandlesRef.current = [];
     };
-    // Chart instance is created once per mount; data updates flow through the
-    // effects below. `resolvedTheme` is read once here for the initial paint
-    // only — the dedicated theme effect right below applies any subsequent
-    // change via `applyOptions`, so intentionally NOT a dependency here.
+    // Chart instance is created once per mount; data/theme/priceFormat
+    // updates flow through the dedicated effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -214,23 +296,57 @@ export function ReplayCandlestickChart({
     drawAnnotationShapes(canvasRef.current, chart, series, shapesRef.current, colors);
   }, [resolvedTheme]);
 
+  // Price precision — applied via `applyOptions`, never by recreating the
+  // series, so switching assets never causes a flash/reset beyond the
+  // legitimate REPLACE the candle-array switch itself triggers below.
   useEffect(() => {
+    seriesRef.current?.applyOptions({ priceFormat: { type: "price", precision: priceFormat.precision, minMove: priceFormat.minMove } });
+  }, [priceFormat.precision, priceFormat.minMove]);
+
+  // §16 — the incremental-update fix. Compares against the LAST candle
+  // array actually rendered (not the previous prop, which could differ if a
+  // render was skipped) to decide the cheapest correct operation.
+  useEffect(() => {
+    const chart = chartRef.current;
     const series = seriesRef.current;
-    if (!series) return;
-    series.setData(
-      candles.map((c) => ({
-        time: Math.floor(c.timestamp / 1000) as UTCTimestamp,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      })),
-    );
-    if (currentTime) {
-      chartRef.current?.timeScale().scrollToPosition(2, false);
+    if (!series || !chart) return;
+    const plan = planCandleUpdate(renderedCandlesRef.current, candles);
+    renderedCandlesRef.current = candles;
+
+    if (plan.type === "none") return;
+
+    if (plan.type === "append") {
+      series.update({
+        time: Math.floor(plan.bar.timestamp / 1000) as UTCTimestamp,
+        open: plan.bar.open,
+        high: plan.bar.high,
+        low: plan.bar.low,
+        close: plan.bar.close,
+      });
+    } else {
+      series.setData(
+        candles.map((c) => ({
+          time: Math.floor(c.timestamp / 1000) as UTCTimestamp,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        })),
+      );
     }
-    drawAnnotationShapes(canvasRef.current, chartRef.current, seriesRef.current, shapesRef.current, colorsRef.current);
-  }, [candles, currentTime]);
+
+    if (autoFollowRef.current) scrollToLatest(chart);
+    drawAnnotationShapes(canvasRef.current, chart, series, shapesRef.current, colorsRef.current);
+  }, [candles]);
+
+  // Re-engaging auto-follow (the "Jump to current" action) immediately
+  // snaps back to the latest candle, even if no new candle arrived.
+  const prevAutoFollowRef = useRef(autoFollow);
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (chart && autoFollow && !prevAutoFollowRef.current) scrollToLatest(chart);
+    prevAutoFollowRef.current = autoFollow;
+  }, [autoFollow]);
 
   // Replay position price lines (entry/SL/targets) — reconciled by id so a
   // line that's still present just gets its price/title updated in place,
@@ -265,10 +381,52 @@ export function ReplayCandlestickChart({
     drawAnnotationShapes(canvasRef.current, chartRef.current, seriesRef.current, annotationShapes, colorsRef.current);
   }, [annotationShapes]);
 
+  const legendCandle = hoveredCandle ?? candles[candles.length - 1] ?? null;
+  const legendPrevCandle = legendCandle ? candles[(candleIndexByTime.get(Math.floor(legendCandle.timestamp / 1000)) ?? 1) - 1] : null;
+
   return (
     <div ref={containerRef} style={{ height }} className="relative w-full">
+      {legendCandle && (
+        <ChartOhlcLegend candle={legendCandle} previous={legendPrevCandle} precision={priceFormat.precision} />
+      )}
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
     </div>
+  );
+}
+
+/** Stage 21.1 §8 — compact top-left OHLC legend, crosshair-driven with a
+ *  last-candle fallback so it's never empty. Volume is shown only when the
+ *  hovered candle actually reports one (§8: "do not fabricate unavailable
+ *  volume"). */
+function ChartOhlcLegend({ candle, previous, precision }: { candle: Candle; previous: Candle | null; precision: number }) {
+  const change = previous ? candle.close - previous.close : null;
+  const changePercent = previous && previous.close !== 0 ? (change! / previous.close) * 100 : null;
+  const isUp = change == null ? null : change >= 0;
+  const fmt = (v: number) => v.toFixed(precision);
+
+  return (
+    <div className="pointer-events-none absolute top-1.5 left-1.5 z-10 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 rounded-md bg-background/70 px-2 py-1 text-[11px] tabular-nums backdrop-blur-sm">
+      <LegendField label="O" value={fmt(candle.open)} />
+      <LegendField label="H" value={fmt(candle.high)} />
+      <LegendField label="L" value={fmt(candle.low)} />
+      <LegendField label="C" value={fmt(candle.close)} />
+      {change != null && (
+        <span className={cn("font-medium", isUp ? "text-success" : "text-danger")}>
+          {isUp ? "+" : ""}
+          {fmt(change)} ({isUp ? "+" : ""}
+          {changePercent!.toFixed(2)}%)
+        </span>
+      )}
+      {candle.volume != null && <LegendField label="Vol" value={candle.volume.toLocaleString()} />}
+    </div>
+  );
+}
+
+function LegendField({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="text-muted-foreground">
+      {label} <span className="font-medium text-foreground">{value}</span>
+    </span>
   );
 }
 

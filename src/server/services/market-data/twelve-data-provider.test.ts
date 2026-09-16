@@ -387,4 +387,23 @@ describe("TwelveDataHistoricalMarketDataProvider", () => {
       expect(result.ok).toBe(true);
     }, 10_000);
   });
+
+  describe("timezone independence (Stage 21.2 §5) — Replay must behave identically regardless of server/browser TZ", () => {
+    it("parses the same datetime string to the identical UTC ms whether the process TZ is UTC, US Eastern, or a UTC+2 zone", async () => {
+      const zones = ["UTC", "America/New_York", "Africa/Lusaka", "Pacific/Auckland"];
+      const results: number[] = [];
+      for (const tz of zones) {
+        vi.stubEnv("TWELVE_DATA_API_KEY", "key123");
+        vi.stubEnv("TZ", tz);
+        const provider = new TwelveDataHistoricalMarketDataProvider();
+        fetchMock.mockResolvedValueOnce(tsResponse([tdValue("2026-08-03 15:59:00", 5000, 5001, 4999, 5000.5, 10)]));
+        const result = await provider.fetchCandles({ canonicalSymbol: "EURUSD", from: MONDAY, to: MONDAY + DAY_MS - 1 });
+        if (!result.ok) throw new Error(`fetchCandles failed under TZ=${tz}: ${result.error.message}`);
+        results.push(result.candles[0].timestamp);
+      }
+      // Every zone must produce the exact same absolute instant — 2026-08-03T15:59:00Z.
+      expect(new Set(results).size).toBe(1);
+      expect(results[0]).toBe(Date.UTC(2026, 7, 3, 15, 59, 0));
+    });
+  });
 });

@@ -9,6 +9,7 @@ import { RowBar } from "@/components/analytics/row-bar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatDateKeyShort } from "@/lib/date";
+import { ruleKeyLabel } from "@/domain/improvements/commitment-adherence";
 import type { AdherenceTrend, ImprovementAnalyticsDTO } from "@/types/edge-improvements";
 
 const TREND_META: Record<AdherenceTrend, { label: string; className: string; Icon: typeof TrendingUp | null }> = {
@@ -155,16 +156,3 @@ export function AnalyticsImprovementSection({ weekly, monthly }: { weekly: Impro
   );
 }
 
-const RULE_KEY_LABELS: Record<string, string> = {
-  OVERRIDE_DISCIPLINE: "Discretionary overrides",
-  STOP_WIDENING_PATTERN: "Stop widening",
-  PREMATURE_CLOSE_PATTERN: "Premature close",
-  MISSED_OPPORTUNITY_DISCIPLINE: "Missed opportunities",
-  BEHAVIOUR_LABEL_PATTERN: "Flagged behaviour pattern",
-  OVERTRADING_DISCIPLINE: "Overtrading",
-  RISK_LIMIT_DISCIPLINE: "Risk-limit breaches",
-};
-
-function ruleKeyLabel(ruleKey: string): string {
-  return RULE_KEY_LABELS[ruleKey] ?? ruleKey;
-}

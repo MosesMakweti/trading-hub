@@ -3,7 +3,14 @@
 import { z } from "zod";
 
 import { requireUser } from "@/server/guards";
-import { generateReviewAnalysis, getLatestReviewAnalysis, type PersistedAnalystReportDTO } from "@/server/services/ai-review-analyst.service";
+import {
+  generateReviewAnalysis,
+  getLatestReviewAnalysis,
+  getReviewAnalysisById,
+  listReviewAnalysisHistory,
+  type AnalystReportHistoryEntryDTO,
+  type PersistedAnalystReportDTO,
+} from "@/server/services/ai-review-analyst.service";
 import type { AnalystFailureReason } from "@/domain/ai-review/types";
 
 const sessionIdSchema = z.string().trim().min(1);
@@ -40,4 +47,25 @@ export async function getLatestReviewAnalysisAction(sessionId: string): Promise<
   const parsed = sessionIdSchema.safeParse(sessionId);
   if (!parsed.success) return null;
   return getLatestReviewAnalysis(user.id, parsed.data);
+}
+
+/** Stage 20.1 §10 — the compact report-history list for the Analyst tab. */
+export async function listReviewAnalysisHistoryAction(sessionId: string): Promise<AnalystReportHistoryEntryDTO[]> {
+  const user = await requireUser();
+  const parsed = sessionIdSchema.safeParse(sessionId);
+  if (!parsed.success) return [];
+  return listReviewAnalysisHistory(user.id, parsed.data);
+}
+
+/**
+ * Stage 20.1 §11 — opens one historical (or current) report read-only.
+ * Always renders that report's OWN persisted evidence index (§16); never
+ * resolves its citations against a freshly rebuilt package.
+ */
+export async function getReviewAnalysisByIdAction(sessionId: string, reportId: string): Promise<PersistedAnalystReportDTO | null> {
+  const user = await requireUser();
+  const parsedSession = sessionIdSchema.safeParse(sessionId);
+  const parsedReport = sessionIdSchema.safeParse(reportId);
+  if (!parsedSession.success || !parsedReport.success) return null;
+  return getReviewAnalysisById(user.id, parsedSession.data, parsedReport.data);
 }

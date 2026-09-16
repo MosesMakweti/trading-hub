@@ -8,8 +8,9 @@ import {
   finalizeEdgeReview,
   startReplayReviewSession,
 } from "@/server/services/replay-review.service";
-import { createManualCommitment, setCommitmentDailyState } from "@/server/services/edge-review-commitment.service";
+import { continueCommitment, createManualCommitment, setCommitmentDailyState } from "@/server/services/edge-review-commitment.service";
 import { buildTraderReviewEvidencePackage } from "@/server/services/ai-review-evidence.service";
+import { AUTOMATIC_EVIDENCE_RULE_KEYS } from "@/domain/improvements/commitment-adherence";
 
 const userIds: string[] = [];
 
@@ -224,5 +225,170 @@ describe("buildTraderReviewEvidencePackage — stable fingerprint (§36, §51)",
     const after = computeEvidenceFingerprint(await buildTraderReviewEvidencePackage(user.id, session.id));
 
     expect(before).not.toBe(after);
+  });
+});
+
+describe("buildTraderReviewEvidencePackage — behaviorOccurrenceTrends (Stage 20.1 §2-6)", () => {
+  it("packages Stage 19.1's own behaviourOccurrence series, tagged DERIVED, without recomputing it", async () => {
+    const user = await makeUser("behavior-trend-basic");
+    const session = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    const commitment = await createManualCommitment(user.id, session.id, {
+      category: "EXECUTION",
+      title: "No stop widening",
+      description: null,
+      priority: "HIGH",
+      automaticRuleKey: "STOP_WIDENING_PATTERN",
+    });
+    await setCommitmentDailyState(user.id, commitment.id, new Date("2026-08-04T00:00:00.000Z"), "BREACHED");
+    await setCommitmentDailyState(user.id, commitment.id, new Date("2026-08-05T00:00:00.000Z"), "BREACHED");
+
+    const evidence = await buildTraderReviewEvidencePackage(user.id, session.id);
+    expect(evidence.behaviorOccurrenceTrends).toHaveLength(1);
+    const trend = evidence.behaviorOccurrenceTrends[0];
+    expect(trend.ruleKey).toBe("STOP_WIDENING_PATTERN");
+    expect(trend.label).toBe("Stop widening");
+    expect(trend.reviewType).toBe("WEEKLY");
+    expect(trend.points).toEqual([{ periodStart: "2026-08-03", breachCount: 2 }]);
+    expect(evidence.evidenceIndex[trend.evidenceId].strength).toBe("DERIVED");
+    expect(evidence.coverageSummary.longitudinalBehaviorAvailable).toBe(true);
+  });
+
+  it("flags NO_LONGITUDINAL_BEHAVIOR_DATA and reports unavailable coverage when no automatic-evidence rule has any breach", async () => {
+    const user = await makeUser("behavior-trend-empty");
+    const session = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+
+    const evidence = await buildTraderReviewEvidencePackage(user.id, session.id);
+    expect(evidence.behaviorOccurrenceTrends).toEqual([]);
+    expect(evidence.missingData).toContain("NO_LONGITUDINAL_BEHAVIOR_DATA");
+    expect(evidence.coverageSummary.longitudinalBehaviorAvailable).toBe(false);
+  });
+
+  it("keeps weekly and monthly series separate — a MONTHLY commitment's breaches never appear in a WEEKLY package (§4)", async () => {
+    const user = await makeUser("behavior-trend-weekly-monthly");
+    const monthlySession = await finalizedSession(user.id, { reviewType: "MONTHLY", startDate: "2026-08-01", endDate: "2026-08-31" });
+    const monthlyCommitment = await createManualCommitment(user.id, monthlySession.id, {
+      category: "EXECUTION",
+      title: "Monthly stop widening objective",
+      description: null,
+      priority: "HIGH",
+      automaticRuleKey: "STOP_WIDENING_PATTERN",
+    });
+    await setCommitmentDailyState(user.id, monthlyCommitment.id, new Date("2026-08-04T00:00:00.000Z"), "BREACHED");
+
+    const weeklySession = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    const evidence = await buildTraderReviewEvidencePackage(user.id, weeklySession.id);
+
+    expect(evidence.behaviorOccurrenceTrends).toEqual([]);
+    expect(evidence.missingData).toContain("NO_LONGITUDINAL_BEHAVIOR_DATA");
+  });
+
+  it("bounds behaviorOccurrenceTrends to the top 6 rules by total breach count and records truncation (§6)", async () => {
+    const user = await makeUser("behavior-trend-bounding");
+    const session = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    expect(AUTOMATIC_EVIDENCE_RULE_KEYS.length).toBe(7); // exercising every rule key at once, one over the cap of 6
+
+    for (const [i, ruleKey] of AUTOMATIC_EVIDENCE_RULE_KEYS.entries()) {
+      const commitment = await createManualCommitment(user.id, session.id, {
+        category: "EXECUTION",
+        title: `Objective for ${ruleKey}`,
+        description: null,
+        priority: "HIGH",
+        automaticRuleKey: ruleKey,
+      });
+      // Distinct, deterministic breach counts (1..7) so ranking is unambiguous —
+      // one breach per calendar day within the session's own 7-day window
+      // (2026-08-03..2026-08-09), never repeating a date on the same commitment.
+      for (let b = 0; b <= i; b++) {
+        await setCommitmentDailyState(user.id, commitment.id, new Date(`2026-08-${String(3 + b).padStart(2, "0")}T00:00:00.000Z`), "BREACHED");
+      }
+    }
+
+    const evidence = await buildTraderReviewEvidencePackage(user.id, session.id);
+    expect(evidence.behaviorOccurrenceTrends).toHaveLength(6);
+    // The lowest-total rule (index 0, RISK_LIMIT_DISCIPLINE with 1 breach... actually AUTOMATIC_EVIDENCE_RULE_KEYS[0]) is the one dropped.
+    const droppedRuleKey = AUTOMATIC_EVIDENCE_RULE_KEYS[0];
+    expect(evidence.behaviorOccurrenceTrends.some((t) => t.ruleKey === droppedRuleKey)).toBe(false);
+    const note = evidence.truncation.find((t) => t.field === "behaviorOccurrenceTrends");
+    expect(note).toEqual({ field: "behaviorOccurrenceTrends", totalAvailable: 7, included: 6, selectionRule: "highest total breach count" });
+  });
+});
+
+describe("buildTraderReviewEvidencePackage — commitmentBehaviorCrossChecks (Stage 20.1 §9)", () => {
+  it("flags CONTRADICTORY when a commitment reads perfect adherence but the same rule breached in this exact period (via a different lineage)", async () => {
+    const user = await makeUser("cross-check-contradictory");
+    const session = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+
+    const perfectCommitment = await createManualCommitment(user.id, session.id, {
+      category: "EXECUTION",
+      title: "Perfectly-followed stop discipline",
+      description: null,
+      priority: "HIGH",
+      automaticRuleKey: "STOP_WIDENING_PATTERN",
+    });
+    await setCommitmentDailyState(user.id, perfectCommitment.id, new Date("2026-08-04T00:00:00.000Z"), "FOLLOWED");
+    await setCommitmentDailyState(user.id, perfectCommitment.id, new Date("2026-08-05T00:00:00.000Z"), "FOLLOWED");
+    await setCommitmentDailyState(user.id, perfectCommitment.id, new Date("2026-08-06T00:00:00.000Z"), "FOLLOWED");
+
+    const otherCommitment = await createManualCommitment(user.id, session.id, {
+      category: "EXECUTION",
+      title: "A separate stop-widening objective",
+      description: null,
+      priority: "HIGH",
+      automaticRuleKey: "STOP_WIDENING_PATTERN",
+    });
+    await setCommitmentDailyState(user.id, otherCommitment.id, new Date("2026-08-07T00:00:00.000Z"), "BREACHED");
+
+    const evidence = await buildTraderReviewEvidencePackage(user.id, session.id);
+    const crossCheck = evidence.commitmentBehaviorCrossChecks.find((c) => c.commitmentTitle === "Perfectly-followed stop discipline");
+    expect(crossCheck).toBeDefined();
+    expect(crossCheck?.currentAdherencePercent).toBe(100);
+    expect(crossCheck?.signal).toBe("CONTRADICTORY");
+    expect(evidence.evidenceIndex[crossCheck!.evidenceId].strength).toBe("DERIVED");
+  });
+
+  it("flags CONVERGING when adherence is healthy and the rule's breach counts have been declining across periods", async () => {
+    const user = await makeUser("cross-check-converging");
+    const sessionA = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-07-27", endDate: "2026-08-02" });
+    const commitmentV1 = await createManualCommitment(user.id, sessionA.id, {
+      category: "EXECUTION",
+      title: "No stop widening",
+      description: null,
+      priority: "HIGH",
+      automaticRuleKey: "STOP_WIDENING_PATTERN",
+    });
+    for (const d of ["2026-07-27", "2026-07-28", "2026-07-29"]) {
+      await setCommitmentDailyState(user.id, commitmentV1.id, new Date(`${d}T00:00:00.000Z`), "BREACHED");
+    }
+
+    const sessionB = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    const commitmentV2 = await continueCommitment(user.id, commitmentV1.id, sessionB.id);
+    await setCommitmentDailyState(user.id, commitmentV2.id, new Date("2026-08-03T00:00:00.000Z"), "BREACHED");
+    for (const d of ["2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-08", "2026-08-09", "2026-08-10", "2026-08-11", "2026-08-12"]) {
+      await setCommitmentDailyState(user.id, commitmentV2.id, new Date(`${d}T00:00:00.000Z`), "FOLLOWED");
+    }
+
+    const evidence = await buildTraderReviewEvidencePackage(user.id, sessionB.id);
+    const trend = evidence.behaviorOccurrenceTrends.find((t) => t.ruleKey === "STOP_WIDENING_PATTERN");
+    expect(trend?.points.map((p) => p.breachCount)).toEqual([3, 1]);
+
+    const crossCheck = evidence.commitmentBehaviorCrossChecks.find((c) => c.ruleKey === "STOP_WIDENING_PATTERN");
+    expect(crossCheck?.currentAdherencePercent).toBe(90);
+    expect(crossCheck?.signal).toBe("CONVERGING");
+  });
+});
+
+describe("buildTraderReviewEvidencePackage — coverage summary (Stage 20.1 §17)", () => {
+  it("reports real included counts and availability flags, not derived from the evidence index", async () => {
+    const user = await makeUser("coverage-summary");
+    const session = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    await makeTrade(user.id, "2026-08-04", { validationState: "VALIDATED" });
+    await makeTrade(user.id, "2026-08-05", { validationState: "OVERRIDDEN" });
+    await createManualCommitment(user.id, session.id, { category: "EXECUTION", title: "x", description: null, priority: "HIGH" });
+
+    const evidence = await buildTraderReviewEvidencePackage(user.id, session.id);
+    expect(evidence.coverageSummary.tradesIncluded).toBe(2);
+    expect(evidence.coverageSummary.commitmentsIncluded).toBe(1);
+    expect(evidence.coverageSummary.replayAvailable).toBe(true); // an empty-but-present Replay comparison
+    expect(evidence.coverageSummary.psychologyAvailable).toBe(false);
   });
 });

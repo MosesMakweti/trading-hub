@@ -10,6 +10,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:db:setup": "node --experimental-strip-types scripts/test-db-setup.mjs",
+    "test:db:reset": "node --experimental-strip-types scripts/test-db-reset.mjs",
     "seed:prop-firms": "node --experimental-strip-types prisma/seed-prop-firms.mjs",
     "backfill:prop-firm-ledger": "node --experimental-strip-types prisma/backfill-prop-firm-ledger.mjs",
     "purge:twelvedata-cache": "node --experimental-strip-types scripts/purge-twelvedata-market-data-cache.mjs"

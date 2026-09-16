@@ -4,17 +4,15 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CandlestickChart, CircleCheck, Compass, FlaskConical, Loader2, NotebookText } from "lucide-react";
+import { CandlestickChart, CircleCheck, Compass, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RichTextEditor } from "@/components/plan/rich-text-editor";
 import { TAG_STYLES, colorForName } from "@/components/ui/tag";
-import { dateKeyToUtcDate, formatDateKeyLong, formatDateKeyShort } from "@/lib/date";
+import { formatDateKeyLong, formatDateKeyShort } from "@/lib/date";
 import { completeReplayReviewSession, startReplayReviewSession, updateReplayReviewNotes } from "@/actions/replay.actions";
 import { ReplayActualPeriodPanel } from "@/components/replay/replay-actual-period-panel";
-import { ReplayStrategyPanel } from "@/components/replay/replay-strategy-panel";
 import { ReplayMarketPanel } from "@/components/replay/replay-market-panel";
 import type { HistoricalStrategyContextDTO, ReplayReviewSessionDTO, ReplayTradeDTO } from "@/types/replay";
 
@@ -151,29 +149,34 @@ export function ReplayWorkspace({
               <CandlestickChart className="size-3.5" />
               Market Replay
             </TabsTrigger>
-            <TabsTrigger value="strategy" className="gap-1.5">
-              <FlaskConical className="size-3.5" />
-              Strategy / Process
-            </TabsTrigger>
             <TabsTrigger value="actual" className="gap-1.5">
               <Compass className="size-3.5" />
               Actual Period
-            </TabsTrigger>
-            <TabsTrigger value="notes" className="gap-1.5">
-              <NotebookText className="size-3.5" />
-              Review Notes
             </TabsTrigger>
           </TabsList>
         </div>
 
         <TabsContent value="market-replay" className="mt-4">
-          <ReplayMarketPanel session={session} assetOptions={assetOptions} strategies={strategies} initialReplayTrades={replayTrades} />
+          {/* Stage 21.1 §12 — Strategy, Market Plan, and Notes moved from
+           *  separate outer tabs into the chart's own collapsible right
+           *  panel (they compete with the chart less there, and Strategy/
+           *  Market Plan are now correctly time-pinned to the Replay
+           *  Clock's OWN current position rather than a fixed session-start
+           *  snapshot). */}
+          <ReplayMarketPanel
+            session={session}
+            assetOptions={assetOptions}
+            strategies={strategies}
+            initialReplayTrades={replayTrades}
+            historicalStrategyContext={historicalStrategyContext}
+            notes={session.notes}
+            notesSaved={notesSaved}
+            onSaveNotes={saveNotes}
+          />
 
-          {/* Stage 18 §6 — the inline, read-only Daily Market Plan panel
-           *  (rendered inside ReplayMarketPanel, keyed to the Clock's OWN
-           *  current day) replaces the need to read plan content here; this
-           *  strip stays only as a quick jump to any OTHER day's full
-           *  Journal page for deeper reference. */}
+          {/* A quick jump to any OTHER day's full Journal plan page for
+           *  deeper reference — the Market Plan tab above covers the
+           *  Clock's own current day inline. */}
           {dailyPlanDateKeys.length > 0 && (
             <div className="mt-4 space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase">
@@ -194,32 +197,8 @@ export function ReplayWorkspace({
           )}
         </TabsContent>
 
-        <TabsContent value="strategy" className="mt-4">
-          <ReplayStrategyPanel
-            initialContext={historicalStrategyContext}
-            strategyId={session.strategyId}
-            atTime={session.replayResumePoint?.currentTime ?? dateKeyToUtcDate(session.startDate).getTime()}
-          />
-        </TabsContent>
-
         <TabsContent value="actual" className="mt-4">
           <ReplayActualPeriodPanel baseline={session.actualBaselineSnapshot} />
-        </TabsContent>
-
-        <TabsContent value="notes" className="mt-4">
-          <div className="glass space-y-2 rounded-2xl p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                Observations, recurring mistakes, market behaviour noticed, questions to investigate.
-              </p>
-              <span className="text-[11px] text-muted-foreground/60">{notesSaved ? "Saved" : "Saving…"}</span>
-            </div>
-            <RichTextEditor
-              initialContent={session.notes}
-              placeholder="What did you notice reviewing this period?"
-              onSave={saveNotes}
-            />
-          </div>
         </TabsContent>
       </Tabs>
     </div>

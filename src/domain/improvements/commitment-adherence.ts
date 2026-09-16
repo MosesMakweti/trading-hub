@@ -325,6 +325,24 @@ export function hasAutomaticEvidenceRule(sourceFindingType: string | null): sour
   return sourceFindingType != null && (AUTOMATIC_EVIDENCE_RULE_KEYS as readonly string[]).includes(sourceFindingType);
 }
 
+/** Single canonical human-readable label per automatic evidence rule key —
+ *  reused by the Analytics → Improvement chart AND the Stage 20.1 AI
+ *  evidence package (`behaviorOccurrenceTrends`), so the trader and the
+ *  analyst never see two different names for the same rule. */
+export const RULE_KEY_LABELS: Record<AutomaticEvidenceRuleKey, string> = {
+  OVERRIDE_DISCIPLINE: "Discretionary overrides",
+  STOP_WIDENING_PATTERN: "Stop widening",
+  PREMATURE_CLOSE_PATTERN: "Premature close",
+  MISSED_OPPORTUNITY_DISCIPLINE: "Missed opportunities",
+  BEHAVIOUR_LABEL_PATTERN: "Flagged behaviour pattern",
+  OVERTRADING_DISCIPLINE: "Overtrading",
+  RISK_LIMIT_DISCIPLINE: "Risk-limit breaches",
+};
+
+export function ruleKeyLabel(ruleKey: string): string {
+  return hasAutomaticEvidenceRule(ruleKey) ? RULE_KEY_LABELS[ruleKey] : ruleKey;
+}
+
 // ── Continuation status (§4/§6 — deriving carry-forward from relationships, never a new status) ──
 
 /**

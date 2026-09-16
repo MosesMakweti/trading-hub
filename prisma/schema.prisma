@@ -60,6 +60,8 @@ model User {
 
   propFirmImportBatches          PropFirmImportBatch[]
   propFirmImportMappingTemplates PropFirmImportMappingTemplate[]
+
+  marketDataImports MarketDataImport[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -959,7 +961,17 @@ model TradeAccountAllocation {
   tradeId          String
   trade            Trade          @relation(fields: [tradeId], references: [id], onDelete: Cascade)
   tradingAccountId String
-  tradingAccount   TradingAccount @relation(fields: [tradingAccountId], references: [id])
+  // Stage 20.3 — matches `trade` above: an allocation with no surviving
+  // account is meaningless, never a historical record worth orphaning.
+  // Confirmed domain-correct (not just added for tests) against a real,
+  // reachable production path: `deleteDataSection("accounts", ...)`
+  // (data-management.service.ts) hard-deletes a user's non-Performance
+  // TradingAccount rows WITHOUT first deleting their Trades, and its own
+  // comment already assumed "(their allocations cascade)" — which the
+  // schema didn't actually implement until now. `TradeAccountAllocation`
+  // is a pure leaf table (nothing else has a FK to it), so cascading it
+  // here is safe.
+  tradingAccount   TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
   riskInputType    RiskInputType
   riskValue        Decimal        @db.Decimal(14, 2)
   closingPnlGross  Decimal        @db.Decimal(14, 2)
@@ -2180,6 +2192,60 @@ enum DistanceUnit {
   TICK
   PRICE
   PERCENT
+}
+
+// ── MT5 historical market-data import (Stage 21.3A) ─────────────────────────
+// Metadata/index only — the normalized candle DATA itself lives in R2
+// (`lib/mt5-candle-storage.ts`), never as Prisma rows (a multi-year M1
+// import is millions of candles; see that module's own doc comment for why
+// chunked object storage was chosen over one row per candle). This row is
+// what `Mt5ImportedHistoricalMarketDataProvider` reads to know WHICH R2
+// chunks exist for a (user, canonical symbol) pair and what range they cover.
+enum Mt5ImportStatus {
+  READY
+  READY_WITH_WARNINGS
+  NEEDS_USER_INPUT
+  INVALID
+}
+
+model MarketDataImport {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // "MT5" today — a plain string (not an enum) so MT4/cTrader can plug in
+  // later without a migration (Stage 21.3A §3's own explicit ask).
+  sourceType  String
+  sourceLabel String? // trader-supplied broker/account label, e.g. "IC Markets Raw"
+
+  // Both preserved always — never destroy the original broker identity (§10).
+  sourceSymbol    String
+  canonicalSymbol String
+
+  nativeTimeframe String // Timeframe ("1m", "5m", ...) — the file's OWN resolution, never claimed finer than it is (§4)
+
+  // TimeConvention (types.ts) as persisted JSON — {kind:"UTC"} |
+  // {kind:"FIXED_OFFSET",offsetMinutes} | {kind:"IANA_ZONE",zone}. Never
+  // silently re-derived; an import's timestamps were normalized ONCE under
+  // this exact convention (§7/§8).
+  timeConventionJson Json
+
+  rangeFrom DateTime
+  rangeTo   DateTime
+
+  originalFileName String?
+
+  // MarketDataQualityReport (quality-analysis.ts) as persisted JSON — the
+  // exact report computed at import time, never re-derived later (§13).
+  qualitySummaryJson Json
+
+  status               Mt5ImportStatus
+  normalizationVersion Int             @default(1)
+  candleCount          Int
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, canonicalSymbol, nativeTimeframe])
 }
 
 model TradePlanScreenshot {
@@ -3453,6 +3519,13 @@ model AiReviewAnalystReport {
   // stability) — the evidence drawer reads from THIS, never a live
   // re-derivation, for a persisted report.
   evidenceIndexJson      Json
+  // Stage 20.1 §17 — the small `EvidenceCoverageSummary` computed once at
+  // generation time, persisted verbatim for the same historical-stability
+  // reason as `evidenceIndexJson` above. Nullable only because reports
+  // generated before Stage 20.1 predate this column; the UI treats a null
+  // here as "coverage summary unavailable for this older report," never as
+  // zero coverage.
+  coverageSummaryJson    Json?
 
   generatedAt DateTime @default(now())
 

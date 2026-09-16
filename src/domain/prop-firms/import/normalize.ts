@@ -101,53 +101,12 @@ export function normalizeSymbol(raw: string): string {
   return s;
 }
 
-function getTimezoneOffsetMs(timeZone: string, atUtc: Date): number {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  const parts: Record<string, string> = {};
-  for (const part of formatter.formatToParts(atUtc)) {
-    if (part.type !== "literal") parts[part.type] = part.value;
-  }
-  const asIfUtc = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour),
-    Number(parts.minute),
-    Number(parts.second),
-  );
-  return asIfUtc - atUtc.getTime();
-}
-
-/** Converts wall-clock components in `timeZone` (an IANA zone, e.g.
- *  "America/New_York", "Etc/GMT-2") to the correct UTC instant, including
- *  DST — via the standard two-pass Intl.DateTimeFormat round-trip (native,
- *  no timezone-database dependency). The rare DST-transition-hour ambiguity
- *  (at most once a year, for one hour) is an acceptable edge case for a
- *  broker-statement importer. */
-export function localWallClockToUtc(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  second: number,
-  timeZone: string,
-): Date {
-  const naiveUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
-  const offset1 = getTimezoneOffsetMs(timeZone, new Date(naiveUtcMs));
-  const candidateMs = naiveUtcMs - offset1;
-  const offset2 = getTimezoneOffsetMs(timeZone, new Date(candidateMs));
-  return new Date(naiveUtcMs - offset2);
-}
+// Stage 21.3A — the IANA wall-clock<->UTC conversion this file always used
+// now lives in `@/lib/timezone` (shared with the MT5 market-data importer).
+// Re-exported here so nothing else importing `localWallClockToUtc` FROM
+// this module needs to change.
+export { localWallClockToUtc } from "@/lib/timezone";
+import { localWallClockToUtc } from "@/lib/timezone";
 
 const MT_DATETIME_PATTERN = /^(\d{4})[.\-/](\d{2})[.\-/](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/;
 const MT_DATE_ONLY_PATTERN = /^(\d{4})[.\-/](\d{2})[.\-/](\d{2})$/;

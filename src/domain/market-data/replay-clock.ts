@@ -21,7 +21,12 @@
 import type { Timeframe } from "@/domain/market-data/timeframe";
 
 export type PlaybackState = "PAUSED" | "PLAYING" | "FINISHED";
-export const PLAYBACK_SPEEDS = [1, 2, 5, 10] as const;
+/** Stage 21.1 §15 — 0.5x added below 1x for reading dense/volatile
+ *  sessions candle-by-candle without fully pausing. Meaning is always
+ *  deterministic relative to Replay Clock advancement (one real candle
+ *  per tick, tick interval scaled by speed) — never tied to browser frame
+ *  rate; see `BASE_TICK_MS` in replay-market-panel.tsx. */
+export const PLAYBACK_SPEEDS = [0.5, 1, 2, 5, 10] as const;
 export type PlaybackSpeed = (typeof PLAYBACK_SPEEDS)[number];
 
 export interface ReplayClockState {

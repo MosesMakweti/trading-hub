@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildHigherTimeframeView, visibleCandles } from "@/domain/market-data/visible-candles";
+import { TIMEFRAMES, timeframeToMs } from "@/domain/market-data/timeframe";
 import type { Candle } from "@/domain/market-data/candle";
 
 const MIN = 60_000;
@@ -40,6 +41,17 @@ describe("visibleCandles — the no-hindsight rule (§11-12)", () => {
   it("an empty candle list is always safely visible-empty", () => {
     expect(visibleCandles([], DAY_START + 1000, "5m")).toEqual([]);
   });
+});
+
+describe("visibleCandles — exact-boundary proof for EVERY canonical timeframe (Stage 21.2 §13)", () => {
+  for (const tf of TIMEFRAMES) {
+    it(`${tf}: hidden 1ms before close, visible at exact close`, () => {
+      const c: Candle = { timestamp: DAY_START, open: 100, high: 101, low: 99, close: 100, volume: null };
+      const closeTime = DAY_START + timeframeToMs(tf);
+      expect(visibleCandles([c], closeTime - 1, tf)).toHaveLength(0);
+      expect(visibleCandles([c], closeTime, tf)).toHaveLength(1);
+    });
+  }
 });
 
 describe("buildHigherTimeframeView — higher-timeframe future-leakage prevention (§17)", () => {
@@ -90,6 +102,36 @@ describe("buildHigherTimeframeView — higher-timeframe future-leakage preventio
     const view = buildHigherTimeframeView([], DAY_START + 10 * MIN, "1m", "1h");
     expect(view.closed).toEqual([]);
     expect(view.partial).toBeNull();
+  });
+});
+
+describe("chart-vs-execution consistency (Stage 21.2 §14-15) — both consumers must read the SAME canonical facts", () => {
+  it("the chart's last closed display-timeframe candle is built from EXACTLY the 1m candles the execution engine would also see, never a different or leaked set", () => {
+    // One hour of 1m base candles, strictly increasing price.
+    const base: Candle[] = [];
+    for (let m = 0; m < 60; m += 1) {
+      const t = Date.UTC(2026, 7, 3, 9, m, 0);
+      const price = 100 + m;
+      base.push({ timestamp: t, open: price, high: price + 0.5, low: price - 0.5, close: price, volume: null });
+    }
+    const replayTime = Date.UTC(2026, 7, 3, 9, 15, 0); // exactly closes the 09:00-09:15 15m bucket
+
+    // Execution's own data source (replay-market-panel.tsx's advanceExecutionIfNeeded): 1m base, no-hindsight-filtered.
+    const executionFeed = visibleCandles(base, replayTime, "1m");
+    // The chart's own data source at a 15m display timeframe.
+    const chartView = buildHigherTimeframeView(base, replayTime, "1m", "15m");
+
+    expect(executionFeed).toHaveLength(15); // exactly the 09:00..09:14 1m candles
+    expect(chartView.closed).toHaveLength(1); // exactly the one now-closed 09:00-09:15 15m candle
+    // The displayed 15m candle's OHLC must be EXACTLY the aggregation of the
+    // SAME 15 one-minute candles the execution engine independently reads —
+    // proving the two consumers can never diverge, since both are pure
+    // functions of the identical `base` array.
+    const displayed = chartView.closed[0];
+    expect(displayed.open).toBe(executionFeed[0].open);
+    expect(displayed.close).toBe(executionFeed[executionFeed.length - 1].close);
+    expect(displayed.high).toBe(Math.max(...executionFeed.map((c) => c.high)));
+    expect(displayed.low).toBe(Math.min(...executionFeed.map((c) => c.low)));
   });
 });
 

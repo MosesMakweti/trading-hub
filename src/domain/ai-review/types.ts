@@ -156,6 +156,12 @@ export interface ReplayComparisonEvidence {
   discrepancy: DiscrepancyEvidence;
 }
 
+/** Shared with `BehaviorOccurrenceTrendEntry.currentTrend` (§Stage 20.1 §3)
+ *  — the exact same trend vocabulary `classifyTrend` already produces
+ *  (`domain/improvements/commitment-adherence.ts`), never a second
+ *  parallel definition. */
+export type EvidenceTrend = "IMPROVING" | "STABLE" | "DECLINING" | "INSUFFICIENT_DATA";
+
 export interface CommitmentEvidenceEntry {
   evidenceId: string;
   title: string;
@@ -164,9 +170,16 @@ export interface CommitmentEvidenceEntry {
   currentAdherencePercent: number | null;
   currentApplicableObservations: number;
   previousAdherencePercent: number | null;
-  trend: "IMPROVING" | "STABLE" | "DECLINING" | "INSUFFICIENT_DATA";
+  trend: EvidenceTrend;
   periodsActive: number;
   resolutionEligible: boolean;
+  /** The commitment's stable automatic-evidence rule key
+   *  (`AutomaticEvidenceRuleKey`), when this commitment is backed by one —
+   *  null for a manual/unmapped commitment. Lets the analyst (and
+   *  `commitmentBehaviorCrossChecks`) pair a commitment with its own
+   *  independent `behaviorOccurrenceTrends` series without guessing from
+   *  title text (Stage 20.1 §9). */
+  ruleKey: string | null;
 }
 
 export interface ReflectionEntry {
@@ -214,6 +227,111 @@ export interface TruncationNote {
   selectionRule: string;
 }
 
+// ── Longitudinal behavior occurrence (Stage 20.1 §2-6) ──────────────────────
+
+export interface BehaviorOccurrenceTrendPoint {
+  /** dateKey — the review period's own start date, same series Stage 19.1
+   *  already keys its per-period breach counts by. */
+  periodStart: string;
+  breachCount: number;
+}
+
+/**
+ * One automatic-evidence rule's longitudinal, review-type-scoped breach
+ * series (§2-4) — packaged directly from
+ * `buildImprovementAnalytics(...).behaviourOccurrence`, never recomputed.
+ * Weekly and monthly are NEVER blended into one series: `reviewType` here
+ * is always the evidence package's own period.reviewType, matching how
+ * `buildImprovementAnalytics` was invoked (§4).
+ *
+ * Strength: DERIVED, not OBJECTIVE (§5) — each point is a deterministic
+ * AGGREGATION (a count of BREACHED daily observations within one review
+ * period) one layer removed from the individual OBJECTIVE
+ * FOLLOWED/BREACHED facts underneath it, exactly the same OBJECTIVE→DERIVED
+ * boundary a commitment's own `trend` already crosses. The evidence item
+ * for each entry is tagged DERIVED accordingly.
+ */
+export interface BehaviorOccurrenceTrendEntry {
+  evidenceId: string;
+  ruleKey: string;
+  label: string;
+  reviewType: "WEEKLY" | "MONTHLY";
+  /** Bounded, most-recent-first is NOT how these are stored — chronological
+   *  ascending (oldest -> newest), matching the source series and easiest
+   *  for both a human and the model to read as a left-to-right trend. */
+  points: BehaviorOccurrenceTrendPoint[];
+  /** Reused verbatim from the matching active/resulted commitment's own
+   *  lineage `trend` (never recomputed here) when a commitment currently
+   *  backs this exact rule key — null when no commitment tracks it right
+   *  now, in which case the analyst must not assert a trend at all (§7-8:
+   *  "insufficient evidence" is a valid, expected answer). */
+  currentTrend: EvidenceTrend | null;
+  /** The applicable-observations denominator behind `currentTrend`, from
+   *  the same matching commitment — lets the analyst recognize a
+   *  small-sample trend rather than treat 1-2 observations as proof. */
+  currentApplicableObservations: number | null;
+}
+
+export type CommitmentBehaviorSignal = "CONVERGING" | "CONTRADICTORY" | "NEUTRAL";
+
+/**
+ * Pairs one active commitment's own adherence with its rule's independent
+ * `behaviorOccurrenceTrends` series (Stage 20.1 §9) so the analyst can
+ * compare "what the trader committed to" against "what the system
+ * independently observed" without recomputing either side itself.
+ *
+ * `signal` is computed HERE, deterministically and conservatively — never
+ * invented by the model:
+ * - CONTRADICTORY: current adherence is a perfect 100% (>=3 applicable
+ *   observations) for THIS period, yet the paired trend series still has a
+ *   breach recorded for this EXACT SAME period (possible because the
+ *   trend aggregates every lineage ever tagged with this rule key, not
+ *   only the currently-active one — e.g. an older, separate commitment
+ *   for the same rule breached this period). Deliberately period-aligned,
+ *   not merely "the most recent tracked point": the underlying series
+ *   only records periods with >=1 breach, so a period with zero breaches
+ *   never appears at all — comparing against the bare last array entry
+ *   would flag a stale, long-past breach as if it contradicted today. A
+ *   real, non-stale structural discrepancy worth surfacing honestly,
+ *   never silently resolved either way.
+ * - CONVERGING: current adherence is otherwise healthy (>=70%, >=3
+ *   applicable observations) AND the paired trend's breach counts are
+ *   non-increasing across its available points with the most recent point
+ *   lower than the first — supportive, convergent evidence.
+ * - NEUTRAL: neither condition is met (including simply not enough trend
+ *   points to say anything) — the analyst must not manufacture a signal
+ *   Traditorium itself doesn't have evidence for.
+ */
+export interface CommitmentBehaviorCrossCheckEntry {
+  evidenceId: string;
+  commitmentTitle: string;
+  ruleKey: string;
+  currentAdherencePercent: number | null;
+  currentApplicableObservations: number;
+  /** Oldest -> newest, copied from the paired `BehaviorOccurrenceTrendEntry.points`. */
+  recentBreachCounts: number[];
+  signal: CommitmentBehaviorSignal;
+}
+
+/**
+ * Stage 20.1 §17 — a small, deterministic summary of what evidence actually
+ * went into the package, computed once at build time from real counts (not
+ * derived from the flat `evidenceIndex`, which loses fidelity — e.g. not
+ * every trade gets its own evidence item). Persisted alongside a generated
+ * report (never re-derived for a historical report) so the coverage line
+ * a trader sees on an old report always describes THAT report's evidence,
+ * never today's.
+ */
+export interface EvidenceCoverageSummary {
+  tradesIncluded: number;
+  behavioralEventsIncluded: number;
+  discrepancyEventsIncluded: number;
+  commitmentsIncluded: number;
+  replayAvailable: boolean;
+  psychologyAvailable: boolean;
+  longitudinalBehaviorAvailable: boolean;
+}
+
 /**
  * The full, provider-independent evidence package for one review period
  * (§5, §10). Deliberately NOT a Prisma serialization — every field here is
@@ -243,6 +361,13 @@ export interface TraderReviewEvidencePackage {
   };
   reflections: ReflectionEvidence;
   historicalContext: HistoricalContext;
+  /** Stage 20.1 §2-6 — bounded, deterministically-selected longitudinal
+   *  occurrence trends reused from Stage 19.1's canonical read model. */
+  behaviorOccurrenceTrends: BehaviorOccurrenceTrendEntry[];
+  /** Stage 20.1 §9. */
+  commitmentBehaviorCrossChecks: CommitmentBehaviorCrossCheckEntry[];
+  /** Stage 20.1 §17 — persisted verbatim alongside a generated report. */
+  coverageSummary: EvidenceCoverageSummary;
   /** Deterministic, explicit unavailable-category flags (§27) — the analyst
    *  must never infer missing information silently. */
   missingData: string[];

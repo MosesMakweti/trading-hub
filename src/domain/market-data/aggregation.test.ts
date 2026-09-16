@@ -70,3 +70,43 @@ describe("aggregateCandles", () => {
     expect(agg).toEqual({ timestamp: H, open: 100, high: 103, low: 97, close: 101, volume: 7 });
   });
 });
+
+/**
+ * Stage 21.2 §10/§11 — explicit per-timeframe proof for every canonical
+ * derived timeframe (30m/4h/1D specifically; 5m/15m/1h are already covered
+ * above and share the exact same code path, since `aggregateCandles` is
+ * timeframe-agnostic). Confirms both the OHLCV math AND the exact UTC
+ * bucket-boundary alignment for each.
+ */
+describe("aggregation — explicit M30/H4/D1 proof (Stage 21.2 §10-11)", () => {
+  it("M30: buckets align to :00/:30 past the hour (UTC-epoch-aligned, not calendar-local)", () => {
+    const oneMin: Candle[] = [];
+    for (let m = 0; m < 60; m += 1) oneMin.push(candle(m, 100 + m, 100 + m + 0.5, 100 + m - 0.5, 100 + m));
+    const buckets = aggregateCandles(oneMin, "30m");
+    expect(buckets.map((b) => b.timestamp)).toEqual([H, H + 30 * MIN]);
+    expect(buckets[0]).toEqual({ timestamp: H, open: 100, high: 129.5, low: 99.5, close: 129, volume: null });
+    expect(buckets[1]).toEqual({ timestamp: H + 30 * MIN, open: 130, high: 159.5, low: 129.5, close: 159, volume: null });
+  });
+
+  it("H4: buckets align to every 4th hour from UTC epoch (00:00/04:00/08:00/... UTC, since 1970-01-01T00:00Z is itself a 4h boundary)", () => {
+    // H (2026-08-03 10:00 UTC) is NOT a 4h-aligned instant — the enclosing
+    // bucket must be 08:00-12:00 UTC, not 10:00-14:00.
+    const fourHBucketStart = Date.UTC(2026, 7, 3, 8, 0, 0);
+    expect(bucketStart(H, "4h")).toBe(fourHBucketStart);
+
+    const oneMin: Candle[] = [candle(0, 100, 101, 99, 100), candle(4 * 60, 200, 201, 199, 200)]; // 10:00 and 14:00 — different H4 buckets
+    const buckets = aggregateCandles(oneMin, "4h");
+    expect(buckets.map((b) => b.timestamp)).toEqual([fourHBucketStart, fourHBucketStart + 4 * 60 * MIN]);
+  });
+
+  it("D1: buckets align to UTC midnight, never a local calendar day", () => {
+    const dayStart = Date.UTC(2026, 7, 3, 0, 0, 0);
+    // A candle at 23:59 UTC and one at 00:01 UTC the next day must fall in DIFFERENT D1 buckets.
+    const lateOnDay0 = { timestamp: dayStart + 23 * 60 * MIN + 59 * MIN, open: 100, high: 101, low: 99, close: 100, volume: null };
+    const earlyOnDay1 = { timestamp: dayStart + 24 * 60 * MIN + 1 * MIN, open: 200, high: 201, low: 199, close: 200, volume: null };
+    const buckets = aggregateCandles([lateOnDay0, earlyOnDay1], "1D");
+    expect(buckets.map((b) => b.timestamp)).toEqual([dayStart, dayStart + 24 * 60 * MIN]);
+    expect(buckets[0].close).toBe(100);
+    expect(buckets[1].open).toBe(200);
+  });
+});

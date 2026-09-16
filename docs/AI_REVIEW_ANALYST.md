@@ -1,4 +1,4 @@
-# Traditorium AI Review Analyst (Stage 20)
+# Traditorium AI Review Analyst (Stage 20, hardened in Stage 20.1)
 
 ## What Traditorium AI does
 
@@ -137,6 +137,12 @@ convention, and a `NullTraderReviewAnalystProvider` fallback for
 environments without `ANTHROPIC_API_KEY` (mirroring `NullRecognitionProvider`).
 Exactly one real provider is implemented in Stage 20
 (`ClaudeTraderReviewAnalystProvider`); no other AI vendor is introduced.
+The model id is server-configurable (`ANTHROPIC_ANALYST_MODEL`, default
+`claude-opus-5`) — a historical report always persists the exact model
+name used at generation time (`row.model`), so changing this env var never
+silently rewrites what an old report says it was generated with. See
+`AI_ANALYST_PRODUCTION_READINESS.md` for the readiness state model and
+live-acceptance checklist.
 
 ## Failure states
 
@@ -165,3 +171,81 @@ explicitly deferred — Stage 20 is a structured report only. No model
 training, fine-tuning, embeddings, or vector database is used or planned
 here; a future conversational layer would consume this same structured
 evidence layer rather than replacing it.
+
+## Stage 20.1 — longitudinal behavior, report history, production hardening
+
+Stage 20.1 is a focused completion/hardening pass on the Stage 20
+architecture above — no redesign, only extension. See
+`AI_ANALYST_PRODUCTION_READINESS.md` for the provider readiness model and
+live-acceptance checklist.
+
+### Longitudinal behavior evidence
+
+The evidence package gained two new sections, both reused directly from
+Stage 19.1's canonical `buildImprovementAnalytics` read model — nothing
+here recomputes adherence or breach counts independently:
+
+- **`behaviorOccurrenceTrends`** — one entry per automatic-evidence rule
+  key (`AUTOMATIC_EVIDENCE_RULE_KEYS`, e.g. stop-widening, overtrading),
+  each with a review-type-scoped, chronological breach-count series
+  (`behaviourOccurrence` packaged verbatim), a human-readable label
+  (`ruleKeyLabel` — the SAME map the Analytics → Improvement chart uses,
+  in `domain/improvements/commitment-adherence.ts`), and, when a
+  currently-active commitment backs that exact rule, its own lineage
+  `trend`/`currentApplicableObservations` copied verbatim (never
+  recomputed). Bounded to the top 6 rules by total breach count and the 8
+  most recent periods per rule, with every truncation recorded in
+  `truncation`. Weekly and monthly are never blended — the section is
+  always scoped to the review session's own `reviewType`, exactly as
+  `buildImprovementAnalytics` was already called.
+  - **Strength: DERIVED, not OBJECTIVE.** Each point is a deterministic
+    AGGREGATION (a count of BREACHED daily observations within one review
+    period) one layer removed from the individual OBJECTIVE
+    FOLLOWED/BREACHED facts underneath it — the same OBJECTIVE→DERIVED
+    boundary a commitment's own `trend` already crosses.
+- **`commitmentBehaviorCrossChecks`** — pairs one active commitment's own
+  adherence with its rule's `behaviorOccurrenceTrends` series, plus a
+  deterministic `signal`: `CONVERGING` (healthy adherence + a declining
+  breach trend), `CONTRADICTORY` (a perfect 100% current-period adherence
+  yet the SAME period still shows a breach — possible because the trend
+  aggregates every lineage ever tagged with that rule, e.g. a separate
+  historical commitment for the same rule), or `NEUTRAL`. Deliberately
+  period-aligned rather than "the last array entry" — the underlying
+  series only records periods with ≥1 breach, so comparing against the
+  bare last point would flag a stale, long-past breach as a live
+  contradiction. The model is told (system prompt) to describe a
+  `CONTRADICTORY` signal honestly, never to manufacture a reconciliation.
+
+The system prompt gained matching safeguards: weekly/monthly series are
+never compared as if the same duration; a trend with `currentTrend`
+`INSUFFICIENT_DATA`/`null` or fewer than 3 points must be described as
+insufficient evidence; absolute claims ("you always," "you never," "you
+have solved this," "this is now fixed") are disallowed in favor of
+"in the observed periods," "the recent trend suggests," "this pattern has
+decreased," or "there is still limited evidence."
+
+### Evidence coverage summary
+
+`EvidenceCoverageSummary` (trades/behavioral events/discrepancy
+events/commitments included, Replay/psychology/longitudinal-behavior
+availability) is computed once at generation time from real counts (not
+derived from the flat `evidenceIndex`, which loses fidelity) and persisted
+alongside the report (`coverageSummaryJson`, nullable for pre-Stage-20.1
+rows) — a historical report always shows ITS OWN coverage, never today's.
+
+### Report history
+
+`listReviewAnalysisHistory`/`getReviewAnalysisById` (service) and their
+matching actions expose every past generation for a session, newest
+first. Opening an older generation renders its own persisted
+`reportJson`/`evidenceIndexJson`/`coverageSummaryJson` exactly as
+generated — evidence citations are NEVER resolved against a live rebuilt
+package, and only the single most recent row (`isCurrent`) is ever
+eligible for the `stale` flag; an older generation is simply "a previous
+generation," never "stale." The Analyst tab shows a collapsible "Previous
+Generations" list, a "Viewing a previous generation" banner with a "Back
+to current" action when browsing history, and swaps the primary button's
+label between "Generate Review Analysis" (no report yet), "Regenerate"
+(current report is fresh), and "Generate Updated Analysis" (current
+report is stale) — regeneration is always an explicit click, never
+automatic.

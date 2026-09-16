@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { prisma } from "@/server/db";
 import { completeReplayReviewSession, createReplayReviewSession, finalizeEdgeReview, startReplayReviewSession } from "@/server/services/replay-review.service";
-import { generateReviewAnalysis, getLatestReviewAnalysis } from "@/server/services/ai-review-analyst.service";
+import { generateReviewAnalysis, getLatestReviewAnalysis, getReviewAnalysisById, listReviewAnalysisHistory } from "@/server/services/ai-review-analyst.service";
 import type { AnalystOutcome, TraderReviewAnalystProvider, TraderReviewAnalystReport } from "@/domain/ai-review/types";
 
 const userIds: string[] = [];
@@ -172,5 +172,97 @@ describe("getLatestReviewAnalysis — access control and staleness (§36, §53)"
 
     const staleNow = await getLatestReviewAnalysis(user.id, session.id);
     expect(staleNow?.stale).toBe(true);
+  });
+
+  it("persists the evidence coverage summary alongside the report", async () => {
+    const user = await makeUser("coverage-summary-persist");
+    const session = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    await generateReviewAnalysis(user.id, session.id, new FakeSuccessProvider());
+
+    const latest = await getLatestReviewAnalysis(user.id, session.id);
+    expect(latest?.coverageSummary).not.toBeNull();
+    expect(latest?.coverageSummary?.replayAvailable).toBe(true);
+  });
+});
+
+describe("listReviewAnalysisHistory — ordering (Stage 20.1 §10)", () => {
+  it("lists every generation newest-first, marking only the most recent as current", async () => {
+    const user = await makeUser("history-ordering");
+    const session = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+
+    const first = await generateReviewAnalysis(user.id, session.id, new FakeSuccessProvider(stubReport("First.")));
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await generateReviewAnalysis(user.id, session.id, new FakeSuccessProvider(stubReport("Second.")));
+    if (!first.success || !second.success) throw new Error("unreachable");
+
+    const history = await listReviewAnalysisHistory(user.id, session.id);
+    expect(history.map((h) => h.id)).toEqual([second.report.id, first.report.id]);
+    expect(history[0].isCurrent).toBe(true);
+    expect(history[1].isCurrent).toBe(false);
+  });
+
+  it("returns an empty list when nothing has been generated yet", async () => {
+    const user = await makeUser("history-empty");
+    const session = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    expect(await listReviewAnalysisHistory(user.id, session.id)).toEqual([]);
+  });
+});
+
+describe("getReviewAnalysisById — historical immutability (Stage 20.1 §11, §12, §16)", () => {
+  it("renders an older generation's own persisted report/evidence, never the newer one's", async () => {
+    const user = await makeUser("historical-immutable");
+    const session = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+
+    const first = await generateReviewAnalysis(user.id, session.id, new FakeSuccessProvider(stubReport("First.")));
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await generateReviewAnalysis(user.id, session.id, new FakeSuccessProvider(stubReport("Second.")));
+    if (!first.success || !second.success) throw new Error("unreachable");
+
+    const fetchedFirst = await getReviewAnalysisById(user.id, session.id, first.report.id);
+    expect(fetchedFirst?.report.periodSummary).toBe("First.");
+    expect(fetchedFirst?.isCurrent).toBe(false);
+    expect(fetchedFirst?.stale).toBe(false); // a historical report is "a previous generation," never "stale"
+
+    const fetchedSecond = await getReviewAnalysisById(user.id, session.id, second.report.id);
+    expect(fetchedSecond?.report.periodSummary).toBe("Second.");
+    expect(fetchedSecond?.isCurrent).toBe(true);
+  });
+
+  it("a live evidence change after generation never mutates an older persisted report's evidence index", async () => {
+    const user = await makeUser("historical-live-change");
+    const session = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+
+    const first = await generateReviewAnalysis(user.id, session.id, new FakeSuccessProvider(stubReport("Before new trade.")));
+    if (!first.success) throw new Error("unreachable");
+    const evidenceIndexBefore = JSON.stringify(first.report.evidenceIndex);
+
+    await prisma.trade.create({
+      data: {
+        userId: user.id,
+        tradeDate: new Date("2026-08-04T00:00:00.000Z"),
+        executionMinutes: 5,
+        direction: "LONG",
+        higherTimeframeBias: "BULLISH",
+        biasConfidencePercent: 80,
+        assetSymbol: "XAUUSD",
+        actualRR: 1,
+      },
+    });
+    await generateReviewAnalysis(user.id, session.id, new FakeSuccessProvider(stubReport("After new trade.")));
+
+    const refetchedFirst = await getReviewAnalysisById(user.id, session.id, first.report.id);
+    expect(refetchedFirst?.report.periodSummary).toBe("Before new trade.");
+    expect(JSON.stringify(refetchedFirst?.evidenceIndex)).toBe(evidenceIndexBefore);
+    expect(refetchedFirst?.stale).toBe(false);
+  });
+
+  it("returns null for a report id belonging to a different session or user", async () => {
+    const owner = await makeUser("historical-owner");
+    const other = await makeUser("historical-other");
+    const session = await finalizedSession(owner.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    const generated = await generateReviewAnalysis(owner.id, session.id, new FakeSuccessProvider());
+    if (!generated.success) throw new Error("unreachable");
+
+    expect(await getReviewAnalysisById(other.id, session.id, generated.report.id)).toBeNull();
   });
 });

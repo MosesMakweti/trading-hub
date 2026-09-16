@@ -5,10 +5,14 @@ import { tiptapToPlainText } from "@/lib/tiptap-text";
 import { getWeeklyReview } from "@/server/services/edge.service";
 import { getReplayComparison } from "@/server/services/replay-comparison.service";
 import { buildImprovementAnalytics, getCommitmentLineage, listCommitmentsForSession } from "@/server/services/edge-review-commitment.service";
+import { ruleKeyLabel } from "@/domain/improvements/commitment-adherence";
 import type {
+  BehaviorOccurrenceTrendEntry,
   BehaviouralEvidenceEntry,
+  CommitmentBehaviorCrossCheckEntry,
   CommitmentEvidenceEntry,
   DiscrepancyEvidenceEntry,
+  EvidenceCoverageSummary,
   EvidenceItem,
   PerformanceSummary,
   ReflectionEntry,
@@ -18,7 +22,7 @@ import type {
   TruncationNote,
 } from "@/domain/ai-review/types";
 
-const PACKAGE_VERSION = "1.0.0";
+const PACKAGE_VERSION = "1.1.0";
 
 // Deterministic caps (§13) — every truncation is recorded in `truncation`
 // (§14), never silently applied.
@@ -28,6 +32,12 @@ const MAX_DISCREPANCY_ENTRIES_PER_CATEGORY = 10;
 const MAX_PSYCHOLOGY_ENTRIES = 15;
 const MAX_DAILY_REFLECTIONS = 10;
 const MAX_TRADE_REFLECTIONS = 10;
+/** Stage 20.1 §6 — "top recurring negative rules," never every rule ever
+ *  tracked. Selection rule: highest total breach count across the rule's
+ *  available points, ruleKey ascending as a deterministic tie-break. */
+const MAX_BEHAVIOR_TREND_RULES = 6;
+/** Stage 20.1 §6 — most recent periods only, per included rule. */
+const MAX_BEHAVIOR_TREND_POINTS = 8;
 
 type EvidenceIndexBuilder = Record<string, EvidenceItem>;
 
@@ -304,6 +314,7 @@ export async function buildTraderReviewEvidencePackage(userId: string, sessionId
       trend: lineage.trend,
       periodsActive: lineage.segments.length,
       resolutionEligible: lineage.resolutionEligible,
+      ruleKey: c.sourceFindingType,
     };
   }
   const activeCommitments = await Promise.all(sessionCommitments.filter((c) => c.status === "ACTIVE").map(toCommitmentEvidence));
@@ -319,6 +330,95 @@ export async function buildTraderReviewEvidencePackage(userId: string, sessionId
   // per-lineage detail is already covered by activeCommitments/
   // commitmentResults above. ─────────────────────────────────────────────
   const improvementAnalytics = await buildImprovementAnalytics(userId, session.reviewType);
+
+  // ── Behavior occurrence trends (Stage 20.1 §2-6) — packaged directly
+  // from Stage 19.1's own `behaviourOccurrence` series, never recomputed.
+  // `session.reviewType` was already the scope `buildImprovementAnalytics`
+  // was called with above, so weekly/monthly are never blended (§4). ─────
+  const behaviorTrendCandidates = improvementAnalytics.behaviourOccurrence
+    .map((series) => ({ ...series, totalBreaches: series.points.reduce((s, p) => s + p.breachCount, 0) }))
+    .sort((a, b) => b.totalBreaches - a.totalBreaches || a.ruleKey.localeCompare(b.ruleKey));
+  if (behaviorTrendCandidates.length > MAX_BEHAVIOR_TREND_RULES) {
+    truncation.push({
+      field: "behaviorOccurrenceTrends",
+      totalAvailable: behaviorTrendCandidates.length,
+      included: MAX_BEHAVIOR_TREND_RULES,
+      selectionRule: "highest total breach count",
+    });
+  }
+  const allCommitmentEvidence = [...activeCommitments, ...commitmentResults];
+  const behaviorOccurrenceTrends: BehaviorOccurrenceTrendEntry[] = behaviorTrendCandidates.slice(0, MAX_BEHAVIOR_TREND_RULES).map((series) => {
+    const pointsFull = series.points; // already chronological ascending (see buildImprovementAnalytics)
+    if (pointsFull.length > MAX_BEHAVIOR_TREND_POINTS) {
+      truncation.push({
+        field: `behaviorOccurrenceTrends.points[${series.ruleKey}]`,
+        totalAvailable: pointsFull.length,
+        included: MAX_BEHAVIOR_TREND_POINTS,
+        selectionRule: "most recent",
+      });
+    }
+    const points = pointsFull.slice(-MAX_BEHAVIOR_TREND_POINTS);
+    // Prefer an ACTIVE commitment's own trend/sample size for this rule — a
+    // RETIRED/COMPLETED one's adherence no longer describes "current."
+    const matchingCommitment = allCommitmentEvidence.find((c) => c.ruleKey === series.ruleKey) ?? null;
+    const label = ruleKeyLabel(series.ruleKey);
+    const trendPhrase = points.length >= 2 ? `${points.map((p) => p.breachCount).join(" → ")} breach(es) across the last ${points.length} ${session.reviewType.toLowerCase()} periods tracked` : `${points[0]?.breachCount ?? 0} breach(es) in the one ${session.reviewType.toLowerCase()} period tracked`;
+    return {
+      evidenceId: addEvidence(evidenceIndex, {
+        id: `BEHAVIOR_TREND:${series.ruleKey}`,
+        strength: "DERIVED",
+        category: "BEHAVIOR_OCCURRENCE_TREND",
+        statement: `${label} (${session.reviewType.toLowerCase()}): ${trendPhrase}.`,
+      }),
+      ruleKey: series.ruleKey,
+      label,
+      reviewType: session.reviewType,
+      points,
+      currentTrend: matchingCommitment?.trend ?? null,
+      currentApplicableObservations: matchingCommitment?.currentApplicableObservations ?? null,
+    };
+  });
+  if (behaviorOccurrenceTrends.length === 0) missingData.push("NO_LONGITUDINAL_BEHAVIOR_DATA");
+
+  // ── Commitment vs. behavior cross-check (Stage 20.1 §9) — deterministic
+  // pairing + conservative signal classification only; the analyst is told
+  // (system prompt) to explain the signal in its own words, never to
+  // silently reconcile a CONTRADICTORY one. ──────────────────────────────
+  const commitmentBehaviorCrossChecks: CommitmentBehaviorCrossCheckEntry[] = [];
+  for (const commitment of activeCommitments) {
+    if (!commitment.ruleKey) continue;
+    const trendEntry = behaviorOccurrenceTrends.find((t) => t.ruleKey === commitment.ruleKey);
+    if (!trendEntry || trendEntry.points.length === 0) continue;
+
+    const recentBreachCounts = trendEntry.points.map((p) => p.breachCount);
+    const isPerfectAdherence = commitment.currentAdherencePercent === 100 && commitment.currentApplicableObservations >= 3;
+    // Period-aligned, not "the last array entry" — the series only records
+    // periods with >=1 breach, so an old breach with nothing but clean
+    // periods since would otherwise be mistaken for a live contradiction.
+    const currentPeriodBreach = trendEntry.points.find((p) => p.periodStart === startDate);
+    const isNonIncreasing = recentBreachCounts.every((v, i) => i === 0 || v <= recentBreachCounts[i - 1]);
+    const isDeclining = recentBreachCounts.length >= 2 && isNonIncreasing && recentBreachCounts[recentBreachCounts.length - 1] < recentBreachCounts[0];
+    const isHealthyAdherence = commitment.currentAdherencePercent != null && commitment.currentAdherencePercent >= 70 && commitment.currentApplicableObservations >= 3;
+
+    let signal: CommitmentBehaviorCrossCheckEntry["signal"] = "NEUTRAL";
+    if (isPerfectAdherence && currentPeriodBreach && currentPeriodBreach.breachCount > 0) signal = "CONTRADICTORY";
+    else if (isHealthyAdherence && isDeclining) signal = "CONVERGING";
+
+    commitmentBehaviorCrossChecks.push({
+      evidenceId: addEvidence(evidenceIndex, {
+        id: `CROSS_CHECK:${commitment.ruleKey}`,
+        strength: "DERIVED",
+        category: "COMMITMENT_BEHAVIOR_CROSS_CHECK",
+        statement: `Commitment "${commitment.title}" adherence ${commitment.currentAdherencePercent == null ? "no data" : `${commitment.currentAdherencePercent}%`} vs. ${ruleKeyLabel(commitment.ruleKey)} breach trend ${recentBreachCounts.join(" → ")} — signal: ${signal}.`,
+      }),
+      commitmentTitle: commitment.title,
+      ruleKey: commitment.ruleKey,
+      currentAdherencePercent: commitment.currentAdherencePercent,
+      currentApplicableObservations: commitment.currentApplicableObservations,
+      recentBreachCounts,
+      signal,
+    });
+  }
 
   // ── Historical context (§11) — one prior period, summarized only. ─────
   const previousReferenceDate = addDaysToKey(startDate, -1);
@@ -404,6 +504,20 @@ export async function buildTraderReviewEvidencePackage(userId: string, sessionId
     };
   });
 
+  const coverageSummary: EvidenceCoverageSummary = {
+    tradesIncluded: trades.length,
+    behavioralEventsIncluded: behavioralEvidenceEntries.length,
+    discrepancyEventsIncluded: replayComparison
+      ? replayComparison.discrepancy.executionDiscrepancyEntries.length +
+        replayComparison.discrepancy.behavioralDiscrepancyEntries.length +
+        replayComparison.discrepancy.confirmedMissedOpportunityEntries.length
+      : 0,
+    commitmentsIncluded: activeCommitments.length + commitmentResults.length,
+    replayAvailable: replayComparison != null,
+    psychologyAvailable: psychologyEntriesFull.length > 0,
+    longitudinalBehaviorAvailable: behaviorOccurrenceTrends.length > 0,
+  };
+
   return {
     packageVersion: PACKAGE_VERSION,
     period: {
@@ -434,6 +548,9 @@ export async function buildTraderReviewEvidencePackage(userId: string, sessionId
     },
     reflections: { periodReflection, dailyReflections, tradeReflections },
     historicalContext: { previousPeriodPerformance, previousPeriodAdherencePercent },
+    behaviorOccurrenceTrends,
+    commitmentBehaviorCrossChecks,
+    coverageSummary,
     missingData,
     truncation,
     evidenceIndex,
