@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 
 import { prisma } from "@/server/db";
-import { createTrade, updateTradeSections } from "@/server/services/trades.service";
+import { createTrade, updateTrade, updateTradeSections } from "@/server/services/trades.service";
 import {
   getPerformanceRiskContext,
   settlePerformanceTrade,
@@ -327,12 +327,19 @@ describe("performance-account.service.ts — canonical initial stop (Stage C.1, 
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   });
 
+  // PLANNED_FALLBACK exists for a Trade.plannedStopLoss that was never routed
+  // through a confirmed/locked TradePlanVersion — legacy data, in practice
+  // (Today V2 Phase 2 §1 removed the last live write path for this column
+  // outside of trade-plan.service's savePlan). These tests write it directly
+  // via Prisma to simulate exactly that legacy shape, rather than through
+  // updateTradeSections (which no longer accepts it).
+
   it("1. inherits the simple planned stop as the initial stop when execution never overrides it", async () => {
     const user = await makeUser("inherit-planned");
     userIds.push(user.id);
 
     const trade = await createTrade(user.id, "2026-09-01", minimalTradeInput({ direction: "LONG" }));
-    await updateTradeSections(user.id, trade.id, { plannedStopLoss: 90 });
+    await prisma.trade.update({ where: { id: trade.id }, data: { plannedStopLoss: "90" } });
     // No actualStopLoss at all — only entry + exit.
     await updateTradeSections(user.id, trade.id, { actualEntry: 100, actualExit: 120 });
 
@@ -347,7 +354,7 @@ describe("performance-account.service.ts — canonical initial stop (Stage C.1, 
     userIds.push(user.id);
 
     const trade = await createTrade(user.id, "2026-09-02", minimalTradeInput({ direction: "LONG" }));
-    await updateTradeSections(user.id, trade.id, { plannedStopLoss: 95 }); // intended stop
+    await prisma.trade.update({ where: { id: trade.id }, data: { plannedStopLoss: "95" } }); // intended stop
     await updateTradeSections(user.id, trade.id, { actualEntry: 100, actualStopLoss: 90, actualExit: 120 }); // actual fill had a wider stop
 
     const snapshot = await performanceSnapshot(trade.id);
@@ -389,11 +396,11 @@ describe("performance-account.service.ts — canonical initial stop (Stage C.1, 
     userIds.push(user.id);
 
     const trade = await createTrade(user.id, "2026-09-05", minimalTradeInput({ direction: "LONG" }));
-    await updateTradeSections(user.id, trade.id, { plannedStopLoss: 90 });
+    await prisma.trade.update({ where: { id: trade.id }, data: { plannedStopLoss: "90" } });
     await updateTradeSections(user.id, trade.id, { actualEntry: 100, actualExit: 120 }); // freezes initialStop = 90 via PLANNED_FALLBACK
 
     // Edit the plan's stop after the fact — must not retroactively change the frozen risk.
-    await updateTradeSections(user.id, trade.id, { plannedStopLoss: 80 });
+    await prisma.trade.update({ where: { id: trade.id }, data: { plannedStopLoss: "80" } });
     await settlePerformanceTrade(user.id, trade.id);
 
     const snapshot = await performanceSnapshot(trade.id);
@@ -422,7 +429,7 @@ describe("performance-account.service.ts — canonical initial stop (Stage C.1, 
     userIds.push(user.id);
 
     const trade = await createTrade(user.id, "2026-09-07", minimalTradeInput({ direction: "LONG" }));
-    await updateTradeSections(user.id, trade.id, { plannedStopLoss: 1990 });
+    await prisma.trade.update({ where: { id: trade.id }, data: { plannedStopLoss: "1990" } });
     await updateTradeSections(user.id, trade.id, { actualEntry: 2000, actualExit: 2020 }); // PLANNED_FALLBACK freezes 1990
 
     const snapshot = await performanceSnapshot(trade.id);
@@ -434,7 +441,7 @@ describe("performance-account.service.ts — canonical initial stop (Stage C.1, 
     userIds.push(user.id);
 
     const trade = await createTrade(user.id, "2026-09-08", minimalTradeInput({ direction: "SHORT" }));
-    await updateTradeSections(user.id, trade.id, { plannedStopLoss: 2010 });
+    await prisma.trade.update({ where: { id: trade.id }, data: { plannedStopLoss: "2010" } });
     await updateTradeSections(user.id, trade.id, { actualEntry: 2000, actualExit: 1980 }); // PLANNED_FALLBACK freezes 2010
 
     const snapshot = await performanceSnapshot(trade.id);
@@ -512,5 +519,68 @@ describe("getPerformanceRiskContext — Trade Idea presentation (Today V2 T3)", 
     // Overriding risk% is rejected once locked — the canonical guard already
     // enforced by updatePerformanceRiskOverride, not re-implemented here.
     await expect(updatePerformanceRiskOverride(user.id, trade.id, 5)).rejects.toThrow();
+  });
+});
+
+// Today V2 Phase 2 — items not already covered by the Stage C/C.1 suites
+// above: plan inheritance leaving the plan itself untouched (§5/§7/tests
+// 7/8), and the canonical settlement result always winning over a stale or
+// manually-supplied Trade.actualRR (§8/test 13).
+describe("performance-account.service.ts — Today V2 Phase 2", () => {
+  const userIds: string[] = [];
+  afterAll(async () => {
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  });
+
+  it("7. an explicit actual entry override never mutates the trade's planned entry", async () => {
+    const user = await makeUser("entry-override-preserves-plan");
+    userIds.push(user.id);
+
+    const trade = await createTrade(user.id, "2026-10-01", minimalTradeInput({ direction: "LONG" }));
+    await prisma.trade.update({ where: { id: trade.id }, data: { plannedEntry: "2000" } });
+
+    // Execution genuinely differed from the plan.
+    await updateTradeSections(user.id, trade.id, { actualEntry: 2005, actualStopLoss: 1990, actualExit: 2020 });
+
+    const reloaded = await prisma.trade.findUniqueOrThrow({ where: { id: trade.id } });
+    expect(reloaded.plannedEntry?.toNumber()).toBe(2000); // untouched
+    expect(reloaded.actualEntry?.toNumber()).toBe(2005); // the real override, preserved separately
+  });
+
+  it("8. an explicit initial-stop override never mutates the trade's planned stop", async () => {
+    const user = await makeUser("stop-override-preserves-plan");
+    userIds.push(user.id);
+
+    const trade = await createTrade(user.id, "2026-10-02", minimalTradeInput({ direction: "LONG" }));
+    await prisma.trade.update({ where: { id: trade.id }, data: { plannedStopLoss: "95" } });
+
+    await updateTradeSections(user.id, trade.id, { actualEntry: 100, actualStopLoss: 90, actualExit: 120 });
+
+    const reloaded = await prisma.trade.findUniqueOrThrow({ where: { id: trade.id } });
+    expect(reloaded.plannedStopLoss?.toNumber()).toBe(95); // untouched — the plan stays what was planned
+    const snapshot = await performanceSnapshot(trade.id);
+    expect(snapshot.initialStop?.toNumber()).toBe(90); // the ACTUAL override is what risk is measured against
+  });
+
+  it("13. a stale/manually-supplied Trade.actualRR is overwritten by the canonical settlement result on the next save", async () => {
+    const user = await makeUser("actualrr-cannot-override-canonical");
+    userIds.push(user.id);
+
+    const trade = await createTrade(user.id, "2026-10-03", minimalTradeInput({ direction: "LONG" }));
+    await updateTradeSections(user.id, trade.id, { actualEntry: 100, actualStopLoss: 90, actualExit: 120 });
+
+    const settled = await prisma.trade.findUniqueOrThrow({ where: { id: trade.id } });
+    expect(settled.actualRR?.toNumber()).toBeCloseTo(2, 6); // the real, canonical result
+
+    // Simulate a stale/malicious client submitting a fabricated actualRR
+    // alongside an otherwise-unrelated field edit (Today V2 Phase 2 §8 —
+    // the live form no longer exposes this input at all, but the service
+    // itself must still be safe against a crafted payload).
+    await updateTrade(user.id, trade.id, minimalTradeInput({ direction: "LONG", actualRR: 999 }));
+
+    const reloaded = await prisma.trade.findUniqueOrThrow({ where: { id: trade.id } });
+    // The canonical settlement re-run (updateTrade's own .then()) wins —
+    // never the manually-supplied 999.
+    expect(reloaded.actualRR?.toNumber()).toBeCloseTo(2, 6);
   });
 });

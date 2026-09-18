@@ -137,17 +137,50 @@ const BEHAVIOR_LABEL: Record<BehaviorTag, string> = {
 
 function reconstructExecuted(input: ExecutedEventInput): EventCounterfactual {
   const invalid = input.validSetup === false || input.missingConfluences.length > 0;
+  const skipTag = input.behaviorTag != null && SKIP_TAGS.has(input.behaviorTag);
+  const shouldNotHaveTaken = invalid || skipTag;
 
-  // Stage C.1: a trade that hasn't settled yet must not masquerade as a
-  // genuine 0R outcome. The old `input.actualR ?? 0` coalescing was meant
-  // to make a null actualR a harmless 0/0 no-op (see the field's own doc
-  // comment), but that broke down for a valid, non-skip-tagged trade with
-  // measurable deviations: `processPerfectR` still accumulated real
-  // deviation cost on top of the coalesced 0, fabricating a discrepancy
-  // for a trade with no determined result yet. Return the true no-op
-  // directly instead of running deviation/behavioral analysis against an
-  // unknown outcome.
+  // Stage C.1 established the true no-op for OUTCOME-dependent math (never
+  // fabricate avoidable/unearned R, or a deviation-derived processPerfectR,
+  // against an unknown result). Today V2 Phase 2 §14 corrects the
+  // over-conservative side effect that shipped with it: a pending trade can
+  // still carry KNOWN process facts — an invalid setup, a skip-tagged
+  // behavior (FOMO/revenge/…), a "wouldn't take again" answer, a manual
+  // override, a session violation, a missing execution confirmation, an
+  // over-risk/overtrading breach — and NONE of those depend on the final R
+  // at all. Surface them as FLAGGED-only (rImpact always null — the SIZE of
+  // the miss genuinely can't be known until settlement) while every
+  // R-derived field stays at its additive-identity zero, so a pending
+  // trade's process assessment is available even while its performance
+  // assessment stays pending. Objective price deviations (input.deviations)
+  // stay excluded here — they're priced in R terms against the final exit,
+  // which is exactly the outcome-dependent math this branch must not touch.
   if (input.actualR == null) {
+    const leakages: LeakageEvent[] = [];
+    if (shouldNotHaveTaken) {
+      const category: LeakageCategory = skipTag ? "BEHAVIORAL" : "STRATEGY_ADHERENCE";
+      const cause = skipTag
+        ? input.behaviorTag!.toLowerCase()
+        : input.missingConfluences.length > 0
+          ? "missing-confluence"
+          : "invalid-setup";
+      const label = skipTag
+        ? BEHAVIOR_LABEL[input.behaviorTag!]
+        : input.missingConfluences.length > 0
+          ? "Missing mandatory confluence"
+          : "Invalid setup taken";
+      leakages.push({ category, cause, label, rImpact: null, severity: "MEDIUM", confidence: "FLAGGED", attributionKnown: false });
+    } else {
+      const flag = (category: LeakageCategory, cause: string, label: string, severity: Severity) =>
+        leakages.push({ category, cause, label, rImpact: null, severity, confidence: "FLAGGED", attributionKnown: false });
+      if (input.wouldTakeAgain === false) flag("BEHAVIORAL", "would-not-repeat", "Would not take again", "MEDIUM");
+      if (input.behaviorTag === "MANUAL_OVERRIDE") flag("BEHAVIORAL", "manual-override", BEHAVIOR_LABEL.MANUAL_OVERRIDE, "MEDIUM");
+      if (input.sessionViolation) flag("STRATEGY_ADHERENCE", "session-violation", "Traded outside strategy session", "MEDIUM");
+      if ((input.missingExecutionConfirmations ?? 0) > 0)
+        flag("STRATEGY_ADHERENCE", "execution-confirmation", "Missing execution confirmation", "LOW");
+      if (input.exceededDailyRisk) flag("RISK", "daily-risk-limit", "Daily risk limit exceeded", "HIGH");
+      if (input.overtrade) flag("BEHAVIORAL", "overtrading", "Overtrading (beyond daily cap)", "MEDIUM");
+    }
     return {
       eventId: input.eventId,
       kind: "EXECUTED",
@@ -157,15 +190,13 @@ function reconstructExecuted(input: ExecutedEventInput): EventCounterfactual {
       processPerfectR: 0,
       avoidableR: 0,
       unearnedR: 0,
-      processBreach: false,
+      processBreach: leakages.length > 0,
       validSetup: !invalid,
-      leakages: [],
+      leakages,
     };
   }
   const actualR = input.actualR;
   const leakages: LeakageEvent[] = [];
-  const skipTag = input.behaviorTag != null && SKIP_TAGS.has(input.behaviorTag);
-  const shouldNotHaveTaken = invalid || skipTag;
 
   let processPerfectR: number;
   let processBreach = false;

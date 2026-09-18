@@ -157,11 +157,21 @@ const workspacePrice = z
 
 // A patch of one-to-many workspace fields. Every key is optional; only the
 // keys actually present are written, so a single field can autosave alone.
+//
+// Today V2 Phase 2 §1 — plannedEntry/plannedStopLoss/plannedTarget are
+// deliberately NOT patchable here. TradePlanVersion (via trade-plan.service's
+// savePlan) is the sole canonical writer of a trade's plan, screenshot or
+// not, and it's the only path that freezes/locks/versions it. This schema
+// used to also accept these three fields with no lock check at all, which
+// meant a locked plan's "immutable" history could be silently rewritten
+// through a plain workspace-section patch, bypassing TradePlanVersion
+// entirely. The live UI already stopped sending them (see
+// trade-execution-section.tsx / trade-idea-section.tsx — planned
+// entry/stop/target are read-only, sourced from the confirmed plan); this
+// removes the now-dead server-side capability so the invariant holds even
+// against a stale or malicious client.
 export const tradeWorkspaceSectionSchema = z
   .object({
-    plannedEntry: workspacePrice,
-    plannedStopLoss: workspacePrice,
-    plannedTarget: workspacePrice,
     marketContext: workspaceNote,
     areasOfInterest: workspaceNote,
     reasonForTrade: workspaceNote,

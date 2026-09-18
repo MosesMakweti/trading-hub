@@ -119,8 +119,12 @@ describe("analytics.service.ts — pending-aware analytics (Stage C.1, Part 2)",
     userIds.push(user.id);
 
     const trade = await createTrade(user.id, "2026-10-09", minimalTradeInput({ direction: "LONG" }));
-    // A real, measurable deviation (chased the entry higher than planned)...
-    await updateTradeSections(user.id, trade.id, { plannedEntry: 100, plannedStopLoss: 90 });
+    // A real, measurable deviation (chased the entry higher than planned) —
+    // written directly since plannedEntry/plannedStopLoss are no longer
+    // patchable via updateTradeSections (Today V2 Phase 2 §1: TradePlanVersion
+    // is the sole canonical writer); a direct write stands in for a
+    // already-confirmed plan for this analytics-only test.
+    await prisma.trade.update({ where: { id: trade.id }, data: { plannedEntry: "100", plannedStopLoss: "90" } });
     // ...but the position is still open (no actualExit) -> never settles.
     await updateTradeSections(user.id, trade.id, { actualEntry: 105 });
 

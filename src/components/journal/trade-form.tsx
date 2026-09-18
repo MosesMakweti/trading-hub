@@ -1068,25 +1068,18 @@ export function TradeForm({
         </section>
       )}
 
-      <section className="glass space-y-3 rounded-2xl p-4">
-        <h2 className="text-sm font-medium text-muted-foreground">Actual RR</h2>
-        <div className="max-w-xs space-y-1.5">
-          <Label className="text-xs">Actual RR (leave blank if still open)</Label>
-          <Controller
-            control={control}
-            name="actualRR"
-            render={({ field }) => (
-              <Input
-                type="number"
-                step="0.01"
-                name={field.name}
-                value={(field.value as number | null) ?? ""}
-                onChange={(e) => field.onChange(e.target.value === "" ? null : e.target.valueAsNumber)}
-              />
-            )}
-          />
-        </div>
-      </section>
+      {/* Today V2 Phase 2 §8 — Actual RR is no longer a manual field anywhere
+          in the normal live workflow. It's DERIVED, read-only: the canonical
+          engine (performance-account.service.ts's settlePerformanceTrade)
+          computes and writes Trade.actualRR the moment actual execution data
+          fully accounts for the position (see Trade Execution's read-only
+          "Actual RR" display). `actualRR` stays in TradeInput/defaultValues
+          purely so this form round-trips a trade's existing value unchanged
+          on save (never wiping legacy/imported records — import.service.ts
+          is the one remaining legitimate direct writer) — it's simply never
+          rendered as an editable control here anymore, closing the gap where
+          a manually-typed value could persist even when settlement itself
+          couldn't calculate one (NOT_CALCULABLE never clears it, by design). */}
 
       {/* Phase 3 — Trade Review: what I learned. Only shown when editing an
           existing trade — a new trade is logged as an idea, and its review +

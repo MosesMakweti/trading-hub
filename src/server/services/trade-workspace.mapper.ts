@@ -79,6 +79,15 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
     // settled at all.
     performancePnlGross: performance?.closingPnlGross?.toNumber() ?? null,
     performancePnlNet: performance?.closingPnlNet?.toNumber() ?? null,
+    performanceRisk: trade.performanceRiskSnapshot
+      ? {
+          riskPercent: trade.performanceRiskSnapshot.riskPercent.toNumber(),
+          riskAmount: trade.performanceRiskSnapshot.riskAmount.toNumber(),
+          initialStop: trade.performanceRiskSnapshot.initialStop?.toNumber() ?? null,
+          realizedR: trade.performanceRiskSnapshot.realizedR?.toNumber() ?? null,
+          settled: trade.performanceRiskSnapshot.settledAt != null,
+        }
+      : null,
     preTradeNotes: trade.psychPreTradeMindset,
     postTradeReflection: trade.psychPostTradeReflection,
     lessonsLearned: trade.psychLessonsLearned,

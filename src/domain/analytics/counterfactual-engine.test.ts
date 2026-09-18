@@ -120,28 +120,25 @@ describe("counterfactual-engine — spec examples", () => {
 });
 
 // Stage C.1 — a null actualR means "not settled yet" (pending), not "0R
-// breakeven." Before this fix, `actualR ?? 0` let a valid trade's real,
+// breakeven." `actualR ?? 0` used to let a valid trade's real,
 // independently-measured deviations (computed from planned/actual PRICES,
 // not from actualR) still accumulate into processPerfectR on top of the
 // coalesced 0, fabricating a positive avoidableR for a trade with no
-// determined outcome at all.
+// determined outcome at all — fixed by a true no-op for OUTCOME-dependent
+// math. Today V2 Phase 2 §14 then corrected the over-conservative side
+// effect of that no-op: a pending trade's independently-known PROCESS facts
+// (invalid setup, skip-tagged behavior, would-not-repeat, …) must still
+// surface — only the R-derived numbers stay suppressed.
 describe("counterfactual-engine — pending trades never fabricate a discrepancy", () => {
-  it("null actualR with a real measurable deviation still produces a true no-op", () => {
+  it("null actualR with a real measurable deviation still produces a true no-op for R-derived fields", () => {
     const e = reconstructEvent(executed({ actualR: null, deviations: [dev("late-entry", 0.5)] }));
     expect(e.actualR).toBe(0);
     expect(e.processPerfectR).toBe(0);
     expect(e.avoidableR).toBe(0);
     expect(e.unearnedR).toBe(0);
+    // No behavioral/setup breach and no exit yet -> nothing process-related to flag either.
     expect(e.processBreach).toBe(false);
     expect(e.leakages).toHaveLength(0);
-  });
-
-  it("null actualR on an invalid/skip-tagged setup also produces a true no-op, not a fabricated avoidable loss", () => {
-    const e = reconstructEvent(executed({ actualR: null, validSetup: false }));
-    expect(e.avoidableR).toBe(0);
-    expect(e.unearnedR).toBe(0);
-    expect(e.leakages).toHaveLength(0);
-    expect(e.validSetup).toBe(false); // setup validity is still known independent of settlement
   });
 
   it("a settled 0R breakeven (not null) is unaffected by the pending short-circuit", () => {
@@ -149,6 +146,55 @@ describe("counterfactual-engine — pending trades never fabricate a discrepancy
     expect(e.actualR).toBe(0);
     expect(e.processPerfectR).toBe(0.5); // deviation cost still applies once the outcome is genuinely known
     expect(e.avoidableR).toBe(0.5);
+  });
+});
+
+// Today V2 Phase 2 §14 — "PENDING TRADE: Process assessment AVAILABLE,
+// Performance assessment PENDING." A pending trade's process facts (known
+// independent of the final R) must surface; only outcome-dependent numbers
+// (avoidableR/unearnedR/processPerfectR, MEASURED leakages) stay suppressed.
+describe("counterfactual-engine — pending trades still surface known process breaches (§14)", () => {
+  it("an invalid setup taken while pending is a known, flagged breach — never a fabricated avoidable loss", () => {
+    const e = reconstructEvent(executed({ actualR: null, validSetup: false }));
+    expect(e.avoidableR).toBe(0);
+    expect(e.unearnedR).toBe(0);
+    expect(e.processPerfectR).toBe(0);
+    expect(e.processBreach).toBe(true); // known now, doesn't need to wait for settlement
+    expect(e.leakages).toHaveLength(1);
+    expect(e.leakages[0].confidence).toBe("FLAGGED");
+    expect(e.leakages[0].rImpact).toBeNull(); // the SIZE of the miss is still unknown
+    expect(e.validSetup).toBe(false);
+  });
+
+  it("a skip-tagged (FOMO) trade while pending is flagged behavioral, not outcome-dependent", () => {
+    const e = reconstructEvent(executed({ actualR: null, behaviorTag: "FOMO" }));
+    expect(e.processBreach).toBe(true);
+    expect(e.leakages).toHaveLength(1);
+    expect(e.leakages[0].category).toBe("BEHAVIORAL");
+    expect(e.leakages[0].cause).toBe("fomo");
+    expect(e.leakages[0].rImpact).toBeNull();
+    expect(e.avoidableR).toBe(0);
+  });
+
+  it("a would-not-repeat answer on an otherwise-valid pending trade is flagged independent of R", () => {
+    const e = reconstructEvent(executed({ actualR: null, wouldTakeAgain: false }));
+    expect(e.processBreach).toBe(true);
+    expect(e.leakages).toHaveLength(1);
+    expect(e.leakages[0].cause).toBe("would-not-repeat");
+    expect(e.leakages[0].confidence).toBe("FLAGGED");
+  });
+
+  it("a session violation on a pending trade is flagged independent of R", () => {
+    const e = reconstructEvent(executed({ actualR: null, sessionViolation: true }));
+    expect(e.processBreach).toBe(true);
+    expect(e.leakages.some((l) => l.cause === "session-violation")).toBe(true);
+  });
+
+  it("a clean pending trade (valid setup, no behavioral flags) has no breach at all", () => {
+    const e = reconstructEvent(executed({ actualR: null }));
+    expect(e.processBreach).toBe(false);
+    expect(e.leakages).toHaveLength(0);
+    expect(e.validSetup).toBe(true);
   });
 });
 

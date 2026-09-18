@@ -12,12 +12,23 @@ export interface AdherenceQuestion {
   prompt: string;
 }
 
+// Today V2 Phase 2 §13 — "executedToPlan" ("Did I execute according to
+// plan?") was removed: Traditorium already knows this objectively, from the
+// Trade Review comparison panel's planned-vs-actual entry/stop/exit deltas
+// (trade-review.service.ts's getTradeReviewData) — asking the trader to
+// self-report the same fact as a yes/no duplicated a machine-observed
+// answer. Historical answers already recorded under this key are left alone
+// in the database (sanitizeAdherenceAnswers simply stops recognizing the key
+// going forward, the same way a future question-set change already handles
+// unknown keys per its own doc comment below); the remaining four questions
+// are all genuinely subjective judgments the system has no objective signal
+// for (strategy/entry-model/trade-management "compliance" as a holistic
+// call, and patience, are not reducible to the objective comparison data).
 export const ADHERENCE_QUESTIONS: AdherenceQuestion[] = [
   { key: "followedStrategy", prompt: "Did I follow my strategy?" },
   { key: "followedEntryModel", prompt: "Did I follow my entry model?" },
   { key: "followedTradeManagement", prompt: "Did I follow my trade-management rules?" },
   { key: "remainedPatient", prompt: "Did I remain patient?" },
-  { key: "executedToPlan", prompt: "Did I execute according to plan?" },
 ];
 
 const ADHERENCE_KEYS = new Set(ADHERENCE_QUESTIONS.map((q) => q.key));

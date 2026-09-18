@@ -81,6 +81,11 @@ const tradeInclude = {
   // Existence-only — powers a "has a plan screenshot attached" flag (Dashboard
   // recent-trades table) without pulling the actual image data.
   planScreenshot: { select: { id: true } },
+  // Today V2 Phase 2 (§5/§6/§10) — the frozen risk/initial-stop/realized-R
+  // facts Trade Execution presents; null until an actual entry locks one.
+  performanceRiskSnapshot: {
+    select: { riskPercent: true, riskAmount: true, initialStop: true, realizedR: true, settledAt: true },
+  },
 } as const;
 
 /** A Trade with all the relations the Trade Workspace DTO needs. Returned by

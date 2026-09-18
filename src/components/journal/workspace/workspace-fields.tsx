@@ -33,10 +33,9 @@ type NoteField = Extract<
   | "whatCouldImprove"
 >;
 
-type PriceField = Extract<
-  keyof TradeWorkspaceSectionInput,
-  "plannedEntry" | "plannedStopLoss" | "plannedTarget" | "actualEntry" | "actualExit" | "actualStopLoss"
->;
+// Planned entry/stop/target are deliberately absent — TradePlanVersion
+// (trade-plan.service.ts's savePlan) is their sole writer (Today V2 Phase 2 §1).
+type PriceField = Extract<keyof TradeWorkspaceSectionInput, "actualEntry" | "actualExit" | "actualStopLoss">;
 
 // A tiny "saving / saved" indicator shared by every editable field.
 function SaveIndicator({ state }: { state: SaveState }) {
@@ -75,7 +74,16 @@ function useFieldSave(
   });
 }
 
-/** Single-line numeric price field (planned/actual entry, stop, target). */
+/** Single-line numeric price field (planned/actual entry, stop, target).
+ *
+ * Today V2 Phase 2 §3 — "EXECUTION = PLAN": when a `planValue` is supplied
+ * and this field is still empty, a small reference + one-click "Use" affordance
+ * lets the trader inherit it instead of retyping the same number; once the
+ * value matches, a quiet "Same as plan" confirmation replaces the prompt.
+ * Never auto-fills on mount — inheriting is always an explicit click (or the
+ * trader can just type their own, genuinely different, actual value), so a
+ * trade never silently gains an actualEntry just because its workspace was
+ * opened. */
 export function WorkspacePriceField({
   dateKey,
   tradeId,
@@ -83,6 +91,8 @@ export function WorkspacePriceField({
   label,
   initialValue,
   className,
+  planValue = null,
+  planLabel = "Plan",
 }: {
   dateKey: string;
   tradeId: string;
@@ -90,16 +100,44 @@ export function WorkspacePriceField({
   label: string;
   initialValue: number | null;
   className?: string;
+  /** The confirmed plan's corresponding value, if any — shown as a
+   *  reference/one-click inheritance source, never auto-applied. */
+  planValue?: number | null;
+  planLabel?: string;
 }) {
   const editable = useWorkspaceEditable();
   const [value, setValue] = useState(initialValue == null ? "" : String(initialValue));
   const state = useFieldSave(dateKey, tradeId, field, value);
 
+  const numericValue = value.trim() === "" ? null : Number(value);
+  const matchesPlan = planValue != null && numericValue != null && numericValue === planValue;
+
   return (
     <div className={cn("space-y-1", className)}>
-      <div className="flex items-center gap-1.5">
-        <label className="text-xs text-muted-foreground">{label}</label>
-        {editable && <SaveIndicator state={state} />}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-muted-foreground">{label}</label>
+          {editable && <SaveIndicator state={state} />}
+        </div>
+        {planValue != null &&
+          (matchesPlan ? (
+            <span className="flex items-center gap-1 text-[11px] text-success">
+              <Check className="size-3" /> Same as {planLabel.toLowerCase()}
+            </span>
+          ) : (
+            <span className="text-[11px] text-muted-foreground">
+              {planLabel}: <span className="tabular-nums">{planValue}</span>
+              {editable && value.trim() === "" && (
+                <button
+                  type="button"
+                  className="ml-1 underline underline-offset-2 hover:text-foreground"
+                  onClick={() => setValue(String(planValue))}
+                >
+                  Use
+                </button>
+              )}
+            </span>
+          ))}
       </div>
       <Input
         inputMode="decimal"

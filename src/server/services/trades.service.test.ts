@@ -5,6 +5,8 @@ import { createTrade, updateTrade, updateTradeSections } from "@/server/services
 import { createPropFirmAccount, createUserPropFirm } from "@/server/services/prop-firms.service";
 import { getAccountLedger } from "@/server/services/account-ledger.service";
 import { upsertExecution } from "@/server/services/trade-executions.service";
+import { savePlan } from "@/server/services/trade-plan.service";
+import { upsertPartialExit } from "@/server/services/trade-partial-exit.service";
 import {
   createOrGetDailyAssetAnalysis,
   updateDailyAssetAnalysis,
@@ -207,5 +209,49 @@ describe("createTrade — trade isolation (Today V2 T3 §14)", () => {
     const allocationsA = await prisma.tradeAccountAllocation.findMany({ where: { tradeId: tradeA.id } });
     const allocationsB = await prisma.tradeAccountAllocation.findMany({ where: { tradeId: tradeB.id } });
     expect(allocationsA.map((a) => a.id).sort()).not.toEqual(allocationsB.map((a) => a.id).sort());
+  });
+
+  // Today V2 Phase 2 §18 — the same invariant, extended to the state this
+  // phase actually touches: plan versions, the frozen risk/initial-stop
+  // snapshot, and partial exits. None of it is keyed by anything but its
+  // own tradeId, so a second trade must start with an empty plan history,
+  // no snapshot, and no partials, regardless of how far Trade A progressed.
+  it("a second trade starts with no plan versions, no performance risk snapshot, and no partial exits from the first", async () => {
+    const user = await makeUser("isolation-phase2");
+    userIds.push(user.id);
+
+    const tradeA = await createTrade(user.id, "2026-07-11", minimalTradeInput({ assetSymbol: "XAUUSD", direction: "LONG" }));
+    await savePlan(user.id, tradeA.id, {
+      direction: "LONG",
+      timeframe: "15m",
+      entry: 2000,
+      stopLoss: 1990,
+      targets: [{ targetOrder: 1, label: "TP1", targetPrice: 2020, plannedClosePercent: 100 }],
+    });
+    await updateTradeSections(user.id, tradeA.id, { actualEntry: 2000, actualStopLoss: 1990 });
+    await upsertPartialExit(user.id, tradeA.id, {
+      exitOrder: 1,
+      exitPrice: 2010,
+      percentClosed: 50,
+      exitedAt: new Date(),
+    });
+
+    const tradeB = await createTrade(user.id, "2026-07-11", minimalTradeInput({ assetSymbol: "EURUSD", direction: "SHORT" }));
+
+    const [planVersionsB, snapshotB, partialsB] = await Promise.all([
+      prisma.tradePlanVersion.findMany({ where: { tradeId: tradeB.id } }),
+      prisma.performanceRiskSnapshot.findUnique({ where: { tradeId: tradeB.id } }),
+      prisma.tradeActualPartialExit.findMany({ where: { tradeId: tradeB.id } }),
+    ]);
+    expect(planVersionsB).toHaveLength(0);
+    expect(snapshotB).toBeNull();
+    expect(partialsB).toHaveLength(0);
+    expect(tradeB.plannedEntry).toBeNull();
+    expect(tradeB.plannedStopLoss).toBeNull();
+
+    // Trade A's own state is untouched by B's creation, confirming this
+    // isn't a coincidental empty-both-ways result.
+    const planVersionsA = await prisma.tradePlanVersion.findMany({ where: { tradeId: tradeA.id } });
+    expect(planVersionsA).toHaveLength(1);
   });
 });

@@ -167,6 +167,24 @@ export interface TradeWorkspaceDTO {
   performancePnlGross: number | null;
   performancePnlNet: number | null;
 
+  /** Today V2 Phase 2 (§5/§6/§10) — the frozen PerformanceRiskSnapshot, once
+   *  an actual entry has locked one. Null before that (still just a Trade
+   *  Idea — see the Performance Account's pre-lock presentation in
+   *  performance-account-row.tsx instead). `initialStop` is the immutable
+   *  original-risk fact (Stage C.1); `actualStopLoss` (below) is the same
+   *  mutable column used for ongoing stop management post-lock — Trade
+   *  Execution presents them side by side as "Initial stop" vs "Current
+   *  stop," never conflating the two. */
+  performanceRisk: {
+    riskPercent: number;
+    riskAmount: number;
+    initialStop: number | null;
+    /** Realized R once fully closed; null while pending. Sourced from the
+     *  same frozen snapshot the settlement engine writes to, never re-derived. */
+    realizedR: number | null;
+    settled: boolean;
+  } | null;
+
   // Existing free-text notes, mapped into Idea / Review sections.
   preTradeNotes: string | null; // psychPreTradeMindset
   postTradeReflection: string | null; // psychPostTradeReflection
