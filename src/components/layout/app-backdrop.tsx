@@ -4,10 +4,10 @@
 // light mode — genuinely different artwork, not one image color-adjusted),
 // softened with a slow drift, a top fade (keeps the header band clean), an
 // atmospheric top bloom, and a vignette — so foreground glass cards always read
-// clearly over it. Source art is 4608x1536 WebP (3x the old 1536x512 JPEG,
-// Lanczos-upscaled + unsharp-masked, lossless-grade quality at a fraction of
-// the JPEG file size) so it stays crisp at full-viewport `object-cover` sizes
-// on 4K/5K displays. A second, blurred copy of the
+// clearly over it. Art is the Traditorium brand key art — matching light/dark
+// renders of the same desk-and-skyline scene (4608x2592 WebP each,
+// Lanczos-upscaled ~2.75x from a 1672x941 source + unsharp-masked) so it stays
+// crisp at full-viewport `object-cover` sizes on 4K/5K displays. A second, blurred copy of the
 // same image is masked to a soft ring around the edges (radial mask keeps the
 // centre — where the trend line reads — untouched), giving a mild
 // depth-of-field effect rather than blurring the whole scene. Both images
