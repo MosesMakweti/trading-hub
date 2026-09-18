@@ -1,6 +1,7 @@
 import { CandlestickChart, Activity, TrendingUp, Wallet, Layers, Brain, CalendarDays, ClipboardList, Target, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { fmtR, fmtUsd, tone as rTone } from "@/lib/analytics-format";
 import { DateRangeFilter } from "@/components/analytics/date-range-filter";
 import { AnalyticsFilterBar } from "@/components/analytics/analytics-filter-bar";
 import { KpiCard } from "@/components/analytics/kpi-card";
@@ -15,7 +16,7 @@ import { PsychologyAnalytics } from "@/components/analytics/psychology-analytics
 import { Heatmap, pnlHeatColor } from "@/components/analytics/heatmap";
 import { PropFirmsAnalyticsSection } from "@/components/analytics/prop-firms-analytics-section";
 import { AnalyticsImprovementSection } from "@/components/analytics/analytics-improvement-section";
-import { Card, GroupList, BehaviourLists, RCurveChart, fmtR, fmtUsd, tone as rTone } from "@/components/analytics/canonical-analytics-section";
+import { Card, GroupList, BehaviourLists, RCurveChart } from "@/components/analytics/canonical-analytics-section";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StaggerList, StaggerItem } from "@/components/shared/motion";
 import { SectionNav } from "@/components/analytics/section-nav";

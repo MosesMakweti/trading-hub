@@ -3,6 +3,7 @@
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid, ReferenceLine } from "recharts";
 
 import { cn } from "@/lib/utils";
+import { fmtR, fmtUsd, tone } from "@/lib/analytics-format";
 import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE } from "@/components/analytics/chart-theme";
 import { MIN_EXPECTANCY_SAMPLE } from "@/domain/performance/expectancy";
 import type { CanonicalAnalyticsSummary } from "@/server/services/analytics-canonical.service";
@@ -18,17 +19,6 @@ import type { RGroupStats, BehaviourLabelStats } from "@/domain/analytics/canoni
  * number rendered here is a pure presentation of what the service already
  * computed — no chart re-derives its own stats. Correlational, not causal.
  */
-
-export function fmtR(n: number | null): string {
-  return n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
-}
-export function fmtUsd(n: number): string {
-  return `${n >= 0 ? "+" : ""}$${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-}
-export function tone(n: number | null | undefined): "success" | "danger" | "neutral" {
-  if (n == null) return "neutral";
-  return n > 0 ? "success" : n < 0 ? "danger" : "neutral";
-}
 
 /** A small "n=" sample-size tag — a group below the app's existing
  *  expectancy-confidence threshold (MIN_EXPECTANCY_SAMPLE) is visually
