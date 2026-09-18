@@ -67,7 +67,6 @@ export default async function DashboardPage({
           sessions={data.sessions}
           accounts={data.accounts}
           preset={preset}
-          todayKey={today}
           unreviewedTrades={unreviewedTrades}
         />
 

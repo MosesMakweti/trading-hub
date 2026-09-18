@@ -40,7 +40,7 @@ export function TradeHeader({ trade }: { trade: TradeWorkspaceDTO }) {
                   : "text-muted-foreground")
             }
           >
-            {trade.actualRR == null ? "Open" : formatRR(trade.actualRR)}
+            {trade.actualRR == null ? "Pending" : formatRR(trade.actualRR)}
           </div>
           {trade.actualRR != null && (
             <div className="text-xs text-muted-foreground tabular-nums">

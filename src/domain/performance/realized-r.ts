@@ -150,3 +150,28 @@ export function isPerformanceSettled(value: Decimal.Value | null | undefined): b
 export function computeCompoundedBalance(balanceBefore: Decimal.Value, pnl: Decimal.Value): Decimal {
   return new Decimal(balanceBefore).plus(pnl);
 }
+
+/**
+ * Today V2 Final Phase §2 — closes the residual Stage C.1 "late stop entry"
+ * ambiguity for NORMAL LIVE TRADING, without a stop-event system. The
+ * problem: once execution begins with no trustworthy planned/locked stop to
+ * inherit, `resolveInitialStop`'s ACTUAL tier freezes whatever value first
+ * appears in actualStopLoss — the backend has no way to tell "the trader is
+ * recording their original stop right now" from "the trader is recording a
+ * stop that already moved, much later." Rather than inventing timestamp
+ * heuristics or a movement log, Traditorium makes establishing the initial
+ * stop an explicit, unmissable interaction exactly in this one case: true
+ * only when execution has started, no trustworthy plan exists to inherit
+ * from, and no initial stop has been resolved yet. Never true once a plan
+ * exists (§2: "Do not require this extra interaction when a trustworthy
+ * locked planned stop already exists and is being inherited") — inheriting
+ * the plan's stop already resolves the ACTUAL tier atomically with entry,
+ * so the ambiguity window never opens in that case at all.
+ */
+export function needsExplicitInitialStopConfirmation(input: {
+  hasActualEntry: boolean;
+  hasTrustworthyPlannedStop: boolean;
+  initialStopResolved: boolean;
+}): boolean {
+  return input.hasActualEntry && !input.hasTrustworthyPlannedStop && !input.initialStopResolved;
+}

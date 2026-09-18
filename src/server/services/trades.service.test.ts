@@ -7,6 +7,7 @@ import { getAccountLedger } from "@/server/services/account-ledger.service";
 import { upsertExecution } from "@/server/services/trade-executions.service";
 import { savePlan } from "@/server/services/trade-plan.service";
 import { upsertPartialExit } from "@/server/services/trade-partial-exit.service";
+import { listBehaviourLabels, listTradeBehaviourLabels, setTradeBehaviourLabels } from "@/server/services/behaviour-labels.service";
 import {
   createOrGetDailyAssetAnalysis,
   updateDailyAssetAnalysis,
@@ -253,5 +254,110 @@ describe("createTrade — trade isolation (Today V2 T3 §14)", () => {
     // isn't a coincidental empty-both-ways result.
     const planVersionsA = await prisma.tradePlanVersion.findMany({ where: { tradeId: tradeA.id } });
     expect(planVersionsA).toHaveLength(1);
+  });
+
+  // Today V2 Final Phase §27 — the final, all-at-once isolation check: a
+  // maximally-loaded Trade A (strategy, plan/lock, execution, accounts,
+  // confluences, partials, psychology, review, behaviour labels) must leak
+  // NONE of it into a fresh Trade B, in one combined assertion rather than
+  // scattered across separate tests.
+  it("a maximally-loaded Trade A leaks none of its state into a fresh Trade B", async () => {
+    const user = await makeUser("isolation-final");
+    userIds.push(user.id);
+    const behaviourLabels = await listBehaviourLabels(user.id); // seeds the default set for a new user
+
+    const tradeA = await createTrade(
+      user.id,
+      "2026-07-15",
+      minimalTradeInput({
+        assetSymbol: "XAUUSD",
+        direction: "LONG",
+        selectedConfluences: ["Liquidity Sweep", "FVG"],
+        selectedExecution: ["Confirmed Break"],
+      }),
+    );
+    await savePlan(user.id, tradeA.id, {
+      direction: "LONG",
+      timeframe: "15m",
+      entry: 2000,
+      stopLoss: 1990,
+      targets: [{ targetOrder: 1, label: "TP1", targetPrice: 2020, plannedClosePercent: 100 }],
+    });
+    await updateTradeSections(user.id, tradeA.id, {
+      actualEntry: 2000,
+      actualStopLoss: 1990,
+      whatWentWell: "Trade A only",
+      whatWentWrong: "Trade A only",
+      reasonForTrade: "Trade A's private thesis",
+      wouldTakeAgain: true,
+      tradeIntent: "PLANNED",
+      psychologyAnswers: {
+        fomo: "no",
+        riskManaged: "yes",
+        followedExitPlan: "yes",
+        alignedWithBias: "yes",
+        influencedBySomeoneElseProfit: "no",
+        influencedByOnlineOpinion: "no",
+        outcomeWillInfluenceNext: "no",
+        monitoringObsession: 10,
+      },
+    });
+    await upsertPartialExit(user.id, tradeA.id, { exitOrder: 1, exitPrice: 2010, percentClosed: 50, exitedAt: new Date() });
+    if (behaviourLabels.length > 0) {
+      await setTradeBehaviourLabels(user.id, tradeA.id, [behaviourLabels[0].id]);
+    }
+
+    // A completely default, unrelated create — nothing above should leak in.
+    // (psychologyAnswers explicitly emptied: minimalTradeInput's own default
+    // is a fully-answered questionnaire, which would otherwise coincidentally
+    // produce a real — but entirely Trade B's OWN — psychology row here.)
+    const tradeB = await createTrade(
+      user.id,
+      "2026-07-15",
+      minimalTradeInput({ assetSymbol: "EURUSD", direction: "SHORT", psychologyAnswers: {} }),
+    );
+
+    const [planVersionsB, snapshotB, partialsB, behaviourLabelsB, allocationsA, allocationsB] = await Promise.all([
+      prisma.tradePlanVersion.findMany({ where: { tradeId: tradeB.id } }),
+      prisma.performanceRiskSnapshot.findUnique({ where: { tradeId: tradeB.id } }),
+      prisma.tradeActualPartialExit.findMany({ where: { tradeId: tradeB.id } }),
+      listTradeBehaviourLabels(user.id, tradeB.id),
+      prisma.tradeAccountAllocation.findMany({ where: { tradeId: tradeA.id } }),
+      prisma.tradeAccountAllocation.findMany({ where: { tradeId: tradeB.id } }),
+    ]);
+
+    // Plan / lock / execution state.
+    expect(planVersionsB).toHaveLength(0);
+    expect(snapshotB).toBeNull();
+    expect(tradeB.plannedEntry).toBeNull();
+    expect(tradeB.plannedStopLoss).toBeNull();
+    expect(tradeB.actualEntry).toBeNull();
+    expect(tradeB.actualStopLoss).toBeNull();
+
+    // Accounts.
+    expect(allocationsA.map((a) => a.id).sort()).not.toEqual(allocationsB.map((a) => a.id).sort());
+
+    // Confluences / execution confirmations.
+    expect((tradeB.selectedConfluences as string[] | null) ?? []).toEqual([]);
+    expect((tradeB.selectedExecution as string[] | null) ?? []).toEqual([]);
+
+    // Partials.
+    expect(partialsB).toHaveLength(0);
+
+    // Psychology / review.
+    expect(tradeB.whatWentWell).toBeNull();
+    expect(tradeB.whatWentWrong).toBeNull();
+    expect(tradeB.reasonForTrade).toBeNull();
+    expect(tradeB.wouldTakeAgain).toBeNull();
+    expect(tradeB.tradeIntent).toBeNull();
+    const psychologyB = await prisma.psychologyQuestionnaireResponse.findUnique({ where: { tradeId: tradeB.id } });
+    expect(psychologyB).toBeNull();
+
+    // Behaviour labels.
+    expect(behaviourLabelsB).toHaveLength(0);
+
+    // Its OWN input is what it actually got — not silently defaulted from A.
+    expect(tradeB.direction).toBe("SHORT");
+    expect(tradeB.assetSymbol).toBe("EURUSD");
   });
 });

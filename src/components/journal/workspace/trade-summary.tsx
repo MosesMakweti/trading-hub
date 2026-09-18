@@ -33,7 +33,7 @@ export function TradeSummary({ trade }: { trade: TradeWorkspaceDTO }) {
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
       <Stat label="Result">
         {trade.actualRR == null ? (
-          <span className="text-muted-foreground">Open</span>
+          <span className="text-muted-foreground">Pending</span>
         ) : (
           <span
             className={cn(

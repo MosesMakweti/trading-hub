@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
-import { BarChart3, BookOpenCheck, CandlestickChart, ClipboardList, ListChecks } from "lucide-react";
+import { BarChart3, BookOpenCheck, ClipboardCheck, Lightbulb, ListChecks, Zap } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { WorkflowStepKey } from "@/domain/today/workflow";
@@ -15,14 +15,19 @@ export interface WorkflowStep {
   href?: string;
 }
 
-/** The canonical ordered workflow. Reused by the Dashboard now and the Today
- *  workspace later (Phase 2+), which will feed it real TradingDay state. */
+/** The canonical ordered workflow — the Today V2 mental model (Today V2
+ *  Final Phase §5): Pre-Session -> Today's Plan -> Trade Idea -> Execution
+ *  -> Review -> Day Summary. Reused by the Dashboard and the Today
+ *  workspace, both fed the same booleans derived from TradingDay/trade
+ *  state (domain/today/workflow.ts) — never a second, independently
+ *  tracked status. */
 export const WORKFLOW_STEP_META: { key: WorkflowStepKey; label: string; icon: LucideIcon }[] = [
-  { key: "prep", label: "Routine", icon: ListChecks },
-  { key: "plan", label: "Plan", icon: ClipboardList },
-  { key: "trade", label: "Trade", icon: CandlestickChart },
+  { key: "preSession", label: "Pre-Session", icon: ListChecks },
+  { key: "todaysPlan", label: "Today's Plan", icon: BarChart3 },
+  { key: "tradeIdea", label: "Trade Idea", icon: Lightbulb },
+  { key: "execution", label: "Execution", icon: Zap },
   { key: "review", label: "Review", icon: BookOpenCheck },
-  { key: "analyze", label: "Analyze", icon: BarChart3 },
+  { key: "daySummary", label: "Day Summary", icon: ClipboardCheck },
 ];
 
 function StepNode({ step, isLast }: { step: WorkflowStep; isLast: boolean }) {

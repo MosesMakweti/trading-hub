@@ -74,14 +74,17 @@ export default async function TodayPage() {
 
   const todaysPlan: TodaysPlanDTO = toTodaysPlanDTO(day);
 
-  // Prep/Plan/Analyze are owned by the TradingDay; Trade/Review are derived from
-  // the day's trades. Feed both into the shared workflow state machine.
+  // Pre-Session/Today's Plan/Day Summary are owned by the TradingDay; Trade
+  // Idea/Execution/Review are derived from the day's trades. Feed both into
+  // the shared workflow state machine (Today V2 Final Phase §5 — six steps,
+  // none of them a newly-persisted status).
   const done: WorkflowDoneState = {
-    prep: day.prepCompletedAt != null,
-    plan: day.planCompletedAt != null,
-    trade: trades.length > 0,
+    preSession: day.prepCompletedAt != null,
+    todaysPlan: day.planCompletedAt != null,
+    tradeIdea: trades.length > 0,
+    execution: trades.some((t) => t.actualEntry != null),
     review: trades.some((t) => t.reviewedAt != null),
-    analyze: day.analyzedAt != null,
+    daySummary: day.analyzedAt != null,
   };
   const stepStatuses = deriveWorkflowSteps(done);
 

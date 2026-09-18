@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3,
   BookOpenCheck,
   CandlestickChart,
+  ClipboardCheck,
   Compass,
   FlagOff,
   Lightbulb,
@@ -19,6 +19,7 @@ import {
   Zap,
 } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { formatDateKeyLong } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,16 +60,21 @@ import type { TradeWorkspaceDTO } from "@/types/trades";
 import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
 import type { AdherenceResultDTO, AdherenceTrend, EdgeReviewCommitmentDailyStatus, TodayCommitmentsDTO } from "@/types/edge-improvements";
 
-// The Today workflow section tabs. The Pre-Session Routine is first; the rest stay
-// locked until the "I am ready to trade" gate is confirmed.
+// The Today workflow section tabs — Pre-Session -> Today's Plan -> Trade Idea
+// -> Execution -> Review -> Day Summary (Today V2 Final Phase §5). The
+// Pre-Session Routine is first; the rest stay locked until the "I am ready
+// to trade" gate is confirmed. `step` maps each tab to the same canonical
+// WorkflowStepKey the stepper above already derives, so a tab's own status
+// dot (§6 progressive disclosure) is never a second, independently-computed
+// signal.
 const ROUTINE_TAB = "pre-session-routine";
-const SECTIONS: { value: string; label: string; icon: LucideIcon }[] = [
-  { value: ROUTINE_TAB, label: "Pre-Session Routine", icon: ListChecks },
-  { value: "daily-market-plan", label: "Daily Market Plan", icon: NotebookText },
-  { value: "trade-idea", label: "Trade Idea", icon: Lightbulb },
-  { value: "trade-execution", label: "Trade Execution", icon: Zap },
-  { value: "trade-review", label: "Trade Review", icon: BookOpenCheck },
-  { value: "daily-analytics", label: "Daily Analytics", icon: BarChart3 },
+const SECTIONS: { value: string; label: string; icon: LucideIcon; step: WorkflowStepKey }[] = [
+  { value: ROUTINE_TAB, label: "Pre-Session", icon: ListChecks, step: "preSession" },
+  { value: "daily-market-plan", label: "Today's Plan", icon: NotebookText, step: "todaysPlan" },
+  { value: "trade-idea", label: "Trade Idea", icon: Lightbulb, step: "tradeIdea" },
+  { value: "trade-execution", label: "Execution", icon: Zap, step: "execution" },
+  { value: "trade-review", label: "Review", icon: BookOpenCheck, step: "review" },
+  { value: "daily-analytics", label: "Day Summary", icon: ClipboardCheck, step: "daySummary" },
 ];
 
 export function TodayWorkspace({
@@ -250,6 +256,16 @@ export function TodayWorkspace({
     status: statusByKey.get(m.key) ?? "upcoming",
   }));
 
+  // Today V2 Final Phase §6 — progressive disclosure: every tab stays
+  // reachable (guidance, not bureaucracy — a trader may legitimately jump
+  // ahead), but its own status dot shows at a glance what's done, what's
+  // current, and what's still waiting on something earlier.
+  const tabStatusDot: Record<WorkflowStepStatus, string> = {
+    done: "bg-success",
+    current: "bg-primary",
+    upcoming: "bg-border",
+  };
+
   return (
     <div className="mx-auto max-w-5xl space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -291,6 +307,7 @@ export function TodayWorkspace({
           <TabsList className="w-max">
             {SECTIONS.map((s) => {
               const locked = !routineReady && s.value !== ROUTINE_TAB;
+              const status = statusByKey.get(s.step) ?? "upcoming";
               return (
                 <TabsTrigger
                   key={s.value}
@@ -301,6 +318,12 @@ export function TodayWorkspace({
                 >
                   {locked ? <Lock className="size-3.5" /> : <s.icon className="size-3.5" />}
                   {s.label}
+                  {!locked && (
+                    <span
+                      className={cn("size-1.5 shrink-0 rounded-full", tabStatusDot[status])}
+                      aria-label={`${s.label}: ${status}`}
+                    />
+                  )}
                 </TabsTrigger>
               );
             })}

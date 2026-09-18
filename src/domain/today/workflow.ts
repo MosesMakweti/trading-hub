@@ -1,20 +1,29 @@
 /**
- * The Today workflow state machine (pure, unit-tested). The trading day advances
- * through a fixed ordered set of steps; each is `done`, the single `current`
- * step (the first not-yet-done one), or `upcoming`. Prep/Plan/Analyze are owned
- * by the TradingDay record; Trade/Review are derived from the day's trades. Both
- * the Today workspace and the Dashboard feed this the same booleans.
+ * The Today workflow state machine (pure, unit-tested). The trading day
+ * advances through a fixed ordered set of steps; each is `done`, the single
+ * `current` step (the first not-yet-done one), or `upcoming`. None of this
+ * is persisted as its own state (Today V2 Final Phase §5) — every boolean is
+ * derived fresh from existing canonical facts each render: preSession/
+ * todaysPlan/daySummary from the TradingDay record, tradeIdea/execution/
+ * review from the day's trades. Both the Today workspace and the Dashboard
+ * feed this the same booleans.
+ *
+ * Six steps, matching the Today V2 mental model (Pre-Session -> Today's Plan
+ * -> Trade Idea -> Execution -> Review -> Day Summary) — previously a
+ * coarser five-step prep/plan/trade/review/analyze model that conflated
+ * planning, executing, and reviewing a trade into one "trade" step.
  */
-export const WORKFLOW_ORDER = ["prep", "plan", "trade", "review", "analyze"] as const;
+export const WORKFLOW_ORDER = ["preSession", "todaysPlan", "tradeIdea", "execution", "review", "daySummary"] as const;
 export type WorkflowStepKey = (typeof WORKFLOW_ORDER)[number];
 export type WorkflowStepStatus = "done" | "current" | "upcoming";
 
 export interface WorkflowDoneState {
-  prep: boolean;
-  plan: boolean;
-  trade: boolean;
+  preSession: boolean;
+  todaysPlan: boolean;
+  tradeIdea: boolean;
+  execution: boolean;
   review: boolean;
-  analyze: boolean;
+  daySummary: boolean;
 }
 
 export function deriveWorkflowSteps(

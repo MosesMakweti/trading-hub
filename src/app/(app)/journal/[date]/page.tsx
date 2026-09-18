@@ -80,11 +80,12 @@ export default async function JournalDayPage({
   let recapSteps: WorkflowStep[] = [];
   if (recap) {
     const done: WorkflowDoneState = {
-      prep: recap.prepDone,
-      plan: recap.planDone,
-      trade: trades.length > 0,
+      preSession: recap.prepDone,
+      todaysPlan: recap.planDone,
+      tradeIdea: trades.length > 0,
+      execution: trades.some((t) => t.actualEntry != null),
       review: trades.some((t) => t.reviewedAt != null),
-      analyze: recap.analyzeDone,
+      daySummary: recap.analyzeDone,
     };
     const byKey = new Map(deriveWorkflowSteps(done).map((s) => [s.key, s.status]));
     recapSteps = WORKFLOW_STEP_META.map((m) => ({ ...m, status: byKey.get(m.key) ?? "upcoming" }));

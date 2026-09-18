@@ -1,10 +1,11 @@
-import { Lock, Wallet } from "lucide-react";
+import { Lock, TriangleAlert, Wallet } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Tag } from "@/components/ui/tag";
 import { AdherenceMeter } from "@/components/journal/adherence-score";
 import { cn } from "@/lib/utils";
 import { minutesToTimeString } from "@/lib/date";
+import { needsExplicitInitialStopConfirmation } from "@/domain/performance/realized-r";
 import {
   WorkspaceField,
   formatRR,
@@ -80,26 +81,46 @@ function PerformanceExecutionCard({ trade }: { trade: TradeWorkspaceDTO }) {
   );
 }
 
-/** Today V2 Phase 2 §5/§6/§7 — the stop-loss field switches identity once an
- *  initial stop has actually been frozen: before that, it's THE decision
- *  that establishes the original risk unit (inherits the locked plan's stop
- *  by default — §5); after, it becomes ongoing stop MANAGEMENT (current
- *  stop), with the frozen initial stop shown alongside, read-only, so moving
- *  to break-even/trailing can never be mistaken for redefining 1R. */
+/** Today V2 Phase 2 §5/§6/§7, closed by Final Phase §2 — the stop-loss field
+ *  switches identity once an initial stop has actually been frozen: before
+ *  that, it's THE decision that establishes the original risk unit
+ *  (inherits the locked plan's stop by default — §5); after, it becomes
+ *  ongoing stop MANAGEMENT (current stop), with the frozen initial stop
+ *  shown alongside, read-only, so moving to break-even/trailing can never
+ *  be mistaken for redefining 1R. For a genuinely planless trade (nothing
+ *  to inherit), `needsExplicitInitialStopConfirmation` makes establishing
+ *  it an unmissable, explicitly-labeled requirement the moment execution
+ *  begins — closing the "entered the stop much later" ambiguity through
+ *  interaction design, not a stop-event system (never required when a
+ *  trustworthy plan exists to inherit from instead). */
 function StopLossField({ trade }: { trade: TradeWorkspaceDTO }) {
   const initialStop = trade.performanceRisk?.initialStop ?? null;
 
   if (initialStop == null) {
+    const mustConfirm = needsExplicitInitialStopConfirmation({
+      hasActualEntry: trade.actualEntry != null,
+      hasTrustworthyPlannedStop: trade.plannedStopLoss != null,
+      initialStopResolved: false,
+    });
+
     return (
-      <WorkspacePriceField
-        dateKey={trade.dateKey}
-        tradeId={trade.id}
-        field="actualStopLoss"
-        label="Initial stop"
-        initialValue={trade.actualStopLoss}
-        planValue={trade.plannedStopLoss}
-        className="sm:col-span-2"
-      />
+      <div className={cn("space-y-1.5 sm:col-span-2", mustConfirm && "rounded-lg border border-warning/40 bg-warning/5 p-2")}>
+        {mustConfirm && (
+          <p className="flex items-center gap-1.5 text-[11px] text-warning">
+            <TriangleAlert className="size-3.5 shrink-0" />
+            No planned stop exists for this trade — enter the stop you actually used to establish your
+            original risk. Performance stays Pending until you do.
+          </p>
+        )}
+        <WorkspacePriceField
+          dateKey={trade.dateKey}
+          tradeId={trade.id}
+          field="actualStopLoss"
+          label={mustConfirm ? "Initial stop (required)" : "Initial stop"}
+          initialValue={trade.actualStopLoss}
+          planValue={trade.plannedStopLoss}
+        />
+      </div>
     );
   }
 

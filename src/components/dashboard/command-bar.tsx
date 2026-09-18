@@ -30,13 +30,11 @@ export function CommandBar({
   sessions,
   accounts,
   preset,
-  todayKey,
   unreviewedTrades,
 }: {
   sessions: SessionWindow[];
   accounts: { id: string; name: string }[];
   preset: DateRangePreset;
-  todayKey: string;
   unreviewedTrades: UnreviewedTradeSummary[];
 }) {
   const router = useRouter();
@@ -123,12 +121,20 @@ export function CommandBar({
 
         <PrivacyModeToggle />
 
+        {/* Today V2 Final Phase §15 — routes to the Today workspace's own
+            in-flow Add Trade dialog (day-context inheritance: bias, active
+            strategy, session — see add-trade-dialog.tsx), rather than the
+            standalone historical-entry form. That form still exists at
+            /journal/[date]/trades/new for adding a trade to a PAST day and
+            for opportunity-linked creation from the Journal — this button
+            is specifically "add a trade right now," so it should never
+            compete with Today's own canonical live path. */}
         <Button
           type="button"
           size="sm"
           className="gap-1.5"
           nativeButton={false}
-          render={<Link href={`/journal/${todayKey}/trades/new`} />}
+          render={<Link href="/today" />}
         >
           <Plus className="size-3.5" />
           Add Trade

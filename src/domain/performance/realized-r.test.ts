@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeCompoundedBalance,
   computeInitialRiskDistance,
+  needsExplicitInitialStopConfirmation,
   computePerformancePnl,
   computePerformanceRiskAmount,
   computeRealizedR,
@@ -162,5 +163,49 @@ describe("computeCompoundedBalance — the spec's two-trade worked example", () 
     expect(pnl.toNumber()).toBe(-1020);
     const after = computeCompoundedBalance(102_000, pnl);
     expect(after.toNumber()).toBe(100_980);
+  });
+});
+
+// Today V2 Final Phase §2 — closing the planless late-stop-entry ambiguity
+// through an explicit interaction rule rather than a stop-event system.
+describe("needsExplicitInitialStopConfirmation", () => {
+  it("requires confirmation once execution begins with no plan and no resolved initial stop", () => {
+    expect(
+      needsExplicitInitialStopConfirmation({
+        hasActualEntry: true,
+        hasTrustworthyPlannedStop: false,
+        initialStopResolved: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("never requires it before execution begins", () => {
+    expect(
+      needsExplicitInitialStopConfirmation({
+        hasActualEntry: false,
+        hasTrustworthyPlannedStop: false,
+        initialStopResolved: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("never requires it when a trustworthy planned/locked stop exists to inherit", () => {
+    expect(
+      needsExplicitInitialStopConfirmation({
+        hasActualEntry: true,
+        hasTrustworthyPlannedStop: true,
+        initialStopResolved: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("stops requiring it once an initial stop has actually been resolved", () => {
+    expect(
+      needsExplicitInitialStopConfirmation({
+        hasActualEntry: true,
+        hasTrustworthyPlannedStop: false,
+        initialStopResolved: true,
+      }),
+    ).toBe(false);
   });
 });

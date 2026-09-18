@@ -3,6 +3,7 @@ import type { TagColor, TradingDay } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { computeTradeExecutionSummary } from "@/domain/trades/trade-execution-summary";
+import { toTradeDiscrepancy } from "@/server/services/trade-discrepancy";
 import { getOrCreateTradingDay, endDay } from "@/server/services/trading-day.service";
 import { reconcileTradeLifecycleForTrade } from "@/server/services/trade-review.service";
 import type { DailyReflectionInput, CloseTradingDayInput } from "@/lib/validation/close-day";
@@ -24,6 +25,7 @@ const dayCloseTradeInclude = {
   actualPartialExits: true,
   performanceRiskSnapshot: { select: { initialStop: true, realizedR: true, performancePnl: true, settledAt: true } },
   behaviourLabels: { include: { behaviourLabel: true } },
+  psychology: { select: { psychologyPercent: true } },
 } as const;
 
 export interface BehaviourLabelCountDTO {
@@ -44,6 +46,14 @@ export interface DayCloseSummaryDTO {
   cancelledCount: number;
   /** Executed (has an actual entry) but never given a reviewLifecycleStatus. */
   unresolvedCount: number;
+  /** Today V2 Final Phase §8/§11 — the canonical Performance-settled split
+   *  (isPerformanceSettled: PerformanceRiskSnapshot.settledAt != null),
+   *  distinct from the reviewLifecycleStatus buckets above: a trade can be
+   *  STILL_HOLDING/unset yet already Performance-settled (fully closed
+   *  execution, review just not filled in yet), or vice versa. Pending here
+   *  always means "outcome not yet calculable," never a $0 stand-in. */
+  settledCount: number;
+  pendingCount: number;
   totalRealizedRSoFar: number;
   totalPnl: number;
   wins: number;
@@ -51,6 +61,24 @@ export interface DayCloseSummaryDTO {
   breakevens: number;
   overrideCount: number;
   averageTradeQualityPercent: number | null;
+  /** Today V2 Final Phase §8 — average of Trade.psychologyPercent across
+   *  trades with an answered Honest Questionnaire that day; null when none
+   *  answered one (never a fabricated average of zero data points). */
+  averagePsychologyPercent: number | null;
+  /** Today V2 Final Phase §8/§17 — valid setups the trader spotted but never
+   *  took (TradeOpportunity: status MISSED, setupValid !== false), the same
+   *  "missed opportunity" concept the Discrepancy Gap already scores.
+   *  Deliberately never conflated with a losing Trade — a missed setup has
+   *  no Trade row at all. */
+  missedValidOpportunityCount: number;
+  /** Today V2 Final Phase §12 — trades with a known process breach
+   *  (invalid setup, FOMO/revenge/impulse, would-not-repeat, session
+   *  violation, missing confirmation, manual override, …), counted whether
+   *  or not the trade has settled yet — reuses the same per-trade
+   *  Counterfactual reconstruction the Journal/workspace badges use, so a
+   *  Pending trade's known process facts are never suppressed here either
+   *  (Phase 2 §14's correction, carried through to Day Summary). */
+  processBreachCount: number;
   behaviourLabels: BehaviourLabelCountDTO[];
   reflection: {
     dayWentWell: string | null;
@@ -64,9 +92,16 @@ export interface DayCloseSummaryDTO {
 
 /** The compact pre-close summary + readiness warnings (Stage 8 §1/§5/§8/§9). */
 export async function getDayCloseSummary(userId: string, dateKey: string): Promise<DayCloseSummaryDTO> {
-  const [day, trades] = await Promise.all([
+  const [day, trades, missedValidOpportunityCount] = await Promise.all([
     prisma.tradingDay.findFirst({ where: { userId, date: dateKeyToUtcDate(dateKey) } }),
     prisma.trade.findMany({ where: tradeWhereForDay(userId, dateKey), include: dayCloseTradeInclude }),
+    // TradeOpportunity = "a valid setup appeared," deliberately separate from
+    // Trade (Final Phase §17) — a missed valid opportunity has no Trade row
+    // at all, so it can only ever be counted here, never conflated with a
+    // losing trade.
+    prisma.tradeOpportunity.count({
+      where: { userId, spottedAt: dateKeyToUtcDate(dateKey), status: "MISSED", setupValid: { not: false }, deletedAt: null },
+    }),
   ]);
 
   let fullyClosedCount = 0;
@@ -82,6 +117,11 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
   let overrideCount = 0;
   let qualitySum = 0;
   let qualityCount = 0;
+  let psychologySum = 0;
+  let psychologyCount = 0;
+  let settledCount = 0;
+  let pendingCount = 0;
+  let processBreachCount = 0;
   const warnings: string[] = [];
   const labelCounts = new Map<string, BehaviourLabelCountDTO>();
 
@@ -110,6 +150,42 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
     if (trade.tradeQualityPercent != null) {
       qualitySum += trade.tradeQualityPercent;
       qualityCount++;
+    }
+    if (trade.psychology?.psychologyPercent != null) {
+      psychologySum += trade.psychology.psychologyPercent;
+      psychologyCount++;
+    }
+
+    // A cancelled idea was never meant to settle — excluded from the
+    // settled/pending split the same way it's excluded from R/PnL below.
+    if (trade.reviewLifecycleStatus !== "CANCELLED_NEVER_TRIGGERED") {
+      if (trade.performanceRiskSnapshot?.settledAt != null) settledCount++;
+      else pendingCount++;
+    }
+
+    // Today V2 Final Phase §12 — reuses the exact per-trade Counterfactual
+    // reconstruction (Phase 2 §14's fix) so a still-Pending trade's known
+    // process breach still counts here, without fabricating an
+    // outcome-dependent number for it.
+    if (
+      toTradeDiscrepancy({
+        tradeNumber: trade.tradeNumber,
+        actualRR: trade.actualRR,
+        direction: trade.direction,
+        plannedEntry: trade.plannedEntry,
+        plannedStopLoss: trade.plannedStopLoss,
+        plannedTarget: trade.plannedTarget,
+        actualEntry: trade.actualEntry,
+        actualExit: trade.actualExit,
+        setupValid: trade.setupValid,
+        missingConfluences: trade.missingConfluences,
+        wouldTakeAgain: trade.wouldTakeAgain,
+        tradeIntent: trade.tradeIntent,
+        executionPercent: trade.executionPercent,
+        psychology: trade.psychology,
+      })?.processBreach
+    ) {
+      processBreachCount++;
     }
 
     // Cancelled ideas never contribute R/PnL/win-loss (Stage 8 §4/§11) — the
@@ -195,6 +271,8 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
     stillHoldingCount,
     cancelledCount,
     unresolvedCount,
+    settledCount,
+    pendingCount,
     totalRealizedRSoFar,
     totalPnl,
     wins,
@@ -202,6 +280,9 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
     breakevens,
     overrideCount,
     averageTradeQualityPercent: qualityCount > 0 ? qualitySum / qualityCount : null,
+    averagePsychologyPercent: psychologyCount > 0 ? psychologySum / psychologyCount : null,
+    missedValidOpportunityCount,
+    processBreachCount,
     behaviourLabels: Array.from(labelCounts.values()).sort((a, b) => b.count - a.count),
     reflection: {
       dayWentWell: day?.dayWentWell ?? null,

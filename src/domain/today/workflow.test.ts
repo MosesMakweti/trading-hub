@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 
 const none: WorkflowDoneState = {
-  prep: false,
-  plan: false,
-  trade: false,
+  preSession: false,
+  todaysPlan: false,
+  tradeIdea: false,
+  execution: false,
   review: false,
-  analyze: false,
+  daySummary: false,
 };
 
 const statuses = (done: WorkflowDoneState) =>
@@ -16,42 +17,59 @@ const statuses = (done: WorkflowDoneState) =>
 describe("deriveWorkflowSteps", () => {
   it("marks the first step current when nothing is done", () => {
     expect(statuses(none)).toEqual([
-      "prep:current",
-      "plan:upcoming",
-      "trade:upcoming",
+      "preSession:current",
+      "todaysPlan:upcoming",
+      "tradeIdea:upcoming",
+      "execution:upcoming",
       "review:upcoming",
-      "analyze:upcoming",
+      "daySummary:upcoming",
     ]);
   });
 
   it("advances current to the first not-done step", () => {
-    expect(statuses({ ...none, prep: true, plan: true })).toEqual([
-      "prep:done",
-      "plan:done",
-      "trade:current",
+    expect(statuses({ ...none, preSession: true, todaysPlan: true })).toEqual([
+      "preSession:done",
+      "todaysPlan:done",
+      "tradeIdea:current",
+      "execution:upcoming",
       "review:upcoming",
-      "analyze:upcoming",
+      "daySummary:upcoming",
     ]);
   });
 
   it("everything done => no current step", () => {
-    expect(statuses({ prep: true, plan: true, trade: true, review: true, analyze: true })).toEqual([
-      "prep:done",
-      "plan:done",
-      "trade:done",
+    expect(
+      statuses({ preSession: true, todaysPlan: true, tradeIdea: true, execution: true, review: true, daySummary: true }),
+    ).toEqual([
+      "preSession:done",
+      "todaysPlan:done",
+      "tradeIdea:done",
+      "execution:done",
       "review:done",
-      "analyze:done",
+      "daySummary:done",
     ]);
   });
 
   it("a later done step doesn't skip the current pointer over an earlier gap", () => {
-    // prep not done, but trade is: prep is still the current (first not-done).
-    expect(statuses({ ...none, trade: true })).toEqual([
-      "prep:current",
-      "plan:upcoming",
-      "trade:done",
+    // preSession not done, but tradeIdea is: preSession is still current (first not-done).
+    expect(statuses({ ...none, tradeIdea: true })).toEqual([
+      "preSession:current",
+      "todaysPlan:upcoming",
+      "tradeIdea:done",
+      "execution:upcoming",
       "review:upcoming",
-      "analyze:upcoming",
+      "daySummary:upcoming",
+    ]);
+  });
+
+  it("execution can be current while a trade idea exists but hasn't been executed yet", () => {
+    expect(statuses({ ...none, preSession: true, todaysPlan: true, tradeIdea: true })).toEqual([
+      "preSession:done",
+      "todaysPlan:done",
+      "tradeIdea:done",
+      "execution:current",
+      "review:upcoming",
+      "daySummary:upcoming",
     ]);
   });
 });

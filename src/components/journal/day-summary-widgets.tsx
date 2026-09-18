@@ -40,18 +40,38 @@ function Stat({
 export function DaySummaryGrid({ summary }: { summary: DayCloseSummaryDTO }) {
   return (
     <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-background/40 p-3 sm:grid-cols-4">
-      <Stat label="Trades taken" value={String(summary.tradeCount)} />
-      <Stat label="Fully closed" value={String(summary.fullyClosedCount)} />
-      <Stat label="Open (partial/holding)" value={String(summary.partiallyClosedCount + summary.stillHoldingCount)} />
+      <Stat label="Trades recorded" value={String(summary.tradeCount)} />
+      <Stat label="Settled" value={String(summary.settledCount)} />
+      {/* Today V2 Final Phase §11 — "Pending" always means outcome-not-yet-
+          calculable, never a fake $0; distinct from Settled. */}
+      <Stat label="Pending" value={String(summary.pendingCount)} tone={summary.pendingCount > 0 ? "muted" : undefined} />
       <Stat label="Cancelled" value={String(summary.cancelledCount)} />
       <Stat
-        label="Realized R"
+        label="Realized R (so far)"
         value={formatRR(summary.totalRealizedRSoFar)}
         tone={summary.totalRealizedRSoFar >= 0 ? "success" : "danger"}
       />
-      <Stat label="PnL" value={formatSignedCurrency(summary.totalPnl)} tone={summary.totalPnl >= 0 ? "success" : "danger"} />
+      <Stat label="Performance PnL" value={formatSignedCurrency(summary.totalPnl)} tone={summary.totalPnl >= 0 ? "success" : "danger"} />
       <Stat label="W / L / BE" value={`${summary.wins} / ${summary.losses} / ${summary.breakevens}`} />
       <Stat label="Overrides" value={String(summary.overrideCount)} tone={summary.overrideCount > 0 ? "danger" : "muted"} />
+      <Stat
+        label="Missed valid setups"
+        value={String(summary.missedValidOpportunityCount)}
+        tone={summary.missedValidOpportunityCount > 0 ? "danger" : "muted"}
+      />
+      <Stat
+        label="Process breaches"
+        value={String(summary.processBreachCount)}
+        tone={summary.processBreachCount > 0 ? "danger" : "muted"}
+      />
+      <Stat
+        label="Avg. strategy adherence"
+        value={summary.averageTradeQualityPercent == null ? "—" : `${summary.averageTradeQualityPercent.toFixed(0)}%`}
+      />
+      <Stat
+        label="Avg. psychology"
+        value={summary.averagePsychologyPercent == null ? "—" : `${summary.averagePsychologyPercent.toFixed(0)}%`}
+      />
     </div>
   );
 }
