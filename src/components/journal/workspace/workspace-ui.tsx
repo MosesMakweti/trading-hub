@@ -176,3 +176,10 @@ export function formatCurrency(n: number) {
 export function formatSignedCurrency(n: number) {
   return `${n >= 0 ? "+" : ""}${formatCurrency(n)}`;
 }
+
+// Stage C — Performance Account PnL is null until settlement genuinely
+// succeeds (never a fake 0; see TradeAccountAllocation's doc comment in
+// schema.prisma). Every display of it must render "Pending", not $0.00.
+export function formatPerformancePnl(n: number | null): string {
+  return n == null ? "Pending" : formatSignedCurrency(n);
+}

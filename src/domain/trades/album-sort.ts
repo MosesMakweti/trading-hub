@@ -17,19 +17,9 @@ export const ALBUM_SORT_OPTIONS: { value: AlbumSort; label: string }[] = [
 
 export interface SortableTrade {
   actualRR: number | null;
-  performancePnlNet: number;
-}
-
-/** Open trades (no result yet) always sort last, regardless of direction.
- *  Returns a comparator result when either side is open, else null (defer to
- *  the caller's real metric comparison). */
-function rankOpenLast(a: SortableTrade, b: SortableTrade): number | null {
-  const aOpen = a.actualRR == null;
-  const bOpen = b.actualRR == null;
-  if (aOpen && bOpen) return 0;
-  if (aOpen) return 1;
-  if (bOpen) return -1;
-  return null;
+  // Stage C: null = not settled / not calculable yet — a pending trade has
+  // no $ performance to rank, same as an open one.
+  performancePnlNet: number | null;
 }
 
 /** `trades` is assumed already newest-first (the service layer's default order). */
@@ -44,10 +34,15 @@ export function sortAlbumTrades<T extends SortableTrade>(trades: T[], sort: Albu
       return arr.sort((a, b) => (b.actualRR ?? -Infinity) - (a.actualRR ?? -Infinity));
     case "WORST_RR":
       return arr.sort((a, b) => (a.actualRR ?? Infinity) - (b.actualRR ?? Infinity));
+    // Coalesce to the same extremes as BEST_RR/WORST_RR above, not
+    // rankOpenLast — a trade can have an actualRR (e.g. a legacy manually
+    // entered one) while its Performance PnL is still null/pending, so
+    // "open" (actualRR) and "not calculable" (performancePnlNet) are
+    // different conditions and neither should crash the other's sort.
     case "BEST_PNL":
-      return arr.sort((a, b) => rankOpenLast(a, b) ?? b.performancePnlNet - a.performancePnlNet);
+      return arr.sort((a, b) => (b.performancePnlNet ?? -Infinity) - (a.performancePnlNet ?? -Infinity));
     case "WORST_PNL":
-      return arr.sort((a, b) => rankOpenLast(a, b) ?? a.performancePnlNet - b.performancePnlNet);
+      return arr.sort((a, b) => (a.performancePnlNet ?? Infinity) - (b.performancePnlNet ?? Infinity));
     default: {
       const _never: never = sort;
       return _never;

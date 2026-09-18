@@ -2,6 +2,7 @@ import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { daysBetweenInclusive } from "@/lib/date-ranges";
 import { buildEquityCurve, dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
+import { isPerformanceSettled } from "@/domain/performance/realized-r";
 import * as metrics from "@/domain/performance/metrics";
 import { maxDrawdown, pnlStats, recoveryFactor } from "@/domain/performance/pnl-stats";
 import {
@@ -191,7 +192,13 @@ export async function getAnalyticsData(
   for (const alloc of allPerformanceAllocations) {
     const tradeDate = alloc.trade.tradeDate;
     if (tradeDate < fromDate) {
-      balanceBeforeRange += alloc.closingPnlNet.toNumber();
+      // closingPnlNet is nullable (not settled yet) — a pending trade
+      // contributes 0 to this carried-forward BALANCE (aggregate
+      // arithmetic), which is a different question from whether it's
+      // eligible for outcome-based analytics (Stage C.1: it isn't — see
+      // the main loop below, which excludes it from win/loss/discrepancy
+      // classification entirely rather than treating it as a $0 trade).
+      balanceBeforeRange += alloc.closingPnlNet?.toNumber() ?? 0;
     } else if (tradeDate <= toDate) {
       inRange.push(alloc);
     }
@@ -243,13 +250,19 @@ export async function getAnalyticsData(
   for (const alloc of inRange) {
     const t = alloc.trade;
     const dateKey = utcDateToKey(t.tradeDate);
-    const pnl = alloc.closingPnlNet.toNumber();
-    const contributionPercent = runningBalance !== 0 ? (pnl / runningBalance) * 100 : 0;
-    runningBalance += pnl; // true account balance — always advances (all in-range trades)
+    // Stage C.1: pnl is null until the Performance Account genuinely settles
+    // this trade (isPerformanceSettled — domain/performance/realized-r.ts)
+    // — never coalesced to 0, which is exactly what let a pending trade
+    // masquerade as a real $0/0R closed trade throughout this loop.
+    const settled = isPerformanceSettled(alloc.closingPnlNet);
+    const pnl = alloc.closingPnlNet?.toNumber() ?? null;
+    const contributionPercent = settled ? (runningBalance !== 0 ? (pnl! / runningBalance) * 100 : 0) : null;
+    runningBalance += pnl ?? 0; // aggregate balance: a pending trade contributes 0 SO FAR, never a fabricated result
 
     // Aggregate only trades matching the active filters. The balance already
     // advanced above, so a filtered-out trade still counts toward later trades'
-    // account-relative contribution %, but never enters the analytics.
+    // account-relative contribution %, but never enters the analytics. A
+    // pending trade never matches a win/loss filter (neither is true yet).
     const included =
       (!filters?.strategyId || t.strategyId === filters.strategyId) &&
       (!filters?.entryModel || t.selectedEntryModel === filters.entryModel) &&
@@ -258,36 +271,47 @@ export async function getAnalyticsData(
       (!filters?.session || (t.selectedSession ?? "") === filters.session) &&
       (!filters?.status || t.status === filters.status) &&
       (!filters?.accountId || t.allocations.some((a) => a.tradingAccountId === filters.accountId)) &&
-      (!filters?.winLoss || (filters.winLoss === "win" ? pnl > 0 : pnl < 0));
+      (!filters?.winLoss || (settled && (filters.winLoss === "win" ? pnl! > 0 : pnl! < 0)));
     if (!included) continue;
 
-    filteredBalance += pnl;
-    tradePnls.push(pnl);
-    balanceSeries.push(filteredBalance);
-    analyticsPoints.push({
-      dateKey,
-      monthKey: dateKey.slice(0, 7),
-      weekday: t.tradeDate.getUTCDay(),
-      hour: Math.floor(t.executionMinutes / 60),
-      pnl,
-      actualR: contributionPercent,
-      direction: t.direction,
-      session: t.selectedSession ?? null,
-      riskPercent: alloc.riskInputType === "PERCENT" ? alloc.riskValue.toNumber() : null,
-    });
+    // Outcome-based collections (equity/drawdown $, weekday/month/session/
+    // hour breakdowns, R distribution) are eligible for settled trades only
+    // — a pending trade contributes nothing to them yet rather than an
+    // artificial $0/0R data point (never a flat equity-curve point either).
+    if (settled) {
+      filteredBalance += pnl!;
+      tradePnls.push(pnl!);
+      balanceSeries.push(filteredBalance);
+      analyticsPoints.push({
+        dateKey,
+        monthKey: dateKey.slice(0, 7),
+        weekday: t.tradeDate.getUTCDay(),
+        hour: Math.floor(t.executionMinutes / 60),
+        pnl: pnl!,
+        actualR: contributionPercent!,
+        direction: t.direction,
+        session: t.selectedSession ?? null,
+        riskPercent: alloc.riskInputType === "PERCENT" ? alloc.riskValue.toNumber() : null,
+      });
+    }
 
     const strategyLabel = t.strategyNameSnapshot
       ? t.strategyVersionSnapshot != null
         ? `${t.strategyNameSnapshot} · v${t.strategyVersionSnapshot}`
         : t.strategyNameSnapshot
       : null;
+    // Pushed for every included trade, settled or pending, so `totalTrades`
+    // reflects the real recorded count (Stage C.1: trade count and settled
+    // sample size are not the same thing). actualRR is null for a pending
+    // trade — metrics.ts's own closedTrades() filter is already null-aware,
+    // so winRate/profitFactor/averageRR/streaks exclude it automatically.
     tradeInputs.push({
       dateKey,
       assetSymbol: t.assetSymbol,
       actualRR: contributionPercent,
       strategyLabel,
     });
-    dailyPnlMap.set(dateKey, (dailyPnlMap.get(dateKey) ?? 0) + pnl);
+    dailyPnlMap.set(dateKey, (dailyPnlMap.get(dateKey) ?? 0) + (pnl ?? 0));
     if (t.expectedRR != null) {
       dailyExpectedR.set(dateKey, (dailyExpectedR.get(dateKey) ?? 0) + t.expectedRR.toNumber());
     }
@@ -295,8 +319,13 @@ export async function getAnalyticsData(
       dailyActualR.set(dateKey, (dailyActualR.get(dateKey) ?? 0) + t.actualRR.toNumber());
     }
 
+    // The behavioural/adherence record itself stays for every trade — a
+    // pending trade can still be scored on process (confluences, execution
+    // confirmations, setup quality are all known at trade time, independent
+    // of settlement). Only the win/loss OUTCOME correlation is gated on
+    // settlement, explicitly (not by coincidentally falling out of a 0).
     adherencePoints.push({
-      win: pnl > 0 ? true : pnl < 0 ? false : null,
+      win: settled ? (pnl! > 0 ? true : pnl! < 0 ? false : null) : null,
       dateKey,
       confluences: (t.selectedConfluences as string[] | null) ?? [],
       confluencePercent: t.confluencePercent,
@@ -348,6 +377,13 @@ export async function getAnalyticsData(
     });
 
     if (t.psychology) {
+      // The psychology record itself is kept for a pending trade too
+      // (behavioural data can exist independent of settlement); actualRR is
+      // null for it, and psychAnalytics' correlation functions
+      // (domain/psychology/analytics.ts) already filter `actualRR !== null`
+      // before correlating psychology with profit/loss — so a pending
+      // trade is counted in psychology averages but excluded from any
+      // psychology-vs-outcome correlation, same split as adherencePoints.
       const otherAccount = t.allocations.find((a) => a.tradingAccount.kind !== "PERFORMANCE");
       psychologyPoints.push({
         dateKey,
@@ -389,8 +425,13 @@ export async function getAnalyticsData(
       : null;
 
   const rangeDays = daysBetweenInclusive(from, to);
-  const winningCount = tradeInputs.filter((t) => (t.actualRR ?? 0) > 0).length;
-  const losingCount = tradeInputs.filter((t) => (t.actualRR ?? 0) < 0).length;
+  // Stage C.1: a pending trade's actualRR is null, not 0 — filtering on
+  // `!= null` first (rather than `?? 0`) keeps it out of both counts
+  // instead of accidentally landing in neither only because 0 fails both
+  // comparisons.
+  const settledTradeInputs = tradeInputs.filter((t) => t.actualRR != null);
+  const winningCount = settledTradeInputs.filter((t) => t.actualRR! > 0).length;
+  const losingCount = settledTradeInputs.filter((t) => t.actualRR! < 0).length;
 
   // Dollar summary + drawdown for the Analytics module (from the realized $ P&L).
   const dollars = pnlStats(tradePnls);
@@ -451,8 +492,12 @@ export async function getAnalyticsData(
 
   return {
     trading: {
+      // Stage C.1: these are no longer the same number — totalTrades is
+      // every recorded trade in range (settled or pending); closedTrades is
+      // the Performance-settled sample size backing winRate/profitFactor/
+      // averageRR/expectancy below (e.g. "5 trades, 4 settled").
       totalTrades: tradeInputs.length,
-      closedTrades: tradeInputs.length,
+      closedTrades: settledTradeInputs.length,
       winningTrades: winningCount,
       losingTrades: losingCount,
       winRate: metrics.winRate(tradeInputs),

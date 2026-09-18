@@ -59,8 +59,9 @@ export interface TradeListItemDTO {
     name: string;
     riskInputType: "PERCENT" | "AMOUNT";
     riskValue: number;
-    closingPnlGross: number;
-    closingPnlNet: number;
+    // Stage C: null = not settled / not calculable yet — never a fake 0.
+    closingPnlGross: number | null;
+    closingPnlNet: number | null;
   }[];
   entryModelName: string | null;
   confluenceLabels: SelectedTagDTO[];
@@ -108,8 +109,9 @@ export interface TradeWorkspaceAccountDTO {
   kind: "PROP_FIRM" | "PERSONAL_BROKERAGE" | "PERFORMANCE";
   riskInputType: "PERCENT" | "AMOUNT";
   riskValue: number;
-  closingPnlGross: number;
-  closingPnlNet: number;
+  // Stage C: null = not settled / not calculable yet — never a fake 0.
+  closingPnlGross: number | null;
+  closingPnlNet: number | null;
 }
 
 
@@ -159,8 +161,11 @@ export interface TradeWorkspaceDTO {
   strategyVersion: number | null;
 
   accounts: TradeWorkspaceAccountDTO[]; // includes the Performance Account allocation
-  performancePnlGross: number;
-  performancePnlNet: number;
+  // Stage C: null = not settled / not calculable yet (see
+  // TradeAccountAllocation's doc comment in schema.prisma) — never coalesce
+  // to 0, that's what caused the Performance Account's $0.00 display bug.
+  performancePnlGross: number | null;
+  performancePnlNet: number | null;
 
   // Existing free-text notes, mapped into Idea / Review sections.
   preTradeNotes: string | null; // psychPreTradeMindset

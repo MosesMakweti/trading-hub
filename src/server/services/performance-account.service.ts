@@ -190,8 +190,30 @@ export async function lockPerformanceRiskSnapshot(userId: string, tradeId: strin
 }
 
 /** Resolves and freezes the initial stop (spec §8) the first time one
- *  becomes available — never overwrites an already-resolved value, so
- *  moving the stop to break-even/trailing later can never redefine 1R. */
+ *  becomes available, via resolveInitialStop's 3-tier hierarchy (actual ->
+ *  locked plan -> canonical planned stop) — never overwrites an
+ *  already-resolved value, so moving the stop to break-even/trailing later
+ *  can never redefine 1R.
+ *
+ *  KNOWN RESIDUAL AMBIGUITY (Stage C audit; Stage C.1 narrowed but did not
+ *  fully close it): `Trade.actualStopLoss` is a single mutable column with
+ *  no lock of its own. In the common paths this is safe — `actualEntry` and
+ *  `actualStopLoss` are normally saved together in one Trade Execution
+ *  submit (this function runs immediately after, in the same
+ *  updateTradeSections call, via settlePerformanceTrade), and a trade with
+ *  a locked TradingView plan or a simple planned stop resolves from that
+ *  the moment entry locks, before any stop could plausibly have moved. The
+ *  gap that remains: a freeform trade (no plan at all) whose trader saves
+ *  `actualEntry` alone, then records `actualStopLoss` for the first time in
+ *  a LATER, separate save — this function still can't distinguish "finally
+ *  typing in the original stop" from "recording a stop that was already
+ *  moved," because no stop-movement history is tracked anywhere in the live
+ *  trade lifecycle (confirmed by audit — only the separate Replay
+ *  simulation engine models a distinct current-vs-planned stop). Closing
+ *  this fully needs either a dedicated, explicitly-locked initial-stop input
+ *  or a stop-movement log — both real Trade Execution UX changes, out of
+ *  scope here. Not changed further per explicit instruction to stop and
+ *  report rather than redesign this. */
 async function ensureInitialStopResolved(userId: string, tradeId: string): Promise<void> {
   const snapshot = await prisma.performanceRiskSnapshot.findUnique({ where: { tradeId } });
   if (!snapshot || snapshot.initialStop != null) return;
@@ -208,6 +230,7 @@ async function ensureInitialStopResolved(userId: string, tradeId: string): Promi
   const { stop, source } = resolveInitialStop(
     trade.actualStopLoss?.toString() ?? null,
     lockedPlan?.stopLoss?.toString() ?? null,
+    trade.plannedStopLoss?.toString() ?? null,
   );
   if (stop == null) return;
 
@@ -227,13 +250,23 @@ async function clearSettlement(tx: TransactionClient, tradeId: string, performan
     where: { tradeId },
     data: { realizedR: null, performancePnl: null, settledAt: null, calculationVersion: { increment: 1 } },
   });
+  // NULL, not 0 — a failed/incomplete settlement is "not calculable yet,"
+  // never a breakeven trade. See the model's own doc comment in schema.prisma.
   await tx.tradeAccountAllocation.updateMany({
     where: { tradeId, tradingAccountId: performanceAccountId },
-    data: { closingPnlGross: 0, closingPnlNet: 0 },
+    data: { closingPnlGross: null, closingPnlNet: null },
   });
   // Deliberately does NOT touch Trade.actualRR here — see the write in
   // settlePerformanceTrade's success branch below for why this is one-way.
 }
+
+/** Explicit outcome of a settlement attempt (Stage C) — replaces the
+ *  previous silent `void` return, so a caller (or a future UI) can tell
+ *  "genuinely settled" apart from "couldn't be calculated yet" without
+ *  re-deriving it from the snapshot/allocation rows itself. */
+export type SettlementResult =
+  | { status: "SETTLED"; realizedR: Decimal; performancePnl: Decimal }
+  | { status: "NOT_CALCULABLE"; reason: string };
 
 /**
  * The main recalculation entrypoint (spec §9/§10/§13) — call after any
@@ -245,9 +278,10 @@ async function clearSettlement(tx: TransactionClient, tradeId: string, performan
  * the same trade — the unique `tradeId` on the snapshot and the unique
  * `[tradeId, tradingAccountId]` on the allocation are what make this
  * idempotent). Safe to call as often as needed; a not-yet-fully-closed or
- * not-yet-locked trade is simply left/reset at no PnL.
+ * not-yet-locked trade is simply left/reset at NOT_CALCULABLE (null ledger
+ * PnL), never a fabricated 0.
  */
-export async function settlePerformanceTrade(userId: string, tradeId: string): Promise<void> {
+export async function settlePerformanceTrade(userId: string, tradeId: string): Promise<SettlementResult> {
   await ensureInitialStopResolved(userId, tradeId);
 
   const [trade, snapshot, partials] = await Promise.all([
@@ -255,12 +289,14 @@ export async function settlePerformanceTrade(userId: string, tradeId: string): P
     prisma.performanceRiskSnapshot.findUnique({ where: { tradeId } }),
     prisma.tradeActualPartialExit.findMany({ where: { tradeId, userId }, select: { exitPrice: true, percentClosed: true } }),
   ]);
-  if (!trade || !snapshot) return;
+  if (!trade || !snapshot) {
+    return { status: "NOT_CALCULABLE", reason: "No locked Performance risk snapshot yet (no actual entry recorded)." };
+  }
 
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     if (snapshot.initialStop == null) {
       await clearSettlement(tx, tradeId, snapshot.performanceAccountId);
-      return;
+      return { status: "NOT_CALCULABLE", reason: "No initial stop resolved yet — enter an actual stop loss or confirm a Trade Plan stop." };
     }
 
     const exits: ExitInput[] =
@@ -276,7 +312,7 @@ export async function settlePerformanceTrade(userId: string, tradeId: string): P
 
     if (!result.fullyClosed || result.realizedR == null) {
       await clearSettlement(tx, tradeId, snapshot.performanceAccountId);
-      return;
+      return { status: "NOT_CALCULABLE", reason: result.reason ?? "Position is not fully closed yet." };
     }
 
     const pnl = computePerformancePnl(snapshot.riskAmount.toString(), result.realizedR);
@@ -305,6 +341,8 @@ export async function settlePerformanceTrade(userId: string, tradeId: string): P
     // Actual RR must not vanish just because an unrelated, still-in-flight
     // edit briefly makes exposure look incomplete elsewhere.
     await tx.trade.update({ where: { id: tradeId }, data: { actualRR: result.realizedR.toString() } });
+
+    return { status: "SETTLED", realizedR: result.realizedR, performancePnl: pnl };
   });
 }
 

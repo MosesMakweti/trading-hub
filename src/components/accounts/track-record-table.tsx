@@ -65,11 +65,10 @@ export function TrackRecordTable({
               <td
                 className={cn(
                   "py-1.5 pr-3 text-right tabular-nums",
-                  e.pnl >= 0 ? "text-success" : "text-danger",
+                  e.pnl == null ? "text-muted-foreground" : e.pnl >= 0 ? "text-success" : "text-danger",
                 )}
               >
-                {e.pnl >= 0 ? "+" : ""}
-                {currency(e.pnl)}
+                {e.pnl == null ? "Pending" : `${e.pnl >= 0 ? "+" : ""}${currency(e.pnl)}`}
               </td>
               <td className="py-1.5 text-right font-medium tabular-nums">
                 {currency(e.runningBalance)}

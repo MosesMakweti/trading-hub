@@ -25,15 +25,19 @@ const P = (o: Partial<AnalyticsTradePoint>): AnalyticsTradePoint => ({
 });
 
 describe("bucketPerf", () => {
-  it("computes net pnl, win rate (of closed), avg R and expectancy", () => {
+  // Stage C.1: every point here is already a settled trade (the caller
+  // never pushes a pending one) — a genuine breakeven counts in the win
+  // rate denominator like domain/performance/metrics.ts's winRate(), it's
+  // just not credited as a win.
+  it("computes net pnl, win rate (of all settled trades, breakeven included in the denominator), avg R and expectancy", () => {
     const b = bucketPerf([
       P({ pnl: 100, actualR: 2 }),
       P({ pnl: -50, actualR: -1 }),
-      P({ pnl: 0, actualR: 0 }), // breakeven — excluded from win rate denominator
+      P({ pnl: 0, actualR: 0 }), // genuine breakeven — still a settled, closed trade
     ]);
     expect(b.trades).toBe(3);
     expect(b.netPnl).toBe(50);
-    expect(b.winRate).toBe(50); // 1 win of 2 closed
+    expect(b.winRate).toBeCloseTo(33.333, 2); // 1 win of 3 settled trades
     expect(b.avgR).toBeCloseTo(0.3333, 3);
   });
 

@@ -153,10 +153,11 @@ function tradeMarketData(data: TradeInput) {
 
 /**
  * Builds every allocation row for a trade: the Performance Account's own
- * automatic allocation (spec §3/§4 — created every time, PnL always 0/0 at
- * save time; the ONLY writer of its PnL going forward is
- * performance-account.service.ts's settlePerformanceTrade, driven by the
- * trade's actual execution data, never this form), plus one row per
+ * automatic allocation (spec §3/§4 — created every time, PnL starts NULL
+ * ("not settled yet" — never a misleading 0) at save time; the ONLY writer
+ * of its PnL going forward is performance-account.service.ts's
+ * settlePerformanceTrade, driven by the trade's actual execution data, never
+ * this form), plus one row per
  * additional REAL participating account, each with its own independently
  * entered risk% and PnL (spec §1/§17 — never derived/scaled from the
  * Performance Account's result).
@@ -190,9 +191,10 @@ async function buildAllocations(userId: string, data: TradeInput, excludeTradeId
       tradingAccountId: performanceAccount.id,
       riskInputType: "PERCENT" as const,
       riskValue: alreadyLocked ? alreadyLocked.riskPercent.toNumber() : performanceRiskPercent,
-      // Never written here — see the doc comment above.
-      closingPnlGross: 0,
-      closingPnlNet: 0,
+      // NULL = not settled yet — never written here as a fake 0. See the
+      // doc comment above.
+      closingPnlGross: null,
+      closingPnlNet: null,
     },
     ...participating,
   ];
@@ -785,10 +787,13 @@ export async function listDailyPnl(userId: string): Promise<DailyPnlEntry[]> {
   const byDay = new Map<string, { pnl: number; count: number; wins: number; losses: number }>();
   for (const e of entries) {
     const existing = byDay.get(e.dateKey) ?? { pnl: 0, count: 0, wins: 0, losses: 0 };
-    existing.pnl += e.pnl;
+    // Stage C: e.pnl is null when not settled / not calculable yet — counts
+    // toward the day's trade count (it happened), but contributes 0 to PnL
+    // and is neither a win nor a loss (never infer one without real data).
+    existing.pnl += e.pnl ?? 0;
     existing.count += 1;
-    if (e.pnl > 0) existing.wins += 1;
-    else if (e.pnl < 0) existing.losses += 1;
+    if (e.pnl != null && e.pnl > 0) existing.wins += 1;
+    else if (e.pnl != null && e.pnl < 0) existing.losses += 1;
     byDay.set(e.dateKey, existing);
   }
 

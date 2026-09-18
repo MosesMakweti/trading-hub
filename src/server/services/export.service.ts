@@ -31,12 +31,10 @@ export async function listTradeExportRecords(
       biasConfidencePercent: t.biasConfidencePercent,
       expectedRR: t.expectedRR ? t.expectedRR.toNumber() : null,
       actualRR: t.actualRR ? t.actualRR.toNumber() : null,
-      performanceClosingPnlGross: performanceAllocation
-        ? performanceAllocation.closingPnlGross.toNumber()
-        : 0,
-      performanceClosingPnlNet: performanceAllocation
-        ? performanceAllocation.closingPnlNet.toNumber()
-        : 0,
+      // Stage C: null = not settled / not calculable yet — never a fake 0
+      // (no allocation row at all is the same "not calculable" case).
+      performanceClosingPnlGross: performanceAllocation?.closingPnlGross?.toNumber() ?? null,
+      performanceClosingPnlNet: performanceAllocation?.closingPnlNet?.toNumber() ?? null,
       psychPreTradeMindset: t.psychPreTradeMindset,
       psychPostTradeReflection: t.psychPostTradeReflection,
       psychLessonsLearned: t.psychLessonsLearned,
@@ -47,8 +45,11 @@ export async function listTradeExportRecords(
         accountName: a.tradingAccount.name,
         riskInputType: a.riskInputType,
         riskValue: a.riskValue.toNumber(),
-        closingPnlGross: a.closingPnlGross.toNumber(),
-        closingPnlNet: a.closingPnlNet.toNumber(),
+        // Non-Performance allocations are always trader-entered (never left
+        // pending by this app's current UI) — 0 is a safe fallback, not a
+        // "not calculable" case like the Performance allocation above.
+        closingPnlGross: a.closingPnlGross?.toNumber() ?? 0,
+        closingPnlNet: a.closingPnlNet?.toNumber() ?? 0,
       })),
       // SOT: the by-name selections frozen on the trade (pre-SOT trades backfilled in P9).
       confluenceLabels: (t.selectedConfluences as string[] | null) ?? [],

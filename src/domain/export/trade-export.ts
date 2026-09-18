@@ -26,10 +26,11 @@ export interface TradeExportRecord {
   // Read-only, informational — the Performance Account's system-calculated
   // PnL at export time (realized R × locked risk amount). Never written on
   // import: the Performance Account has no manual PnL input anymore, so a
-  // re-imported trade's Performance PnL is 0 until real actual-execution
-  // data (entry/stop/exit) is entered for it in the workspace.
-  performanceClosingPnlGross: number;
-  performanceClosingPnlNet: number;
+  // re-imported trade's Performance PnL stays null (not calculable) until
+  // real actual-execution data (entry/stop/exit) is entered for it in the
+  // workspace. Stage C: null = not settled, never a fake 0.
+  performanceClosingPnlGross: number | null;
+  performanceClosingPnlNet: number | null;
   psychPreTradeMindset: string | null;
   psychPostTradeReflection: string | null;
   psychLessonsLearned: string | null;
@@ -49,7 +50,7 @@ export interface TradeExportRow {
   Direction: string;
   "Expected RR": string;
   "Actual RR": string;
-  "Performance PnL (Net)": number;
+  "Performance PnL (Net)": number | string;
   "Psychology Grade": string;
 }
 
@@ -71,7 +72,7 @@ export function toExportRow(
     Direction: record.direction === "LONG" ? "Long" : "Short",
     "Expected RR": record.expectedRR == null ? "" : String(record.expectedRR),
     "Actual RR": record.actualRR == null ? "" : String(record.actualRR),
-    "Performance PnL (Net)": record.performanceClosingPnlNet,
+    "Performance PnL (Net)": record.performanceClosingPnlNet == null ? "Pending" : record.performanceClosingPnlNet,
     "Psychology Grade": psychologyGrade ?? "",
   };
 }

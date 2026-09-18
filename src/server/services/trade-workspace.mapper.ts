@@ -70,11 +70,15 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
       kind: a.tradingAccount.kind as TradeWorkspaceDTO["accounts"][number]["kind"],
       riskInputType: a.riskInputType,
       riskValue: a.riskValue.toNumber(),
-      closingPnlGross: a.closingPnlGross.toNumber(),
-      closingPnlNet: a.closingPnlNet.toNumber(),
+      closingPnlGross: a.closingPnlGross?.toNumber() ?? null,
+      closingPnlNet: a.closingPnlNet?.toNumber() ?? null,
     })),
-    performancePnlGross: performance?.closingPnlGross.toNumber() ?? 0,
-    performancePnlNet: performance?.closingPnlNet.toNumber() ?? 0,
+    // Stage C: null (no allocation row, or not settled yet) is preserved as
+    // null — this used to coalesce to 0, which is exactly what made the
+    // Performance Account look settled-at-zero before it had actually
+    // settled at all.
+    performancePnlGross: performance?.closingPnlGross?.toNumber() ?? null,
+    performancePnlNet: performance?.closingPnlNet?.toNumber() ?? null,
     preTradeNotes: trade.psychPreTradeMindset,
     postTradeReflection: trade.psychPostTradeReflection,
     lessonsLearned: trade.psychLessonsLearned,

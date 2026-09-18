@@ -10,19 +10,28 @@ import {
 } from "./realized-r";
 
 describe("resolveInitialStop", () => {
-  it("prefers the confirmed actual stop over the planned stop", () => {
-    expect(resolveInitialStop(1.095, 1.09)).toEqual({ stop: expect.anything(), source: "ACTUAL" });
-    expect(resolveInitialStop(1.095, 1.09).stop!.toNumber()).toBe(1.095);
+  it("prefers the confirmed actual stop over the locked planned stop and the canonical planned stop", () => {
+    expect(resolveInitialStop(1.095, 1.09, 1.08)).toEqual({ stop: expect.anything(), source: "ACTUAL" });
+    expect(resolveInitialStop(1.095, 1.09, 1.08).stop!.toNumber()).toBe(1.095);
   });
 
   it("falls back to the locked planned stop when no actual stop was entered", () => {
-    const result = resolveInitialStop(null, 1.09);
+    const result = resolveInitialStop(null, 1.09, 1.08);
     expect(result.source).toBe("PLANNED");
     expect(result.stop!.toNumber()).toBe(1.09);
   });
 
-  it("resolves to null when neither exists", () => {
-    expect(resolveInitialStop(null, null)).toEqual({ stop: null, source: null });
+  // Stage C.1 — third tier: the simple case-file plannedStopLoss field, used
+  // only when neither an actual stop nor a locked TradePlanVersion exists
+  // (e.g. a freeform trade with no TradingView screenshot plan).
+  it("falls back to the canonical planned stop when neither an actual nor a locked plan stop exists", () => {
+    const result = resolveInitialStop(null, null, 1.08);
+    expect(result.source).toBe("PLANNED_FALLBACK");
+    expect(result.stop!.toNumber()).toBe(1.08);
+  });
+
+  it("resolves to null when none of the three sources exist", () => {
+    expect(resolveInitialStop(null, null, null)).toEqual({ stop: null, source: null });
   });
 });
 

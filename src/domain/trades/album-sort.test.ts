@@ -10,7 +10,7 @@ const trades: T[] = [
   { id: "a", actualRR: 1, performancePnlNet: 500 },
   { id: "b", actualRR: -2, performancePnlNet: -900 },
   { id: "c", actualRR: 3, performancePnlNet: 200 },
-  { id: "d", actualRR: null, performancePnlNet: 0 }, // open — no result yet
+  { id: "d", actualRR: null, performancePnlNet: null }, // open — no result yet (Stage C: null, never a fake 0)
 ];
 
 const ids = (t: T[]) => t.map((x) => x.id);

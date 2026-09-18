@@ -7,6 +7,7 @@ import {
   WorkspaceField,
   formatRR,
   formatSignedCurrency,
+  formatPerformancePnl,
 } from "@/components/journal/workspace/workspace-ui";
 import {
   WorkspaceNoteField,
@@ -41,14 +42,22 @@ export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
         <WorkspaceField
           label="Performance PnL (net)"
           value={
-            <span className={trade.performancePnlNet >= 0 ? "text-success" : "text-danger"}>
-              {formatSignedCurrency(trade.performancePnlNet)}
+            <span
+              className={
+                trade.performancePnlNet == null
+                  ? "text-muted-foreground"
+                  : trade.performancePnlNet >= 0
+                    ? "text-success"
+                    : "text-danger"
+              }
+            >
+              {formatPerformancePnl(trade.performancePnlNet)}
             </span>
           }
         />
         <WorkspaceField
           label="Performance PnL (gross)"
-          value={formatSignedCurrency(trade.performancePnlGross)}
+          value={formatPerformancePnl(trade.performancePnlGross)}
         />
       </div>
 
@@ -99,14 +108,18 @@ export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
                   {a.riskInputType === "PERCENT" ? "%" : "$"}
                 </span>
               </div>
-              <span
-                className={cn(
-                  "font-medium tabular-nums",
-                  a.closingPnlNet >= 0 ? "text-success" : "text-danger",
-                )}
-              >
-                {formatSignedCurrency(a.closingPnlNet)}
-              </span>
+              {a.closingPnlNet == null ? (
+                <span className="font-medium tabular-nums text-muted-foreground">Pending</span>
+              ) : (
+                <span
+                  className={cn(
+                    "font-medium tabular-nums",
+                    a.closingPnlNet >= 0 ? "text-success" : "text-danger",
+                  )}
+                >
+                  {formatSignedCurrency(a.closingPnlNet)}
+                </span>
+              )}
             </div>
           ))}
         </div>

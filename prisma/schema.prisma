@@ -438,6 +438,11 @@ model PerformanceRiskSnapshot {
 enum InitialStopSource {
   ACTUAL
   PLANNED
+  // Stage C.1 — third-tier fallback: Trade.plannedStopLoss (the simple
+  // case-file field), used only when neither an actual stop nor a locked
+  // TradePlanVersion stop exists. See resolveInitialStop's doc comment
+  // (domain/performance/realized-r.ts) for the full hierarchy.
+  PLANNED_FALLBACK
 }
 
 // Pre-Session Routine item type. Extensible: adding a future type (RATING,
@@ -949,13 +954,27 @@ model PsychologyQuestionnaireResponse {
   updatedAt         DateTime @updatedAt
 }
 
-// Per-account risk input and closing PnL for a trade that may span multiple
-// accounts of different sizes. Exactly one allocation per trade belongs to
-// the user's PERFORMANCE account (identified via `tradingAccount.kind`) and
-// its closingPnlGross/closingPnlNet are the only ones directly entered by
-// the trader; every other account's are auto-calculated at write time by
-// scaling the Performance Account's PnL by relative risk% (see
-// domain/performance/allocation.ts) — never entered manually.
+// "System A" — per-account risk input and closing PnL for a trade that may
+// span multiple accounts of different sizes:
+//   - PERFORMANCE — the virtual, normalized trader-performance benchmark.
+//     Every executed trade participates by default; its closingPnlGross/Net
+//     are NEVER trader-entered — the only writer is
+//     performance-account.service.ts's settlePerformanceTrade, computed from
+//     canonical realized R (domain/performance/realized-r.ts) × the locked
+//     Performance risk amount.
+//   - PERSONAL_BROKERAGE — a real participating account; its PnL IS entered
+//     directly by the trader (never derived/scaled from the Performance
+//     Account's result — a stale comment here previously claimed otherwise).
+// Richer, independent real-account execution (Prop Firms) is a separate
+// model, TradeAccountExecution ("System B") — see its own doc comment for
+// why the two aren't merged.
+//
+// closingPnlGross/closingPnlNet are nullable: NULL means "not settled /
+// not calculable yet" (the trade was just created, or settlement couldn't
+// complete — e.g. no initial stop or exposure not fully closed); 0 means the
+// canonical calculation genuinely produced a breakeven result. Never conflate
+// the two — a reader that coalesces NULL to 0 silently lies about an
+// unsettled trade's outcome.
 model TradeAccountAllocation {
   id               String         @id @default(cuid())
   tradeId          String
@@ -974,20 +993,28 @@ model TradeAccountAllocation {
   tradingAccount   TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
   riskInputType    RiskInputType
   riskValue        Decimal        @db.Decimal(14, 2)
-  closingPnlGross  Decimal        @db.Decimal(14, 2)
-  closingPnlNet    Decimal        @db.Decimal(14, 2)
+  closingPnlGross  Decimal?       @db.Decimal(14, 2)
+  closingPnlNet    Decimal?       @db.Decimal(14, 2)
 
   @@unique([tradeId, tradingAccountId])
 }
 
 // ── Prop Firms module (Phase 2: Trade Idea ↔ Account Execution) ─────────────
-// The System-B analogue of TradeAccountAllocation above, but for
-// PropFirmAccount instead of TradingAccount, and with genuinely independent
-// per-account risk/planned/actual fields rather than one derived from a
-// Performance Account. A Trade (the "Idea" — shared thesis/setup/planned
-// entry-stop-target already on Trade) has zero, one, or many of these — one
-// per PropFirmAccount it was allocated/executed on. Fully additive; nothing
-// on Trade/TradeAccountAllocation/TradingAccount changes.
+// "System B" — the analogue of TradeAccountAllocation ("System A") above,
+// but for PropFirmAccount instead of TradingAccount, and with genuinely
+// independent per-account risk/planned/actual fields rather than one derived
+// from a Performance Account. A Trade (the "Idea" — shared thesis/setup/
+// planned entry-stop-target already on Trade) has zero, one, or many of
+// these — one per PropFirmAccount it was allocated/executed on. Fully
+// additive; nothing on Trade/TradeAccountAllocation/TradingAccount changes.
+//
+// Why not merge with System A: a real prop-firm account has a real broker
+// statement, so its netPnl is the ground truth and actualR is DERIVED from it
+// (netPnl / plannedRiskAmount, domain/prop-firms/risk.ts) — the opposite
+// direction from the Performance Account, which has no broker statement and
+// computes PnL FROM a canonical realized-R read off prices
+// (domain/performance/realized-r.ts). Two intentionally different PnL bases
+// for two intentionally different account types, not accidental duplication.
 enum RiskEntryMode {
   PERCENT
   AMOUNT

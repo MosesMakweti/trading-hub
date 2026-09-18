@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatDateKeyShort, minutesToTimeString } from "@/lib/date";
-import { formatRR, formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
+import { formatRR, formatPerformancePnl } from "@/components/journal/workspace/workspace-ui";
 import type { AlbumImageDTO, AlbumTradeDTO } from "@/types/trades-album";
 
 export interface AlbumSlide {
@@ -66,7 +66,8 @@ export function AlbumStage({
   const result = tradeResult(trade.actualRR);
   const rrTone =
     trade.actualRR == null ? "text-muted-foreground" : trade.actualRR >= 0 ? "text-success" : "text-danger";
-  const pnlTone = trade.performancePnlNet >= 0 ? "text-success" : "text-danger";
+  const pnlTone =
+    trade.performancePnlNet == null ? "text-muted-foreground" : trade.performancePnlNet >= 0 ? "text-success" : "text-danger";
 
   return (
     <div className="glass overflow-hidden rounded-2xl">
@@ -137,7 +138,7 @@ export function AlbumStage({
           </Badge>
         </Stat>
         <Stat label="P&L">
-          <span className={cn("tabular-nums", pnlTone)}>{formatSignedCurrency(trade.performancePnlNet)}</span>
+          <span className={cn("tabular-nums", pnlTone)}>{formatPerformancePnl(trade.performancePnlNet)}</span>
         </Stat>
         <Stat label="R-Multiple">
           <span className={cn("tabular-nums", rrTone)}>

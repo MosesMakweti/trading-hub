@@ -9,19 +9,31 @@
 import { Decimal } from "decimal.js";
 import { computePlannedR, type DirectionLike } from "@/domain/prop-firms/risk";
 
-export type InitialStopSourceLike = "ACTUAL" | "PLANNED";
+export type InitialStopSourceLike = "ACTUAL" | "PLANNED" | "PLANNED_FALLBACK";
 
-/** Priority: confirmed actual initial stop, then the locked planned stop —
- *  never both, never a guess. Resolve once; the caller must not call this
- *  again after a stop has already been resolved and frozen on the snapshot
- *  (spec §8: moving the stop to break-even/trailing later must never
- *  redefine the original 1R unit). */
+/**
+ * Original-risk resolution hierarchy (Stage C.1) — "strongest historical
+ * evidence available," never a guess, and never the CURRENT/moved stop:
+ *   1. ACTUAL — an explicit actual execution stop (Trade.actualStopLoss).
+ *   2. PLANNED — the locked TradePlanVersion's stop (the confirmed
+ *      TradingView screenshot plan), when no actual stop was given.
+ *   3. PLANNED_FALLBACK — the simple case-file `Trade.plannedStopLoss`
+ *      field, when neither of the above exists (a freeform trade with no
+ *      screenshot plan). Lowest priority — an explicit or locked-plan stop
+ *      always wins when present.
+ * Resolve once; the caller must not call this again after a stop has
+ * already been resolved and frozen on the snapshot (spec §8: moving the
+ * stop to break-even/trailing later must never redefine the original 1R
+ * unit — see ensureInitialStopResolved's write-once guard, and its own doc
+ * comment for the residual ambiguity this hierarchy does NOT fully close). */
 export function resolveInitialStop(
   actualStopLoss: Decimal.Value | null,
   lockedPlannedStop: Decimal.Value | null,
+  canonicalPlannedStop: Decimal.Value | null,
 ): { stop: Decimal | null; source: InitialStopSourceLike | null } {
   if (actualStopLoss != null) return { stop: new Decimal(actualStopLoss), source: "ACTUAL" };
   if (lockedPlannedStop != null) return { stop: new Decimal(lockedPlannedStop), source: "PLANNED" };
+  if (canonicalPlannedStop != null) return { stop: new Decimal(canonicalPlannedStop), source: "PLANNED_FALLBACK" };
   return { stop: null, source: null };
 }
 
@@ -112,6 +124,23 @@ export function computePerformanceRiskAmount(balanceBefore: Decimal.Value, riskP
  *  account executions, never the virtual benchmark. */
 export function computePerformancePnl(riskAmount: Decimal.Value, realizedR: Decimal.Value): Decimal {
   return new Decimal(riskAmount).times(realizedR);
+}
+
+/**
+ * Stage C.1, Part 2 — the ONE canonical rule for whether a trade's
+ * Performance result is eligible for outcome-based analytics (win rate,
+ * profit factor, average R, equity curve, discrepancy, psychology-outcome
+ * correlation, ...). A trade is eligible only once it has genuinely
+ * settled — never inferred from a $0/0R value, and never scattered as
+ * ad-hoc `?? 0` checks through analytics code. Every settled-outcome field
+ * in this codebase (TradeAccountAllocation.closingPnlNet,
+ * PerformanceRiskSnapshot.realizedR/performancePnl) is nullable with
+ * exactly this meaning, so the rule is intentionally just "not null" — see
+ * schema.prisma's TradeAccountAllocation doc comment for the full
+ * null/zero contract this enforces.
+ */
+export function isPerformanceSettled(value: Decimal.Value | null | undefined): boolean {
+  return value != null;
 }
 
 /** Performance Balance After = Balance Before + Calculated PnL (spec §11,

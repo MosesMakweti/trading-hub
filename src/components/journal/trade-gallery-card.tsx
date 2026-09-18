@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   TradeStatusBadge,
   formatRR,
-  formatSignedCurrency,
+  formatPerformancePnl,
 } from "@/components/journal/workspace/workspace-ui";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
@@ -58,7 +58,7 @@ export function TradeGalleryCard({ trade }: { trade: TradeWorkspaceDTO }) {
               {trade.actualRR == null ? "Open" : formatRR(trade.actualRR)}
             </span>
             <span className="ml-2 text-xs text-muted-foreground tabular-nums">
-              {formatSignedCurrency(trade.performancePnlNet)}
+              {formatPerformancePnl(trade.performancePnlNet)}
             </span>
           </div>
           {trade.psychology && (

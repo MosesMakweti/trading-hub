@@ -184,9 +184,13 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
             <div className="text-muted-foreground">
               Risk: {a.riskValue}
               {a.riskInputType === "PERCENT" ? "%" : "$"} · Net PnL:{" "}
-              <span className={a.closingPnlNet >= 0 ? "text-success" : "text-danger"}>
-                {a.closingPnlNet.toFixed(2)}
-              </span>
+              {a.closingPnlNet == null ? (
+                <span className="text-muted-foreground">Pending</span>
+              ) : (
+                <span className={a.closingPnlNet >= 0 ? "text-success" : "text-danger"}>
+                  {a.closingPnlNet.toFixed(2)}
+                </span>
+              )}
             </div>
           </div>
         ))}

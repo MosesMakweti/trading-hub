@@ -92,10 +92,14 @@ export function RecentTradesTable({ trades }: { trades: TradeWithWorkspaceRelati
                       </span>
                     ))}
                     {performance && (
-                      <span className={cn("font-medium tabular-nums", performance.closingPnlNet.toNumber() >= 0 ? "text-success" : "text-danger")}>
-                        {performance.closingPnlNet.toNumber() >= 0 ? "+" : ""}
-                        {performance.closingPnlNet.toNumber().toFixed(2)}
-                      </span>
+                      performance.closingPnlNet == null ? (
+                        <span className="text-muted-foreground">Pending</span>
+                      ) : (
+                        <span className={cn("font-medium tabular-nums", performance.closingPnlNet.toNumber() >= 0 ? "text-success" : "text-danger")}>
+                          {performance.closingPnlNet.toNumber() >= 0 ? "+" : ""}
+                          {performance.closingPnlNet.toNumber().toFixed(2)}
+                        </span>
+                      )
                     )}
                     {t.psychology && <Badge variant={GRADE_VARIANT[t.psychology.grade]}>{t.psychology.grade}</Badge>}
                   </div>

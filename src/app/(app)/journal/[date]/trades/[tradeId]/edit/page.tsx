@@ -68,8 +68,11 @@ export default async function EditTradePage({
       tradingAccountId: a.tradingAccountId,
       riskInputType: a.riskInputType,
       riskValue: a.riskValue.toNumber(),
-      closingPnlGross: a.closingPnlGross.toNumber(),
-      closingPnlNet: a.closingPnlNet.toNumber(),
+      // Non-Performance allocations are always trader-entered — 0 is a safe
+      // fallback (this list already excludes the Performance allocation,
+      // which is the only kind Stage C's null semantics apply to).
+      closingPnlGross: a.closingPnlGross?.toNumber() ?? 0,
+      closingPnlNet: a.closingPnlNet?.toNumber() ?? 0,
     })),
     // SOT: selections are stored by name (from the chosen strategy). Old trades
     // predating the strategy-scoped model have no names yet — start empty; the

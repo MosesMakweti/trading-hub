@@ -111,8 +111,9 @@ export default async function JournalDayPage({
         name: a.tradingAccount.name,
         riskInputType: a.riskInputType,
         riskValue: a.riskValue.toNumber(),
-        closingPnlGross: a.closingPnlGross.toNumber(),
-        closingPnlNet: a.closingPnlNet.toNumber(),
+        // Stage C: null = not settled / not calculable yet — never a fake 0.
+        closingPnlGross: a.closingPnlGross?.toNumber() ?? null,
+        closingPnlNet: a.closingPnlNet?.toNumber() ?? null,
       })),
       entryModelName: t.selectedEntryModel,
       strategyName: t.strategyNameSnapshot,

@@ -84,7 +84,10 @@ export interface ExecutedEventInput {
   eventId: string;
   sequence: number;
   dateKey: string;
-  /** Realized R multiple. null = open/unrecorded → treated as a 0/0 no-op event. */
+  /** Realized R multiple. null = not yet settled (Stage C.1: pending, not a
+   *  0R breakeven) → reconstructExecuted returns a true no-op for it,
+   *  before any deviation/behavioral analysis runs, rather than fabricating
+   *  a discrepancy against an unknown outcome. */
   actualR: number | null;
   /** setupValid — false ⇒ invalid setup taken. null = unknown (not treated as invalid). */
   validSetup: boolean | null;
@@ -133,9 +136,34 @@ const BEHAVIOR_LABEL: Record<BehaviorTag, string> = {
 };
 
 function reconstructExecuted(input: ExecutedEventInput): EventCounterfactual {
-  const actualR = input.actualR ?? 0;
-  const leakages: LeakageEvent[] = [];
   const invalid = input.validSetup === false || input.missingConfluences.length > 0;
+
+  // Stage C.1: a trade that hasn't settled yet must not masquerade as a
+  // genuine 0R outcome. The old `input.actualR ?? 0` coalescing was meant
+  // to make a null actualR a harmless 0/0 no-op (see the field's own doc
+  // comment), but that broke down for a valid, non-skip-tagged trade with
+  // measurable deviations: `processPerfectR` still accumulated real
+  // deviation cost on top of the coalesced 0, fabricating a discrepancy
+  // for a trade with no determined result yet. Return the true no-op
+  // directly instead of running deviation/behavioral analysis against an
+  // unknown outcome.
+  if (input.actualR == null) {
+    return {
+      eventId: input.eventId,
+      kind: "EXECUTED",
+      sequence: input.sequence,
+      dateKey: input.dateKey,
+      actualR: 0,
+      processPerfectR: 0,
+      avoidableR: 0,
+      unearnedR: 0,
+      processBreach: false,
+      validSetup: !invalid,
+      leakages: [],
+    };
+  }
+  const actualR = input.actualR;
+  const leakages: LeakageEvent[] = [];
   const skipTag = input.behaviorTag != null && SKIP_TAGS.has(input.behaviorTag);
   const shouldNotHaveTaken = invalid || skipTag;
 

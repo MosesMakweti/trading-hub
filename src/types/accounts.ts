@@ -5,7 +5,11 @@ export interface AccountTrackRecordEntryDTO {
   direction: "LONG" | "SHORT";
   riskInputType: "PERCENT" | "AMOUNT";
   riskValue: number;
-  pnl: number;
+  // Stage C: null = not settled / not calculable yet — never a fake 0.
+  // `runningBalance` itself stays a plain number: a pending trade
+  // contributes 0 to the running total (an aggregate-arithmetic decision,
+  // distinct from this row's own display, which must show "Pending").
+  pnl: number | null;
   runningBalance: number;
 }
 

@@ -47,6 +47,13 @@ function accountBaseline(account: {
  * supposed to be its source of truth. The soft-delete Prisma extension only
  * covers top-level queries, not nested `include`s, so deleted trades are
  * excluded explicitly here.
+ *
+ * Stage C: closingPnlNet is nullable (not settled / not calculable yet — see
+ * TradeAccountAllocation's doc comment). A pending trade contributes 0 to
+ * this aggregate balance — that's an arithmetic decision about the total,
+ * distinct from that trade's own display, which must still show "Pending"
+ * rather than $0.00 wherever it's shown per-trade (track record, recent
+ * trades, etc.).
  */
 export async function getAccountBalance(accountId: string, excludeTradeId?: string): Promise<number> {
   const account = await prisma.tradingAccount.findUniqueOrThrow({ where: { id: accountId } });
@@ -58,7 +65,7 @@ export async function getAccountBalance(accountId: string, excludeTradeId?: stri
     },
     select: { closingPnlNet: true },
   });
-  const pnlSum = allocations.reduce((sum, a) => sum + a.closingPnlNet.toNumber(), 0);
+  const pnlSum = allocations.reduce((sum, a) => sum + (a.closingPnlNet?.toNumber() ?? 0), 0);
   return accountBaseline(account) + pnlSum;
 }
 
@@ -69,11 +76,15 @@ export interface AccountTrackRecordEntry {
   direction: "LONG" | "SHORT";
   riskInputType: "PERCENT" | "AMOUNT";
   riskValue: number;
-  pnl: number;
+  // Stage C: null = not settled / not calculable yet — never a fake 0.
+  pnl: number | null;
   runningBalance: number;
 }
 
-/** Chronological trade-by-trade history for one account, with a running balance — never manually entered. */
+/** Chronological trade-by-trade history for one account, with a running
+ *  balance — never manually entered. A pending trade's own `pnl` is null
+ *  (Stage C) but still contributes 0 to `runningBalance`/`currentBalance`,
+ *  same "aggregate vs per-trade display" split as getAccountBalance above. */
 export async function getAccountTrackRecord(accountId: string): Promise<{
   currentBalance: number;
   entries: AccountTrackRecordEntry[];
@@ -87,8 +98,8 @@ export async function getAccountTrackRecord(accountId: string): Promise<{
 
   let running = accountBaseline(account);
   const entries: AccountTrackRecordEntry[] = allocations.map((a) => {
-    const pnl = a.closingPnlNet.toNumber();
-    running += pnl;
+    const pnl = a.closingPnlNet?.toNumber() ?? null;
+    running += pnl ?? 0;
     return {
       tradeId: a.tradeId,
       dateKey: utcDateToKey(a.trade.tradeDate),

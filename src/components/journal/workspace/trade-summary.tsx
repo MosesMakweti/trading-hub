@@ -4,7 +4,7 @@ import { GRADE_VARIANT } from "@/lib/grade-variant";
 import {
   StrategyRef,
   formatRR,
-  formatSignedCurrency,
+  formatPerformancePnl,
 } from "@/components/journal/workspace/workspace-ui";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
@@ -41,7 +41,7 @@ export function TradeSummary({ trade }: { trade: TradeWorkspaceDTO }) {
               trade.actualRR >= 0 ? "text-success" : "text-danger",
             )}
           >
-            {formatRR(trade.actualRR)} · {formatSignedCurrency(trade.performancePnlNet)}
+            {formatRR(trade.actualRR)} · {formatPerformancePnl(trade.performancePnlNet)}
           </span>
         )}
       </Stat>

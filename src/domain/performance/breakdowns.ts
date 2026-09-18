@@ -6,6 +6,16 @@
  *
  * `actualR` here is the trade's contribution % (the R proxy used across analytics);
  * `pnl` is realized dollars.
+ *
+ * Stage C.1: the caller (analytics.service.ts) now only ever pushes a point
+ * for a trade whose Performance result has genuinely settled — a pending
+ * trade never enters this array at all, rather than appearing as a fake
+ * $0/0R point. That means every `AnalyticsTradePoint` here IS a closed
+ * trade; `bucketPerf` no longer needs (and must not use) a `pnl !== 0`
+ * filter to guess which ones are "real" — that filter used to also
+ * incorrectly exclude a genuine $0 breakeven trade from the win-rate
+ * denominator, which conflated "pending" and "breakeven" in exactly the
+ * way Stage C's ledger fix was meant to end.
  */
 
 export interface AnalyticsTradePoint {
@@ -38,9 +48,12 @@ export function bucketPerf(points: AnalyticsTradePoint[]): BucketPerf {
   const trades = points.length;
   if (trades === 0) return { trades: 0, netPnl: 0, winRate: null, avgR: null, expectancy: null };
   const netPnl = points.reduce((s, p) => s + p.pnl, 0);
-  const closed = points.filter((p) => p.pnl !== 0);
   const wins = points.filter((p) => p.pnl > 0).length;
-  const winRate = closed.length > 0 ? (wins / closed.length) * 100 : null;
+  // Every point here is already a settled trade (see the module doc
+  // comment) — the denominator is every trade, matching
+  // domain/performance/metrics.ts's winRate() convention of counting a
+  // genuine breakeven in the denominator without crediting it as a win.
+  const winRate = (wins / trades) * 100;
   const avgR = mean(points.map((p) => p.actualR));
   const winR = points.filter((p) => p.actualR > 0).map((p) => p.actualR);
   const lossR = points.filter((p) => p.actualR < 0).map((p) => p.actualR);

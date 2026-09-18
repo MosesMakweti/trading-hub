@@ -32,10 +32,12 @@ export default async function AccountsPage() {
     Promise.all(accountRows.map((row) => getAccountTrackRecord(row.id))),
   ]);
 
-  // Performance Account: equity curve + lightweight core stats.
+  // Performance Account: equity curve + lightweight core stats. A pending
+  // (Stage C: null) trade contributes 0 to the day's realized PnL — same
+  // "aggregate vs per-trade display" split as accounts.service.ts.
   const perfByDay = new Map<string, number>();
   for (const e of performanceTrackRecord.entries) {
-    perfByDay.set(e.dateKey, (perfByDay.get(e.dateKey) ?? 0) + e.pnl);
+    perfByDay.set(e.dateKey, (perfByDay.get(e.dateKey) ?? 0) + (e.pnl ?? 0));
   }
   const perfDailyPercents = dailyPercentsFromBalanceHistory(
     PERFORMANCE_ACCOUNT_STARTING_BALANCE,

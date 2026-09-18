@@ -119,6 +119,39 @@ describe("counterfactual-engine — spec examples", () => {
   });
 });
 
+// Stage C.1 — a null actualR means "not settled yet" (pending), not "0R
+// breakeven." Before this fix, `actualR ?? 0` let a valid trade's real,
+// independently-measured deviations (computed from planned/actual PRICES,
+// not from actualR) still accumulate into processPerfectR on top of the
+// coalesced 0, fabricating a positive avoidableR for a trade with no
+// determined outcome at all.
+describe("counterfactual-engine — pending trades never fabricate a discrepancy", () => {
+  it("null actualR with a real measurable deviation still produces a true no-op", () => {
+    const e = reconstructEvent(executed({ actualR: null, deviations: [dev("late-entry", 0.5)] }));
+    expect(e.actualR).toBe(0);
+    expect(e.processPerfectR).toBe(0);
+    expect(e.avoidableR).toBe(0);
+    expect(e.unearnedR).toBe(0);
+    expect(e.processBreach).toBe(false);
+    expect(e.leakages).toHaveLength(0);
+  });
+
+  it("null actualR on an invalid/skip-tagged setup also produces a true no-op, not a fabricated avoidable loss", () => {
+    const e = reconstructEvent(executed({ actualR: null, validSetup: false }));
+    expect(e.avoidableR).toBe(0);
+    expect(e.unearnedR).toBe(0);
+    expect(e.leakages).toHaveLength(0);
+    expect(e.validSetup).toBe(false); // setup validity is still known independent of settlement
+  });
+
+  it("a settled 0R breakeven (not null) is unaffected by the pending short-circuit", () => {
+    const e = reconstructEvent(executed({ actualR: 0, deviations: [dev("late-entry", 0.5)] }));
+    expect(e.actualR).toBe(0);
+    expect(e.processPerfectR).toBe(0.5); // deviation cost still applies once the outcome is genuinely known
+    expect(e.avoidableR).toBe(0.5);
+  });
+});
+
 describe("counterfactual-engine — flagged (unknown-R) breaches", () => {
   it("valid trade, would-not-repeat → flagged behavioral, no shaded R", () => {
     const e = reconstructEvent(executed({ actualR: -1, wouldTakeAgain: false }));

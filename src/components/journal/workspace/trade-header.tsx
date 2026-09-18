@@ -6,7 +6,7 @@ import {
   TradeStatusBadge,
   WorkspaceField,
   formatRR,
-  formatSignedCurrency,
+  formatPerformancePnl,
 } from "@/components/journal/workspace/workspace-ui";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
@@ -44,7 +44,7 @@ export function TradeHeader({ trade }: { trade: TradeWorkspaceDTO }) {
           </div>
           {trade.actualRR != null && (
             <div className="text-xs text-muted-foreground tabular-nums">
-              {formatSignedCurrency(trade.performancePnlNet)}
+              {formatPerformancePnl(trade.performancePnlNet)}
             </div>
           )}
         </div>
