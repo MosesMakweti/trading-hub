@@ -16,6 +16,7 @@ import { TodayAssetsSection } from "@/components/today/today-assets-section";
 import { useDebouncedAutosave, type SaveState } from "@/hooks/use-debounced-autosave";
 import { updateTodaysPlan } from "@/actions/today.actions";
 import type { TodaysPlanDTO, DailyAssetAnalysisDTO } from "@/types/today";
+import type { SessionWindow } from "@/domain/schedule/session-countdown";
 
 /**
  * Daily Market Plan (Stage 11) — the single, integrated planning workflow
@@ -33,6 +34,10 @@ export function DailyMarketPlanSection({
   plan,
   analyses,
   onComplete,
+  strategies,
+  tradeFormAccounts,
+  activeSessions,
+  sessionWindows,
 }: {
   dateKey: string;
   plan: TodaysPlanDTO;
@@ -40,6 +45,12 @@ export function DailyMarketPlanSection({
   /** Called once the plan is marked complete — the parent moves the workspace
    *  on to Trade Idea. */
   onComplete?: () => void;
+  // Today V2 (T3) — threaded through to each asset card so "Start Trade
+  // Idea" can launch with that asset's day-plan context pre-filled.
+  strategies: { id: string; name: string; version: number }[];
+  tradeFormAccounts: { id: string; name: string; kind: string }[];
+  activeSessions: string[];
+  sessionWindows: SessionWindow[];
 }) {
   const router = useRouter();
 
@@ -132,7 +143,14 @@ export function DailyMarketPlanSection({
 
       {/* Today's Assets → Asset Analysis, one integrated step */}
       <SectionCard title="Today's assets">
-        <TodayAssetsSection dateKey={dateKey} analyses={analyses} />
+        <TodayAssetsSection
+          dateKey={dateKey}
+          analyses={analyses}
+          strategies={strategies}
+          tradeFormAccounts={tradeFormAccounts}
+          activeSessions={activeSessions}
+          sessionWindows={sessionWindows}
+        />
       </SectionCard>
 
       {/* General Session Context — day-level, asset-independent */}

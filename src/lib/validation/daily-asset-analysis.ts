@@ -38,6 +38,12 @@ export const dailyAssetAnalysisUpdateSchema = z
     finalBias: finalBiasSchema.nullable(),
     notes: richText,
     keyLevels: richText,
+    // Today V2 (T3) — "the strategy I intend to trade on this asset today,"
+    // a day-plan default for new Trade Ideas (never a historical trade
+    // owner — see the schema's own doc comment). Ownership against the
+    // current user is validated in the service, never trusted from the ID
+    // alone.
+    activeStrategyId: z.string().nullable(),
   })
   .partial()
   .refine((data) => Object.keys(data).length > 0, { message: "Nothing to update." });

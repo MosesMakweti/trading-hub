@@ -2,7 +2,11 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { prisma } from "@/server/db";
 import { createTrade, updateTradeSections } from "@/server/services/trades.service";
-import { settlePerformanceTrade } from "@/server/services/performance-account.service";
+import {
+  getPerformanceRiskContext,
+  settlePerformanceTrade,
+  updatePerformanceRiskOverride,
+} from "@/server/services/performance-account.service";
 import { getAccountBalance } from "@/server/services/accounts.service";
 import { tradeSchema, type TradeInput } from "@/lib/validation/trades";
 
@@ -458,5 +462,55 @@ describe("performance-account.service.ts — canonical initial stop (Stage C.1, 
 
     const snapshot = await performanceSnapshot(trade.id);
     expect(snapshot.initialStop?.toNumber()).toBe(90);
+  });
+});
+
+describe("getPerformanceRiskContext — Trade Idea presentation (Today V2 T3)", () => {
+  const userIds: string[] = [];
+  afterAll(async () => {
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  });
+
+  it("16/17/18. a new trade automatically participates at the default risk%, with a derived (never fake-zero) risk amount", async () => {
+    const user = await makeUser("risk-context-default");
+    userIds.push(user.id);
+
+    const trade = await createTrade(user.id, "2026-09-20", minimalTradeInput());
+    const context = await getPerformanceRiskContext(user.id, trade.id);
+
+    expect(context.locked).toBe(false);
+    expect(context.riskPercent).toBeCloseTo(1, 6); // account default
+    expect(context.balanceBefore).toBeCloseTo(100_000, 6);
+    expect(context.riskAmount).toBeCloseTo(1000, 6); // derived, never manually entered
+  });
+
+  it("17. the risk% override is editable through the canonical path before lock, and the derived amount updates with it", async () => {
+    const user = await makeUser("risk-context-override");
+    userIds.push(user.id);
+
+    const trade = await createTrade(user.id, "2026-09-21", minimalTradeInput());
+    await updatePerformanceRiskOverride(user.id, trade.id, 2);
+
+    const context = await getPerformanceRiskContext(user.id, trade.id);
+    expect(context.riskPercent).toBeCloseTo(2, 6);
+    expect(context.riskAmount).toBeCloseTo(2000, 6); // 2% of $100,000, derived
+  });
+
+  it("locked: reads the frozen historical values, not a live recomputation", async () => {
+    const user = await makeUser("risk-context-locked");
+    userIds.push(user.id);
+
+    const trade = await createTrade(user.id, "2026-09-22", minimalTradeInput({ direction: "LONG" }));
+    await updateTradeSections(user.id, trade.id, { actualEntry: 100, actualStopLoss: 90, actualExit: 120 });
+
+    const context = await getPerformanceRiskContext(user.id, trade.id);
+    expect(context.locked).toBe(true);
+    expect(context.riskPercent).toBeCloseTo(1, 6);
+    expect(context.balanceBefore).toBeCloseTo(100_000, 6);
+    expect(context.riskAmount).toBeCloseTo(1000, 6);
+
+    // Overriding risk% is rejected once locked — the canonical guard already
+    // enforced by updatePerformanceRiskOverride, not re-implemented here.
+    await expect(updatePerformanceRiskOverride(user.id, trade.id, 5)).rejects.toThrow();
   });
 });

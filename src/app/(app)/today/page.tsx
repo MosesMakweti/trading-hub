@@ -18,6 +18,7 @@ import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-fi
 import { listExecutionsForTrades } from "@/server/services/trade-executions.service";
 import { toAccountAllocationSelectorDTO, toExecutionDTO } from "@/server/services/prop-firms.mapper";
 import { getActiveCommitmentsForToday, getAdherenceSummaries, getCommitmentDailyStates } from "@/server/services/edge-review-commitment.service";
+import { listStrategySessionWindows } from "@/server/services/strategy-sot.service";
 import { dateKeyToUtcDate, localDateToKey } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
 import { FadeIn } from "@/components/shared/motion";
@@ -36,7 +37,7 @@ export default async function TodayPage() {
   // Create the day once, THEN load everything else — passing the day into the
   // routine service avoids a second concurrent upsert racing the (userId, date) unique.
   const day = await getOrCreateTradingDay(user.id, todayKey);
-  const [trades, routine, dailyPerf, propFirmAccountsRaw, tradeFormOptions, opportunities, assetAnalyses, reviewCommitments] =
+  const [trades, routine, dailyPerf, propFirmAccountsRaw, tradeFormOptions, opportunities, assetAnalyses, reviewCommitments, sessionWindows] =
     await Promise.all([
       listTradesForDay(user.id, todayKey),
       getOrCreateDayRoutine(user.id, day),
@@ -46,6 +47,10 @@ export default async function TodayPage() {
       listOpportunityDtosForDay(user.id, todayKey),
       listDailyAssetAnalyses(user.id, todayKey),
       getActiveCommitmentsForToday(user.id),
+      // Today V2 (T3) — session inheritance for a new Trade Idea (see
+      // domain/schedule/session-countdown.ts's resolveDefaultSession,
+      // applied client-side at dialog-open time in add-trade-dialog.tsx).
+      listStrategySessionWindows(user.id),
     ]);
 
   // Stage 16 §18 — daily acknowledgement, keyed by commitment id, for today only.
@@ -98,6 +103,7 @@ export default async function TodayPage() {
         reviewCommitments={reviewCommitments}
         commitmentDailyStates={dailyStates}
         commitmentAdherence={commitmentAdherence}
+        sessionWindows={sessionWindows}
         linkableTrades={trades
           .filter((t) => t.opportunityId == null)
           .map((t) => ({

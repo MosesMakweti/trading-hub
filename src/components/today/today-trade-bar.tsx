@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { TradeStatusBadge } from "@/components/journal/workspace/workspace-ui";
 import { AddTradeDialog } from "@/components/today/add-trade-dialog";
+import type { SessionWindow } from "@/domain/schedule/session-countdown";
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
 /**
@@ -20,8 +21,8 @@ export function TodayTradeBar({
   todayKey,
   accounts,
   strategies,
-  planBias,
-  planConviction,
+  activeSessions,
+  sessionWindows,
 }: {
   trades: TradeWorkspaceDTO[];
   focusedId: string | null;
@@ -29,8 +30,10 @@ export function TodayTradeBar({
   todayKey: string;
   accounts: { id: string; name: string; kind: string }[];
   strategies: { id: string; name: string; version: number }[];
-  planBias?: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
-  planConviction?: number | null;
+  // Today V2 (T3) — this is a generic entry point (not tied to one asset),
+  // so it only gets the day-level session default, never asset/strategy/bias.
+  activeSessions?: string[];
+  sessionWindows?: SessionWindow[];
 }) {
   return (
     <div className="glass flex flex-wrap items-center gap-2 rounded-2xl p-2.5">
@@ -75,8 +78,8 @@ export function TodayTradeBar({
           dateKey={todayKey}
           accounts={accounts}
           strategies={strategies}
-          planBias={planBias}
-          planConviction={planConviction}
+          activeSessions={activeSessions}
+          sessionWindows={sessionWindows}
         />
       </div>
     </div>

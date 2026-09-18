@@ -75,6 +75,12 @@ export interface DailyAssetAnalysisDTO {
   keyLevels: unknown; // Tiptap JSON or null — Areas of Interest
   evidenceItems: DirectionalEvidenceItemDTO[];
   evidenceSummary: DirectionalEvidenceSummary;
+  // Today V2 (T3) — day-plan preference, a DEFAULT for new Trade Ideas on
+  // this asset, never the historical owner of an already-created Trade.
+  // Live (not frozen) the same way finalBias is — see the model's own doc
+  // comment in schema.prisma.
+  activeStrategyId: string | null;
+  activeStrategyName: string | null;
 }
 
 /** Today's Trading Plan section data. State on TradingDay. */

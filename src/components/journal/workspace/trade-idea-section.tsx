@@ -241,7 +241,7 @@ export function TradeIdeaSection({
         <TradeImageBucket tradeId={trade.id} category="BEFORE" label="Before-Trade Images" />
       </div>
 
-      <AccountAllocationSection tradeId={trade.id} propFirmAccounts={propFirmAccounts} executions={executions} />
+      <AccountAllocationSection dateKey={trade.dateKey} tradeId={trade.id} propFirmAccounts={propFirmAccounts} executions={executions} />
     </div>
   );
 }

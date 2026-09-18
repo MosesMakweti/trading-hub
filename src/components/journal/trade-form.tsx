@@ -163,6 +163,18 @@ interface TradeFormProps {
   // starts aligned with what the trader decided this morning (create only).
   initialBias?: "BULLISH" | "BEARISH";
   initialBiasConfidence?: number;
+  // Today V2 (T3) — day-context inheritance, all plain form defaults (never
+  // auto-saved; the trader may freely override any of these before the
+  // normal save/create action runs). initialStrategyId sources from
+  // DailyAssetAnalysis.activeStrategyId (a day-plan preference, never a
+  // historical trade owner) — there is deliberately no canonical numeric
+  // "conviction" signal on DailyAssetAnalysis to default biasConfidencePercent
+  // from (see directional-evidence.ts's own doc comment: evidence counts are
+  // explicitly never to be rendered as a percentage/statistical claim), so
+  // that field is intentionally NOT defaulted here.
+  initialAssetSymbol?: string;
+  initialStrategyId?: string;
+  initialSession?: string | null;
   // Stage 6 — Today's live "Add Trade Idea" dialog passes false to declutter
   // fast, in-the-moment decision-making: the Performance Account risk
   // override and the Other Participating Accounts picker are both account-
@@ -188,6 +200,9 @@ export function TradeForm({
   onCancel,
   initialBias,
   initialBiasConfidence,
+  initialAssetSymbol,
+  initialStrategyId,
+  initialSession,
   showAccountAllocation = true,
 }: TradeFormProps) {
   const router = useRouter();
@@ -206,6 +221,9 @@ export function TradeForm({
       defaultValues ??
       {
         ...emptyDefaults,
+        assetSymbol: initialAssetSymbol ?? emptyDefaults.assetSymbol,
+        strategyId: initialStrategyId ?? emptyDefaults.strategyId,
+        selectedSession: initialSession ?? emptyDefaults.selectedSession,
         higherTimeframeBias: initialBias ?? emptyDefaults.higherTimeframeBias,
         biasConfidencePercent: initialBiasConfidence ?? emptyDefaults.biasConfidencePercent,
       },
@@ -361,10 +379,16 @@ export function TradeForm({
     };
   }, [selectedStrategyId]);
 
-  // When the strategy changes, clear the entry model — a model belongs to exactly
-  // one strategy, so the previous selection can't carry over. Skip the very first
-  // run so an edit-mode trade keeps its saved entry model on load. Same for the
-  // Setup Type (Stage 4) — it belongs to exactly one strategy too.
+  // When the strategy changes, clear every selection that belongs to exactly
+  // one strategy, so nothing from the previous strategy's checklist can
+  // carry over (Today V2 T3 — this now also matters for an INHERITED
+  // default strategy the trader then changes, not just a manual switch).
+  // Confluences/execution confirmations are strategy-scoped exactly like
+  // entry model/setup type; previously only those two were cleared here,
+  // leaving stale confluence/execution names silently attached to the new
+  // strategy. Skip the very first run so an edit-mode trade (or a create
+  // that started with an inherited default strategy) keeps its existing
+  // selections on load rather than wiping them the instant the form mounts.
   const strategyInitialised = useRef(false);
   useEffect(() => {
     if (!strategyInitialised.current) {
@@ -376,6 +400,8 @@ export function TradeForm({
     setValue("selectedSetupConditions", []);
     setValue("setupOverrideReason", null);
     setValue("setupOverrideNote", null);
+    setValue("selectedConfluences", [], { shouldDirty: true, shouldValidate: true });
+    setValue("selectedExecution", [], { shouldDirty: true, shouldValidate: true });
   }, [selectedStrategyId, setValue]);
 
   // When the trader flips direction, drop any selected confluences that no longer

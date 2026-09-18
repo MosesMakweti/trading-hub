@@ -7,14 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AccountAllocationRow } from "@/components/journal/workspace/account-allocation-row";
 import { AccountPerformanceBreakdown } from "@/components/journal/workspace/account-performance-breakdown";
+import { PerformanceAccountRow } from "@/components/journal/workspace/performance-account-row";
 import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
 import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
 
 export function AccountAllocationSection({
+  dateKey,
   tradeId,
   propFirmAccounts,
   executions,
 }: {
+  dateKey: string;
   tradeId: string;
   propFirmAccounts: AccountAllocationSelectorDTO[];
   executions: ExecutionDTO[];
@@ -35,12 +38,14 @@ export function AccountAllocationSection({
 
   return (
     <div className="space-y-3 rounded-xl border border-border bg-background/30 p-3">
+      <PerformanceAccountRow dateKey={dateKey} tradeId={tradeId} />
+
       {resolvedExecutions.length > 0 && (
         <AccountPerformanceBreakdown executions={resolvedExecutions} propFirmAccounts={propFirmAccounts} />
       )}
 
       <div className="flex items-center justify-between">
-        <div className="text-xs font-medium text-muted-foreground">Account Allocations</div>
+        <div className="text-xs font-medium text-muted-foreground">Other participating accounts</div>
         {editable && availableToAdd.length > 0 && (
           <div className="flex items-center gap-2">
             <Select
@@ -76,7 +81,7 @@ export function AccountAllocationSection({
       </div>
 
       {visibleAccountIds.length === 0 ? (
-        <p className="text-xs text-muted-foreground italic">No accounts allocated to this idea yet.</p>
+        <p className="text-xs text-muted-foreground italic">No other accounts allocated to this idea yet.</p>
       ) : (
         <div className="space-y-3">
           {visibleAccountIds.map((accountId) => {

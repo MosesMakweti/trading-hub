@@ -16,6 +16,8 @@ import {
   updateDirectionalEvidenceItem,
 } from "@/server/services/daily-asset-analysis.service";
 import { assertOwnsMediaTarget } from "@/server/services/media.service";
+import { createTrade } from "@/server/services/trades.service";
+import { tradeSchema, type TradeInput } from "@/lib/validation/trades";
 
 /** Real integration tests against the dev Postgres DB — same pattern as
  *  trades.service.test.ts. */
@@ -312,5 +314,137 @@ describe("daily-asset-analysis.service — Stage 11 (Daily Market Plan consolida
 
     // Still read-only — never creates an analysis for an asset with none.
     expect(await getDailyMarketContextForAsset(user.id, DATE_A, "EURUSD")).toBeNull();
+  });
+});
+
+function minimalTradeInput(overrides: Partial<TradeInput> = {}): TradeInput {
+  return tradeSchema.parse({
+    assetSymbol: "XAUUSD",
+    executionMinutes: 570,
+    direction: "LONG",
+    higherTimeframeBias: "BULLISH",
+    biasConfidencePercent: 80,
+    ...overrides,
+  });
+}
+
+// Today V2 (T3) — DailyAssetAnalysis.activeStrategyId: a per-asset day-plan
+// preference, a form DEFAULT for new Trade Ideas, never a historical trade
+// owner (see the schema's own doc comment).
+describe("daily-asset-analysis.service — activeStrategyId (Today V2 T3)", () => {
+  const userIds: string[] = [];
+  afterAll(async () => {
+    await cleanupUsers(...userIds);
+  });
+
+  async function makeStrategy(userId: string, name: string) {
+    const last = await prisma.strategy.findFirst({ where: { userId }, orderBy: { sortOrder: "desc" } });
+    return prisma.strategy.create({ data: { userId, name, sortOrder: (last?.sortOrder ?? -1) + 1 } });
+  }
+
+  async function firstAnalysisDTO(userId: string, dateKey: string) {
+    const rows = await listDailyAssetAnalyses(userId, dateKey);
+    return toDailyAssetAnalysisDTO(rows[0]);
+  }
+
+  it("1. saves activeStrategyId and it round-trips through the DTO", async () => {
+    const user = await makeUser("active-strategy-save");
+    userIds.push(user.id);
+    const strategy = await makeStrategy(user.id, "London Continuation");
+
+    const analysis = await createOrGetDailyAssetAnalysis(user.id, "2026-11-01", "XAUUSD");
+    await updateDailyAssetAnalysis(user.id, analysis.id, { activeStrategyId: strategy.id });
+
+    const dto = await firstAnalysisDTO(user.id, "2026-11-01");
+    expect(dto.activeStrategyId).toBe(strategy.id);
+    expect(dto.activeStrategyName).toBe("London Continuation");
+  });
+
+  it("2. rejects attaching another user's strategy", async () => {
+    const owner = await makeUser("active-strategy-owner");
+    const attacker = await makeUser("active-strategy-attacker");
+    userIds.push(owner.id, attacker.id);
+    const othersStrategy = await makeStrategy(owner.id, "Not Yours");
+
+    const analysis = await createOrGetDailyAssetAnalysis(attacker.id, "2026-11-02", "EURUSD");
+    await expect(
+      updateDailyAssetAnalysis(attacker.id, analysis.id, { activeStrategyId: othersStrategy.id }),
+    ).rejects.toThrow("Strategy not found.");
+
+    const dto = await firstAnalysisDTO(attacker.id, "2026-11-02");
+    expect(dto.activeStrategyId).toBeNull();
+  });
+
+  it("3. a hard-deleted strategy clears activeStrategyId (onDelete: SetNull)", async () => {
+    const user = await makeUser("active-strategy-setnull");
+    userIds.push(user.id);
+    const strategy = await makeStrategy(user.id, "Temporary");
+
+    const analysis = await createOrGetDailyAssetAnalysis(user.id, "2026-11-03", "XAUUSD");
+    await updateDailyAssetAnalysis(user.id, analysis.id, { activeStrategyId: strategy.id });
+    expect((await firstAnalysisDTO(user.id, "2026-11-03")).activeStrategyId).toBe(strategy.id);
+
+    await prisma.strategy.delete({ where: { id: strategy.id } });
+
+    const reloaded = await prisma.dailyAssetAnalysis.findUniqueOrThrow({ where: { id: analysis.id } });
+    expect(reloaded.activeStrategyId).toBeNull();
+  });
+
+  it("4. an analysis with no active strategy remains a fully valid row", async () => {
+    const user = await makeUser("active-strategy-none");
+    userIds.push(user.id);
+
+    const analysis = await createOrGetDailyAssetAnalysis(user.id, "2026-11-04", "GBPUSD");
+    await updateDailyAssetAnalysis(user.id, analysis.id, { finalBias: "LONG" });
+
+    const dto = await firstAnalysisDTO(user.id, "2026-11-04");
+    expect(dto.activeStrategyId).toBeNull();
+    expect(dto.activeStrategyName).toBeNull();
+    expect(dto.finalBias).toBe("LONG");
+  });
+
+  it("6. two assets on the same day can carry different active strategies", async () => {
+    const user = await makeUser("active-strategy-per-asset");
+    userIds.push(user.id);
+    const london = await makeStrategy(user.id, "London Continuation");
+    const nyReversal = await makeStrategy(user.id, "NY Reversal");
+
+    const xau = await createOrGetDailyAssetAnalysis(user.id, "2026-11-06", "XAUUSD");
+    const eur = await createOrGetDailyAssetAnalysis(user.id, "2026-11-06", "EURUSD");
+    await updateDailyAssetAnalysis(user.id, xau.id, { activeStrategyId: london.id });
+    await updateDailyAssetAnalysis(user.id, eur.id, { activeStrategyId: nyReversal.id });
+
+    const rows = await listDailyAssetAnalyses(user.id, "2026-11-06");
+    const dtos = rows.map(toDailyAssetAnalysisDTO);
+    expect(dtos.find((d) => d.assetSymbol === "XAUUSD")?.activeStrategyName).toBe("London Continuation");
+    expect(dtos.find((d) => d.assetSymbol === "EURUSD")?.activeStrategyName).toBe("NY Reversal");
+  });
+
+  it("7. changing the day's active strategy afterward never mutates an already-created Trade's strategy", async () => {
+    const user = await makeUser("active-strategy-no-retro-mutate");
+    userIds.push(user.id);
+    const strategyA = await makeStrategy(user.id, "Strategy A");
+    const strategyB = await makeStrategy(user.id, "Strategy B");
+
+    const analysis = await createOrGetDailyAssetAnalysis(user.id, "2026-11-07", "XAUUSD");
+    await updateDailyAssetAnalysis(user.id, analysis.id, { activeStrategyId: strategyA.id });
+
+    // Simulates the form defaulting Trade.strategyId from the day's active
+    // strategy at creation time — a plain value passed through createTrade,
+    // never a server-side link to DailyAssetAnalysis itself.
+    const trade = await createTrade(
+      user.id,
+      "2026-11-07",
+      minimalTradeInput({ assetSymbol: "XAUUSD", strategyId: strategyA.id }),
+    );
+    expect(trade.strategyId).toBe(strategyA.id);
+
+    // The trader (or someone else) later changes today's plan preference...
+    await updateDailyAssetAnalysis(user.id, analysis.id, { activeStrategyId: strategyB.id });
+
+    // ...the already-created Trade must be completely unaffected.
+    const reloadedTrade = await prisma.trade.findUniqueOrThrow({ where: { id: trade.id } });
+    expect(reloadedTrade.strategyId).toBe(strategyA.id);
+    expect(reloadedTrade.strategyNameSnapshot).toBe("Strategy A");
   });
 });

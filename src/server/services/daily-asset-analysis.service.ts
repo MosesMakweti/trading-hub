@@ -9,9 +9,18 @@ import type {
 } from "@/lib/validation/daily-asset-analysis";
 import type { DailyAssetAnalysisDTO, DirectionalEvidenceItemDTO } from "@/types/today";
 
-type AnalysisWithEvidence = DailyAssetAnalysis & { directionalEvidenceItems: DirectionalEvidenceItem[] };
+type AnalysisWithEvidence = DailyAssetAnalysis & {
+  directionalEvidenceItems: DirectionalEvidenceItem[];
+  activeStrategy: { id: string; name: string; deletedAt: Date | null } | null;
+};
 
-const withEvidence = { directionalEvidenceItems: { orderBy: { sortOrder: "asc" as const } } };
+const withEvidence = {
+  directionalEvidenceItems: { orderBy: { sortOrder: "asc" as const } },
+  // Not soft-delete-filtered by the query itself (a to-one include can't
+  // take a `where`) — deletedAt is checked in toDailyAssetAnalysisDTO below,
+  // same pattern as trade-workspace.mapper.ts's own strategy link.
+  activeStrategy: { select: { id: true, name: true, deletedAt: true } },
+};
 
 function toEvidenceItemDTO(item: DirectionalEvidenceItem): DirectionalEvidenceItemDTO {
   return {
@@ -25,6 +34,10 @@ function toEvidenceItemDTO(item: DirectionalEvidenceItem): DirectionalEvidenceIt
 
 export function toDailyAssetAnalysisDTO(row: AnalysisWithEvidence): DailyAssetAnalysisDTO {
   const evidenceItems = row.directionalEvidenceItems.map(toEvidenceItemDTO);
+  // Only surface a still-live strategy — a soft-deleted one must not keep
+  // suggesting itself as today's plan default (SetNull only fires on a hard
+  // delete, so activeStrategyId itself can still point at a soft-deleted row).
+  const activeStrategy = row.activeStrategy && !row.activeStrategy.deletedAt ? row.activeStrategy : null;
   return {
     id: row.id,
     assetSymbol: row.assetSymbol,
@@ -38,6 +51,8 @@ export function toDailyAssetAnalysisDTO(row: AnalysisWithEvidence): DailyAssetAn
     keyLevels: row.keyLevels,
     evidenceItems,
     evidenceSummary: summarizeDirectionalEvidence(evidenceItems),
+    activeStrategyId: activeStrategy?.id ?? null,
+    activeStrategyName: activeStrategy?.name ?? null,
   };
 }
 
@@ -132,6 +147,19 @@ export async function updateDailyAssetAnalysis(
   if (data.notes !== undefined) patch.notes = data.notes === null ? Prisma.DbNull : data.notes;
   if (data.keyLevels !== undefined) {
     patch.keyLevels = data.keyLevels === null ? Prisma.DbNull : data.keyLevels;
+  }
+  // Today V2 (T3) — never trust a raw strategy id: a user could otherwise
+  // attach another user's Strategy to their own day plan by guessing/
+  // replaying an id. Clearing it (null) needs no ownership check.
+  if (data.activeStrategyId !== undefined) {
+    if (data.activeStrategyId !== null) {
+      const owns = await prisma.strategy.findFirst({
+        where: { id: data.activeStrategyId, userId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!owns) throw new Error("Strategy not found.");
+    }
+    patch.activeStrategyId = data.activeStrategyId;
   }
 
   const result = await prisma.dailyAssetAnalysis.updateMany({

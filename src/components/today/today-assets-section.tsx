@@ -3,11 +3,12 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronDown, ChevronUp, LineChart, Loader2, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, LineChart, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TAG_STYLES, colorForName } from "@/components/ui/tag";
 import { RichTextEditor } from "@/components/plan/rich-text-editor";
 import { ImageAttachments } from "@/components/media/image-attachments";
@@ -15,6 +16,7 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SaveDot } from "@/components/today/today-ui";
 import { DirectionalEvidencePanel } from "@/components/today/directional-evidence-panel";
+import { AddTradeDialog } from "@/components/today/add-trade-dialog";
 import type { SaveState } from "@/hooks/use-debounced-autosave";
 import {
   archiveDailyAssetAnalysis,
@@ -24,6 +26,7 @@ import {
 import type { DayBias } from "@/lib/validation/today";
 import type { FinalBias } from "@/lib/validation/daily-asset-analysis";
 import type { DailyAssetAnalysisDTO } from "@/types/today";
+import type { SessionWindow } from "@/domain/schedule/session-countdown";
 
 const MARKET_BIASES: { value: DayBias; label: string; selected: "default" | "destructive" | "secondary" }[] = [
   { value: "BULLISH", label: "Bullish", selected: "default" },
@@ -83,9 +86,20 @@ function BiasRow<T extends string>({
 export function TodayAssetsSection({
   dateKey,
   analyses,
+  strategies,
+  tradeFormAccounts,
+  activeSessions,
+  sessionWindows,
 }: {
   dateKey: string;
   analyses: DailyAssetAnalysisDTO[];
+  // Today V2 (T3) — for each card's "Active strategy" selector and its
+  // "Start Trade Idea" launch point (asset + strategy + bias + session, all
+  // plain form defaults — see add-trade-dialog.tsx's own doc comment).
+  strategies: { id: string; name: string; version: number }[];
+  tradeFormAccounts: { id: string; name: string; kind: string }[];
+  activeSessions: string[];
+  sessionWindows: SessionWindow[];
 }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState<Set<string>>(
@@ -183,6 +197,10 @@ export function TodayAssetsSection({
               expanded={expanded.has(analysis.id)}
               onToggle={() => toggle(analysis.id)}
               onDelete={() => setPendingDelete(analysis)}
+              strategies={strategies}
+              tradeFormAccounts={tradeFormAccounts}
+              activeSessions={activeSessions}
+              sessionWindows={sessionWindows}
             />
           ))}
         </div>
@@ -208,17 +226,26 @@ function AssetAnalysisCard({
   expanded,
   onToggle,
   onDelete,
+  strategies,
+  tradeFormAccounts,
+  activeSessions,
+  sessionWindows,
 }: {
   dateKey: string;
   analysis: DailyAssetAnalysisDTO;
   expanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  strategies: { id: string; name: string; version: number }[];
+  tradeFormAccounts: { id: string; name: string; kind: string }[];
+  activeSessions: string[];
+  sessionWindows: SessionWindow[];
 }) {
   const [htfBias, setHtfBias] = useState<DayBias | null>(analysis.htfBias);
   const [sessionBias, setSessionBias] = useState<DayBias | null>(analysis.sessionBias);
   const [fundamentalBias, setFundamentalBias] = useState<DayBias | null>(analysis.fundamentalBias);
   const [finalBias, setFinalBias] = useState<FinalBias | null>(analysis.finalBias);
+  const [activeStrategyId, setActiveStrategyId] = useState<string | null>(analysis.activeStrategyId);
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
   async function save(patch: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
@@ -274,7 +301,28 @@ function AssetAnalysisCard({
 
       {expanded && (
         <div className="space-y-4 border-t border-border/60 p-3.5">
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between">
+            {/* Today V2 (T3) — launched FROM this asset's plan, so the new
+                Trade Idea starts pre-filled with this asset's own bias,
+                active strategy, and the day's session — see
+                add-trade-dialog.tsx's own doc comment for the split between
+                this and the generic "Add trade" entry points. */}
+            <AddTradeDialog
+              dateKey={dateKey}
+              accounts={tradeFormAccounts}
+              strategies={strategies}
+              initialAssetSymbol={analysis.assetSymbol}
+              initialStrategyId={activeStrategyId ?? undefined}
+              finalBias={finalBias}
+              activeSessions={activeSessions}
+              sessionWindows={sessionWindows}
+              trigger={
+                <Button type="button" size="sm" variant="outline" className="gap-1.5">
+                  <Sparkles className="size-3.5" />
+                  Start trade idea
+                </Button>
+              }
+            />
             <Button
               type="button"
               variant="ghost"
@@ -372,6 +420,32 @@ function AssetAnalysisCard({
                 void save({ finalBias: v });
               }}
             />
+            <div>
+              <p className="mb-1.5 text-xs text-muted-foreground">
+                Active strategy — the default for a new Trade Idea on this asset today
+              </p>
+              <Select
+                items={{ "": "No default strategy", ...Object.fromEntries(strategies.map((s) => [s.id, s.name])) }}
+                value={activeStrategyId ?? ""}
+                onValueChange={(v) => {
+                  const next = v || null;
+                  setActiveStrategyId(next);
+                  void save({ activeStrategyId: next });
+                }}
+              >
+                <SelectTrigger className="h-9 w-full max-w-72">
+                  <SelectValue placeholder="No default strategy" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">No default strategy</SelectItem>
+                  {strategies.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div>

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { prisma } from "@/server/db";
-import { createTrade, updateTrade } from "@/server/services/trades.service";
+import { createTrade, updateTrade, updateTradeSections } from "@/server/services/trades.service";
 import { createPropFirmAccount, createUserPropFirm } from "@/server/services/prop-firms.service";
 import { getAccountLedger } from "@/server/services/account-ledger.service";
 import { upsertExecution } from "@/server/services/trade-executions.service";
@@ -154,5 +154,58 @@ describe("dailyBiasSnapshot — frozen at trade creation (Stage 4/11)", () => {
 
     const trade = await createTrade(user.id, "2026-07-03", minimalTradeInput({ assetSymbol: "GBPUSD" }));
     expect(trade.dailyBiasSnapshot).toBeNull();
+  });
+});
+
+// Today V2 (T3) §14 — Trade B must never inherit Trade A's mutable state.
+// Only DAY context (bias, active strategy, session) is an intentional
+// default, and that inheritance happens client-side in the trade FORM
+// (add-trade-dialog.tsx / trade-form.tsx defaultValues), never server-side —
+// createTrade is (and must remain) a pure function of its own TradeInput,
+// with no read of any other trade for the same user/day.
+describe("createTrade — trade isolation (Today V2 T3 §14)", () => {
+  const userIds: string[] = [];
+  afterAll(async () => {
+    await cleanupUsers(...userIds);
+  });
+
+  it("a second trade for the same day starts with none of the first trade's mutable fields", async () => {
+    const user = await makeUser("isolation");
+    userIds.push(user.id);
+
+    const tradeA = await createTrade(
+      user.id,
+      "2026-07-10",
+      minimalTradeInput({
+        assetSymbol: "XAUUSD",
+        direction: "LONG",
+        selectedConfluences: ["Liquidity Sweep", "FVG"],
+        selectedExecution: ["Confirmed Break"],
+      }),
+    );
+    await updateTradeSections(user.id, tradeA.id, {
+      actualEntry: 100,
+      actualStopLoss: 90,
+      actualExit: 120,
+      whatWentWell: "Trade A only",
+      reasonForTrade: "Trade A's private thesis",
+    });
+
+    // A completely default, unrelated create — nothing above should leak in.
+    const tradeB = await createTrade(user.id, "2026-07-10", minimalTradeInput({ assetSymbol: "EURUSD", direction: "SHORT" }));
+
+    expect(tradeB.id).not.toBe(tradeA.id);
+    expect((tradeB.selectedConfluences as string[] | null) ?? []).toEqual([]);
+    expect((tradeB.selectedExecution as string[] | null) ?? []).toEqual([]);
+    expect(tradeB.reasonForTrade).toBeNull();
+    expect(tradeB.actualEntry).toBeNull();
+    expect(tradeB.actualStopLoss).toBeNull();
+    expect(tradeB.actualExit).toBeNull();
+    expect(tradeB.whatWentWell).toBeNull();
+    expect(tradeB.direction).toBe("SHORT"); // its OWN input, not A's LONG
+
+    const allocationsA = await prisma.tradeAccountAllocation.findMany({ where: { tradeId: tradeA.id } });
+    const allocationsB = await prisma.tradeAccountAllocation.findMany({ where: { tradeId: tradeB.id } });
+    expect(allocationsA.map((a) => a.id).sort()).not.toEqual(allocationsB.map((a) => a.id).sort());
   });
 });

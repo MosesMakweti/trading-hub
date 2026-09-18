@@ -370,3 +370,61 @@ export async function updatePerformanceRiskOverride(userId: string, tradeId: str
     data: { riskValue: riskPercent },
   });
 }
+
+/** Today V2 (T3) — everything the Trade Idea UI needs to present the
+ *  Performance Account's participation without exposing implementation
+ *  terminology (System A, TradeAccountAllocation, PerformanceRiskSnapshot).
+ *  Composes the existing risk/balance functions above — never a second risk
+ *  system. */
+export interface PerformanceRiskContext {
+  riskPercent: number;
+  /** Null only if the trade itself can't be found — never a fake 0 balance. */
+  balanceBefore: number | null;
+  /** Null only alongside a null balanceBefore — never a fake $0 risk amount
+   *  (Stage C's null/zero principle applies here too). */
+  riskAmount: number | null;
+  /** True once actualEntry exists — risk% is frozen and read from the
+   *  immutable snapshot rather than recomputed from a later balance. */
+  locked: boolean;
+  maxRiskPercent: number | null;
+}
+
+export async function getPerformanceRiskContext(userId: string, tradeId: string): Promise<PerformanceRiskContext> {
+  const [trade, config, snapshot] = await Promise.all([
+    prisma.trade.findFirst({ where: { id: tradeId, userId } }),
+    getPerformanceConfig(userId),
+    prisma.performanceRiskSnapshot.findUnique({ where: { tradeId } }),
+  ]);
+  if (!trade) throw new Error("Trade not found.");
+
+  if (snapshot) {
+    // Locked — read the frozen historical values, never recompute them from
+    // whatever the account's balance happens to be now.
+    return {
+      riskPercent: snapshot.riskPercent.toNumber(),
+      balanceBefore: snapshot.balanceBefore.toNumber(),
+      riskAmount: snapshot.riskAmount.toNumber(),
+      locked: true,
+      maxRiskPercent: config.maxRiskPercent?.toNumber() ?? null,
+    };
+  }
+
+  const allocation = await prisma.tradeAccountAllocation.findFirst({
+    where: { tradeId, tradingAccountId: config.accountId },
+    select: { riskValue: true },
+  });
+  const riskPercent = allocation ? allocation.riskValue.toNumber() : config.defaultRiskPercent.toNumber();
+  const balanceBefore = await getPerformanceBalanceBefore(userId, {
+    tradeDate: trade.tradeDate,
+    executionMinutes: trade.executionMinutes,
+    tradeNumber: trade.tradeNumber,
+  });
+  const riskAmount = computePerformanceRiskAmount(balanceBefore, riskPercent);
+  return {
+    riskPercent,
+    balanceBefore: balanceBefore.toNumber(),
+    riskAmount: riskAmount.toNumber(),
+    locked: false,
+    maxRiskPercent: config.maxRiskPercent?.toNumber() ?? null,
+  };
+}

@@ -50,3 +50,30 @@ export function nextSessionEvent(
   }
   return best ? { session: best.session, status: "upcoming", minutesUntil: best.minutesUntil } : null;
 }
+
+/**
+ * Today V2 (T3) — resolves a day-level default session for a new Trade
+ * Idea, from `TradingDay.activeSessions` (plain names the trader picked as
+ * "in play today," no time windows of their own) plus the trader's globally
+ * configured session windows (for telling which of several is happening
+ * right now). Never guesses:
+ *   - exactly one active session name -> that one, unconditionally (there's
+ *     nothing to disambiguate, so no time-window match is even needed).
+ *   - several active session names -> only default when EXACTLY ONE of
+ *     them is the currently-active window (by nextSessionEvent); otherwise
+ *     null, so the trader picks explicitly rather than the app assuming.
+ *   - zero active session names -> null.
+ */
+export function resolveDefaultSession(
+  activeSessionNames: string[],
+  windows: SessionWindow[],
+  nowMinutesSinceMidnight: number,
+): string | null {
+  if (activeSessionNames.length === 0) return null;
+  if (activeSessionNames.length === 1) return activeSessionNames[0];
+
+  const activeNameSet = new Set(activeSessionNames.map((n) => n.trim().toLowerCase()));
+  const candidateWindows = windows.filter((w) => activeNameSet.has(w.name.trim().toLowerCase()));
+  const current = nextSessionEvent(candidateWindows, nowMinutesSinceMidnight);
+  return current?.status === "active" ? current.session.name : null;
+}

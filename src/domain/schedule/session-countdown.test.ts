@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { nextSessionEvent, type SessionWindow } from "./session-countdown";
+import { nextSessionEvent, resolveDefaultSession, type SessionWindow } from "./session-countdown";
 
 const LONDON: SessionWindow = { id: "1", name: "London", startMinutes: 480, endMinutes: 720 }; // 08:00-12:00
 const NY: SessionWindow = { id: "2", name: "New York", startMinutes: 780, endMinutes: 1020 }; // 13:00-17:00
@@ -39,5 +39,33 @@ describe("nextSessionEvent", () => {
     const activeEarly = nextSessionEvent([OVERNIGHT], 120); // 02:00, still inside (wrapped)
     expect(activeEarly?.status).toBe("active");
     expect(activeEarly?.minutesUntil).toBe(360 - 120);
+  });
+});
+
+// Today V2 (T3) — session inheritance for a new Trade Idea.
+describe("resolveDefaultSession", () => {
+  it("defaults the single active session unconditionally, regardless of the time", () => {
+    expect(resolveDefaultSession(["London"], [], 60)).toBe("London"); // no window catalog at all, still resolves
+  });
+
+  it("returns null when no sessions are active today", () => {
+    expect(resolveDefaultSession([], [LONDON, NY], 600)).toBeNull();
+  });
+
+  it("defaults the one currently-active session among several active-today sessions", () => {
+    expect(resolveDefaultSession(["London", "New York"], [LONDON, NY], 600)).toBe("London"); // 10:00
+    expect(resolveDefaultSession(["London", "New York"], [LONDON, NY], 900)).toBe("New York"); // 15:00
+  });
+
+  it("never guesses when none of several active-today sessions is currently in its window", () => {
+    expect(resolveDefaultSession(["London", "New York"], [LONDON, NY], 60)).toBeNull(); // 01:00, neither open
+  });
+
+  it("never guesses when the window catalog can't disambiguate multiple active-today sessions", () => {
+    expect(resolveDefaultSession(["London", "New York"], [], 600)).toBeNull(); // no windows to check against
+  });
+
+  it("matches session names case-insensitively against the window catalog", () => {
+    expect(resolveDefaultSession(["london", "new york"], [LONDON, NY], 600)).toBe("London");
   });
 });

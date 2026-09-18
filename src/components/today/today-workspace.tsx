@@ -48,6 +48,7 @@ import {
   type WorkflowStep,
 } from "@/components/dashboard/workflow-progress";
 import type { WorkflowStepKey, WorkflowStepStatus } from "@/domain/today/workflow";
+import type { SessionWindow } from "@/domain/schedule/session-countdown";
 import type {
   DailyAnalyticsDTO,
   DailyAssetAnalysisDTO,
@@ -87,6 +88,7 @@ export function TodayWorkspace({
   reviewCommitments,
   commitmentDailyStates,
   commitmentAdherence,
+  sessionWindows,
 }: {
   day: TradingDayDTO;
   // Only serializable data crosses the server→client boundary; the icon-bearing
@@ -109,6 +111,10 @@ export function TodayWorkspace({
   reviewCommitments: TodayCommitmentsDTO;
   commitmentDailyStates: Record<string, EdgeReviewCommitmentDailyStatus>;
   commitmentAdherence: Record<string, { current: AdherenceResultDTO; trend: AdherenceTrend }>;
+  // Today V2 (T3) — day-level session inheritance for the generic "Add
+  // trade" entry points (TradingDay.activeSessions itself lives on
+  // `todaysPlan.activeSessions`, already in scope below).
+  sessionWindows: SessionWindow[];
 }) {
   const router = useRouter();
   // The Pre-Session Routine gates the rest of the day: the trader must have confirmed
@@ -165,6 +171,8 @@ export function TodayWorkspace({
           todayKey={day.dateKey}
           accounts={tradeFormAccounts}
           strategies={tradeFormStrategies}
+          activeSessions={todaysPlan.activeSessions}
+          sessionWindows={sessionWindows}
         />
         {focusedTrade ? (
           // key = tradeId: remount the whole section when the focused trade
@@ -202,6 +210,8 @@ export function TodayWorkspace({
                 dateKey={day.dateKey}
                 accounts={tradeFormAccounts}
                 strategies={tradeFormStrategies}
+                activeSessions={todaysPlan.activeSessions}
+                sessionWindows={sessionWindows}
               />
             }
           />
@@ -215,6 +225,8 @@ export function TodayWorkspace({
                 dateKey={day.dateKey}
                 accounts={tradeFormAccounts}
                 strategies={tradeFormStrategies}
+                activeSessions={todaysPlan.activeSessions}
+                sessionWindows={sessionWindows}
               />
             }
           />
@@ -313,6 +325,10 @@ export function TodayWorkspace({
                 plan={todaysPlan}
                 analyses={dailyAssetAnalyses}
                 onComplete={() => advanceTo("trade-idea")}
+                strategies={tradeFormStrategies}
+                tradeFormAccounts={tradeFormAccounts}
+                activeSessions={todaysPlan.activeSessions}
+                sessionWindows={sessionWindows}
               />
             ) : s.value === "trade-idea" ? (
               tradeTab("idea")
