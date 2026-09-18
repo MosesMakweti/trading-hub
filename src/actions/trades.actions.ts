@@ -44,6 +44,12 @@ export async function createTrade(
 
   revalidatePath(`/journal/${dateKey}`);
   revalidatePath("/journal");
+  // createTrade always creates the Performance Account's own allocation row
+  // (trades.service.ts's buildAllocations) even though it starts at 0/0 —
+  // /accounts shows every account's allocation list, so it needs to see the
+  // new trade too, not just once it later settles.
+  revalidatePath("/dashboard");
+  revalidatePath("/accounts");
   return { success: true, tradeId: trade.id };
 }
 
@@ -64,6 +70,10 @@ export async function updateTrade(
   const trade = await tradesService.updateTrade(user.id, tradeId, parsed.data);
   revalidatePath(`/journal/${dateKey}`);
   revalidatePath("/journal");
+  // updateTrade also re-settles the Performance Account (see the .then() in
+  // tradesService.updateTrade) — revalidate its display surfaces too.
+  revalidatePath("/dashboard");
+  revalidatePath("/accounts");
   return { success: true, tradeId: trade.id };
 }
 
@@ -88,6 +98,13 @@ export async function updateTradeSection(
   revalidatePath(`/journal/${dateKey}/trades/${tradeId}`);
   revalidatePath(`/journal/${dateKey}`);
   revalidatePath("/today");
+  // This is the save path that fills actualEntry/actualStopLoss/actualExit,
+  // which is what actually locks/settles the Performance Account (see
+  // lockPerformanceRiskSnapshot/settlePerformanceTrade in trades.service.ts)
+  // — without revalidating these, the Performance Account card/section keep
+  // showing pre-trade numbers until an unrelated full reload.
+  revalidatePath("/dashboard");
+  revalidatePath("/accounts");
   return { success: true };
 }
 
@@ -108,5 +125,10 @@ export async function archiveTrade(dateKey: string, tradeId: string): Promise<Si
   await tradesService.archiveTrade(user.id, tradeId);
   revalidatePath(`/journal/${dateKey}`);
   revalidatePath("/journal");
+  // Deleting a settled trade cascades away its PerformanceRiskSnapshot
+  // (schema onDelete: Cascade) — reverses its effect on the Performance
+  // Account, so its display surfaces need to refresh too.
+  revalidatePath("/dashboard");
+  revalidatePath("/accounts");
   return { success: true };
 }

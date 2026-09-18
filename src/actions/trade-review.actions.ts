@@ -20,6 +20,14 @@ function revalidateTrade(dateKey: string, tradeId: string) {
   revalidatePath(`/journal/${dateKey}`);
 }
 
+// Partial-exit upsert/delete both re-settle the Performance Account
+// (trade-partial-exit.service.ts calls settlePerformanceTrade) — its display
+// surfaces need to refresh too, not just the journal.
+function revalidatePerformanceSurfaces() {
+  revalidatePath("/dashboard");
+  revalidatePath("/accounts");
+}
+
 export async function loadTradeReviewDataAction(
   tradeId: string,
 ): Promise<{ success: true; data: TradeReviewDataDTO } | { success: false; error: string }> {
@@ -103,6 +111,7 @@ export async function upsertPartialExitAction(dateKey: string, tradeId: string, 
     return { success: false, error: errorMessage(error, "Failed to save the partial exit.") };
   }
   revalidateTrade(dateKey, tradeId);
+  revalidatePerformanceSurfaces();
   return { success: true };
 }
 
@@ -114,5 +123,6 @@ export async function deletePartialExitAction(dateKey: string, tradeId: string, 
     return { success: false, error: errorMessage(error, "Failed to remove the partial exit.") };
   }
   revalidateTrade(dateKey, tradeId);
+  revalidatePerformanceSurfaces();
   return { success: true };
 }
