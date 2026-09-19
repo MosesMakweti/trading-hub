@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { DATE_RANGE_PRESET_LABELS, type DateRangePreset } from "@/lib/date-ranges";
 
-const PRESETS: Exclude<DateRangePreset, "custom">[] = ["week", "month", "3months", "year"];
+const PRESETS: Exclude<DateRangePreset, "custom">[] = ["week", "month", "3months", "ytd", "year", "all"];
 
 export function DateRangeFilter({
   preset,

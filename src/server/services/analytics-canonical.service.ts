@@ -156,6 +156,10 @@ export interface CanonicalAnalyticsSummary {
   overview: {
     totalExecutedTrades: number;
     finalizedTrades: number;
+    /** Analytics V2 §2/§3 — executed but not yet Performance-settled
+     *  (totalExecutedTrades − finalizedTrades). Outcome not yet finalized;
+     *  never counted toward win rate/profit factor/expectancy/streaks. */
+    pendingTrades: number;
     winningTrades: number;
     losingTrades: number;
     breakevenTrades: number;
@@ -166,6 +170,10 @@ export interface CanonicalAnalyticsSummary {
     profitFactor: number | null;
     averageWinnerR: number | null;
     averageLoserR: number | null;
+    /** Analytics V2 §3 — best/worst SETTLED result (R-multiple); null with
+     *  no settled sample yet, never 0. */
+    bestTradeR: number | null;
+    worstTradeR: number | null;
     overrideCount: number;
     overrideRate: number | null;
     cancelledCount: number;
@@ -195,7 +203,12 @@ export interface CanonicalAnalyticsSummary {
 export function summarizeCanonicalAnalytics(rows: CanonicalAnalyticsTradeRow[]): CanonicalAnalyticsSummary {
   const overall = computeRGroupStats("all", "All", rows);
   const executed = rows.filter((r) => r.isExecuted);
-  const finalized = executed.filter((r) => r.reviewLifecycleStatus === "FULLY_CLOSED" && r.finalizedR != null);
+  // Analytics V2 — finalizedR is already gated on the canonical
+  // Performance-settled fact (canonical-dataset.ts); reviewLifecycleStatus
+  // is an independent, manual trader confirmation and must not additionally
+  // gate the settled sample here (see canonical-aggregations.ts's
+  // toMetricInputs for the same fix).
+  const finalized = executed.filter((r) => r.finalizedR != null);
   const winners = finalized.filter((r) => r.finalizedR! > 0);
   const losers = finalized.filter((r) => r.finalizedR! < 0);
   const overrideCount = executed.filter((r) => r.validationState === "OVERRIDDEN").length;
@@ -205,6 +218,7 @@ export function summarizeCanonicalAnalytics(rows: CanonicalAnalyticsTradeRow[]):
     overview: {
       totalExecutedTrades: overall.count,
       finalizedTrades: overall.finalizedCount,
+      pendingTrades: overall.count - overall.finalizedCount,
       winningTrades: winners.length,
       losingTrades: losers.length,
       breakevenTrades: finalized.length - winners.length - losers.length,
@@ -215,6 +229,8 @@ export function summarizeCanonicalAnalytics(rows: CanonicalAnalyticsTradeRow[]):
       profitFactor: overall.profitFactor,
       averageWinnerR: winners.length > 0 ? winners.reduce((s, r) => s + r.finalizedR!, 0) / winners.length : null,
       averageLoserR: losers.length > 0 ? losers.reduce((s, r) => s + r.finalizedR!, 0) / losers.length : null,
+      bestTradeR: finalized.length > 0 ? Math.max(...finalized.map((r) => r.finalizedR!)) : null,
+      worstTradeR: finalized.length > 0 ? Math.min(...finalized.map((r) => r.finalizedR!)) : null,
       overrideCount,
       overrideRate: validatedOrOverridden.length > 0 ? (overrideCount / validatedOrOverridden.length) * 100 : null,
       cancelledCount: rows.filter((r) => r.isCancelled).length,

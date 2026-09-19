@@ -213,3 +213,79 @@ describe("analytics.service.ts — pending-aware analytics (Stage C.1, Part 2)",
     expect(after.trading.netPnl).toBeCloseTo(2000, 6);
   });
 });
+
+describe("analytics.service.ts — Analytics V2 (drawdown curve, execution quality)", () => {
+  const userIds: string[] = [];
+  afterAll(async () => {
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  });
+
+  it("drawdownCurve is zipped with real dates and current drawdown reflects the last settled trade", async () => {
+    const user = await makeUser("drawdown-curve");
+    userIds.push(user.id);
+
+    // Trade 1: +2R win (balance up). Trade 2: -1R loss (balance down from peak).
+    const t1 = await createTrade(user.id, "2026-11-01", minimalTradeInput({ direction: "LONG" }));
+    await updateTradeSections(user.id, t1.id, { actualEntry: 100, actualStopLoss: 90, actualExit: 120 });
+    const t2 = await createTrade(user.id, "2026-11-02", minimalTradeInput({ direction: "LONG" }));
+    await updateTradeSections(user.id, t2.id, { actualEntry: 100, actualStopLoss: 90, actualExit: 90 });
+
+    const data = await getAnalyticsData(user.id, "2026-11-01", "2026-11-30");
+    expect(data.trading.drawdownCurve.length).toBe(3); // starting point + 2 settled trades
+    expect(data.trading.drawdownCurve[0].dateKey).toBe("2026-11-01"); // the range start, not a trade date
+    expect(data.trading.drawdownCurve[1].dateKey).toBe("2026-11-01");
+    expect(data.trading.drawdownCurve[2].dateKey).toBe("2026-11-02");
+    // Peaked after the win (102,000), then declined after the loss (-1% of
+    // 102,000 = -1,020) -> current drawdown > 0.
+    expect(data.trading.currentDrawdownAmount).toBeCloseTo(1020, 6);
+    expect(data.trading.currentDrawdownPercent).toBeGreaterThan(0);
+    expect(data.trading.maxDrawdownAmount).toBeCloseTo(data.trading.currentDrawdownAmount, 6);
+  });
+
+  it("current drawdown is zero when the series ends at a new peak", async () => {
+    const user = await makeUser("drawdown-at-peak");
+    userIds.push(user.id);
+
+    const trade = await createTrade(user.id, "2026-11-03", minimalTradeInput({ direction: "LONG" }));
+    await updateTradeSections(user.id, trade.id, { actualEntry: 100, actualStopLoss: 90, actualExit: 120 });
+
+    const data = await getAnalyticsData(user.id, "2026-11-01", "2026-11-30");
+    expect(data.trading.currentDrawdownAmount).toBe(0);
+    expect(data.trading.currentDrawdownPercent).toBe(0);
+  });
+
+  it("executionQuality only counts trades with a confirmed plan, and reports zero deviations as a clean plan-follow rate", async () => {
+    const user = await makeUser("execution-quality-clean");
+    userIds.push(user.id);
+
+    // A freeform trade with no plan at all — excluded from the denominator entirely.
+    const freeform = await createTrade(user.id, "2026-11-04", minimalTradeInput({ direction: "LONG" }));
+    await updateTradeSections(user.id, freeform.id, { actualEntry: 100, actualStopLoss: 90, actualExit: 120 });
+
+    // A planned trade executed exactly to plan — zero deviations.
+    const planned = await createTrade(user.id, "2026-11-05", minimalTradeInput({ direction: "LONG" }));
+    await prisma.trade.update({ where: { id: planned.id }, data: { plannedEntry: "100", plannedStopLoss: "90", plannedTarget: "120" } });
+    await updateTradeSections(user.id, planned.id, { actualEntry: 100, actualStopLoss: 90, actualExit: 120 });
+
+    const data = await getAnalyticsData(user.id, "2026-11-01", "2026-11-30");
+    expect(data.trading.executionQuality.sampleSize).toBe(1); // only the planned trade
+    expect(data.trading.executionQuality.planFollowRatePercent).toBe(100);
+    expect(data.trading.executionQuality.byCause).toHaveLength(0);
+  });
+
+  it("executionQuality reports a late-entry deviation without treating it as a discrepancy verdict", async () => {
+    const user = await makeUser("execution-quality-deviation");
+    userIds.push(user.id);
+
+    const trade = await createTrade(user.id, "2026-11-06", minimalTradeInput({ direction: "LONG" }));
+    await prisma.trade.update({ where: { id: trade.id }, data: { plannedEntry: "100", plannedStopLoss: "90", plannedTarget: "120" } });
+    // Chased the entry 5 points higher than planned (0.5R late-entry deviation).
+    await updateTradeSections(user.id, trade.id, { actualEntry: 105, actualStopLoss: 90, actualExit: 120 });
+
+    const data = await getAnalyticsData(user.id, "2026-11-01", "2026-11-30");
+    expect(data.trading.executionQuality.sampleSize).toBe(1);
+    expect(data.trading.executionQuality.planFollowRatePercent).toBe(0);
+    expect(data.trading.executionQuality.byCause).toHaveLength(1);
+    expect(data.trading.executionQuality.byCause[0].cause).toBe("late-entry");
+  });
+});

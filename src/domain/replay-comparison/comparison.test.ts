@@ -8,6 +8,7 @@ function makeBaseline(actualTrades: ActualTradeRefDTO[], overrideRate: number | 
   const overview: CanonicalAnalyticsSummary["overview"] = {
     totalExecutedTrades: actualTrades.length,
     finalizedTrades: actualTrades.length,
+    pendingTrades: 0,
     winningTrades: actualTrades.filter((t) => t.winLossClass === "WIN").length,
     losingTrades: actualTrades.filter((t) => t.winLossClass === "LOSS").length,
     breakevenTrades: 0,
@@ -18,6 +19,8 @@ function makeBaseline(actualTrades: ActualTradeRefDTO[], overrideRate: number | 
     profitFactor: null,
     averageWinnerR: null,
     averageLoserR: null,
+    bestTradeR: null,
+    worstTradeR: null,
     overrideCount: 0,
     overrideRate,
     cancelledCount: 0,

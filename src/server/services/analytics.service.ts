@@ -25,7 +25,7 @@ import {
   type CounterfactualInput,
 } from "@/domain/analytics/counterfactual-engine";
 import { computeExpectancy } from "@/domain/performance/expectancy";
-import { computeDeviations } from "@/domain/analytics/deviation-engine";
+import { aggregateDeviationCauses, computeDeviations } from "@/domain/analytics/deviation-engine";
 import {
   buildOpportunityCurve,
   summarizeOpportunities,
@@ -227,9 +227,20 @@ export async function getAnalyticsData(
   // drawdown (Analytics module). Same allocations as everything else — no new query.
   const tradePnls: number[] = [];
   const balanceSeries: number[] = [balanceBeforeRange];
+  // Analytics V2 §5 — parallel to balanceSeries (index-aligned, one entry
+  // per settled trade plus the starting point) so the drawdown series can be
+  // plotted against real dates without a second pass over the trades.
+  const balanceSeriesDates: string[] = [from];
   // Per-trade points for the Phase B breakdowns (day-of-week / month / direction /
   // session / hour / risk) — built from the same rows, not a second data source.
   const analyticsPoints: AnalyticsTradePoint[] = [];
+  // Analytics V2 §9 — Execution Quality: the SAME deviations computed below
+  // for the counterfactual engine, also collected on their own so entry/
+  // exit/risk deviation can be reported as plain differences (never a
+  // second, competing calculation of what already-costed deviations mean).
+  const deviationPrimaries: (ReturnType<typeof computeDeviations>["primary"])[] = [];
+  let plannedTradeCount = 0; // trades with a confirmed plan to compare against
+  let planFollowedCount = 0; // ...of those, trades with zero material deviations
 
   // Day-level aggregates (over ALL in-range trades — a day's over-risk / overtrading
   // is real regardless of the active filters) for the counterfactual's day flags.
@@ -282,6 +293,7 @@ export async function getAnalyticsData(
       filteredBalance += pnl!;
       tradePnls.push(pnl!);
       balanceSeries.push(filteredBalance);
+      balanceSeriesDates.push(dateKey);
       analyticsPoints.push({
         dateKey,
         monthKey: dateKey.slice(0, 7),
@@ -339,9 +351,10 @@ export async function getAnalyticsData(
     // Deviation engine: the OBJECTIVE trader-controlled R-costs (entry/exit/risk
     // slip). This — NOT expected−actual — is the avoidable discrepancy.
     const tradeActualR = t.actualRR ? t.actualRR.toNumber() : null;
-    const { deviations } = computeDeviations({
+    const plannedEntryNum = t.plannedEntry ? t.plannedEntry.toNumber() : null;
+    const { deviations, primary } = computeDeviations({
       direction: t.direction,
-      plannedEntry: t.plannedEntry ? t.plannedEntry.toNumber() : null,
+      plannedEntry: plannedEntryNum,
       plannedStopLoss: t.plannedStopLoss ? t.plannedStopLoss.toNumber() : null,
       plannedTarget: t.plannedTarget ? t.plannedTarget.toNumber() : null,
       actualEntry: t.actualEntry ? t.actualEntry.toNumber() : null,
@@ -352,6 +365,16 @@ export async function getAnalyticsData(
         : null,
       actualRiskPercent: alloc.riskInputType === "PERCENT" ? alloc.riskValue.toNumber() : null,
     });
+
+    // Analytics V2 §9 — only a trade with a confirmed plan can meaningfully
+    // "follow" or "deviate from" one; a freeform trade with no plan is
+    // excluded from the denominator entirely rather than counting as a
+    // trivial, misleading 100% follow.
+    if (plannedEntryNum != null) {
+      plannedTradeCount += 1;
+      deviationPrimaries.push(primary);
+      if (deviations.length === 0) planFollowedCount += 1;
+    }
 
     // Counterfactual (Process-Perfect) executed event — reuses the same deviations.
     const dailyRiskLimit = t.strategy?.tradeManagement?.maxDailyRiskPercent ?? null;
@@ -437,6 +460,16 @@ export async function getAnalyticsData(
   const dollars = pnlStats(tradePnls);
   const drawdown = maxDrawdown(balanceSeries);
 
+  // Analytics V2 §9 — Execution Quality: describes plan-vs-actual DIFFERENCES
+  // (entry/exit/risk deviation, plan-follow rate), never a judgment of
+  // "mistake" — that classification stays in the Discrepancy/Counterfactual
+  // section above. Reuses the exact deviations already computed per trade.
+  const executionQuality = {
+    byCause: aggregateDeviationCauses(deviationPrimaries),
+    planFollowRatePercent: plannedTradeCount > 0 ? (planFollowedCount / plannedTradeCount) * 100 : null,
+    sampleSize: plannedTradeCount,
+  };
+
   // Phase B breakdowns (all from analyticsPoints — no extra query).
   const breakdowns = {
     dayOfWeek: dayOfWeekPerformance(analyticsPoints),
@@ -518,6 +551,19 @@ export async function getAnalyticsData(
       largestLoss: dollars.largestLoss,
       maxDrawdownAmount: drawdown.amount,
       maxDrawdownPercent: drawdown.percent,
+      // Analytics V2 §5 — decline from the all-time peak as of right now,
+      // distinct from the historical worst (maxDrawdown*). Zero at a new peak.
+      currentDrawdownAmount: drawdown.currentAmount,
+      currentDrawdownPercent: drawdown.currentPercent,
+      // The full drawdown-through-time series, zipped with real dates —
+      // never just the single worst number.
+      drawdownCurve: drawdown.series.map((p) => ({
+        dateKey: balanceSeriesDates[p.index],
+        balance: p.balance,
+        peak: p.peak,
+        drawdownAmount: p.amount,
+        drawdownPercent: p.percent,
+      })),
       recoveryFactor: recoveryFactor(dollars.netPnl, drawdown.amount),
       startingBalance: balanceBeforeRange,
       currentBalance: runningBalance,
@@ -537,6 +583,7 @@ export async function getAnalyticsData(
       // trade-quality adherence, avg confluence count on winners vs losers, and a
       // per-confluence win-rate leaderboard. Built from each trade's frozen scores.
       adherence: summarizeAdherence(adherencePoints),
+      executionQuality,
     },
     psychology: {
       averagePercent: psychAnalytics.averagePsychologyPercent(psychologyPoints),

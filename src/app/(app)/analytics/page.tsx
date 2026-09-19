@@ -17,7 +17,7 @@ import { presetToRange, type DateRangePreset } from "@/lib/date-ranges";
 import { AnalyticsModule } from "@/components/analytics/analytics-module";
 import { FadeIn } from "@/components/shared/motion";
 
-const VALID_PRESETS: DateRangePreset[] = ["week", "month", "3months", "year", "custom"];
+const VALID_PRESETS: DateRangePreset[] = ["week", "month", "3months", "ytd", "year", "all", "custom"];
 
 type Params = {
   range?: string;

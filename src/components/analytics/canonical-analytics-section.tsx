@@ -1,12 +1,8 @@
 "use client";
 
-import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid, ReferenceLine } from "recharts";
-
 import { cn } from "@/lib/utils";
 import { fmtR, fmtUsd, tone } from "@/lib/analytics-format";
-import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE } from "@/components/analytics/chart-theme";
 import { MIN_EXPECTANCY_SAMPLE } from "@/domain/performance/expectancy";
-import type { CanonicalAnalyticsSummary } from "@/server/services/analytics-canonical.service";
 import type { RGroupStats, BehaviourLabelStats } from "@/domain/analytics/canonical-aggregations";
 
 /**
@@ -94,32 +90,9 @@ export function GroupList({ stats, emptyLabel }: { stats: RGroupStats[]; emptyLa
   );
 }
 
-export function RCurveChart({ curve }: { curve: CanonicalAnalyticsSummary["cumulativeRCurve"] }) {
-  if (curve.length < 2) {
-    return (
-      <p className="py-16 text-center text-sm text-muted-foreground">
-        {curve.length === 0 ? "No realized trades in this range yet." : "Just one realized trade so far."}
-      </p>
-    );
-  }
-  const data = curve.map((p, i) => ({ index: i + 1, date: p.dateKey, value: p.cumulativeR }));
-  return (
-    <ResponsiveContainer width="100%" height={260}>
-      <LineChart data={data} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-        <XAxis dataKey="index" tick={CHART_AXIS_TICK} tickLine={false} axisLine={false} />
-        <YAxis tick={CHART_AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={(v) => `${v}R`} />
-        <ReferenceLine y={0} stroke="var(--border)" />
-        <Tooltip
-          contentStyle={CHART_TOOLTIP_STYLE}
-          formatter={(value) => [`${Number(value) >= 0 ? "+" : ""}${Number(value).toFixed(2)}R`, "Cumulative R"]}
-          labelFormatter={(_, payload) => payload?.[0]?.payload?.date ?? ""}
-        />
-        <Line type="monotone" dataKey="value" stroke="var(--chart-2)" strokeWidth={2} dot={false} />
-      </LineChart>
-    </ResponsiveContainer>
-  );
-}
+// RCurveChart was retired in Analytics V2 — its cumulativeR series is now
+// one of the three modes in the unified EquityCurveChart (R / $ / %),
+// rather than a separate chart duplicating the same data.
 
 export function BehaviourLists({ stats }: { stats: BehaviourLabelStats[] }) {
   const positive = stats.filter((s) => s.polarity === "POSITIVE" && s.count > 0);

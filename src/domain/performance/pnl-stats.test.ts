@@ -32,14 +32,38 @@ describe("maxDrawdown", () => {
     // peak 110000 → 104500 = 5500 (5%); earlier peak 105000 → 92000 = 13000 (12.38%)
     expect(dd.amount).toBe(13000);
     expect(dd.percent).toBeCloseTo(12.381, 2);
+    expect(dd.series).toHaveLength(7);
   });
 
   it("is zero for a monotonically rising series", () => {
-    expect(maxDrawdown([100, 110, 120])).toEqual({ amount: 0, percent: 0 });
+    const dd = maxDrawdown([100, 110, 120]);
+    expect(dd.amount).toBe(0);
+    expect(dd.percent).toBe(0);
+    expect(dd.currentAmount).toBe(0);
+    expect(dd.currentPercent).toBe(0);
   });
 
   it("handles an empty series", () => {
-    expect(maxDrawdown([])).toEqual({ amount: 0, percent: 0 });
+    const dd = maxDrawdown([]);
+    expect(dd.amount).toBe(0);
+    expect(dd.percent).toBe(0);
+    expect(dd.series).toEqual([]);
+  });
+
+  // Analytics V2 §5 — current drawdown is the decline from peak AS OF the
+  // last point, distinct from the historical maximum.
+  it("current drawdown reflects the LAST point, not the worst historical trough", () => {
+    // Worst trough was 92000 (from peak 105000); series ends recovered near peak.
+    const dd = maxDrawdown([100000, 105000, 92000, 98000, 110000, 108000]);
+    expect(dd.amount).toBeCloseTo(13000, 6); // the historical worst (105000 -> 92000)
+    expect(dd.currentAmount).toBeCloseTo(2000, 6); // last point: peak 110000, now 108000
+    expect(dd.currentPercent).toBeCloseTo((2000 / 110000) * 100, 6);
+  });
+
+  it("current drawdown is zero when the series ends exactly at its peak", () => {
+    const dd = maxDrawdown([100, 90, 105]);
+    expect(dd.currentAmount).toBe(0);
+    expect(dd.currentPercent).toBe(0);
   });
 });
 

@@ -19,6 +19,17 @@ describe("presetToRange", () => {
     const range = presetToRange("year", today);
     expect(range).toEqual({ from: "2025-07-15", to: "2026-07-15" });
   });
+
+  // Analytics V2 §18 — the requested preset set: 7D/30D/90D/YTD/1Y/ALL/Custom.
+  it("computes a year-to-date window for 'ytd'", () => {
+    const range = presetToRange("ytd", today);
+    expect(range).toEqual({ from: "2026-01-01", to: "2026-07-15" });
+  });
+
+  it("computes an all-time sentinel window for 'all'", () => {
+    const range = presetToRange("all", today);
+    expect(range).toEqual({ from: "2000-01-01", to: "2026-07-15" });
+  });
 });
 
 describe("daysBetweenInclusive", () => {

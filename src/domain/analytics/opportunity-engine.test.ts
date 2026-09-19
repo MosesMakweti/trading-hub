@@ -31,16 +31,19 @@ const missed = (over: Partial<OpportunityInput> = {}): OpportunityInput => ({
   ...over,
 });
 
-describe("opportunity-engine — scenario A: executed valid trade under-captures (execution leakage)", () => {
-  it("splits the gap into execution leakage, not missed cost", () => {
-    // expectancy 0.5 × execScore 80% = 0.40 expected; realized 0.10 → 0.30 leakage.
+describe("opportunity-engine — scenario A: executed valid trade under-captures its scaled expectation (execution variance)", () => {
+  it("still reports execution variance as a diagnostic, but never lets it feed edge capture", () => {
+    // expectancy 0.5 × execScore 80% = 0.40 expected; realized 0.10 → 0.30 "variance".
     const s = summarizeOpportunities([executed({ executionScore: 80, actualR: 0.1 })]);
     expect(s.executionLeakageR).toBe(0.3);
     expect(s.missedOpportunityCostR).toBe(0);
-    expect(s.totalDiscrepancyR).toBe(0.3);
+    expect(s.totalDiscrepancyR).toBe(0.3); // still a valid diagnostic total
     expect(s.realizedR).toBe(0.1);
-    expect(s.potentialR).toBe(0.4);
-    expect(s.edgeCapturePercent).toBe(25); // 0.10 / 0.40
+    // Analytics V2 §10/§11 — potentialR/edgeCapturePercent exclude execution
+    // variance entirely: with no missed opportunity, everything actually
+    // available (0.1R) was banked, regardless of the scaled-expectation gap.
+    expect(s.potentialR).toBe(0.1);
+    expect(s.edgeCapturePercent).toBe(100);
     expect(s.executed).toBe(1);
     expect(s.missed).toBe(0);
     expect(s.executionRatePercent).toBe(100);
@@ -100,6 +103,22 @@ describe("opportunity-engine — scenario E: invalid setups are excluded from th
   });
 });
 
+// Analytics V2 §10/§11/§13 — the exact regression this task calls out by
+// name: a correctly-executed, valid, NORMAL LOSS must never look like a
+// failure to capture edge just because it lost.
+describe("opportunity-engine — a correctly-executed normal loss never reduces edge capture", () => {
+  it("a clean -1R loss on a fully-executed valid setup still reports 100% edge capture", () => {
+    const s = summarizeOpportunities([executed({ executionScore: 100, actualR: -1 })]);
+    expect(s.realizedR).toBe(-1);
+    expect(s.missedOpportunityCostR).toBe(0);
+    // Nothing was missed, so everything genuinely available (-1R, the honest
+    // outcome of this trade) was "captured" — a loss on a correctly taken,
+    // correctly executed trade is not an unavailed opportunity.
+    expect(s.potentialR).toBe(-1);
+    expect(s.edgeCapturePercent).toBe(100);
+  });
+});
+
 describe("opportunity-engine — scenario F: one opportunity → one outcome (no double counting)", () => {
   it("an executed opportunity is never also counted as a missed one, even with stale missed fields", () => {
     // outcome EXECUTED wins; the leftover missedRealizedR must be ignored entirely.
@@ -139,7 +158,9 @@ describe("opportunity-engine — scenario G: mixed portfolio decomposes and sums
     expect(round2(s.executionLeakageR + s.missedOpportunityCostR)).toBe(s.totalDiscrepancyR);
 
     expect(s.realizedR).toBe(0.1);
-    expect(s.potentialR).toBe(3.4);
+    // Analytics V2 §10/§11 — potentialR = realizedR + missedOpportunityCostR
+    // only (0.1 + 3), never + executionLeakageR (normal variance).
+    expect(s.potentialR).toBe(3.1);
     expect(s.missedWins).toBe(1);
     expect(s.missedLosses).toBe(1);
     expect(s.missedUndetermined).toBe(1);

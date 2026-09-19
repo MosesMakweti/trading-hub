@@ -12,6 +12,7 @@ function makeBaseline(overrides: {
   const overview: CanonicalAnalyticsSummary["overview"] = {
     totalExecutedTrades: 10,
     finalizedTrades: 8,
+    pendingTrades: 2,
     winningTrades: 5,
     losingTrades: 3,
     breakevenTrades: 0,
@@ -22,6 +23,8 @@ function makeBaseline(overrides: {
     profitFactor: 1.8,
     averageWinnerR: 1.5,
     averageLoserR: -1,
+    bestTradeR: 2.5,
+    worstTradeR: -1.2,
     overrideCount: 2,
     overrideRate: 25,
     cancelledCount: 1,

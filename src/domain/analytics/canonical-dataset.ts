@@ -149,8 +149,18 @@ export function buildCanonicalTradeRow(input: CanonicalTradeRowInput): Canonical
     realizedR = summary.realizedRSoFar;
     pnl = summary.pnl;
 
-    if (input.reviewLifecycleStatus === "FULLY_CLOSED" && input.actualRR != null) {
-      finalizedR = input.actualRR;
+    // Analytics V2 — gate "finalized" on the canonical Performance-settled
+    // fact (isPerformanceSettled's own definition: the position is fully
+    // closed and a real result exists), never on reviewLifecycleStatus.
+    // Those are independent write paths (settlePerformanceTrade vs the
+    // trader's own setReviewLifecycleStatus confirmation): a trade can be
+    // genuinely settled — real realizedR, real PnL — before the trader ever
+    // opens Trade Review to mark it FULLY_CLOSED. Gating on the manual
+    // status silently excluded such trades from win rate/profit
+    // factor/expectancy/every breakdown, undercounting real, determined
+    // results. `summary.settled` already reduces to exactly this fact.
+    if (summary.settled && realizedR != null) {
+      finalizedR = realizedR;
       winLossClass = finalizedR > R_EPSILON ? "WIN" : finalizedR < -R_EPSILON ? "LOSS" : "BREAKEVEN";
     }
   }

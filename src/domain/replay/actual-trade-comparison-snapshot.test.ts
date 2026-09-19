@@ -33,9 +33,14 @@ function baseInput(overrides: Partial<ActualTradeComparisonSnapshotInput> = {}):
     legacyPlannedTarget: 1921,
     confirmedPlan: null,
     actualPartialExits: [],
-    settled: false,
-    settledRealizedR: null,
-    settledPnl: null,
+    // Analytics V2 — a genuinely FULLY_CLOSED trade with a real actualRR is
+    // canonically settled too; settled/settledRealizedR/settledPnl must stay
+    // consistent with reviewLifecycleStatus/actualRR above (real usage
+    // always writes them together via settlePerformanceTrade), or
+    // buildCanonicalTradeRow correctly treats it as still pending.
+    settled: true,
+    settledRealizedR: 2,
+    settledPnl: 200,
     preTradeMoodTags: ["Focused"],
     preTradeMoodIntensity: 4,
     tradeIntent: "PLANNED",

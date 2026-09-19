@@ -29,9 +29,13 @@ export interface RGroupStats {
 }
 
 export function toMetricInputs(rows: CanonicalAnalyticsTradeRow[]): TradeMetricInput[] {
-  return rows
-    .filter((r) => r.reviewLifecycleStatus === "FULLY_CLOSED" && r.finalizedR != null)
-    .map((r) => ({ dateKey: r.dateKey, assetSymbol: r.assetSymbol, actualRR: r.finalizedR }));
+  // Analytics V2 — `finalizedR` (canonical-dataset.ts) is already gated on
+  // the canonical Performance-settled fact; re-imposing
+  // reviewLifecycleStatus === "FULLY_CLOSED" here would silently exclude a
+  // genuinely settled trade the trader hasn't yet manually confirmed in
+  // Trade Review, undercounting win rate/profit factor/expectancy/streaks.
+  // `finalizedR != null` is the complete, sufficient gate on its own.
+  return rows.filter((r) => r.finalizedR != null).map((r) => ({ dateKey: r.dateKey, assetSymbol: r.assetSymbol, actualRR: r.finalizedR }));
 }
 
 export function computeRGroupStats(key: string, label: string, rows: CanonicalAnalyticsTradeRow[]): RGroupStats {
@@ -265,9 +269,7 @@ export interface PlannedVsActualSummary {
  *  A correctly-executed loss on a valid setup is normal variance, not
  *  penalized here; this only describes the plan-vs-outcome gap on average. */
 export function summarizePlannedVsActual(rows: CanonicalAnalyticsTradeRow[]): PlannedVsActualSummary {
-  const withBoth = rows.filter(
-    (r) => r.reviewLifecycleStatus === "FULLY_CLOSED" && r.plannedR != null && r.finalizedR != null,
-  );
+  const withBoth = rows.filter((r) => r.plannedR != null && r.finalizedR != null);
   if (withBoth.length === 0) {
     return { sampleSize: 0, averagePlannedR: null, averageRealizedR: null, averageGap: null, meetOrExceedRate: null };
   }

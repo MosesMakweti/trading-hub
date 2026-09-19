@@ -8,6 +8,7 @@ import { KpiCard } from "@/components/analytics/kpi-card";
 import { ProgressRing } from "@/components/analytics/progress-ring";
 import { Donut } from "@/components/analytics/donut";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
+import { DrawdownChart } from "@/components/analytics/drawdown-chart";
 import { DiscrepancyAnalytics } from "@/components/analytics/discrepancy-analytics";
 import { OpportunityAnalytics } from "@/components/analytics/opportunity-analytics";
 import { AdherenceAnalytics } from "@/components/analytics/adherence-analytics";
@@ -16,7 +17,7 @@ import { PsychologyAnalytics } from "@/components/analytics/psychology-analytics
 import { Heatmap, pnlHeatColor } from "@/components/analytics/heatmap";
 import { PropFirmsAnalyticsSection } from "@/components/analytics/prop-firms-analytics-section";
 import { AnalyticsImprovementSection } from "@/components/analytics/analytics-improvement-section";
-import { Card, GroupList, BehaviourLists, RCurveChart } from "@/components/analytics/canonical-analytics-section";
+import { Card, GroupList, BehaviourLists, SampleTag } from "@/components/analytics/canonical-analytics-section";
 import { EmptyState } from "@/components/shared/empty-state";
 import { StaggerList, StaggerItem } from "@/components/shared/motion";
 import { SectionNav } from "@/components/analytics/section-nav";
@@ -245,34 +246,57 @@ export function AnalyticsModule({
               </section>
             </StaggerItem>
 
-            {/* Performance Curve — cumulative realized R (trader performance) */}
+            {/* Equity Curve — ONE chart, R / $ / % switching (Analytics V2 §4).
+                Full-width, the page's primary visualization alongside Discrepancy. */}
             <StaggerItem>
-              <section id="section-performance-curve" className="scroll-mt-24 space-y-3">
+              <section id="section-equity-curve" className="scroll-mt-24 space-y-3">
                 <SectionHeading
-                  title="Performance Curve"
-                  hint="cumulative realized R — cancelled ideas excluded, partials counted once"
+                  title="Equity Curve"
+                  hint="canonical Performance Account performance — cancelled ideas excluded, pending never fabricated"
                   icon={TrendingUp}
                 />
-                <div className="glass rounded-2xl p-4">
-                  <RCurveChart curve={c.cumulativeRCurve} />
+                <EquityCurveChart
+                  data={d.equityCurve}
+                  rCurve={c.cumulativeRCurve}
+                  dollarCurve={d.drawdownCurve}
+                />
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <MiniStat label="Starting balance" value={money(d.startingBalance)} />
+                  <MiniStat label="Current balance" value={money(d.currentBalance)} />
+                  <MiniStat
+                    label="Total Realized R"
+                    value={fmtR(c.overview.totalRealizedR)}
+                    tone={c.overview.totalRealizedR > 0 ? "success" : c.overview.totalRealizedR < 0 ? "danger" : undefined}
+                  />
+                  <MiniStat label="Recovery factor" value={ratio(d.recoveryFactor)} />
                 </div>
               </section>
             </StaggerItem>
 
-            {/* Account Equity — monetary balance (account accounting, not trader performance) */}
+            {/* Drawdown — through time, from the same canonical balance series (§5). */}
             <StaggerItem>
-              <section id="section-account-equity" className="scroll-mt-24 space-y-3">
-                <SectionHeading title="Account Equity" hint="monetary balance of the Performance Account" icon={Wallet} />
-                <EquityCurveChart data={d.equityCurve} />
+              <section id="section-drawdown" className="scroll-mt-24 space-y-3">
+                <SectionHeading
+                  title="Drawdown"
+                  hint="decline from the running peak — Performance Account only, never Prop Firm cashflows"
+                  icon={Wallet}
+                />
+                <div className="glass rounded-2xl p-4">
+                  <DrawdownChart curve={d.drawdownCurve} />
+                </div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <MiniStat label="Starting balance" value={money(d.startingBalance)} />
-                  <MiniStat label="Current balance" value={money(d.currentBalance)} />
                   <MiniStat
                     label="Max drawdown"
                     value={`${d.maxDrawdownPercent.toFixed(1)}%`}
                     tone={d.maxDrawdownPercent > 0 ? "danger" : undefined}
                   />
-                  <MiniStat label="Recovery factor" value={ratio(d.recoveryFactor)} />
+                  <MiniStat label="Max drawdown ($)" value={money(d.maxDrawdownAmount)} />
+                  <MiniStat
+                    label="Current drawdown"
+                    value={`${d.currentDrawdownPercent.toFixed(1)}%`}
+                    tone={d.currentDrawdownPercent > 0 ? "danger" : undefined}
+                  />
+                  <MiniStat label="Current drawdown ($)" value={money(d.currentDrawdownAmount)} />
                 </div>
               </section>
             </StaggerItem>
@@ -318,6 +342,47 @@ export function AnalyticsModule({
                           {c.plannedVsActual.meetOrExceedRate != null ? `${c.plannedVsActual.meetOrExceedRate.toFixed(0)}%` : "—"}
                         </div>
                       </div>
+                    </div>
+                  )}
+                </Card>
+                <Card
+                  title="Execution Quality"
+                  hint="describes differences, not mistakes — error/leakage classification lives in Discrepancy above"
+                >
+                  {d.executionQuality.sampleSize === 0 ? (
+                    <p className="text-xs text-muted-foreground/60 italic">No trades with a confirmed plan yet.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2 text-sm">
+                        <span className="font-medium">Plan-follow rate</span>
+                        <div className="flex items-center gap-2">
+                          <SampleTag count={d.executionQuality.sampleSize} />
+                          <span className="font-semibold tabular-nums">
+                            {d.executionQuality.planFollowRatePercent != null
+                              ? `${d.executionQuality.planFollowRatePercent.toFixed(0)}%`
+                              : "—"}
+                          </span>
+                        </div>
+                      </div>
+                      {d.executionQuality.byCause.length === 0 ? (
+                        <p className="text-xs text-muted-foreground/60 italic">
+                          No material entry/exit/risk deviations recorded — every planned trade played out as planned.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          <span className="text-[11px] font-medium text-muted-foreground uppercase">
+                            Where plans differed (by cause)
+                          </span>
+                          {d.executionQuality.byCause.map((c) => (
+                            <div key={c.cause} className="flex items-center justify-between gap-2 text-xs">
+                              <span>{c.label}</span>
+                              <span className="tabular-nums text-muted-foreground">
+                                {c.occurrences}× · avg {fmtR(c.avgCostR)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </Card>

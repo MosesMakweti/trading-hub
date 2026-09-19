@@ -137,6 +137,37 @@ describe("buildCanonicalTradeRow", () => {
     expect(row.winLossClass).toBe("PENDING");
   });
 
+  // Analytics V2 — settlePerformanceTrade and setReviewLifecycleStatus are
+  // independent write paths; a trade can be genuinely Performance-settled
+  // before the trader ever visits Trade Review to confirm reviewLifecycleStatus.
+  // finalizedR must reflect the canonical settled fact, never wait on the
+  // separate manual status.
+  it("counts a genuinely settled trade as finalized even when reviewLifecycleStatus was never manually confirmed", () => {
+    const row = buildCanonicalTradeRow(
+      baseInput({
+        reviewLifecycleStatus: null,
+        actualEntry: 1900,
+        actualStopLoss: 1890,
+        actualExit: 1920,
+        resolvedInitialStop: 1890,
+        settled: true,
+        settledRealizedR: 2,
+        settledPnl: 200,
+        actualRR: 2,
+      }),
+    );
+    expect(row.finalizedR).toBe(2);
+    expect(row.winLossClass).toBe("WIN");
+  });
+
+  it("still stays PENDING when settled is false, regardless of any stray reviewLifecycleStatus value", () => {
+    const row = buildCanonicalTradeRow(
+      baseInput({ reviewLifecycleStatus: "FULLY_CLOSED", actualEntry: 1900, actualStopLoss: 1890, settled: false }),
+    );
+    expect(row.finalizedR).toBeNull();
+    expect(row.winLossClass).toBe("PENDING");
+  });
+
   it("an idea with no actual entry yet is not executed and contributes nothing", () => {
     const row = buildCanonicalTradeRow(baseInput());
     expect(row.isExecuted).toBe(false);

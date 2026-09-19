@@ -71,19 +71,34 @@ export interface OpportunitySummary {
   executionRatePercent: number | null;
 
   // ── R decomposition (the "why") ─────────────────────────────────────────────
-  /** Σ (expectedR − actualR) over executed valid trades. +ve = under-captured. */
+  /** Σ (expectedR − actualR) over executed valid trades, where expectedR scales
+   *  strategyExpectancyR by execution quality. A DIAGNOSTIC only ("Execution
+   *  variance" in the UI) — Analytics V2 §10/§11: this is NOT trader-controlled
+   *  leakage and must never feed a "capture" percentage, because it fabricates
+   *  a shortfall from ordinary probabilistic variance (a correctly-executed
+   *  trade that simply didn't hit its scaled expectation isn't a failure to
+   *  capture). Kept separate from `potentialR`/`edgeCapturePercent` below for
+   *  exactly this reason — see summarizeOpportunities. */
   executionLeakageR: number;
-  /** Σ max(0, missedRealizedR) over valid missed trades — forgone winners only. */
+  /** Σ max(0, missedRealizedR) over valid missed trades — forgone winners only.
+   *  This IS genuinely avoidable (a valid setup you had the chance to take). */
   missedOpportunityCostR: number;
-  /** executionLeakageR + missedOpportunityCostR. */
+  /** executionLeakageR + missedOpportunityCostR — a diagnostic total, NOT the
+   *  denominator of edgeCapturePercent (see below). */
   totalDiscrepancyR: number;
 
   // ── Edge capture ────────────────────────────────────────────────────────────
   /** Σ actualR over executed valid trades — the R actually banked. */
   realizedR: number;
-  /** realizedR + totalDiscrepancyR — R a disciplined full capture would have made. */
+  /** Analytics V2 §10/§11 — realizedR + missedOpportunityCostR ONLY. Execution
+   *  variance (executionLeakageR) is deliberately excluded: it is normal
+   *  strategy variance, not an unavailed opportunity, and folding it in here
+   *  would penalize a correctly-executed loss for not having been a win.
+   *  potentialR answers "what could I have banked by also taking every valid
+   *  setup I spotted," not "what my execution quality theoretically implied." */
   potentialR: number;
-  /** realizedR / potentialR × 100 — share of available edge actually captured. */
+  /** realizedR / potentialR × 100 — share of available edge actually captured,
+   *  counting only genuinely avoidable missed opportunities as "available". */
   edgeCapturePercent: number | null;
 
   // ── Missed-outcome breakdown (behavioral) ───────────────────────────────────
@@ -194,7 +209,9 @@ export function summarizeOpportunities(inputs: OpportunityInput[]): OpportunityS
   }
 
   const totalDiscrepancyR = round2(executionLeakageR + missedOpportunityCostR);
-  const potentialR = round2(realizedR + totalDiscrepancyR);
+  // Analytics V2 §10/§11 — deliberately excludes executionLeakageR (normal
+  // variance, not an unavailed opportunity). See the field doc comments above.
+  const potentialR = round2(realizedR + missedOpportunityCostR);
 
   return {
     validOpportunities,
