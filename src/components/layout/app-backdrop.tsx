@@ -1,45 +1,57 @@
 // Photo backdrop — a non-interactive decorative layer behind the whole app
 // (fixed, -z-10, pointer-events-none, aria-hidden): a dedicated monochrome
-// candlestick-market image per theme (dark image in dark mode, light image in
-// light mode), softened with a slow drift, a top fade (keeps the header band
-// clean), an atmospheric top bloom, and a vignette — so foreground glass
-// cards always read clearly over it. Art is rain-streaked glass with a
-// blurred candlestick chart behind it — matching light/dark renders of the
-// same scene (dark: black glass, red/teal candles; light: white glass,
-// pink/teal candles), 4608x2592 WebP each, Lanczos-upscaled from a 1659x948
-// source + unsharp-masked. Both stay crisp at full-viewport
-// `object-cover` sizes on 4K/5K displays. A second, blurred copy of the
-// same image is masked to a soft ring around the edges (radial mask keeps the
-// centre — where the trend line reads — untouched), giving a mild
-// depth-of-field effect rather than blurring the whole scene. Both images
-// render at all times; only the theme's `dark:` class variant decides which
-// is visible (same trick as `ThemeToggle`'s two icons), so there's no
-// client/server hydration mismatch. The only motion is a very slow GPU drift,
-// disabled under reduced-motion.
+// low-poly "trading bull" network artwork per theme (dark render in dark
+// mode, light render in light mode), softened with a slow drift, a top fade
+// (keeps the header band clean), an atmospheric top bloom, and a vignette —
+// so foreground `.glass` cards (opaque; see design-system.md §7) always read
+// clearly over it. The bull is built from interconnected wireframe polygons,
+// nodes, and translucent facets — dark: black/charcoal facets with
+// silver/white structural lines; light: independently balanced white/silver
+// facets with graphite lines (not an inverted copy). 3840x2160 WebP each,
+// Lanczos-upscaled from a 1659x948 source + unsharp-masked (untouched
+// masters live outside /public, at assets/backdrop-source/, so they're never
+// part of the deployed static bundle). Both stay crisp at
+// full-viewport `object-cover` sizes on 4K/5K displays. `object-position` is
+// fixed at 88% 12% (near the head/horns, close to the top) rather than
+// centered: cover-fit only ever crops ONE axis at a time (whichever the
+// viewport overflows relative to the image's native 16:9), so a single
+// off-center anchor correctly protects the head/horns/back-ridge silhouette
+// on both extremes — narrow/tall viewports (mobile) crop horizontally and
+// keep the anchor's right bias; wide/short viewports (ultrawide) crop
+// vertically and keep the anchor's top bias — without needing responsive
+// breakpoints. A second, blurred copy of the same image is masked to a soft
+// ring around the edges (radial mask keeps the centre untouched), giving a
+// mild depth-of-field effect rather than blurring the whole scene. Both
+// images render at all times; only the theme's `dark:` class variant decides
+// which is visible (same trick as `ThemeToggle`'s two icons), so there's no
+// client/server hydration mismatch and no wrong-theme flash. The only motion
+// is a very slow GPU drift, disabled under reduced-motion.
 
 import Image from "next/image";
+
+const OBJECT_POSITION = "object-[88%_12%]";
 
 export function AppBackdrop() {
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
       <div className="backdrop-drift-a absolute inset-0" style={{ opacity: "var(--backdrop-strength)" }}>
         <Image
-          src="/backdrop/market-light.webp"
+          src="/backdrop/bull-light.webp"
           alt=""
           fill
           priority
           quality={90}
           sizes="100vw"
-          className="object-cover dark:hidden"
+          className={`object-cover ${OBJECT_POSITION} dark:hidden`}
         />
         <Image
-          src="/backdrop/market-dark.webp"
+          src="/backdrop/bull-dark.webp"
           alt=""
           fill
           priority
           quality={90}
           sizes="100vw"
-          className="hidden object-cover dark:block"
+          className={`hidden object-cover ${OBJECT_POSITION} dark:block`}
         />
 
         {/* Depth-of-field ring: same art, blurred, masked to the edges only. */}
@@ -51,18 +63,18 @@ export function AppBackdrop() {
           }}
         >
           <Image
-            src="/backdrop/market-light.webp"
+            src="/backdrop/bull-light.webp"
             alt=""
             fill
             sizes="100vw"
-            className="object-cover blur-2xl dark:hidden"
+            className={`object-cover ${OBJECT_POSITION} blur-2xl dark:hidden`}
           />
           <Image
-            src="/backdrop/market-dark.webp"
+            src="/backdrop/bull-dark.webp"
             alt=""
             fill
             sizes="100vw"
-            className="hidden object-cover blur-2xl dark:block"
+            className={`hidden object-cover ${OBJECT_POSITION} blur-2xl dark:block`}
           />
         </div>
       </div>

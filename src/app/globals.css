@@ -126,13 +126,16 @@
   /* Matte canvas: no colored wash on light (kept flat + neutral). */
   --app-canvas-glow: transparent;
   /* Photo backdrop (decorative, behind the whole app) — a dedicated light-theme
-     candlestick-market image (see `AppBackdrop`; dark mode swaps in its own
+     low-poly bull image (see `AppBackdrop`; dark mode swaps in its own
      image, not a filtered copy of this one). The vignette fades toward the
      near-white canvas so it recedes behind content instead of fighting
-     light-mode text. */
+     light-mode text. Strength is lower than the old candlestick art's was —
+     the bull's wireframe reaches edge-to-edge with no empty glass regions, so
+     it needs a lighter touch to stay in the background rather than the
+     foreground. */
   --backdrop-vignette: oklch(0.97 0.002 255 / 55%);
   --backdrop-glow: oklch(1 0 0 / 55%);
-  --backdrop-strength: 0.75;
+  --backdrop-strength: 0.45;
   /* Sidebar is a frosted panel lighter than the canvas; the active item is a raised
      white pill (bg-card + soft shadow, in the sidebar primitive) that lifts off it. */
   --sidebar: oklch(0.93 0.003 255);
@@ -210,12 +213,14 @@
 
   /* Matte canvas: a barely-there top light for depth — neutral, not colored. */
   --app-canvas-glow: oklch(1 0 0 / 2.5%);
-  /* Photo backdrop — the dedicated dark-theme candlestick-market image runs
-     near-full-strength; the vignette deepens the edges to black for the
-     cinematic, institutional-terminal feel. */
+  /* Photo backdrop — the dedicated dark-theme low-poly bull image; the
+     vignette deepens the edges to black for the cinematic,
+     institutional-terminal feel. Strength is dialed back from the old
+     candlestick art (0.9) since this artwork's wireframe reaches
+     edge-to-edge with no empty glass regions to rest the eye on. */
   --backdrop-vignette: oklch(0 0 0 / 62%);
   --backdrop-glow: oklch(0.7 0.006 265 / 10%);
-  --backdrop-strength: 0.9;
+  --backdrop-strength: 0.6;
 }
 
 @layer base {
@@ -383,8 +388,8 @@
     animation: pulse-glow 2.4s ease-in-out infinite;
   }
 
-  /* Floating candlestick backdrop — each depth plane drifts at a different, very slow
-     pace so the market feels alive without ever pulling focus (GPU transform only). */
+  /* AppBackdrop drift — each depth plane drifts at a different, very slow
+     pace so the artwork feels alive without ever pulling focus (GPU transform only). */
   .backdrop-drift-a { animation: backdrop-drift-a 80s ease-in-out infinite alternate; will-change: transform; }
   .backdrop-drift-b { animation: backdrop-drift-b 110s ease-in-out infinite alternate; will-change: transform; }
   .backdrop-drift-c { animation: backdrop-drift-c 64s ease-in-out infinite alternate; will-change: transform; }
