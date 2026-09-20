@@ -14,11 +14,11 @@
       </header>
       <p class="tagline">TradingView Companion</p>
 
-      <div class="status-row">
+      <div class="status-row" aria-live="polite">
         <span class="dot" data-role="tv-dot"></span>
         <span data-role="tv-label">Checking TradingView…</span>
       </div>
-      <div class="status-row" data-role="conn-row" hidden>
+      <div class="status-row" data-role="conn-row" aria-live="polite" hidden>
         <span class="dot" data-role="conn-dot"></span>
         <span data-role="conn-label"></span>
       </div>
@@ -41,7 +41,7 @@
            draft was started against, and the trader hasn't already said
            "keep it" for this specific new symbol. See draft.ts's
            ensureOriginSymbol/acknowledgeSymbolMismatch/startNewIdeaForSymbol. -->
-      <section class="card card-warning" data-role="symbol-warning" hidden>
+      <section class="card card-warning" data-role="symbol-warning" role="alert" hidden>
         <div class="field-label">Chart changed</div>
         <p class="muted" data-role="symbol-warning-text"></p>
         <div class="form-actions">
@@ -82,7 +82,7 @@
       </section>
 
       <!-- Error -->
-      <section class="card card-error" data-role="error-view" hidden>
+      <section class="card card-error" data-role="error-view" role="alert" hidden>
         <div class="field-label">Connection failed</div>
         <p class="muted" data-role="error-message"></p>
         <button class="btn btn-primary" data-role="retry-connect">Try again</button>
@@ -104,13 +104,13 @@
           <option value="">Select a strategy…</option>
         </select>
         <p class="muted" data-role="strategy-loading" hidden>Loading strategy…</p>
-        <p class="muted strategy-error" data-role="strategy-load-error" hidden></p>
+        <p class="muted strategy-error" data-role="strategy-load-error" role="alert" hidden></p>
 
         <div data-role="strategy-detail" hidden>
           <div class="field-label">Direction</div>
-          <div class="direction-toggle">
-            <button type="button" class="btn direction-btn" data-role="direction-long" data-direction="LONG">LONG</button>
-            <button type="button" class="btn direction-btn" data-role="direction-short" data-direction="SHORT">SHORT</button>
+          <div class="direction-toggle" role="group" aria-label="Trade direction">
+            <button type="button" class="btn direction-btn" data-role="direction-long" data-direction="LONG" aria-pressed="false">LONG</button>
+            <button type="button" class="btn direction-btn" data-role="direction-short" data-direction="SHORT" aria-pressed="false">SHORT</button>
           </div>
 
           <div data-role="session-field" hidden>
@@ -134,8 +134,8 @@
           </div>
 
           <div data-role="strategy-rules" hidden>
-            <button type="button" class="link-btn" data-role="toggle-rules">Strategy Rules ▾</button>
-            <div class="rules-content" data-role="rules-content" hidden>
+            <button type="button" class="link-btn" data-role="toggle-rules" aria-expanded="false" aria-controls="rules-content">Strategy Rules ▾</button>
+            <div class="rules-content" id="rules-content" data-role="rules-content" hidden>
               <div data-role="rules-framework"></div>
               <div data-role="rules-trade-management"></div>
             </div>
@@ -168,7 +168,7 @@
           </div>
         </div>
 
-        <p class="muted strategy-error" data-role="screenshot-error" hidden></p>
+        <p class="muted strategy-error" data-role="screenshot-error" role="alert" hidden></p>
 
         <!-- Recognition (Step 9) — only ever appears once a screenshot is
              uploaded; Apply Suggestions is the ONLY thing that ever
@@ -177,7 +177,7 @@
           <button type="button" class="btn btn-ghost" data-role="analyze-chart">Analyze Chart</button>
         </div>
         <p class="muted" data-role="recognition-analyzing" hidden>Analyzing…</p>
-        <p class="muted strategy-error" data-role="recognition-error" hidden></p>
+        <p class="muted strategy-error" data-role="recognition-error" role="alert" hidden></p>
 
         <div class="recognition-card" data-role="recognition-result" hidden>
           <div class="field-label">Recognized Trade Plan</div>
@@ -218,8 +218,8 @@
              Strategy Rules) so collapsing is something the trader opts into,
              never something that makes already-typed notes look like they
              went missing. -->
-        <button type="button" class="link-btn" data-role="toggle-notes">Notes ▾</button>
-        <div data-role="notes-content">
+        <button type="button" class="link-btn" data-role="toggle-notes" aria-expanded="true" aria-controls="notes-content">Notes ▾</button>
+        <div id="notes-content" data-role="notes-content">
           <div class="note-field">
             <label for="market-context-input">Market Context</label>
             <textarea data-role="market-context-input" id="market-context-input" rows="2"></textarea>
@@ -239,7 +239,7 @@
 
         <button type="button" class="btn btn-primary" data-role="save-trade">Save Trade Idea</button>
 
-        <div data-role="trade-success" hidden>
+        <div data-role="trade-success" role="status" aria-live="polite" hidden>
           <p class="success-title">✓ Trade Idea saved</p>
           <p data-role="success-summary"></p>
           <p class="muted" data-role="success-warnings" hidden></p>
@@ -249,7 +249,7 @@
           </div>
         </div>
 
-        <div class="card-error" data-role="trade-error" hidden>
+        <div class="card-error" data-role="trade-error" role="alert" hidden>
           <p class="strategy-error" data-role="error-summary"></p>
           <ul data-role="error-issues"></ul>
           <button type="button" class="btn btn-ghost" data-role="retry-save">Try again</button>

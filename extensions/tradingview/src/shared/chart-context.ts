@@ -35,15 +35,6 @@ export interface TradingViewChartContext {
   updatedAt: number;
 }
 
-export const EMPTY_CHART_CONTEXT: TradingViewChartContext = {
-  symbol: null,
-  timeframe: null,
-  detected: false,
-  symbolSource: null,
-  timeframeSource: null,
-  updatedAt: 0,
-};
-
 /** Value-equality for the fields that matter to the UI/messaging — used to
  *  suppress redundant CHART_CONTEXT_CHANGED sends (§18: "duplicate context
  *  does not cause unnecessary message spam"). `updatedAt` is deliberately

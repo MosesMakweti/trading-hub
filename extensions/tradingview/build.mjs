@@ -75,5 +75,37 @@ await Promise.all([
   build({ ...common, format: "esm", entryPoints: [path.join(ROOT, "src/panel/panel.ts")], outfile: path.join(DIST, "panel/panel.js") }),
 ]);
 
+// 4. Step 10, §12 — production build validation. §8's "must not
+//    accidentally point at localhost" is already enforced at the SOURCE
+//    (no silent default target, API_BASE_URL is a define-time constant —
+//    see config.ts), but this is a cheap, independent check of the actual
+//    OUTPUT bytes: if "localhost" ever ends up inside a production bundle
+//    or manifest — through a future refactor, a bad merge, a stray
+//    hardcoded fallback — the build fails loudly here rather than shipping
+//    a broken package silently. Skipped for the development target, where
+//    localhost is the correct, expected value.
+if (envArg === "production") {
+  // Deliberately NOT a bare "localhost" substring check — content.js
+  // legitimately contains the string "localhost" as a comparison target
+  // inside its own dev-logging guard (`API_BASE_URL.includes("localhost")`,
+  // see tradingview-detect.ts), which is correct, dead code at runtime once
+  // API_BASE_URL is folded to the production URL, not a leak. What must
+  // never appear is the ACTUAL dev host/permission string.
+  const forbidden = [TARGETS.development.apiBaseUrl, TARGETS.development.apiHostPermission];
+  const outputFiles = ["manifest.json", "background.js", "content.js", "panel/panel.js"].map((f) => path.join(DIST, f));
+  const offenders = outputFiles.filter((f) => {
+    const contents = readFileSync(f, "utf8");
+    return forbidden.some((needle) => contents.includes(needle));
+  });
+  if (offenders.length > 0) {
+    console.error(`\n✖ Production build validation failed: a development host string found in:\n${offenders.map((f) => `  - ${path.relative(process.cwd(), f)}`).join("\n")}`);
+    process.exit(1);
+  }
+  if (!manifest.includes(target.apiBaseUrl) || manifest.includes("__API_HOST_PERMISSION__")) {
+    console.error(`\n✖ Production build validation failed: manifest does not correctly point at ${target.apiBaseUrl}.`);
+    process.exit(1);
+  }
+}
+
 console.log(`\nBuilt ${envArg} extension → ${path.relative(process.cwd(), DIST)}`);
 console.log(`  API base URL: ${target.apiBaseUrl}`);

@@ -91,6 +91,48 @@ describe("tradingview-detect content script", () => {
     });
   });
 
+  it("Step 10 — re-detects on a replaceState-driven SPA navigation (not just pushState)", async () => {
+    window.history.replaceState(null, "", "/chart/?symbol=OANDA:XAUUSD");
+    const { chromeMock } = installChromeMock();
+    await import("./tradingview-detect");
+    chromeMock.runtime.sendMessage.mockClear();
+
+    window.history.replaceState(null, "", "/chart/?symbol=OANDA:EURUSD");
+
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "CHART_CONTEXT_CHANGED",
+      context: expect.objectContaining({ symbol: { raw: "OANDA:EURUSD", display: "EURUSD", exchange: "OANDA" } }),
+    });
+  });
+
+  it("Step 10 — the 3s reconciliation timer catches a change none of the other three triggers observed", async () => {
+    vi.useFakeTimers();
+    try {
+      window.history.replaceState(null, "", "/chart/?symbol=OANDA:XAUUSD");
+      const { chromeMock } = installChromeMock();
+      await import("./tradingview-detect");
+      chromeMock.runtime.sendMessage.mockClear();
+
+      // Change the URL via the ORIGINAL, unpatched replaceState (captured in
+      // beforeAll, before installSpaNavigationHooks ever wrapped it) — this
+      // updates window.location exactly like a real navigation would, but
+      // deliberately bypasses the pushState/replaceState hook's own notify()
+      // call, and touches no <title> either. Only the reconciliation timer
+      // is left to catch it — simulates whatever "falls through the first
+      // three" triggers the doc comment describes.
+      originalReplaceState.call(window.history, null, "", "/chart/?symbol=OANDA:EURUSD");
+
+      await vi.advanceTimersByTimeAsync(3000); // matches RECONCILE_INTERVAL_MS in tradingview-detect.ts
+
+      expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({
+        type: "CHART_CONTEXT_CHANGED",
+        context: expect.objectContaining({ symbol: { raw: "OANDA:EURUSD", display: "EURUSD", exchange: "OANDA" } }),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("re-detects on a popstate (back/forward) navigation", async () => {
     window.history.replaceState(null, "", "/chart/?symbol=OANDA:XAUUSD");
     const { chromeMock } = installChromeMock();

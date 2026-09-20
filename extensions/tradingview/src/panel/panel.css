@@ -33,6 +33,12 @@ body {
   color: var(--text);
   font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* Step 10, §14 — the panel is a fixed 320px width; a single long,
+     unbreakable string (a long strategy/confluence/session name, a long
+     validation message) must wrap rather than clip or force horizontal
+     scroll. Applies panel-wide rather than per-element, since new text
+     surfaces get this for free. */
+  overflow-wrap: break-word;
 }
 
 .panel {
@@ -141,8 +147,13 @@ select {
   outline: none;
 }
 
-select:focus {
+select:focus-visible {
   border-color: rgba(242, 242, 244, 0.4);
+  /* Step 10, §15 — a border-color-only change is too low-contrast against
+     this dark surface to count as a real focus indicator; add a visible
+     ring so keyboard focus is actually easy to see, without touching the
+     resting (non-focus) visual design at all. */
+  box-shadow: 0 0 0 2px rgba(242, 242, 244, 0.35);
 }
 
 [data-role="strategy-detail"] {
@@ -253,8 +264,9 @@ input[type="password"] {
   outline: none;
 }
 
-input[type="password"]:focus {
+input[type="password"]:focus-visible {
   border-color: rgba(242, 242, 244, 0.4);
+  box-shadow: 0 0 0 2px rgba(242, 242, 244, 0.35);
 }
 
 .btn {
@@ -341,9 +353,16 @@ textarea {
   resize: vertical;
 }
 
-input[type="text"]:focus,
-textarea:focus {
+input[type="text"]:focus-visible,
+textarea:focus-visible {
   border-color: rgba(242, 242, 244, 0.4);
+  box-shadow: 0 0 0 2px rgba(242, 242, 244, 0.35);
+}
+
+.btn:focus-visible,
+.link-btn:focus-visible {
+  outline: 2px solid rgba(242, 242, 244, 0.6);
+  outline-offset: 2px;
 }
 
 #entry-input,
