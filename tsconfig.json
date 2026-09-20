@@ -30,5 +30,13 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    // Traditorium TradingView Extension (Step 4, extensions/tradingview/README.md)
+    // is a deliberately isolated package — its own package.json, its own
+    // tsconfig.json/vitest.config.ts, its own @shared/* alias and `chrome`
+    // types. It must never be swept into the web app's compilation; excluding
+    // it here is what keeps that boundary real rather than only documented.
+    "extensions"
+  ]
 }

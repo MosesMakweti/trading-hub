@@ -1,0 +1,491 @@
+/* Traditorium TradingView Extension — Step 4.
+ * Visual language matches the web app's actual current card treatment
+ * (docs/design-system.md §7 in the main repo: glassmorphism was removed
+ * app-wide — `.glass` is an OPAQUE surface with a thin border + soft
+ * shadow, not backdrop-blur). A native side-panel document has no
+ * translucent page content behind it for a real blur to show through
+ * anyway, so "restrained glassmorphism" here means the same thing it now
+ * means on the web app: a card that reads as a raised, bordered surface,
+ * not a literal blur effect. Same near-white/near-black inverting CTA
+ * pattern as the web app's primary buttons. */
+
+:root {
+  --bg: #131318;
+  --card: #1b1c22;
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #f2f2f4;
+  --muted: #9a9aa3;
+  --primary: #f2f2f4;
+  --primary-text: #17171b;
+  --danger: #e5484d;
+  --success: #34d399;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 320px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.panel {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand img {
+  border-radius: 4px;
+  display: block;
+}
+
+.brand-name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.tagline {
+  margin: -6px 0 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+
+.dot[data-state="on"] {
+  background: var(--success);
+}
+
+.dot[data-state="error"] {
+  background: var(--danger);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 8px 20px -14px rgba(0, 0, 0, 0.4);
+}
+
+.card-error {
+  border-color: rgba(229, 72, 77, 0.35);
+}
+
+.chart-values {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: ui-monospace, monospace;
+}
+
+.chart-symbol {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chart-sep {
+  color: var(--muted);
+}
+
+.chart-timeframe {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Step 6 — strategy-aware trade context */
+
+select {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 12.5px;
+  outline: none;
+}
+
+select:focus {
+  border-color: rgba(242, 242, 244, 0.4);
+}
+
+[data-role="strategy-detail"] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+[data-role="strategy-detail"] > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.direction-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.direction-btn {
+  flex: 1;
+}
+
+.direction-btn[data-active="true"] {
+  background: var(--primary);
+  color: var(--primary-text);
+  border-color: transparent;
+}
+
+.strategy-error {
+  color: var(--danger);
+}
+
+.tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tag-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tag-row input {
+  margin-top: 2px;
+  accent-color: var(--text);
+}
+
+.tag-row-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.tag-row-name {
+  color: var(--text);
+}
+
+.tag-row-meta {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.tag-row-meta.mandatory {
+  color: var(--danger);
+}
+
+.rules-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+
+.field-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+input[type="password"] {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 9px;
+  font-size: 12.5px;
+  font-family: ui-monospace, monospace;
+  outline: none;
+}
+
+input[type="password"]:focus {
+  border-color: rgba(242, 242, 244, 0.4);
+}
+
+.btn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text);
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-text);
+  border-color: transparent;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.form-actions .btn {
+  flex: 1;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 4px;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.link-btn:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.link-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Step 7 — Trade Plan / Notes / Save */
+
+.price-field,
+.note-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.price-field label,
+.note-field label {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+input[type="text"],
+textarea {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+}
+
+input[type="text"]:focus,
+textarea:focus {
+  border-color: rgba(242, 242, 244, 0.4);
+}
+
+#entry-input,
+#stop-input {
+  font-family: ui-monospace, monospace;
+}
+
+.target-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.target-label {
+  font-size: 11.5px;
+  color: var(--muted);
+  width: 28px;
+  flex: none;
+}
+
+.target-price-input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+}
+
+.target-r-preview {
+  font-size: 11px;
+  color: var(--success);
+  width: 34px;
+  flex: none;
+  text-align: right;
+}
+
+.target-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  flex: none;
+}
+
+.target-remove:hover {
+  color: var(--danger);
+}
+
+.success-title {
+  margin: 0;
+  color: var(--success);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+[data-role="trade-success"],
+[data-role="trade-error"] {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+[data-role="error-issues"] {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--danger);
+}
+
+[data-role="view-in-traditorium"] {
+  flex: 1;
+  text-align: center;
+  text-decoration: none;
+}
+
+/* Step 8 — chart screenshot capture/upload */
+
+[data-role="screenshot-preview"] {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.screenshot-image {
+  display: block;
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+[data-role="screenshot-preview"] .form-actions .btn {
+  flex: none;
+}
+
+[data-role="upload-screenshot"] {
+  flex: 1 !important;
+}
+
+/* Step 9 — symbol-change warning (Part 8) */
+
+.card-warning {
+  border-color: rgba(217, 119, 6, 0.4);
+  background: rgba(217, 119, 6, 0.06);
+}
+
+/* Step 9 — recognition (Parts 1-4) */
+
+[data-role="analyze-idle"] {
+  margin-top: 4px;
+}
+
+.recognition-card {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recognition-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.recognition-fields dt {
+  color: var(--muted);
+}
+
+.recognition-fields dd {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+}
+
+.recognition-fields dd.not-detected {
+  color: var(--muted);
+  font-family: inherit;
+  font-style: italic;
+}

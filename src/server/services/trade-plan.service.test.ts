@@ -6,6 +6,7 @@ import {
   attachPlanScreenshotFromExisting,
   getPlanWorkspace,
   lockPlanIfConfirmedAndUnlocked,
+  recognizeStandaloneMediaAsset,
   removePlanScreenshot,
   runRecognition,
   savePlan,
@@ -143,6 +144,51 @@ describe("trade-plan.service — recognition (no provider configured)", () => {
 
     const { screenshot } = await getPlanWorkspace(userId, tradeId);
     expect(screenshot?.status).toBe("CONFIRMED");
+  });
+});
+
+describe("trade-plan.service — recognizeStandaloneMediaAsset (Step 9, Part 1)", () => {
+  it("resolves to RECOGNITION_FAILED (no provider configured) for a bare MediaAsset with no Trade/TradePlanScreenshot at all", async () => {
+    const user = await makeUser("standalone-recognition");
+    const asset = await makeMediaAsset(user.id);
+
+    const outcome = await recognizeStandaloneMediaAsset(user.id, asset.id);
+    expect(outcome.status).toBe("RECOGNITION_FAILED");
+    if (outcome.status === "RECOGNITION_FAILED") expect(outcome.error).toBeTruthy();
+
+    // Confirms this really never required a Trade/TradePlanScreenshot to exist.
+    const screenshot = await prisma.tradePlanScreenshot.findFirst({ where: { mediaAssetId: asset.id } });
+    expect(screenshot).toBeNull();
+
+    await cleanupUsers(user.id);
+  });
+
+  it("throws (never fabricates a result) for a MediaAsset that doesn't exist", async () => {
+    const user = await makeUser("standalone-recognition-missing");
+    await expect(recognizeStandaloneMediaAsset(user.id, "does-not-exist")).rejects.toThrow(/not found|access denied/i);
+    await cleanupUsers(user.id);
+  });
+
+  it("throws for a MediaAsset that belongs to a DIFFERENT user — cross-user access is never permitted", async () => {
+    const owner = await makeUser("standalone-recognition-owner");
+    const other = await makeUser("standalone-recognition-other");
+    const asset = await makeMediaAsset(owner.id);
+
+    await expect(recognizeStandaloneMediaAsset(other.id, asset.id)).rejects.toThrow(/not found|access denied/i);
+
+    await cleanupUsers(owner.id, other.id);
+  });
+
+  it("never persists a ScreenshotRecognitionField row — there is nothing to scope one to pre-trade", async () => {
+    const user = await makeUser("standalone-recognition-no-persist");
+    const asset = await makeMediaAsset(user.id);
+
+    await recognizeStandaloneMediaAsset(user.id, asset.id);
+
+    const fields = await prisma.screenshotRecognitionField.findMany({ where: { screenshot: { mediaAssetId: asset.id } } });
+    expect(fields).toEqual([]);
+
+    await cleanupUsers(user.id);
   });
 });
 

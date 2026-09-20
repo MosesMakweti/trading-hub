@@ -1,0 +1,22 @@
+{
+  "name": "traditorium-tradingview-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Traditorium companion browser extension for TradingView (Step 4 foundation — see README.md).",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs --env=production",
+    "build:dev": "node build.mjs --env=development",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.12",
+    "@types/jsdom": "^30.0.0",
+    "esbuild": "^0.25.0",
+    "jsdom": "^30.1.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

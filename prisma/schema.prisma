@@ -62,6 +62,9 @@ model User {
   propFirmImportMappingTemplates PropFirmImportMappingTemplate[]
 
   marketDataImports MarketDataImport[]
+
+  apiTokens         ApiToken[]
+  apiIdempotencyKeys ApiIdempotencyKey[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -1224,6 +1227,60 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+// TradingView Extension — Step 2 (docs/extension-api.md). A long-lived
+// bearer credential for external clients (the future browser extension),
+// entirely separate from NextAuth's session cookie — see api-auth.ts.
+// The raw token is shown to the user exactly once, at creation; only its
+// SHA-256 hash is ever persisted (never the raw value, never in a log).
+// `tokenPrefix` is the non-secret first few characters of the raw token
+// (e.g. "td_a1b2c3d4"), stored only so a "Connected Apps" UI can later show
+// "Extension token ...c3d4" without ever re-reading the secret.
+model ApiToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String // trader-chosen label, e.g. "TradingView extension"
+  tokenHash   String @unique // sha256(rawToken), hex
+  tokenPrefix String // display-only, never sufficient to authenticate
+
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  // Null = still active. Revoking never deletes the row (an audit trail of
+  // who could access what, when) — requireApiUser treats a revoked or
+  // expired token exactly like an unknown one (generic 401, no distinction
+  // leaked to the caller).
+  revokedAt  DateTime?
+  expiresAt  DateTime?
+
+  @@index([userId])
+}
+
+// TradingView Extension — Step 3 (docs/extension-api.md). Idempotency
+// protection for POST /api/v1/trades: a browser extension can retry a
+// create (double-click, network retry, service-worker retry) without
+// risking a duplicate Trade. Scoped `@@unique([userId, key])` — a client-
+// generated key only needs to be unique per user, so two different traders
+// may independently reuse the same key value. `requestHash` lets a genuine
+// retry (identical payload) be distinguished from a key reused for a
+// DIFFERENT payload (a client bug, not a retry) — see api-idempotency.ts.
+model ApiIdempotencyKey {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  key         String // client-supplied, e.g. a UUID
+  requestHash String // sha256 of the canonicalized request body
+  // Set once the trade this key produced is known. Null only in the
+  // (should-be-impossible) window between reserving the key and the trade
+  // actually committing — see api-idempotency.ts's transaction.
+  tradeId     String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, key])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

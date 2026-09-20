@@ -138,7 +138,10 @@ export type RiskInputType = z.infer<typeof riskInputTypeSchema>;
 // and these narrative fields never fight over the same payload.
 
 // Empty string -> null; otherwise trimmed, length-capped free text.
-const workspaceNote = z
+// Exported (TradingView Extension — Step 3, docs/extension-api.md) so
+// lib/validation/api-trades.ts can reuse the EXACT same field validator for
+// its notes payload, rather than approximating it with a second definition.
+export const workspaceNote = z
   .string()
   .trim()
   .max(4000)

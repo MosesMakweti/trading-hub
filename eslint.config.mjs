@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Traditorium TradingView Extension (Step 4) — an isolated package with
+    // its own lint/typecheck (extensions/tradingview/package.json); not the
+    // web app's code, must not be linted against the web app's rules/globals.
+    "extensions/**",
   ]),
 ]);
 

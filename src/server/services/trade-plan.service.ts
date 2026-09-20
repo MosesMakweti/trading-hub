@@ -6,7 +6,11 @@ import { computeDistance } from "@/domain/trade-plan/distance";
 import { computeTargetRMultiples, computeWeightedPlannedR } from "@/domain/trade-plan/planned-rr";
 import { hasBlockingIssues, validatePlan } from "@/domain/trade-plan/plan-validation";
 import { lookupInstrument, parseSymbol } from "@/domain/trade-plan/instrument-catalog";
-import { NullRecognitionProvider, type ScreenshotRecognitionProvider } from "@/domain/trade-plan/recognition-types";
+import {
+  NullRecognitionProvider,
+  type ScreenshotRecognitionOutcome,
+  type ScreenshotRecognitionProvider,
+} from "@/domain/trade-plan/recognition-types";
 import { ClaudeVisionRecognitionProvider } from "@/domain/trade-plan/providers/claude-vision-provider";
 import type { ConfirmPlanInput, RevisePlanInput, AnnotationUpsertInput } from "@/lib/validation/trade-plan";
 
@@ -29,6 +33,29 @@ import type { ConfirmPlanInput, RevisePlanInput, AnnotationUpsertInput } from "@
 function resolveRecognitionProvider(): ScreenshotRecognitionProvider {
   const claudeVision = new ClaudeVisionRecognitionProvider();
   return claudeVision.isAvailable() ? claudeVision : new NullRecognitionProvider();
+}
+
+/**
+ * TradingView Extension — Step 9. The trade/TradePlanScreenshot-INDEPENDENT
+ * half of recognition: resolve a provider, check availability, call it.
+ * Extracted out of `runRecognition` (below) so BOTH the web app's
+ * trade-scoped flow and the extension's pre-trade standalone flow
+ * (`recognizeStandaloneMediaAsset`) share the exact same provider
+ * resolution and invocation — never a second recognition system. Persisting
+ * the result (ScreenshotRecognitionField rows, TradePlanScreenshot status)
+ * is NOT this function's job — that's inherently trade-scoped and stays in
+ * `runRecognition` only.
+ */
+async function recognizeImage(
+  imageBuffer: Buffer,
+  mimeType: string,
+): Promise<{ outcome: ScreenshotRecognitionOutcome; provider: ScreenshotRecognitionProvider }> {
+  const provider = resolveRecognitionProvider();
+  if (!provider.isAvailable()) {
+    return { outcome: { status: "RECOGNITION_FAILED", error: "Recognition provider unavailable." }, provider };
+  }
+  const outcome = await provider.recognize({ imageBuffer, mimeType });
+  return { outcome, provider };
 }
 
 async function assertOwnsTrade(userId: string, tradeId: string) {
@@ -145,16 +172,6 @@ export async function runRecognition(userId: string, tradeId: string): Promise<R
 
   await prisma.tradePlanScreenshot.update({ where: { id: screenshot.id }, data: { status: "PROCESSING" } });
 
-  const provider = resolveRecognitionProvider();
-
-  if (!provider.isAvailable()) {
-    await prisma.tradePlanScreenshot.update({
-      where: { id: screenshot.id },
-      data: { status: "RECOGNITION_FAILED", recognitionError: "Recognition provider unavailable.", processedAt: new Date() },
-    });
-    return { status: "RECOGNITION_FAILED", error: "Recognition provider unavailable." };
-  }
-
   let imageBuffer: Buffer;
   try {
     imageBuffer = await readMediaFile(screenshot.mediaAsset.storageKey);
@@ -166,7 +183,7 @@ export async function runRecognition(userId: string, tradeId: string): Promise<R
     return { status: "RECOGNITION_FAILED", error: "Could not read the uploaded image." };
   }
 
-  const outcome = await provider.recognize({ imageBuffer, mimeType: screenshot.mediaAsset.mimeType });
+  const { outcome, provider } = await recognizeImage(imageBuffer, screenshot.mediaAsset.mimeType);
 
   if (outcome.status === "RECOGNITION_FAILED") {
     await prisma.tradePlanScreenshot.update({
@@ -220,6 +237,44 @@ export async function runRecognition(userId: string, tradeId: string): Promise<R
   });
 
   return { status: "RECOGNITION_COMPLETE" };
+}
+
+/**
+ * TradingView Extension — Step 9, Part 1. Runs recognition against a
+ * STANDALONE `MediaAsset` — one with no `TradePlanScreenshot` yet, because
+ * no Trade exists yet (the extension's capture-before-save flow, Step 8).
+ * `runRecognition` (above) can't be reused directly: it's keyed by
+ * `tradeId` and requires an existing `TradePlanScreenshot` to persist
+ * `ScreenshotRecognitionField` rows against — neither exists here.
+ *
+ * Reuses the EXACT same `recognizeImage` (provider resolution +
+ * invocation) as `runRecognition` — never a second recognition system, per
+ * the Step 9 brief. The only real difference is PERSISTENCE: this returns
+ * the raw `ScreenshotRecognitionOutcome` directly to the caller rather than
+ * writing `ScreenshotRecognitionField`/`TradePlanScreenshot` rows, since
+ * there is nothing yet to scope them to. Once the trader saves the trade
+ * (attaching this same `mediaAssetId` via the existing, unmodified
+ * `attachPlanScreenshot`), the resulting `TradePlanScreenshot` is a normal
+ * `UPLOADED` one — recognition is not re-run or retroactively persisted
+ * against it. This is a deliberate scope boundary: persisting recognition
+ * history for extension-created trades the same way the web app's
+ * trade-scoped flow does would require a second, parallel persistence path
+ * for a pre-trade asset, which is exactly the "second recognition system"
+ * this step is instructed not to build.
+ */
+export async function recognizeStandaloneMediaAsset(userId: string, mediaAssetId: string): Promise<ScreenshotRecognitionOutcome> {
+  const asset = await prisma.mediaAsset.findFirst({ where: { id: mediaAssetId, userId } });
+  if (!asset) throw new Error("Image not found or access denied.");
+
+  let imageBuffer: Buffer;
+  try {
+    imageBuffer = await readMediaFile(asset.storageKey);
+  } catch {
+    return { status: "RECOGNITION_FAILED", error: "Could not read the uploaded image." };
+  }
+
+  const { outcome } = await recognizeImage(imageBuffer, asset.mimeType);
+  return outcome;
 }
 
 // ── Annotations ───────────────────────────────────────────────────────────

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="dark" />
+    <title>Traditorium</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="brand">
+        <img src="../../icons/icon48.png" alt="" width="20" height="20" />
+        <span class="brand-name">TRADITORIUM</span>
+      </header>
+      <p class="tagline">TradingView Companion</p>
+
+      <div class="status-row">
+        <span class="dot" data-role="tv-dot"></span>
+        <span data-role="tv-label">Checking TradingView…</span>
+      </div>
+      <div class="status-row" data-role="conn-row" hidden>
+        <span class="dot" data-role="conn-dot"></span>
+        <span data-role="conn-label"></span>
+      </div>
+
+      <!-- Chart context (Step 5) — shown whenever TradingView is detected,
+           independent of Traditorium connection state. Never fabricates a
+           symbol/timeframe: see view.ts's toChartViewModel. -->
+      <section class="card chart-card" data-role="chart-card" hidden>
+        <div class="field-label">Chart</div>
+        <div class="chart-values" data-role="chart-values" hidden>
+          <span class="chart-symbol" data-role="chart-symbol"></span>
+          <span class="chart-sep">·</span>
+          <span class="chart-timeframe" data-role="chart-timeframe"></span>
+        </div>
+        <p class="muted" data-role="chart-unavailable" hidden></p>
+      </section>
+
+      <!-- Symbol-change safety (Step 9, Part 8) — shown only when the live
+           TradingView symbol has materially diverged from the symbol this
+           draft was started against, and the trader hasn't already said
+           "keep it" for this specific new symbol. See draft.ts's
+           ensureOriginSymbol/acknowledgeSymbolMismatch/startNewIdeaForSymbol. -->
+      <section class="card card-warning" data-role="symbol-warning" hidden>
+        <div class="field-label">Chart changed</div>
+        <p class="muted" data-role="symbol-warning-text"></p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-primary" data-role="keep-draft">Keep Draft</button>
+          <button type="button" class="btn btn-ghost" data-role="start-new-idea">Start New Idea</button>
+        </div>
+      </section>
+
+      <!-- Disconnected (Step 9, Part 11) — explains where a token comes
+           from and links directly to the real Settings → Integrations
+           page (settings/integrations/page.tsx, Part 10) rather than
+           assuming the trader already knows. -->
+      <section class="card" data-role="disconnected-view" hidden>
+        <div class="field-label">Connect Traditorium</div>
+        <p class="muted">
+          Create an extension token from
+          <a data-role="open-settings" href="#" target="_blank" rel="noopener noreferrer">Traditorium → Settings → Integrations</a>.
+        </p>
+        <button class="btn btn-primary" data-role="show-connect-form">Paste Token</button>
+      </section>
+
+      <!-- Connect form -->
+      <section class="card" data-role="connect-form" hidden>
+        <label class="field-label" for="token-input">Traditorium API token</label>
+        <input id="token-input" data-role="token-input" type="password" autocomplete="off" spellcheck="false" placeholder="td_live_…" />
+        <div class="form-actions">
+          <button class="btn btn-primary" data-role="submit-token">Connect</button>
+          <button class="btn btn-ghost" data-role="cancel-connect">Cancel</button>
+        </div>
+        <p class="hint">
+          Create a token from <a data-role="open-settings" href="#" target="_blank" rel="noopener noreferrer">Traditorium → Settings → Integrations</a>, or via the developer CLI — see the extension README.
+        </p>
+      </section>
+
+      <!-- Connecting -->
+      <section class="card" data-role="connecting-view" hidden>
+        <div class="muted">Connecting…</div>
+      </section>
+
+      <!-- Error -->
+      <section class="card card-error" data-role="error-view" hidden>
+        <div class="field-label">Connection failed</div>
+        <p class="muted" data-role="error-message"></p>
+        <button class="btn btn-primary" data-role="retry-connect">Try again</button>
+      </section>
+
+      <!-- Connected -->
+      <section class="card" data-role="connected-view" hidden>
+        <div class="field-label" data-role="user-name"></div>
+        <div class="muted" data-role="strategy-count"></div>
+      </section>
+
+      <!-- Strategy-aware trade context (Step 6) — shown once connected,
+           independent of the "Open Trading Panel" stub above. Nothing here
+           submits anything; see strategy-view.ts for how each field is
+           derived and README.md's Step 6 section for the full behavior. -->
+      <section class="card" data-role="strategy-card" hidden>
+        <label class="field-label" for="strategy-select">Strategy</label>
+        <select data-role="strategy-select">
+          <option value="">Select a strategy…</option>
+        </select>
+        <p class="muted" data-role="strategy-loading" hidden>Loading strategy…</p>
+        <p class="muted strategy-error" data-role="strategy-load-error" hidden></p>
+
+        <div data-role="strategy-detail" hidden>
+          <div class="field-label">Direction</div>
+          <div class="direction-toggle">
+            <button type="button" class="btn direction-btn" data-role="direction-long" data-direction="LONG">LONG</button>
+            <button type="button" class="btn direction-btn" data-role="direction-short" data-direction="SHORT">SHORT</button>
+          </div>
+
+          <div data-role="session-field" hidden>
+            <label class="field-label" for="session-select">Session</label>
+            <select data-role="session-select"><option value="">—</option></select>
+          </div>
+
+          <div data-role="entry-model-field" hidden>
+            <label class="field-label" for="entry-model-select">Entry Model</label>
+            <select data-role="entry-model-select"><option value="">—</option></select>
+          </div>
+
+          <div data-role="confluences-field" hidden>
+            <div class="field-label">Confluences</div>
+            <div class="tag-list" data-role="confluence-list"></div>
+          </div>
+
+          <div data-role="execution-field" hidden>
+            <div class="field-label">Execution Confirmations</div>
+            <div class="tag-list" data-role="execution-list"></div>
+          </div>
+
+          <div data-role="strategy-rules" hidden>
+            <button type="button" class="link-btn" data-role="toggle-rules">Strategy Rules ▾</button>
+            <div class="rules-content" data-role="rules-content" hidden>
+              <div data-role="rules-framework"></div>
+              <div data-role="rules-trade-management"></div>
+            </div>
+          </div>
+
+          <p class="muted" data-role="validation-hints"></p>
+        </div>
+      </section>
+
+      <!-- Chart screenshot capture/upload (Step 8) + recognition (Step 9,
+           Parts 1-4) — shown once connected AND TradingView is detected,
+           matching the Trade Plan card's own visibility rule (the
+           screenshot only exists to attach to a trade idea). Capture
+           happens ONLY on the explicit click below — never automatically
+           (§13). See screenshot.ts/recognition.ts for the state machines
+           and README.md's Step 8/9 sections for the full behavior. -->
+      <section class="card" data-role="screenshot-card" hidden>
+        <div class="field-label">Chart Screenshot</div>
+
+        <button type="button" class="btn btn-primary" data-role="capture-chart">Capture Chart</button>
+        <p class="muted" data-role="screenshot-capturing" hidden>Capturing…</p>
+
+        <div data-role="screenshot-preview" hidden>
+          <img class="screenshot-image" data-role="screenshot-image" alt="Captured TradingView chart preview" />
+          <p class="muted" data-role="screenshot-status"></p>
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" data-role="upload-screenshot">Upload Screenshot</button>
+            <button type="button" class="btn btn-ghost" data-role="retake-screenshot">Retake</button>
+            <button type="button" class="btn btn-ghost" data-role="remove-screenshot">Remove</button>
+          </div>
+        </div>
+
+        <p class="muted strategy-error" data-role="screenshot-error" hidden></p>
+
+        <!-- Recognition (Step 9) — only ever appears once a screenshot is
+             uploaded; Apply Suggestions is the ONLY thing that ever
+             modifies the draft from this section (§3). -->
+        <div data-role="analyze-idle" hidden>
+          <button type="button" class="btn btn-ghost" data-role="analyze-chart">Analyze Chart</button>
+        </div>
+        <p class="muted" data-role="recognition-analyzing" hidden>Analyzing…</p>
+        <p class="muted strategy-error" data-role="recognition-error" hidden></p>
+
+        <div class="recognition-card" data-role="recognition-result" hidden>
+          <div class="field-label">Recognized Trade Plan</div>
+          <p class="muted" data-role="recognition-context-conflict" hidden></p>
+          <dl class="recognition-fields" data-role="recognition-fields"></dl>
+          <p class="muted" data-role="recognition-empty" hidden>Nothing was detected on this screenshot.</p>
+          <p class="muted" data-role="recognition-overwrite-warning" hidden>This will replace values you've already entered.</p>
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" data-role="apply-suggestions">Apply Suggestions</button>
+            <button type="button" class="btn btn-ghost" data-role="dismiss-suggestions">Dismiss</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Trade Plan / Notes / Save (Step 7) — planning only, see
+           trade-view.ts and README.md's Step 7 section. Shown once
+           TradingView is detected AND connected, independent of whether a
+           strategy has been picked (a freeform trade with no strategy is a
+           valid, existing Traditorium use case — see trade-payload.ts). -->
+      <section class="card" data-role="trade-plan-card" hidden>
+        <div class="field-label">Trade Plan</div>
+
+        <div class="price-field">
+          <label for="entry-input">Entry</label>
+          <input data-role="entry-input" id="entry-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" />
+        </div>
+        <div class="price-field">
+          <label for="stop-input">Stop Loss</label>
+          <input data-role="stop-input" id="stop-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" />
+        </div>
+
+        <div class="field-label">Targets</div>
+        <div data-role="target-list"></div>
+        <button type="button" class="btn btn-ghost" data-role="add-target">+ Add Target</button>
+
+        <!-- Collapsible (Step 9, Part 6) — same toggle pattern as Strategy
+             Rules (toggle-rules/rules-content). Defaults to EXPANDED (unlike
+             Strategy Rules) so collapsing is something the trader opts into,
+             never something that makes already-typed notes look like they
+             went missing. -->
+        <button type="button" class="link-btn" data-role="toggle-notes">Notes ▾</button>
+        <div data-role="notes-content">
+          <div class="note-field">
+            <label for="market-context-input">Market Context</label>
+            <textarea data-role="market-context-input" id="market-context-input" rows="2"></textarea>
+          </div>
+          <div class="note-field">
+            <label for="areas-of-interest-input">Areas of Interest</label>
+            <textarea data-role="areas-of-interest-input" id="areas-of-interest-input" rows="2"></textarea>
+          </div>
+          <div class="note-field">
+            <label for="reason-for-trade-input">Reason for Trade</label>
+            <textarea data-role="reason-for-trade-input" id="reason-for-trade-input" rows="2"></textarea>
+          </div>
+        </div>
+
+        <p class="muted" data-role="trade-warnings" hidden></p>
+        <p class="muted strategy-error" data-role="trade-blockers" hidden></p>
+
+        <button type="button" class="btn btn-primary" data-role="save-trade">Save Trade Idea</button>
+
+        <div data-role="trade-success" hidden>
+          <p class="success-title">✓ Trade Idea saved</p>
+          <p data-role="success-summary"></p>
+          <p class="muted" data-role="success-warnings" hidden></p>
+          <div class="form-actions">
+            <a class="btn btn-primary" data-role="view-in-traditorium" target="_blank" rel="noopener noreferrer">View in Traditorium</a>
+            <button type="button" class="btn btn-ghost" data-role="add-another">Add Another</button>
+          </div>
+        </div>
+
+        <div class="card-error" data-role="trade-error" hidden>
+          <p class="strategy-error" data-role="error-summary"></p>
+          <ul data-role="error-issues"></ul>
+          <button type="button" class="btn btn-ghost" data-role="retry-save">Try again</button>
+        </div>
+      </section>
+
+      <footer class="footer" data-role="footer" hidden>
+        <a class="link-btn" data-role="open-settings" href="#" target="_blank" rel="noopener noreferrer">Manage Tokens</a>
+        <button class="link-btn" data-role="disconnect">Disconnect</button>
+      </footer>
+    </main>
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>

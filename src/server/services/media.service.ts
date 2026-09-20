@@ -139,6 +139,41 @@ export async function assertOwnsMediaTarget(
 }
 
 /**
+ * Creates the bare `MediaAsset` row for a just-saved file — no
+ * `MediaAttachment`, no ownership check of any OTHER record (the caller is
+ * uploading their own file; there's nothing else to authorize against at
+ * this point). Two callers share this:
+ *   - `attachMedia` (below), which creates one then immediately wraps it in
+ *     an attachment for an existing owner record.
+ *   - `createStandaloneMediaAsset` (below), for the TradingView extension's
+ *     `POST /api/v1/media` (Step 8) — captured BEFORE a Trade exists, so
+ *     there is no owner record to attach to yet. `attachPlanScreenshot`
+ *     (trade-plan.service.ts) only ever checks `MediaAsset.userId`, never a
+ *     MediaAttachment, so a standalone asset is fully usable there the
+ *     moment it's created — it just won't appear in an
+ *     ownerType/ownerId-based gallery query until something attaches it.
+ */
+async function createMediaAsset(args: {
+  userId: string;
+  storageKey: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+}) {
+  const asset = await prisma.mediaAsset.create({
+    data: {
+      userId: args.userId,
+      storageKey: args.storageKey,
+      fileName: args.fileName,
+      mimeType: args.mimeType,
+      fileSize: args.fileSize,
+      url: mediaUrl("pending"), // replaced below once the id exists
+    },
+  });
+  return prisma.mediaAsset.update({ where: { id: asset.id }, data: { url: mediaUrl(asset.id) } });
+}
+
+/**
  * Links a just-saved file to an owner record and returns the resulting gallery
  * item. Ownership is re-verified here (defense in depth) even though the upload
  * route already checked it. Throws if the owner isn't the user's — the caller
@@ -163,18 +198,7 @@ export async function attachMedia(args: {
     where: { ownerType: args.ownerType, ownerId: args.ownerId, category: args.category },
   });
 
-  const asset = await prisma.mediaAsset.create({
-    data: {
-      userId: args.userId,
-      storageKey: args.storageKey,
-      fileName: args.fileName,
-      mimeType: args.mimeType,
-      fileSize: args.fileSize,
-      url: mediaUrl("pending"), // replaced below once the id exists
-    },
-  });
-  const url = mediaUrl(asset.id);
-  await prisma.mediaAsset.update({ where: { id: asset.id }, data: { url } });
+  const asset = await createMediaAsset(args);
 
   const attachment = await prisma.mediaAttachment.create({
     data: {
@@ -190,7 +214,7 @@ export async function attachMedia(args: {
 
   return {
     id: attachment.id,
-    url,
+    url: asset.url,
     fileName: args.fileName,
     mimeType: args.mimeType,
     fileSize: args.fileSize,
@@ -198,6 +222,86 @@ export async function attachMedia(args: {
     caption: attachment.caption,
     timeframe: attachment.timeframe,
   };
+}
+
+export interface StandaloneMediaDTO {
+  id: string;
+  url: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+}
+
+/**
+ * TradingView Extension — Step 8. Creates a MediaAsset with no owner
+ * attachment yet, for a caller that doesn't have (or doesn't yet want to
+ * commit to) an owner record — specifically, `POST /api/v1/media`, called
+ * BEFORE the Trade it will eventually belong to exists (§15: capture is
+ * decoupled from trade creation on purpose). The returned id is a fully
+ * valid `mediaAssetId` for `POST /api/v1/trades`, which resolves it via
+ * `attachPlanScreenshot` — itself unmodified, and itself never requiring a
+ * MediaAttachment (see createMediaAsset's doc comment above).
+ *
+ * KNOWN LIMITATION (documented, not a bug): because no MediaAttachment is
+ * created here, an asset uploaded this way will NOT appear in a
+ * MediaAttachment-based gallery (e.g. the Trades Album's before-trade photo
+ * list) unless/until something later attaches it that way. It DOES render
+ * correctly anywhere the canonical TradePlanScreenshot relation is used
+ * directly (the Trade Workspace's own plan view), and it IS served
+ * correctly by the existing auth-scoped `GET /api/media/[id]` route (which
+ * looks up by `MediaAsset.id` + `userId` only, never a MediaAttachment).
+ */
+export async function createStandaloneMediaAsset(args: {
+  userId: string;
+  storageKey: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+}): Promise<StandaloneMediaDTO> {
+  const asset = await createMediaAsset(args);
+  return { id: asset.id, url: asset.url, fileName: asset.fileName, mimeType: asset.mimeType, fileSize: asset.fileSize };
+}
+
+export type StandaloneDeleteFailureReason = "not_found" | "attached";
+
+export interface StandaloneDeleteResult {
+  ok: boolean;
+  reason?: StandaloneDeleteFailureReason;
+}
+
+/**
+ * TradingView Extension — Step 9, Part 9. Deletes a MediaAsset ONLY when it
+ * is genuinely a standalone, unused orphan — never one already in use.
+ * "In use" means either:
+ *   - it has ANY `MediaAttachment` row (the web app's normal gallery link), or
+ *   - it's referenced by ANY `TradePlanScreenshot`, as either the original
+ *     `mediaAssetId` or the annotated `previewMediaAssetId`.
+ * Either condition blocks deletion outright — this function has no
+ * "detach first" behavior; a screenshot already wrapped into a canonical
+ * Trade Plan is never touched, full stop. Scoped to `userId` throughout, so
+ * a caller can only ever delete their OWN unattached uploads (never another
+ * user's media, attached or not).
+ *
+ * This is the exact case Step 8 left as a known, accepted orphan: a
+ * Retake/Remove after upload, or an abandoned Trade Idea, leaves a bare
+ * `MediaAsset` nothing else references. This function is the smallest safe
+ * way to actually clean one up, reusing the existing `deleteMediaFile`
+ * (same R2 call `deleteMediaAttachment` below already uses) — no new
+ * storage/deletion mechanism.
+ */
+export async function deleteStandaloneMediaAsset(userId: string, mediaAssetId: string): Promise<StandaloneDeleteResult> {
+  const asset = await prisma.mediaAsset.findFirst({ where: { id: mediaAssetId, userId }, select: { id: true, storageKey: true } });
+  if (!asset) return { ok: false, reason: "not_found" };
+
+  const [attachmentCount, screenshotCount] = await Promise.all([
+    prisma.mediaAttachment.count({ where: { mediaId: asset.id } }),
+    prisma.tradePlanScreenshot.count({ where: { OR: [{ mediaAssetId: asset.id }, { previewMediaAssetId: asset.id }] } }),
+  ]);
+  if (attachmentCount > 0 || screenshotCount > 0) return { ok: false, reason: "attached" };
+
+  await deleteMediaFile(asset.storageKey);
+  await prisma.mediaAsset.delete({ where: { id: asset.id } });
+  return { ok: true };
 }
 
 export async function updateMediaCaption(userId: string, attachmentId: string, caption: string | null) {

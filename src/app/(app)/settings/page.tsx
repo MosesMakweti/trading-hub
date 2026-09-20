@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, Database, ListChecks, Trash2, type LucideIcon } from "lucide-react";
+import { ChevronRight, Database, ListChecks, Plug, Trash2, type LucideIcon } from "lucide-react";
 
 import { FadeIn } from "@/components/shared/motion";
 
@@ -10,6 +10,12 @@ const AREAS: { href: string; icon: LucideIcon; title: string; description: strin
     title: "Pre-Session Routine",
     description:
       "Build your pre-market ritual — sections and checklist items you run through in Today before you trade.",
+  },
+  {
+    href: "/settings/integrations",
+    icon: Plug,
+    title: "Extension & API Tokens",
+    description: "Connect the TradingView Companion extension, or any other tool that speaks Traditorium's API.",
   },
   {
     href: "/settings/data",
