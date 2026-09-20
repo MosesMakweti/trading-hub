@@ -8,10 +8,10 @@ import type { ConnectionState, GetChartContextMessage } from "@shared/messages";
 import type { TradingViewChartContext } from "@shared/chart-context";
 import type { StrategyReferenceResult } from "@shared/strategy";
 import type { CreateTradeRequest, CreateTradeResult } from "@shared/trade-api";
-import type { UploadMediaResult } from "@shared/media-api";
+import type { DeleteMediaResult, UploadMediaResult } from "@shared/media-api";
 import type { CaptureResult } from "@shared/capture-api";
 import type { AnalyzeScreenshotResult } from "@shared/recognition-api";
-import { analyzeScreenshot, createTrade, getMe, getStrategies, getStrategy, uploadMedia } from "./api-client";
+import { analyzeScreenshot, createTrade, deleteMedia, getMe, getStrategies, getStrategy, uploadMedia } from "./api-client";
 import { clearStored, getStored, setStored } from "./storage";
 
 const TRADINGVIEW_ORIGIN = /^https:\/\/www\.tradingview\.com\//;
@@ -221,6 +221,35 @@ export async function analyzeScreenshotAsset(mediaAssetId: string): Promise<Anal
   if (!apiToken) return { ok: false, kind: "unauthorized", message: "Not connected to Traditorium." };
 
   const result = await analyzeScreenshot(apiToken, mediaAssetId);
+  if (!result.ok && result.kind === "unauthorized") await clearStored();
+  return result;
+}
+
+/**
+ * Step 10 — completes the screenshot lifecycle: best-effort deletion of a
+ * standalone `MediaAsset` the panel is abandoning (Retake/Remove/replace/
+ * Start New Idea, all BEFORE a Save ever attached it to a real Trade — see
+ * panel.ts's call sites, all gated on "was this id ever set on the
+ * draft"). Same token/401 handling as every other background→API call.
+ *
+ * DEDUP (service-worker lifetime only, not persisted — a fresh restart
+ * simply re-attempts, which is harmless: the server's own delete is
+ * naturally idempotent, a second DELETE for an already-gone id just
+ * returns 404): `attempted` remembers every mediaAssetId this call has
+ * already been made for, so a rapid double-click (e.g. Remove fired twice
+ * before the first request's response updates the UI) sends exactly one
+ * network request, not two.
+ */
+const attemptedDeletions = new Set<string>();
+
+export async function deleteOrphanedMedia(mediaAssetId: string): Promise<DeleteMediaResult> {
+  if (attemptedDeletions.has(mediaAssetId)) return { ok: true };
+  attemptedDeletions.add(mediaAssetId);
+
+  const { apiToken } = await getStored();
+  if (!apiToken) return { ok: false, kind: "unauthorized", message: "Not connected to Traditorium." };
+
+  const result = await deleteMedia(apiToken, mediaAssetId);
   if (!result.ok && result.kind === "unauthorized") await clearStored();
   return result;
 }

@@ -124,6 +124,18 @@ export interface AnalyzeScreenshotMessage {
   mediaAssetId: string;
 }
 
+/** Step 10 — best-effort cleanup of a standalone screenshot the trader is
+ *  abandoning (Retake/Remove/replace-with-new-capture/Start New Idea)
+ *  BEFORE it was ever attached to a saved Trade Idea. Fire-and-forget from
+ *  the panel's perspective (see panel.ts's `cleanupOrphanedMedia`) — the
+ *  local draft is already cleared by the time this is sent, so neither a
+ *  network failure nor a 409 ("already attached" — see
+ *  `background/state.ts::deleteOrphanedMedia`) ever affects the draft. */
+export interface DeleteMediaMessage {
+  type: "DELETE_MEDIA";
+  mediaAssetId: string;
+}
+
 export type ExtensionMessage =
   | TradingViewDetectedMessage
   | ChartContextChangedMessage
@@ -137,7 +149,8 @@ export type ExtensionMessage =
   | CreateTradeMessage
   | CaptureChartMessage
   | UploadCaptureMessage
-  | AnalyzeScreenshotMessage;
+  | AnalyzeScreenshotMessage
+  | DeleteMediaMessage;
 
 /** Every field here is safe to render directly in the UI or log — NEVER add
  *  a token/secret field to this type. Step 6 upgrades `strategyCount` to the

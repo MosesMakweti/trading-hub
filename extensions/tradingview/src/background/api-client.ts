@@ -20,7 +20,7 @@
 import { API_BASE_URL } from "@shared/config";
 import type { StrategiesResponse, StrategyReferenceResponse } from "@shared/strategy";
 import type { ApiTradeDTO, CreateTradeRequest, CreateTradeResult, CreateTradeValidationIssue } from "@shared/trade-api";
-import type { UploadedMedia, UploadMediaResult } from "@shared/media-api";
+import type { DeleteMediaResult, UploadedMedia, UploadMediaResult } from "@shared/media-api";
 import type { AnalyzeScreenshotResult, ScreenshotRecognitionOutcome } from "@shared/recognition-api";
 
 export interface ApiUser {
@@ -208,6 +208,50 @@ export async function analyzeScreenshot(token: string, mediaAssetId: string): Pr
     return { ok: false, kind: "unauthorized", message: errorMessageOf(body, "The Traditorium token is invalid or has been revoked.") };
   }
   if (res.status === 404) return { ok: false, kind: "not_found", message: errorMessageOf(body, "Image not found or access denied.") };
+  return { ok: false, kind: "server", message: `Traditorium returned an unexpected error (${res.status}).` };
+}
+
+/**
+ * Step 10. `DELETE /api/v1/media/:mediaAssetId` — completes the screenshot
+ * lifecycle Step 9 left half-built (the endpoint existed; nothing called
+ * it). A 204 has no body, so it's the one response here that never touches
+ * `res.json()`. 409 ("already attached/in use") is a normal, expected
+ * outcome for a caller that races an in-flight save against a cleanup —
+ * classified distinctly (`kind: "protected"`) rather than folded into
+ * `"server"`, so callers can treat it as "nothing to do" rather than a
+ * failure worth surfacing.
+ */
+export async function deleteMedia(token: string, mediaAssetId: string): Promise<DeleteMediaResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/api/v1/media/${encodeURIComponent(mediaAssetId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return { ok: false, kind: "network", message: "Could not reach Traditorium." };
+  }
+
+  if (res.status === 204) return { ok: true };
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return { ok: false, kind: "server", message: "Traditorium sent an unexpected response." };
+  }
+
+  if (res.status === 401) {
+    return { ok: false, kind: "unauthorized", message: errorMessageOf(body, "The Traditorium token is invalid or has been revoked.") };
+  }
+  if (res.status === 404) return { ok: false, kind: "not_found", message: errorMessageOf(body, "Image not found or already deleted.") };
+  if (res.status === 409) {
+    return {
+      ok: false,
+      kind: "protected",
+      message: errorMessageOf(body, "This image is already attached to a trade and can't be deleted here."),
+    };
+  }
   return { ok: false, kind: "server", message: `Traditorium returned an unexpected error (${res.status}).` };
 }
 

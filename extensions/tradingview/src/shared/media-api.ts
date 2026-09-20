@@ -31,3 +31,18 @@ export type UploadMediaResult =
   | { ok: false; kind: "validation"; message: string }
   | { ok: false; kind: "network"; message: string }
   | { ok: false; kind: "server"; message: string };
+
+/**
+ * Step 10. Mirrors `DELETE /api/v1/media/:id`'s exact wire contract
+ * (`docs/extension-api.md`'s "Media deletion" section) — 204/401/404/409,
+ * same shape convention as UploadMediaResult. `kind: "protected"` is the
+ * 409 case (already attached/in use) — always treated as an expected,
+ * non-alarming outcome by every caller, never retried.
+ */
+export type DeleteMediaResult =
+  | { ok: true }
+  | { ok: false; kind: "unauthorized"; message: string }
+  | { ok: false; kind: "not_found"; message: string }
+  | { ok: false; kind: "protected"; message: string }
+  | { ok: false; kind: "network"; message: string }
+  | { ok: false; kind: "server"; message: string };

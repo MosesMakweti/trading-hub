@@ -277,8 +277,12 @@ function renderStrategySection() {
   detail.hidden = vm.selectedStrategyId == null;
   if (vm.selectedStrategyId == null) return;
 
-  el<HTMLButtonElement>("direction-long").dataset.active = String(vm.direction === "LONG");
-  el<HTMLButtonElement>("direction-short").dataset.active = String(vm.direction === "SHORT");
+  const isLong = vm.direction === "LONG";
+  const isShort = vm.direction === "SHORT";
+  el<HTMLButtonElement>("direction-long").dataset.active = String(isLong);
+  el<HTMLButtonElement>("direction-long").setAttribute("aria-pressed", String(isLong));
+  el<HTMLButtonElement>("direction-short").dataset.active = String(isShort);
+  el<HTMLButtonElement>("direction-short").setAttribute("aria-pressed", String(isShort));
 
   const sessionField = el<HTMLElement>("session-field");
   sessionField.hidden = vm.sessionNames.length === 0;
@@ -302,6 +306,7 @@ function renderStrategySection() {
   rules.hidden = !vm.rules.show;
   if (vm.rules.show) {
     el<HTMLElement>("rules-content").hidden = !rulesExpanded;
+    el<HTMLButtonElement>("toggle-rules").setAttribute("aria-expanded", String(rulesExpanded));
     el<HTMLElement>("rules-framework").textContent =
       vm.rules.frameworkStepCount > 0 ? `Framework — ${vm.rules.frameworkStepCount} steps: ${vm.rules.frameworkSteps.join(", ")}` : "";
     const tm = vm.rules.tradeManagement;
@@ -423,7 +428,8 @@ function renderTradeSection() {
   saveBtn.textContent = vm.submission.status === "submitting" ? "Saving…" : "Save Trade Idea";
 
   el<HTMLElement>("notes-content").hidden = !notesExpanded;
-  el<HTMLElement>("toggle-notes").textContent = notesExpanded ? "Notes ▴" : "Notes ▾";
+  el<HTMLButtonElement>("toggle-notes").textContent = notesExpanded ? "Notes ▴" : "Notes ▾";
+  el<HTMLButtonElement>("toggle-notes").setAttribute("aria-expanded", String(notesExpanded));
 
   el<HTMLElement>("trade-success").hidden = vm.submission.status !== "success";
   el<HTMLElement>("trade-error").hidden = vm.submission.status !== "error";
@@ -750,14 +756,35 @@ function wireTradeEvents() {
   });
 }
 
+/**
+ * Step 10 — best-effort, fire-and-forget cleanup of a standalone screenshot
+ * the trader is abandoning before it was ever attached to a saved Trade
+ * Idea. Deliberately NOT awaited: the local draft has already moved on by
+ * the time this is called (see the two call sites below), and a network
+ * failure here must never affect the draft (§"Finish Screenshot Lifecycle
+ * Cleanup" — "Network cleanup failure must not destroy the trade draft").
+ * A 409 ("already attached") is expected and silently fine — the server
+ * remains authoritative and simply refuses; this never retries. See
+ * background/state.ts::deleteOrphanedMedia for the request-level dedup that
+ * keeps a rapid double-click from firing two DELETE requests.
+ */
+function cleanupOrphanedMedia(mediaAssetId: string) {
+  void sendRaw<{ ok: boolean }>({ type: "DELETE_MEDIA", mediaAssetId });
+}
+
 // §19/§21 — if the draft already references a previously-uploaded
 // screenshot, a fresh capture/retake must clear that reference immediately
 // (not wait for the new upload to finish) — otherwise a Save click in the
 // window between "Retake" and the new upload completing would silently
 // attach the OLD, about-to-be-replaced image. The controller's own
 // "uploaded" callback sets a NEW mediaAssetId once the new upload confirms.
+// Step 10 — also triggers best-effort server-side deletion of the asset
+// being abandoned, now that it's never getting attached to anything.
 function clearMediaAssetIdIfSet() {
-  if (currentDraft.mediaAssetId != null) void applyDraft(setMediaAssetId(currentDraft, null));
+  const orphanedId = currentDraft.mediaAssetId;
+  if (orphanedId == null) return;
+  void applyDraft(setMediaAssetId(currentDraft, null));
+  cleanupOrphanedMedia(orphanedId);
 }
 
 function wireScreenshotEvents() {
@@ -774,9 +801,10 @@ function wireScreenshotEvents() {
   el<HTMLButtonElement>("upload-screenshot").addEventListener("click", () => screenshotController.upload());
   el<HTMLButtonElement>("remove-screenshot").addEventListener("click", () => {
     screenshotController.remove();
-    // §20 — Remove also clears the draft's reference to an already-uploaded
-    // asset (the server-side MediaAsset itself is left alone — no deletion
-    // call exists for it, by design; see screenshot.ts's doc comment).
+    // §20/Step 10 — Remove also clears the draft's reference to an
+    // already-uploaded asset AND best-effort deletes it server-side
+    // (clearMediaAssetIdIfSet → cleanupOrphanedMedia) — it was never
+    // attached to anything, so there's nothing left worth keeping.
     clearMediaAssetIdIfSet();
     recognitionController.dismiss();
   });
@@ -803,10 +831,16 @@ function wireSymbolWarningEvents() {
   el<HTMLButtonElement>("start-new-idea").addEventListener("click", () => {
     // A genuinely new idea for a different symbol — the old screenshot/
     // recognition/submission state belonged to the PREVIOUS idea too.
+    // Step 10 — the old idea's screenshot was never attached to a saved
+    // Trade (startNewIdeaForSymbol → resetAfterSave clears mediaAssetId the
+    // same way a successful save does), so it's an orphan the moment this
+    // draft moves on; capture the id BEFORE the reducer clears it.
+    const orphanedMediaAssetId = currentDraft.mediaAssetId;
     screenshotController.remove();
     recognitionController.dismiss();
     tradeSubmitter.reset();
     void applyDraft(startNewIdeaForSymbol(currentDraft, currentSymbolDisplay()));
+    if (orphanedMediaAssetId != null) cleanupOrphanedMedia(orphanedMediaAssetId);
   });
 }
 

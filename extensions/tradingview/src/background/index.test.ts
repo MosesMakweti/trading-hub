@@ -211,6 +211,20 @@ describe("background message router", () => {
     expect(sendResponse).toHaveBeenCalledWith(analyzeResult);
   });
 
+  it("Step 10 — DELETE_MEDIA forwards to state.deleteOrphanedMedia with the mediaAssetId, returning its result directly", async () => {
+    const deleteResult = { ok: true as const };
+    vi.mocked(state.deleteOrphanedMedia).mockResolvedValue(deleteResult);
+
+    const listener = getRegisteredListener(chromeMock);
+    const sendResponse = vi.fn();
+    const keepChannelOpen = listener({ type: "DELETE_MEDIA", mediaAssetId: "media_1" }, {}, sendResponse);
+    expect(keepChannelOpen).toBe(true);
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(state.deleteOrphanedMedia).toHaveBeenCalledWith("media_1");
+    expect(sendResponse).toHaveBeenCalledWith(deleteResult);
+  });
+
   it("Step 6 — SET_DRAFT persists the given draft and acknowledges only — never re-verifies the connection over the network", async () => {
     const draft = { ...EMPTY_DRAFT, strategyId: "strat_1", direction: "LONG" as const, updatedAt: 123 };
 

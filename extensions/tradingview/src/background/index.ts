@@ -11,6 +11,7 @@ import {
   analyzeScreenshotAsset,
   captureActiveTradingViewTab,
   connect,
+  deleteOrphanedMedia,
   disconnect,
   fetchChartContext,
   fetchStrategyReference,
@@ -117,6 +118,11 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
     case "ANALYZE_SCREENSHOT":
       // Step 9, Part 1 — always a fresh, on-demand call, never cached.
       analyzeScreenshotAsset(message.mediaAssetId).then(sendResponse);
+      return true;
+
+    case "DELETE_MEDIA":
+      // Step 10 — best-effort orphan cleanup; see state.ts::deleteOrphanedMedia.
+      deleteOrphanedMedia(message.mediaAssetId).then(sendResponse);
       return true;
 
     default:

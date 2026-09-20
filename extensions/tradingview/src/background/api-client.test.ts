@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CreateTradeRequest } from "@shared/trade-api";
-import { analyzeScreenshot, createTrade, getMe, getStrategies, uploadMedia } from "./api-client";
+import { analyzeScreenshot, createTrade, deleteMedia, getMe, getStrategies, uploadMedia } from "./api-client";
 
 function payload(): CreateTradeRequest {
   return {
@@ -340,6 +340,68 @@ describe("api-client", () => {
     it("classifies a 500 as server", async () => {
       vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Internal Server Error" }), { status: 500 })));
       const result = await analyzeScreenshot("token", "media_1");
+      expect(result).toEqual({ ok: false, kind: "server", message: expect.any(String) });
+    });
+  });
+
+  describe("deleteMedia (Step 10)", () => {
+    it("DELETEs the right URL with the bearer token", async () => {
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 204 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await deleteMedia("td_live_abc", "media_1");
+
+      const [url, init] = fetchMock.mock.calls[0]!;
+      expect(url).toBe("http://localhost:3000/api/v1/media/media_1");
+      expect(init?.method).toBe("DELETE");
+      expect(init?.headers).toEqual({ Authorization: "Bearer td_live_abc" });
+    });
+
+    it("a 204 (no body) is a success", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+      const result = await deleteMedia("token", "media_1");
+      expect(result).toEqual({ ok: true });
+    });
+
+    it("classifies a 401 as unauthorized", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 })));
+      const result = await deleteMedia("token", "media_1");
+      expect(result).toEqual({ ok: false, kind: "unauthorized", message: expect.any(String) });
+    });
+
+    it("classifies a 404 as not_found", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Not found" }), { status: 404 })));
+      const result = await deleteMedia("token", "does-not-exist");
+      expect(result).toEqual({ ok: false, kind: "not_found", message: expect.any(String) });
+    });
+
+    it("classifies a 409 as protected, surfacing the server's own message — never treated as a failure by any caller", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify({ error: "This image is already attached to a trade and can't be deleted here." }), { status: 409 })),
+      );
+      const result = await deleteMedia("token", "media_1");
+      expect(result).toEqual({ ok: false, kind: "protected", message: "This image is already attached to a trade and can't be deleted here." });
+    });
+
+    it("classifies a network failure as network, never leaking the raw error", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          throw new TypeError("Failed to fetch: token=secret");
+        }),
+      );
+      const result = await deleteMedia("token", "media_1");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.kind).toBe("network");
+        expect(result.message).not.toContain("secret");
+      }
+    });
+
+    it("classifies a 500 as server", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Internal Server Error" }), { status: 500 })));
+      const result = await deleteMedia("token", "media_1");
       expect(result).toEqual({ ok: false, kind: "server", message: expect.any(String) });
     });
   });

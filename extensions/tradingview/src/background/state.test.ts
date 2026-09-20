@@ -8,6 +8,7 @@ import {
   analyzeScreenshotAsset,
   captureActiveTradingViewTab,
   connect,
+  deleteOrphanedMedia,
   disconnect,
   fetchChartContext,
   fetchStrategyReference,
@@ -347,6 +348,71 @@ describe("state", () => {
       await setStored({ apiToken: "td_live_super_secret_value" });
       vi.mocked(apiClient.analyzeScreenshot).mockResolvedValue({ ok: true, outcome: { status: "RECOGNITION_COMPLETE", fields: [] } });
       const result = await analyzeScreenshotAsset("media_1");
+      expect(JSON.stringify(result)).not.toContain("td_live_super_secret_value");
+    });
+  });
+
+  describe("deleteOrphanedMedia (Step 10)", () => {
+    it("returns 'unauthorized' without calling the API when there's no stored token", async () => {
+      const result = await deleteOrphanedMedia("media_del_1");
+      expect(result).toEqual({ ok: false, kind: "unauthorized", message: expect.any(String) });
+      expect(apiClient.deleteMedia).not.toHaveBeenCalled();
+    });
+
+    it("passes the stored token and given mediaAssetId straight through to api-client.deleteMedia", async () => {
+      await setStored({ apiToken: "td_live_x" });
+      vi.mocked(apiClient.deleteMedia).mockResolvedValue({ ok: true });
+
+      await deleteOrphanedMedia("media_del_2");
+      expect(apiClient.deleteMedia).toHaveBeenCalledWith("td_live_x", "media_del_2");
+    });
+
+    it("a 409 ('already attached') resolves as a normal, non-thrown result — the server remains authoritative", async () => {
+      await setStored({ apiToken: "td_live_x" });
+      vi.mocked(apiClient.deleteMedia).mockResolvedValue({ ok: false, kind: "protected", message: "This image is already attached to a trade and can't be deleted here." });
+
+      const result = await deleteOrphanedMedia("media_del_3");
+      expect(result).toEqual({ ok: false, kind: "protected", message: expect.any(String) });
+    });
+
+    it("§21 — a 401 clears the stored token", async () => {
+      await setStored({ apiToken: "td_live_x" });
+      vi.mocked(apiClient.deleteMedia).mockResolvedValue({ ok: false, kind: "unauthorized", message: "The Traditorium token is invalid or has been revoked." });
+
+      await deleteOrphanedMedia("media_del_4");
+      expect((await getStored()).apiToken).toBeNull();
+    });
+
+    it("a non-401 failure never clears the stored token", async () => {
+      await setStored({ apiToken: "td_live_x" });
+      vi.mocked(apiClient.deleteMedia).mockResolvedValue({ ok: false, kind: "network", message: "Could not reach Traditorium." });
+
+      await deleteOrphanedMedia("media_del_5");
+      expect((await getStored()).apiToken).toBe("td_live_x");
+    });
+
+    it("dedup: a second call for the SAME mediaAssetId never issues a second network request (avoids duplicate DELETEs from a rapid double-click)", async () => {
+      await setStored({ apiToken: "td_live_x" });
+      vi.mocked(apiClient.deleteMedia).mockResolvedValue({ ok: true });
+
+      await deleteOrphanedMedia("media_del_dedup");
+      await deleteOrphanedMedia("media_del_dedup");
+      expect(apiClient.deleteMedia).toHaveBeenCalledTimes(1);
+    });
+
+    it("dedup does not apply across DIFFERENT mediaAssetIds", async () => {
+      await setStored({ apiToken: "td_live_x" });
+      vi.mocked(apiClient.deleteMedia).mockResolvedValue({ ok: true });
+
+      await deleteOrphanedMedia("media_del_distinct_a");
+      await deleteOrphanedMedia("media_del_distinct_b");
+      expect(apiClient.deleteMedia).toHaveBeenCalledTimes(2);
+    });
+
+    it("no DeleteMediaResult variant this module can produce ever contains the substring of a real token", async () => {
+      await setStored({ apiToken: "td_live_super_secret_value" });
+      vi.mocked(apiClient.deleteMedia).mockResolvedValue({ ok: true });
+      const result = await deleteOrphanedMedia("media_del_6");
       expect(JSON.stringify(result)).not.toContain("td_live_super_secret_value");
     });
   });
