@@ -122,6 +122,16 @@ export class ClaudeVisionRecognitionProvider implements ScreenshotRecognitionPro
   readonly name = "claude-vision";
   readonly version = "1.0.0";
 
+  /** Step 10 — optional constructor-injected client, mirroring the exact
+   *  pattern `ClaudeTraderReviewAnalystProvider` already established
+   *  (`src/domain/ai-review/providers/claude-analyst-provider.ts`) so
+   *  `recognize()`'s error handling (timeout/auth/rate-limit/refusal/
+   *  malformed) can be unit-tested with a fake client instead of a real
+   *  network call. Production's one call site (`trade-plan.service.ts`)
+   *  passes nothing, so this is a purely additive, behavior-preserving
+   *  change. */
+  constructor(private readonly client: Anthropic = new Anthropic()) {}
+
   isAvailable(): boolean {
     return Boolean(process.env.ANTHROPIC_API_KEY);
   }
@@ -134,11 +144,9 @@ export class ClaudeVisionRecognitionProvider implements ScreenshotRecognitionPro
       return { status: "RECOGNITION_FAILED", error: `Unsupported image type for recognition: ${input.mimeType}.` };
     }
 
-    const client = new Anthropic();
-
     let response: Anthropic.Message;
     try {
-      response = await client.messages.create({
+      response = await this.client.messages.create({
         model: "claude-opus-5",
         max_tokens: 4096,
         system: SYSTEM_PROMPT,
