@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -44,6 +44,12 @@ export function PreSessionRoutineSection({
   );
   const [readyAt, setReadyAt] = useState<string | null>(routine.readyAt);
   const [isPending, startTransition] = useTransition();
+  // Every in-flight `saveRoutineResponse` call, so `toggleReady` can wait for
+  // them to land before asking the server to evaluate the gate — otherwise
+  // checking the final required box and immediately hitting Continue can race
+  // the save: the server would read the DB before that write completes and
+  // see the item as still incomplete.
+  const pendingSavesRef = useRef<Set<Promise<unknown>>>(new Set());
 
   const snapshot: RoutineSnapshot = { sections: routine.snapshot.sections, responses };
   const progress = routineProgress(snapshot);
@@ -58,8 +64,14 @@ export function PreSessionRoutineSection({
 
   function persist(itemId: string, patch: RoutineResponse) {
     startTransition(async () => {
-      const result = await saveRoutineResponse(dateKey, itemId, patch);
-      if (!result.success) toast.error(result.error);
+      const promise = saveRoutineResponse(dateKey, itemId, patch);
+      pendingSavesRef.current.add(promise);
+      try {
+        const result = await promise;
+        if (!result.success) toast.error(result.error);
+      } finally {
+        pendingSavesRef.current.delete(promise);
+      }
     });
   }
 
@@ -75,6 +87,10 @@ export function PreSessionRoutineSection({
   function toggleReady() {
     const next = !isReady;
     startTransition(async () => {
+      // Let any outstanding checkbox/text saves land before the server checks
+      // the gate, so a save that's still in flight can't make a just-completed
+      // item look unchecked to the DB-backed validation below.
+      await Promise.allSettled(pendingSavesRef.current);
       const result = await setRoutineReady(dateKey, next);
       if (!result.success) {
         toast.error(result.error);
