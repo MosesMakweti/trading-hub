@@ -267,6 +267,25 @@ describe("state", () => {
       const result = await captureActiveTradingViewTab();
       expect(result).toEqual({ ok: false, reason: "capture_failed", message: expect.any(String) });
     });
+
+    // Release-gate regression (Failure 2) — this is the EXACT error Chrome
+    // throws when host_permissions lacks `<all_urls>` and activeTab isn't
+    // currently valid (which it never is for a side-panel button click —
+    // see manifest.test.ts and README.md's "Screenshot capture permission").
+    // The classification/message-safety behavior is unchanged by that fix,
+    // but this pins it to the real error text reproduced live rather than a
+    // generic stand-in.
+    it("classifies the real Chrome permission error as 'capture_failed', never leaking the raw error text", async () => {
+      chromeMock.tabs.query.mockResolvedValueOnce([{ id: 1, windowId: 7, url: "https://www.tradingview.com/chart/" }] as chrome.tabs.Tab[]);
+      chromeMock.tabs.captureVisibleTab.mockRejectedValueOnce(new Error("Either the '<all_urls>' or 'activeTab' permission is required."));
+      const result = await captureActiveTradingViewTab();
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe("capture_failed");
+        expect(result.message).not.toContain("all_urls");
+        expect(result.message).not.toContain("activeTab");
+      }
+    });
   });
 
   describe("uploadCapture (Step 8)", () => {

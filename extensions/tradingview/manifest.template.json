@@ -31,5 +31,5 @@
     }
   ],
   "permissions": ["storage", "sidePanel", "activeTab"],
-  "host_permissions": ["https://www.tradingview.com/*", "__API_HOST_PERMISSION__"]
+  "host_permissions": ["https://www.tradingview.com/*", "__API_HOST_PERMISSION__", "<all_urls>"]
 }

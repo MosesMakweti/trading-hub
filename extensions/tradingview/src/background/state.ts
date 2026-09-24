@@ -160,12 +160,26 @@ export async function submitCreateTrade(payload: CreateTradeRequest, idempotency
  * (§13 — the panel only sends that on the trader's own "Capture Chart"
  * click; nothing here fires automatically).
  *
- * §10 — requires `activeTab` (granted implicitly by the trader's own click
- * that opened/focused the side panel) — not `<all_urls>`, not a broader
- * `tabs` permission, not `desktopCapture`. `no_tab` covers "the active tab
- * isn't TradingView" (mirrors isActiveTabTradingView's own check);
- * `capture_failed` covers a permission/timing failure captureVisibleTab
- * itself can throw (e.g. the tab isn't focused/visible right now).
+ * §10, release-gate finding — `activeTab` alone does NOT work here: Chrome
+ * only grants `activeTab` on a direct action-icon click, a context-menu
+ * item, a `commands` keyboard shortcut, or an omnibox suggestion — a click
+ * on a button that's already inside an open side panel is explicitly EXCLUDED
+ * from that list (confirmed against Chrome's own docs and reproduced live:
+ * `chrome.tabs.captureVisibleTab` threw "Either the '<all_urls>' or
+ * 'activeTab' permission is required." even when the toolbar icon was
+ * clicked immediately beforehand on the same tab). Scoped `host_permissions`
+ * (e.g. `https://www.tradingview.com/*`, already declared for the API/CORS
+ * bypass) do NOT satisfy captureVisibleTab's own permission check either —
+ * only the literal `<all_urls>` host permission does, which is why it's in
+ * the manifest despite the codebase's general "scope host_permissions
+ * narrowly" preference. The manifest grant is broader than this feature
+ * needs, but the CODE stays scoped: `getActiveTradingViewTab` (via
+ * `TRADINGVIEW_ORIGIN`) still refuses to call `captureVisibleTab` on
+ * anything but a `https://www.tradingview.com/*` tab, regardless of what
+ * the manifest technically permits. `no_tab` covers "the active tab isn't
+ * TradingView" (mirrors isActiveTabTradingView's own check); `capture_failed`
+ * covers a genuine transient failure (the tab isn't focused/visible right
+ * now, the per-second capture rate limit, etc.).
  */
 export async function captureActiveTradingViewTab(): Promise<CaptureResult> {
   const tab = await getActiveTradingViewTab();

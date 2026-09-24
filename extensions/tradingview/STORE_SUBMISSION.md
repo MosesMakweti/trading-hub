@@ -41,7 +41,7 @@ Production `manifest.json` (`extensions/tradingview/manifest.template.json`) req
 |---|---|
 | `storage` | Persists the Traditorium API token (`chrome.storage.local`) and the in-progress trade draft (`chrome.storage.session`) locally in the browser — nothing is synced to a Google account or any third party. See "Draft persistence" in the README. |
 | `sidePanel` | Renders the extension's UI as a native Chrome side panel next to the TradingView tab, instead of a popup that closes on every click away. |
-| `activeTab` | Grants temporary access to the currently active tab **only after the trader's own click** (opening/focusing the side panel) — used for `chrome.tabs.captureVisibleTab` (the chart screenshot feature) and for reading the active tab's URL to confirm it's a TradingView tab before messaging its content script. Never used to access any tab the trader hasn't just interacted with. |
+| `activeTab` | Declared as a low-friction, reviewer-familiar grant, but does not reliably authorize `chrome.tabs.captureVisibleTab` in this extension's actual UX — see the `<all_urls>` entry below for why. |
 
 ### Host permissions
 
@@ -49,8 +49,9 @@ Production `manifest.json` (`extensions/tradingview/manifest.template.json`) req
 |---|---|
 | `https://www.tradingview.com/*` | Required for the content script (`content_scripts` in the manifest) that detects the chart's symbol/timeframe — this is the entire reason the extension exists. |
 | `https://traditorium.com/*` (production) | Required for the background service worker's `fetch()` calls to Traditorium's own `/api/v1/*` API — the ONLY server this extension ever talks to. (The development build instead requests `http://localhost:3000/*`, and is never the build submitted to a store — see `build.mjs`'s production-only `localhost` validation.) |
+| `<all_urls>` | Required by `chrome.tabs.captureVisibleTab` (the "Capture Chart" screenshot feature). Chrome only authorizes this call with the literal `<all_urls>` host permission or a currently-valid `activeTab` grant — and `activeTab` is only granted by a direct action-icon click, context-menu item, keyboard shortcut, or omnibox suggestion, explicitly excluding a click on a button already inside an open side panel (Chrome's own documented behavior, reproduced live during a release-gate test: `captureVisibleTab` threw `Either the '<all_urls>' or 'activeTab' permission is required.` even when the toolbar icon was clicked immediately before "Capture Chart" on the same tab). This is the same pattern nearly every screenshot/clipping extension on the Store uses for the same reason. The manifest grant is broader than the feature conceptually needs, but the extension's own code (`getActiveTradingViewTab`/`TRADINGVIEW_ORIGIN` in `background/state.ts`) still refuses to call `captureVisibleTab` on anything but a `tradingview.com` tab, regardless of what the manifest technically permits. |
 
-**No `<all_urls>`, no broad `tabs` permission, no `cookies`, no `webRequest`, no `debugger`, no `desktopCapture`.** The extension cannot read or act on any page other than TradingView (via the declared content script) and the one tab the trader is actively looking at when they use a feature that needs it (via `activeTab`).
+**No broad `tabs` permission, no `cookies`, no `webRequest`, no `debugger`, no `desktopCapture`.** The extension cannot read or act on any page other than TradingView (via the declared content script) and, functionally, the tab the trader is actively looking at when they use a feature that needs it — even though the `<all_urls>` grant is technically broader, per the capture-permission note above.
 
 ## Screenshot privacy disclosure
 
@@ -99,7 +100,7 @@ The Store requires a support contact (a URL or email). Not yet decided — optio
 Things a Chrome Web Store reviewer is likely to specifically check, flagged here so they're not a surprise:
 - **Remote code**: none. All JavaScript ships inside the package (`content.js`, `background.js`, `panel/panel.js`) — there is no `eval`, no dynamically fetched/executed script, and no CDN-loaded library (see "Extension Security Audit" in the resume doc). This is the single most common Manifest V3 rejection reason and this extension is clean on it.
 - **Single, narrow content-script match**: `https://www.tradingview.com/*` only — reviewers scrutinize broad content-script matches; this one is about as narrow as the feature allows.
-- **`activeTab` + `captureVisibleTab` combination**: a well-understood, reviewer-familiar pattern (many screenshot/clipping extensions use exactly this) — should not itself raise flags given the disclosure above is present in the listing.
+- **`<all_urls>` for `captureVisibleTab`**: a well-understood, reviewer-familiar pattern (many screenshot/clipping extensions use exactly this, since `activeTab` alone doesn't cover a side-panel-triggered capture) — should not itself raise flags given the disclosure above is present in the listing and the permissions justification explains why `activeTab` alone wasn't sufficient.
 - **Data handling disclosure form**: the Store's own "Privacy practices" questionnaire (separate from the privacy policy URL) will need to be filled out accurately — declare that the extension handles authentication tokens and user-uploaded images sent to a single, disclosed remote server (Traditorium), and that recognition is AI-based.
 - **Functionality requiring an account**: the extension is non-functional without a Traditorium account and token — this is expected and fine, but the listing description should say so plainly (already reflected above) so a reviewer isn't confused by "nothing happens" on first install.
 
