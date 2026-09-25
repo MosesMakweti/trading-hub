@@ -154,7 +154,12 @@ describe("tradingview-detect content script", () => {
     await import("./tradingview-detect");
     chromeMock.runtime.sendMessage.mockClear();
 
-    document.title = "EURUSD, 15 — TradingView";
+    // Release-gate finding — this is TradingView's REAL live /chart/ page
+    // title format ("SYMBOL <price> <arrow> <change>% <source>"), not the
+    // "SYMBOL, INTERVAL — TradingView" format assumed before that format was
+    // live-verified (see chart-detector.ts's module doc comment). There is
+    // no title-based timeframe tier anymore, so only the symbol changes here.
+    document.title = "EURUSD 1.13766 ▼ −0.03% BANKS";
     // MutationObserver callbacks fire as a microtask — flush the queue.
     await Promise.resolve();
     await Promise.resolve();
@@ -163,7 +168,6 @@ describe("tradingview-detect content script", () => {
       type: "CHART_CONTEXT_CHANGED",
       context: expect.objectContaining({
         symbol: { raw: "EURUSD", display: "EURUSD", exchange: null },
-        timeframe: "15m",
       }),
     });
   });
