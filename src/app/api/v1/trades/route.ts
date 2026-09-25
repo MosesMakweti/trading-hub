@@ -17,8 +17,14 @@ export const runtime = "nodejs";
  * TradingView Extension — Step 3 (docs/extension-api.md). The first external
  * write path. This route is an ADAPTER ONLY:
  *
- *   parse/validate request  →  createTrade()  →  savePlan()?  →
- *   updateTradeSections()?  →  attachPlanScreenshot()?  →  serialize
+ *   parse/validate request  →  createTrade()  →  attachPlanScreenshot()?  →
+ *   savePlan()?  →  updateTradeSections()?  →  serialize
+ *
+ * attachPlanScreenshot MUST run before savePlan (release-gate finding — see
+ * the comment at that call site): savePlan freezes whatever screenshot
+ * exists AT THAT MOMENT into the new TradePlanVersion, exactly mirroring the
+ * native web app, where the trader always attaches a screenshot (a separate
+ * Server Action call) before confirming the plan (a later, separate call).
  *
  * Every one of those four calls is the EXACT, unmodified service function
  * the web app's own Server Actions already call (trades.actions.ts,
@@ -113,7 +119,34 @@ export async function POST(request: Request) {
   // exists). A failure here does not roll back the trade; it's reported as
   // a warning so the caller knows exactly what didn't apply and can retry
   // that one step against the now-known trade id.
+  //
+  // Release-gate finding — attachPlanScreenshot MUST run BEFORE savePlan,
+  // not after. In the native web app these are two separate Server Actions
+  // fired by two separate user interactions (attachPlanScreenshotAction on
+  // drop, confirmPlanAction later on "Confirm Plan" — trade-plan.actions.ts)
+  // and the trader always attaches the screenshot first. savePlan() reads
+  // whatever TradePlanScreenshot exists for this trade AT THE MOMENT IT
+  // RUNS and freezes that into the new (immutable) TradePlanVersion's
+  // `screenshotMediaAssetId`, and only promotes the screenshot's own status
+  // to CONFIRMED/LOCKED when it finds one. Calling it before the screenshot
+  // was attached (the previous order here) meant savePlan always found
+  // `screenshot: null`, permanently freezing versionNumber 1 with
+  // `screenshotMediaAssetId: null` and leaving the screenshot stuck at
+  // "UPLOADED" — live-confirmed against a real saved trade's DB rows: a
+  // correct TradePlanScreenshot existed, but its TradePlanVersion still had
+  // screenshotMediaAssetId: null, which is what Traditorium's Before Trade
+  // UI actually reads (trade-plan.mapper.ts's toVersionDTO). No later
+  // savePlan call ever re-freezes an already-created version, so this was
+  // permanent, not something a subsequent action could fix.
   const warnings: string[] = [];
+
+  if (input.mediaAssetId) {
+    try {
+      await tradePlanService.attachPlanScreenshot(userId, trade.id, input.mediaAssetId);
+    } catch (e) {
+      warnings.push(`mediaAssetId: ${errorMessage(e, "Could not attach the screenshot.")}`);
+    }
+  }
 
   if (input.plan) {
     try {
@@ -129,14 +162,6 @@ export async function POST(request: Request) {
       await tradesService.updateTradeSections(userId, trade.id, notes);
     } catch (e) {
       warnings.push(`notes: ${errorMessage(e, "Could not save trade notes.")}`);
-    }
-  }
-
-  if (input.mediaAssetId) {
-    try {
-      await tradePlanService.attachPlanScreenshot(userId, trade.id, input.mediaAssetId);
-    } catch (e) {
-      warnings.push(`mediaAssetId: ${errorMessage(e, "Could not attach the screenshot.")}`);
     }
   }
 

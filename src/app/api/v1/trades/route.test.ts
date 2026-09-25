@@ -5,6 +5,7 @@ import { createApiToken } from "@/server/services/api-tokens.service";
 import * as tradesService from "@/server/services/trades.service";
 import { tradeSchema } from "@/lib/validation/trades";
 import { POST as createTradeRoute } from "./route";
+import { DELETE as deleteMediaRoute } from "../media/[mediaAssetId]/route";
 
 /**
  * Real integration tests against the dev Postgres DB — same pattern as the
@@ -65,6 +66,27 @@ async function createViaApi(rawToken: string, trade: Record<string, unknown>, ex
   const res = await createTradeRoute(req({ trade: tradePayload(trade), ...extra }, rawToken, idempotencyKey));
   const body = await res.json();
   return { res, body };
+}
+
+async function makeMediaAsset(userId: string) {
+  return prisma.mediaAsset.create({
+    data: {
+      userId,
+      storageKey: `test/${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      fileName: "chart.png",
+      mimeType: "image/png",
+      fileSize: 1024,
+      url: "https://example.com/chart.png",
+    },
+  });
+}
+
+async function deleteMediaViaApi(rawToken: string, mediaAssetId: string) {
+  const headers: Record<string, string> = { authorization: `Bearer ${rawToken}` };
+  const res = await deleteMediaRoute(new Request(`http://localhost/api/v1/media/${mediaAssetId}`, { method: "DELETE", headers }), {
+    params: Promise.resolve({ mediaAssetId }),
+  });
+  return res;
 }
 
 describe("POST /api/v1/trades", () => {
@@ -419,6 +441,120 @@ describe("POST /api/v1/trades", () => {
 
       const count = await prisma.trade.count({ where: { userId: user.id } });
       expect(count).toBe(2);
+    });
+  });
+
+  // Release-gate regression — the extension's uploaded MediaAsset was
+  // reaching TradePlanScreenshot correctly, but attachPlanScreenshot ran
+  // AFTER savePlan, so the immutable TradePlanVersion this endpoint creates
+  // was always frozen with screenshotMediaAssetId: null — which is what
+  // Traditorium's Before Trade UI actually reads (trade-plan.mapper.ts's
+  // toVersionDTO). Live-confirmed against a real saved trade's DB rows
+  // before the fix. These tests assert on the DB rows directly, not just
+  // the response body, since the bug was invisible in the 201/hasPlanScreenshot
+  // signal alone.
+  describe("Before Trade screenshot attachment (release-gate regression)", () => {
+    it("a valid, owned mediaAssetId becomes the canonical Before Trade screenshot: attached to the trade AND frozen into its TradePlanVersion", async () => {
+      const user = await makeUser("screenshot-attach");
+      userIds.push(user.id);
+      const { rawToken } = await createApiToken(user.id, "test");
+      const asset = await makeMediaAsset(user.id);
+
+      const { res, body } = await createViaApi(
+        rawToken,
+        {},
+        {
+          plan: { entry: 1900, stopLoss: 1890, targets: [{ targetOrder: 1, label: "TP1", targetPrice: 1910 }] },
+          mediaAssetId: asset.id,
+        },
+      );
+      expect(res.status).toBe(201);
+      expect(body.warnings).toBeUndefined();
+      expect(body.trade.hasPlanScreenshot).toBe(true);
+
+      const screenshot = await prisma.tradePlanScreenshot.findFirst({ where: { tradeId: body.trade.id } });
+      expect(screenshot?.mediaAssetId).toBe(asset.id);
+      // Promoted out of "UPLOADED" by savePlan finding it already attached —
+      // the exact signal that was permanently stuck before this fix.
+      expect(screenshot?.status).toBe("CONFIRMED");
+
+      const version = await prisma.tradePlanVersion.findFirst({ where: { tradeId: body.trade.id }, orderBy: { versionNumber: "desc" } });
+      expect(version?.screenshotMediaAssetId).toBe(asset.id); // the actual regression
+      expect(version?.versionNumber).toBe(1);
+    });
+
+    it("without a mediaAssetId, the trade still creates normally with no screenshot (no regression for the common no-screenshot case)", async () => {
+      const user = await makeUser("screenshot-none");
+      userIds.push(user.id);
+      const { rawToken } = await createApiToken(user.id, "test");
+
+      const { res, body } = await createViaApi(
+        rawToken,
+        {},
+        { plan: { entry: 1900, stopLoss: 1890, targets: [{ targetOrder: 1, label: "TP1", targetPrice: 1910 }] } },
+      );
+      expect(res.status).toBe(201);
+      expect(body.trade.hasPlanScreenshot).toBe(false);
+
+      const version = await prisma.tradePlanVersion.findFirst({ where: { tradeId: body.trade.id } });
+      expect(version?.screenshotMediaAssetId).toBeNull();
+    });
+
+    it("a nonexistent mediaAssetId fails safely: the trade still creates, reported as a warning, no screenshot attached", async () => {
+      const user = await makeUser("screenshot-missing");
+      userIds.push(user.id);
+      const { rawToken } = await createApiToken(user.id, "test");
+
+      const { res, body } = await createViaApi(rawToken, {}, { mediaAssetId: "does-not-exist" });
+      expect(res.status).toBe(201);
+      expect(body.warnings?.some((w: string) => w.startsWith("mediaAssetId:"))).toBe(true);
+      expect(body.trade.hasPlanScreenshot).toBe(false);
+    });
+
+    it("the attached asset cannot subsequently be deleted through the standalone DELETE endpoint", async () => {
+      const user = await makeUser("screenshot-delete-protection");
+      userIds.push(user.id);
+      const { rawToken } = await createApiToken(user.id, "test");
+      const asset = await makeMediaAsset(user.id);
+
+      const { res, body } = await createViaApi(rawToken, {}, { mediaAssetId: asset.id });
+      expect(res.status).toBe(201);
+      expect(body.trade.hasPlanScreenshot).toBe(true);
+
+      const deleteRes = await deleteMediaViaApi(rawToken, asset.id);
+      expect(deleteRes.status).toBe(409);
+
+      const stillThere = await prisma.mediaAsset.findUnique({ where: { id: asset.id } });
+      expect(stillThere).not.toBeNull();
+    });
+
+    it("multiple planned targets still work correctly alongside a screenshot attachment (the fix must not regress normal plan creation)", async () => {
+      const user = await makeUser("screenshot-plus-targets");
+      userIds.push(user.id);
+      const { rawToken } = await createApiToken(user.id, "test");
+      const asset = await makeMediaAsset(user.id);
+
+      const { res, body } = await createViaApi(
+        rawToken,
+        { assetSymbol: "XAUUSD", direction: "LONG" },
+        {
+          plan: {
+            entry: 1900,
+            stopLoss: 1890,
+            targets: [
+              { targetOrder: 1, label: "TP1", targetPrice: 1910, plannedClosePercent: 50 },
+              { targetOrder: 2, label: "TP2", targetPrice: 1930 },
+            ],
+          },
+          mediaAssetId: asset.id,
+        },
+      );
+      expect(res.status).toBe(201);
+      expect(body.trade.plannedTargets).toHaveLength(2);
+      expect(body.trade.hasPlanScreenshot).toBe(true);
+
+      const version = await prisma.tradePlanVersion.findFirst({ where: { tradeId: body.trade.id } });
+      expect(version?.screenshotMediaAssetId).toBe(asset.id);
     });
   });
 });

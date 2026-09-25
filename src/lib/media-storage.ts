@@ -27,9 +27,21 @@ export function extForMime(mimeType: string): string {
   return EXT_BY_MIME[mimeType] ?? "bin";
 }
 
-/** Guards against a malformed key reaching R2 (keys are ours, but this is cheap). */
+/**
+ * Guards against a malformed key reaching R2 (keys are ours, but this is
+ * cheap). Release-gate finding: this previously required the FIRST segment
+ * (the userId) to be hex-only (`[0-9a-f-]+`), but `saveMediaFile` builds keys
+ * as `<userId>/<uuid>.<ext>` where `userId` is a Prisma `cuid()` — lowercase
+ * alphanumeric, NOT restricted to hex (e.g. "cmty4b7m900003zsb6qsyhmj5"
+ * contains 't', 'y', 'z', 's', 'j', 'm', none of which are hex digits). That
+ * meant this check threw a plain `Error` (never `MediaNotFoundError`) for
+ * EVERY real asset — `readMediaFile` always failed, and GET /api/media/[id]
+ * always returned 502 — live-confirmed: the object itself was always a
+ * perfectly valid, uncorrupted file when read directly from R2 bypassing
+ * this check. Only the second segment (`randomUUID()`) is an actual hex
+ * UUID; the first is validated against the real cuid alphabet instead. */
 function assertValidKey(storageKey: string): void {
-  if (!/^[0-9a-f-]+\/[0-9a-f-]+\.[a-z0-9]+$/i.test(storageKey)) {
+  if (!/^[a-z0-9]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]+$/i.test(storageKey)) {
     throw new Error("Invalid storage key.");
   }
 }
