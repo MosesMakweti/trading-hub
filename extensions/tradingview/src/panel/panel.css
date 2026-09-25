@@ -26,6 +26,26 @@
   box-sizing: border-box;
 }
 
+/* Release-gate finding — every `display: flex/block/grid` rule below (e.g.
+ * `.card`) has the SAME CSS specificity as the browser's own default
+ * `[hidden] { display: none }` UA-stylesheet rule, and an author stylesheet
+ * rule always wins over a UA one regardless of specificity — so setting
+ * `.hidden = true` on any element that ALSO matches one of those class
+ * rules (virtually every conditionally-shown element in this panel: the
+ * disconnected/connect-form/connecting/error/connected sections, chart-card,
+ * strategy-card, screenshot-card, etc.) correctly updated the DOM attribute
+ * but did NOT actually hide the element — live-confirmed via
+ * `getComputedStyle(el).display` returning `"flex"` even while `el.hidden`
+ * was `true`. This is what let the connect-form/connecting/error sections
+ * render visually on top of the connected-view section at the same time.
+ * `!important` here is the standard, well-established fix for exactly this
+ * class of conflict (the same rule ships in most CSS resets) — it's the one
+ * place in this file `!important` is appropriate, since its entire job is
+ * to make `hidden` win over every other display rule, unconditionally. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   width: 320px;
