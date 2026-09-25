@@ -38,6 +38,14 @@ export function toMetricInputs(rows: CanonicalAnalyticsTradeRow[]): TradeMetricI
   return rows.filter((r) => r.finalizedR != null).map((r) => ({ dateKey: r.dateKey, assetSymbol: r.assetSymbol, actualRR: r.finalizedR }));
 }
 
+/** Dashboard KPI sparkline (Analytics V2 §21 — Dashboard/canonical unification)
+ *  — the running win rate, chronological, over the SAME finalized population
+ *  every other canonical stat uses. Thin wrapper over `toMetricInputs` +
+ *  `metrics.cumulativeWinRateSeries`; no second win/loss classification. */
+export function cumulativeWinRateSeries(rows: CanonicalAnalyticsTradeRow[]): number[] {
+  return metrics.cumulativeWinRateSeries(toMetricInputs(rows));
+}
+
 export function computeRGroupStats(key: string, label: string, rows: CanonicalAnalyticsTradeRow[]): RGroupStats {
   const executed = rows.filter((r) => r.isExecuted);
   const metricInputs = toMetricInputs(executed);

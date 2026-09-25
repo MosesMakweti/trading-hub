@@ -6,6 +6,7 @@ import { setupOverrideReasonSchema } from "@/lib/validation/trades";
 
 const dateKey = z.string().refine(isValidDateKey, { message: "Invalid date." });
 const assetSymbolSchema = z.string().trim().min(1).max(20).transform((s) => s.toUpperCase());
+const replayTimeframeSchema = z.enum(["1m", "5m", "15m", "30m", "1h", "4h", "1D"]);
 
 export const createReplayReviewSessionSchema = z
   .object({
@@ -144,7 +145,10 @@ export const updateReplayProgressSchema = z.object({
 
 /** Fetching a chunk of historical candles for the Replay chart (Stage 13 §8,
  *  extended Stage 17B §13 — `sessionId` is required so market-data
- *  provenance can be frozen/enforced per session). */
+ *  provenance can be frozen/enforced per session). Strict no-future-candle
+ *  delivery (Prompt 5) — READ-ONLY: `to` is a request, never trusted as
+ *  the visibility boundary itself; the server clips to the session's own
+ *  authoritative `replayCurrentTime` regardless of what's asked for. */
 export const getReplayCandlesSchema = z.object({
   sessionId: z.string().min(1),
   canonicalSymbol: assetSymbolSchema,
@@ -152,7 +156,17 @@ export const getReplayCandlesSchema = z.object({
   to: z.number().int().positive(),
 });
 
-const replayTimeframeSchema = z.enum(["1m", "5m", "15m", "30m", "1h", "4h", "1D"]);
+/** Strict no-future-candle delivery (Prompt 5 §5/§6) — the ONLY request
+ *  shape that can EXTEND a session's authoritative replay boundary
+ *  forward. `requestedTime` is a target the server clamps to
+ *  `[currentBoundary, periodEnd]`, never trusted directly — see
+ *  `advanceReplayClock`'s own doc comment. */
+export const advanceReplayClockSchema = z.object({
+  sessionId: z.string().min(1),
+  canonicalSymbol: assetSymbolSchema,
+  requestedTime: z.number().int().nonnegative(),
+  timeframe: replayTimeframeSchema.optional(),
+});
 
 /**
  * Stage 18 §18 — geometry is validated AT THE BOUNDARY, per `type`, via a

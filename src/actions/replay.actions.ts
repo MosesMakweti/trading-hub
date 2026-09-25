@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
 import {
+  advanceReplayClockSchema,
   advanceReplayExecutionSchema,
   cancelReplayPendingSchema,
   clearReplayAnnotationsSchema,
@@ -312,6 +313,7 @@ type CandlesResult = { success: true; candles: Candle[]; sourceLabel: string | n
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   databento: "Databento",
   twelvedata: "Twelve Data",
+  "mt5-imported": "MT5 Imported",
 };
 
 /** Price bases worth surfacing in the badge — Databento's "raw-unadjusted"
@@ -329,23 +331,29 @@ function buildSourceLabel(
   if (!last) return null;
   if (last.providerId === "fixture") return "Synthetic Fixture";
   const providerName = PROVIDER_DISPLAY_NAMES[last.providerId] ?? last.providerId;
-  const lastSegment = last.segments[last.segments.length - 1];
+  // MT5 Imported's `contractSymbol` segments carry the internal
+  // `MarketDataImport` row id (see that provider's own doc comment), never
+  // a human-readable contract — the passive badge must never leak it.
+  const lastSegment = last.providerId === "mt5-imported" ? null : last.segments[last.segments.length - 1];
   const symbolPart = lastSegment ? ` · ${lastSegment.contractSymbol}` : "";
   const basisPart = last.priceBasis && DISPLAYED_PRICE_BASES.has(last.priceBasis) ? ` · ${last.priceBasis}` : "";
   return `${providerName}${symbolPart}${basisPart}`;
 }
 
 /**
- * Fetches a chunk of historical candles for the Replay chart (Stage 13 §8,
- * chunking reworked Stage 17B §23-24) — the client calls this on demand for
- * a small day/week-sized window at a time (see
- * `domain/market-data/replay-prefetch-window.ts`), never the whole review
- * period in one response, and never receives more than it asked for. This
- * is the ONLY way candle data reaches the browser; the no-hindsight filter
- * (visible-candles.ts) is then applied client-side against the Replay
- * Clock's `currentTime` before anything is rendered — fetching ahead is
- * allowed, revealing is not (§20). `sessionId` pins market-data provenance
- * (§13) — see `replay-review.service.ts`'s `fetchReplayCandlesWithProvenance`.
+ * Fetches a chunk of ALREADY-AUTHORIZED historical candles for the Replay
+ * chart (Stage 13 §8, chunking reworked Stage 17B §23-24, strict visibility
+ * corrected Prompt 5 §3-5). READ-ONLY with respect to how much of the
+ * review a session may see — the server clips the response to the
+ * session's own authoritative `replayCurrentTime`, regardless of the `to`
+ * requested, so this can safely be called with a wide range (e.g.
+ * rebuilding chart state after a reload, §23) without ever revealing
+ * anything new. `visible-candles.ts`'s client-side filter still runs too,
+ * but purely as defense-in-depth now (§20) — the SERVER is the primary
+ * boundary. To reveal MORE of the review (Step/Play/seek), call
+ * `advanceReplayClockAction` below instead; this action can never do that.
+ * `sessionId` pins market-data provenance (§13) — see
+ * `replay-review.service.ts`'s `fetchReplayCandlesWithProvenance`.
  */
 export async function getReplayCandles(input: unknown): Promise<CandlesResult> {
   const user = await requireUser();
@@ -363,6 +371,36 @@ export async function getReplayCandles(input: unknown): Promise<CandlesResult> {
   );
   if (!result.ok) return { success: false, error: result.error };
   return { success: true, candles: result.candles, sourceLabel: buildSourceLabel(result.provenance) };
+}
+
+type AdvanceResult =
+  | { success: true; candles: Candle[]; sourceLabel: string | null; currentTime: number }
+  | { success: false; error: MarketDataError };
+
+/**
+ * Strict no-future-candle delivery (Prompt 5 §5/§6/§10) — the ONLY action
+ * that can extend how far a Replay session may legitimately see, backing
+ * Step/Play/seek/jump-to-start/day-navigation alike. `requestedTime` is a
+ * target the server independently clamps (see
+ * `replay-review.service.ts`'s `advanceReplayClock`) — never trusted as
+ * the boundary directly. Returns exactly the newly-permitted candles.
+ */
+export async function advanceReplayClockAction(input: unknown): Promise<AdvanceResult> {
+  const user = await requireUser();
+  const parsed = advanceReplayClockSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: { code: "PROVIDER_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid input." } };
+  }
+
+  const result = await replayReviewService.advanceReplayClock(
+    user.id,
+    parsed.data.sessionId,
+    parsed.data.canonicalSymbol,
+    parsed.data.requestedTime,
+    parsed.data.timeframe,
+  );
+  if (!result.ok) return { success: false, error: result.error };
+  return { success: true, candles: result.candles, sourceLabel: buildSourceLabel(result.provenance), currentTime: result.currentTime };
 }
 
 // ── Comparison (Stage 15.2) ─────────────────────────────────────────────────

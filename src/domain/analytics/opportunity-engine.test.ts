@@ -177,4 +177,34 @@ describe("opportunity-engine — scenario G: mixed portfolio decomposes and sums
   });
 });
 
+describe("opportunity-engine — Audit Fixture H: executed loss + missed winner/loser/undetermined coexist without cross-contamination", () => {
+  it("combines all four opportunity outcomes in one portfolio; execution variance never inflates potentialR", () => {
+    const inputs: OpportunityInput[] = [
+      // Fully-executed (100%) valid setup that lost -1R despite a +0.5R
+      // scaled expectation — real execution variance (gapR = 0.5 - (-1) =
+      // 1.5R), but NOT a missed opportunity: nothing was skipped.
+      executed({ opportunityId: "loss", sequence: 1, executionScore: 100, actualR: -1 }),
+      missed({ opportunityId: "win", sequence: 2, missedRealizedR: 2 }), // valid missed winner
+      missed({ opportunityId: "lose", sequence: 3, missedRealizedR: -1.5 }), // valid missed loser
+      missed({ opportunityId: "undetermined", sequence: 4, missedRealizedR: null }), // undetermined
+    ];
+    const s = summarizeOpportunities(inputs);
+
+    // 1. The executed normal loss is real execution variance, never
+    //    classified as missed-opportunity cost.
+    expect(s.realizedR).toBe(-1);
+    expect(s.executionLeakageR).toBeCloseTo(1.5);
+    // 2. Only the missed WINNER contributes cost.
+    expect(s.missedOpportunityCostR).toBe(2);
+    expect(s.missedWins).toBe(1);
+    // 3. The missed LOSER contributes exactly 0 — avoiding a loss isn't a cost.
+    expect(s.missedLosses).toBe(1);
+    // 4. The UNDETERMINED miss contributes no fabricated R.
+    expect(s.missedUndetermined).toBe(1);
+    // potentialR = realizedR + missedOpportunityCostR ONLY (-1 + 2 = 1) —
+    // the 1.5R of execution variance above is deliberately excluded.
+    expect(s.potentialR).toBe(1);
+  });
+});
+
 const round2 = (n: number): number => Math.round(n * 100) / 100;

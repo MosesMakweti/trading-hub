@@ -185,6 +185,66 @@ describe("statsByStrategy", () => {
   });
 });
 
+// Audit fixtures (Analytics V2 correctness pass) — pin down the exact,
+// already-existing product definitions these functions implement, so a
+// future change can't silently redefine them. This is the ONE engine both
+// the legacy `getAnalyticsData` and the canonical dataset's `toMetricInputs`
+// feed into, so it's also the single point of truth Dashboard's migration
+// (dashboard.service.ts) now depends on.
+describe("Audit fixtures — win/loss/breakeven classification and R stats", () => {
+  it("Fixture A: +2R,-1R,+3R,-1R,0R — breakevens count in the win-rate denominator (existing, intentional definition)", () => {
+    const trades = [
+      T("2026-01-01", "A", 2),
+      T("2026-01-02", "A", -1),
+      T("2026-01-03", "A", 3),
+      T("2026-01-04", "A", -1),
+      T("2026-01-05", "A", 0),
+    ];
+    // Net R = +3R over 5 determined trades (2 wins, 2 losses, 1 breakeven).
+    // `closedTrades()` filters on `actualRR !== null`, so the breakeven (0)
+    // trade is "determined" and sits in every denominator below — win rate
+    // is 2/5 = 40%, NOT 2/(2+2) = 50%. This is the current product's
+    // definition, verified here rather than silently redefined.
+    expect(winRate(trades)).toBe(40);
+    expect(averageRR(trades)).toBeCloseTo(0.6); // 3 / 5
+    expect(expectancy(trades)).toBeCloseTo(0.6); // identity with averageRR holds, BE included
+    expect(profitFactor(trades)).toBeCloseTo(2.5); // grossWin 5 / grossLoss 2
+  });
+
+  it("Fixture D: all losses (-1R,-1R,-2R) — profit factor is 0, not null/NaN, since a real gross loss exists", () => {
+    const trades = [T("2026-01-01", "A", -1), T("2026-01-02", "A", -1), T("2026-01-03", "A", -2)];
+    expect(winRate(trades)).toBe(0);
+    expect(profitFactor(trades)).toBe(0); // grossWin 0 / grossLoss 4 — a real ratio, not undefined
+    expect(expectancy(trades)).toBeCloseTo(-4 / 3);
+    expect(cumulativeWinRateSeries(trades)).toEqual([0, 0, 0]);
+  });
+
+  it("Fixture E: all wins (+1R,+2R,+1R) — profit factor is null (undefined ratio), never Infinity", () => {
+    const trades = [T("2026-01-01", "A", 1), T("2026-01-02", "A", 2), T("2026-01-03", "A", 1)];
+    expect(winRate(trades)).toBe(100);
+    expect(profitFactor(trades)).toBeNull(); // grossLoss 0 → contract is null, not Infinity
+    expect(expectancy(trades)).toBeCloseTo(4 / 3);
+    expect(Number.isFinite(expectancy(trades))).toBe(true);
+    expect(cumulativeWinRateSeries(trades)).toEqual([100, 100, 100]);
+  });
+
+  it("Fixture F: no trades — every stat is null/empty, never NaN", () => {
+    expect(winRate([])).toBeNull();
+    expect(profitFactor([])).toBeNull();
+    expect(expectancy([])).toBeNull();
+    expect(averageRR([])).toBeNull();
+    expect(cumulativeWinRateSeries([])).toEqual([]);
+  });
+
+  it("Fixture G: a lone breakeven (0R) trade — counted as determined (0% win rate), not treated as no data", () => {
+    const trades = [T("2026-01-01", "A", 0)];
+    expect(winRate(trades)).toBe(0); // one determined trade, zero wins — distinct from null (no data)
+    expect(averageRR(trades)).toBe(0);
+    expect(expectancy(trades)).toBe(0);
+    expect(profitFactor(trades)).toBeNull(); // no gross win AND no gross loss — undefined ratio
+  });
+});
+
 describe("monthlyReturns", () => {
   it("sums daily percents into monthly buckets, sorted chronologically", () => {
     const result = monthlyReturns([

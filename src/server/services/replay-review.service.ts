@@ -15,10 +15,14 @@ import * as metrics from "@/domain/performance/metrics";
 import { summarizePsychologyAdherence, toMetricInputs } from "@/domain/analytics/canonical-aggregations";
 import { buildActualTradeComparisonSnapshot } from "@/domain/replay/actual-trade-comparison-snapshot";
 import { getHistoricalCandles, getProviderById, isProviderDisplayPermitted, resolveMarketDataProvider } from "@/server/services/market-data.service";
+import { MT5_IMPORTED_PROVIDER_ID } from "@/server/services/market-data/mt5-imported-provider";
+import { getMt5Import, listMt5Imports, type MarketDataImportSummaryDTO } from "@/server/services/mt5-import.service";
+import { visibleCandles } from "@/domain/market-data/visible-candles";
 import type { SetupValidationSnapshot } from "@/domain/trades/setup-validation";
 import type { CreateReplayReviewSessionInput } from "@/lib/validation/replay";
 import type { Candle } from "@/domain/market-data/candle";
 import type { CandleProvenance, FetchCandlesResult, HistoricalMarketDataProvider } from "@/domain/market-data/provider-types";
+import { timeframeToMs, type Timeframe } from "@/domain/market-data/timeframe";
 import type {
   ActualTradeComparisonSnapshot,
   ActualTradeRefDTO,
@@ -40,6 +44,7 @@ import type {
 
 const sessionWithStrategy = { strategy: { select: { name: true } } } as const;
 type SessionRow = ReplayReviewSession & { strategy: { name: string } | null };
+const DAY_MS = 86_400_000;
 
 function toListItemDTO(row: SessionRow): ReplaySessionListItemDTO {
   const baseline = row.actualBaselineSnapshot as unknown as ReplayActualBaseline | null;
@@ -441,21 +446,56 @@ export async function updateReplayReviewNotes(userId: string, id: string, notes:
  * pause/asset-switch/timeframe-switch/navigating away, never on every
  * animation frame. Overwrites the previous checkpoint; there is only ever
  * one "where the trader left off" per session.
+ *
+ * Strict no-future-candle delivery (Prompt 5 §5/§18) — this is NO LONGER
+ * the mechanism that can EXTEND how much of a review a session is allowed
+ * to see; only `advanceReplayClock`'s validated search can do that (it
+ * independently re-derives the new boundary from real provider data, never
+ * trusts a client-supplied instant directly). This function's own
+ * `currentTime` write is therefore clamped to NEVER exceed whatever is
+ * already the session's authoritative boundary — a resume-point checkpoint
+ * can move backward (retreating/pausing somewhere already-revealed) or stay
+ * put, but calling this directly can never be used to sneak the boundary
+ * forward and bypass the validated advance path. Also clamped to the
+ * review period itself, so a corrupted or malicious value can never persist
+ * as the resume point either.
  */
 export async function updateReplayProgress(
   userId: string,
   id: string,
   progress: { currentTime: number; asset: string; timeframe: string },
 ): Promise<void> {
-  const result = await prisma.replayReviewSession.updateMany({
+  const session = await prisma.replayReviewSession.findFirst({
     where: { id, userId },
-    data: {
-      replayCurrentTime: new Date(progress.currentTime),
-      replayCurrentAsset: progress.asset,
-      replayCurrentTimeframe: progress.timeframe,
-    },
+    select: { startDate: true, endDate: true },
   });
-  if (result.count === 0) throw new Error("Review session not found.");
+  if (!session) throw new Error("Review session not found.");
+
+  const periodStart = session.startDate.getTime();
+  const periodEnd = session.endDate.getTime() + DAY_MS - 1;
+  const requested = Math.min(Math.max(progress.currentTime, periodStart), periodEnd);
+
+  // Prompt 7 §10 hardening — a read-then-write clamp (read
+  // `replayCurrentTime`, compute a clamped value in application code, write
+  // it back) has a genuine race: a CONCURRENT `advanceReplayClock` call can
+  // write a NEW, higher boundary in between this function's own read and
+  // write, and this write would then silently overwrite that higher,
+  // legitimately-advanced value with a stale, smaller one — PROVEN by a
+  // regression test (Promise.all-raced advance + progress update). Fixed
+  // by folding the clamp into a single atomic UPDATE: `LEAST(..., COALESCE
+  // ("replayCurrentTime", periodStart))` reads the row's OWN current value
+  // at the moment Postgres actually performs the write (which takes a row
+  // lock for the statement's duration), never a value read moments earlier
+  // in application code — there is no gap for a concurrent write to land in.
+  const result = await prisma.$executeRaw`
+    UPDATE "ReplayReviewSession"
+    SET "replayCurrentTime" = LEAST(${new Date(requested)}::timestamp, COALESCE("replayCurrentTime", ${new Date(periodStart)}::timestamp)),
+        "replayCurrentAsset" = ${progress.asset},
+        "replayCurrentTimeframe" = ${progress.timeframe},
+        "updatedAt" = NOW()
+    WHERE "id" = ${id} AND "userId" = ${userId}
+  `;
+  if (result === 0) throw new Error("Review session not found.");
 }
 
 /**
@@ -583,7 +623,94 @@ async function recordMarketDataProvenance(sessionId: string, canonicalSymbol: st
  * untouched either way. This function is fully provider-agnostic — adding
  * Twelve Data required zero changes here, only a second entry in
  * `market-data.service.ts`'s `getProviderById`/`resolveMarketDataProvider`/
- * `isProviderDisplayPermitted`.
+ * `isProviderDisplayPermitted`. Stage 21.3B's MT5 Imported provider needed
+ * one small addition here (passing `userId` into `getProviderById`, since
+ * unlike a vendor feed it's constructed per-user) — everything else about
+ * this function is unchanged and still fully provider-agnostic.
+ */
+/**
+ * Freeze-once provider resolution, factored out of `fetchReplayCandlesWithProvenance`
+ * so the SAME rule (pinned provenance wins, licensing-gate still applies,
+ * never auto-selects MT5) governs every path that can touch candle data —
+ * including the strict-visibility `advanceReplayClock` below (Prompt 5
+ * §17: "implement the visibility boundary at a provider-independent layer
+ * wherever possible... do not add four separate implementations"). Pure
+ * resolution only; callers decide what range to actually fetch.
+ */
+function resolvePinnedOrAutomaticProvider(
+  userId: string,
+  canonicalSymbol: string,
+  provenanceMap: MarketDataProvenanceMap,
+): { ok: true; provider: HistoricalMarketDataProvider } | Extract<FetchCandlesResult, { ok: false }> {
+  const existing = provenanceMap[canonicalSymbol];
+  if (!existing) {
+    return { ok: true, provider: resolveMarketDataProvider(canonicalSymbol) };
+  }
+
+  // Stage 21.3B §4, extended Edge Review Replay Data Source §14/§15 —
+  // `userId`/`importId` are only ever consulted when
+  // `existing.providerId === "mt5-imported"`; every other provider id
+  // ignores them (see `getProviderById`'s own doc comment). Passing
+  // `existing.datasetId` back in here is what keeps a session pinned to
+  // the EXACT `MarketDataImport` a trader explicitly selected — without
+  // it, every subsequent candle request would silently fall back to the
+  // provider's default "merge every overlapping import" behavior instead
+  // of staying on that one chosen dataset.
+  const pinned = getProviderById(existing.providerId, { userId, importId: existing.datasetId });
+  if (!pinned) {
+    return {
+      ok: false,
+      error: {
+        code: "PROVIDER_ERROR",
+        message: `This session's ${canonicalSymbol} data was originally sourced from an unrecognized provider ("${existing.providerId}").`,
+      },
+    };
+  }
+  if (!pinned.isAvailable()) {
+    return {
+      ok: false,
+      error: {
+        code: "PROVIDER_ERROR",
+        message: `This session's ${canonicalSymbol} data came from ${pinned.displayName}, which is no longer configured. Restore its credentials to keep replaying this asset — Traditorium never silently switches data sources mid-session.`,
+      },
+    };
+  }
+  // Stage 17B.1 §10/§11 (extended Stage 17C.2 §21) — historical
+  // provenance staying frozen does NOT override current licensing
+  // policy. A session pinned to a licensed/gated provider (Databento or
+  // Twelve Data) whose display is currently disabled gets a structured,
+  // non-destructive refusal: the frozen provenance record is left
+  // untouched (no write happens below), no fetch is attempted, and there
+  // is no silent fallback to Fixture or any other provider substitution.
+  if (!isProviderDisplayPermitted(pinned.id)) {
+    return {
+      ok: false,
+      error: {
+        code: "PROVIDER_DISPLAY_DISABLED",
+        message: `This session's ${canonicalSymbol} data is sourced from ${pinned.displayName}, which is currently disabled for display (licensing policy). The original provenance is preserved — it will resume once display is re-enabled.`,
+      },
+    };
+  }
+  return { ok: true, provider: pinned };
+}
+
+/**
+ * Strict no-future-candle delivery (Prompt 5 §3-5) — the SERVER, not
+ * `visible-candles.ts`, is now the PRIMARY boundary: this function never
+ * returns a candle beyond the session's own AUTHORITATIVE
+ * `replayCurrentTime` (§5's "preferred architecture" — the persisted
+ * cursor already exists on `ReplayReviewSession`, no schema change
+ * needed), regardless of what `to` a caller requests. This function is
+ * READ-ONLY with respect to that boundary — it can serve MORE of the
+ * ALREADY-authorized history (e.g. rebuilding client state after a
+ * reload, §23) but can NEVER extend how far a session may see; only
+ * `advanceReplayClock` below can do that, deliberately, via its own
+ * validated search. Reuses `visibleCandles` — the EXACT SAME
+ * closed-candle rule `visible-candles.ts` already defines and tests
+ * client-side — so there is one single definition of "visible" for the
+ * whole app, applied here as the primary boundary and left in place
+ * client-side purely as defense-in-depth (§20). See that module's own
+ * doc comment for the exact rule.
  */
 export async function fetchReplayCandlesWithProvenance(
   userId: string,
@@ -594,60 +721,304 @@ export async function fetchReplayCandlesWithProvenance(
 ): Promise<{ ok: true; candles: Candle[]; provenance: CandleProvenance[] } | Extract<FetchCandlesResult, { ok: false }>> {
   const session = await prisma.replayReviewSession.findFirst({
     where: { id: sessionId, userId },
-    select: { marketDataProvenance: true },
+    select: { marketDataProvenance: true, startDate: true, endDate: true, replayCurrentTime: true },
   });
   if (!session) {
     return { ok: false, error: { code: "PROVIDER_ERROR", message: "Replay review session not found." } };
   }
 
-  const map = (session.marketDataProvenance as unknown as MarketDataProvenanceMap | null) ?? {};
-  const existing = map[canonicalSymbol];
+  const periodStart = session.startDate.getTime();
+  const periodEnd = session.endDate.getTime() + DAY_MS - 1;
+  // The trusted boundary — NEVER the client's own `to`. A session that has
+  // never advanced yet (replayCurrentTime still null) has authorized
+  // nothing past periodStart.
+  const visibilityBoundary = session.replayCurrentTime ? Math.min(session.replayCurrentTime.getTime(), periodEnd) : periodStart;
 
-  let provider: HistoricalMarketDataProvider;
-  if (existing) {
-    const pinned = getProviderById(existing.providerId);
-    if (!pinned) {
-      return {
-        ok: false,
-        error: {
-          code: "PROVIDER_ERROR",
-          message: `This session's ${canonicalSymbol} data was originally sourced from an unrecognized provider ("${existing.providerId}").`,
-        },
-      };
-    }
-    if (!pinned.isAvailable()) {
-      return {
-        ok: false,
-        error: {
-          code: "PROVIDER_ERROR",
-          message: `This session's ${canonicalSymbol} data came from ${pinned.displayName}, which is no longer configured. Restore its credentials to keep replaying this asset — Traditorium never silently switches data sources mid-session.`,
-        },
-      };
-    }
-    // Stage 17B.1 §10/§11 (extended Stage 17C.2 §21) — historical
-    // provenance staying frozen does NOT override current licensing
-    // policy. A session pinned to a licensed/gated provider (Databento or
-    // Twelve Data) whose display is currently disabled gets a structured,
-    // non-destructive refusal: the frozen provenance record is left
-    // untouched (no write happens below), no fetch is attempted, and there
-    // is no silent fallback to Fixture or any
-    // other provider substitution.
-    if (!isProviderDisplayPermitted(pinned.id)) {
-      return {
-        ok: false,
-        error: {
-          code: "PROVIDER_DISPLAY_DISABLED",
-          message: `This session's ${canonicalSymbol} data is sourced from ${pinned.displayName}, which is currently disabled for display (licensing policy). The original provenance is preserved — it will resume once display is re-enabled.`,
-        },
-      };
-    }
-    provider = pinned;
-  } else {
-    provider = resolveMarketDataProvider(canonicalSymbol);
+  const clampedFrom = Math.max(from, periodStart);
+  const clampedTo = Math.min(to, visibilityBoundary);
+  if (clampedFrom > clampedTo) return { ok: true, candles: [], provenance: [] };
+
+  const map = (session.marketDataProvenance as unknown as MarketDataProvenanceMap | null) ?? {};
+  const resolved = resolvePinnedOrAutomaticProvider(userId, canonicalSymbol, map);
+  if (!resolved.ok) return resolved;
+
+  const result = await getHistoricalCandles(canonicalSymbol, clampedFrom, clampedTo, resolved.provider);
+  if (!result.ok) return result;
+  const safeCandles = visibleCandles(result.candles, visibilityBoundary, "1m");
+  // Prompt 6 §20 fix — a provider's OWN provenance segments record what it
+  // QUERIED, not what actually became visible (a day-granular provider
+  // fetch happens regardless of whether the request's sliver of that day
+  // survives the strict visibility filter above). Recording provenance for
+  // a fetch that revealed ZERO candles falsely "consumes" this asset's
+  // provenance — `isProvenanceConsumed`'s freeze-once lock (§16) would then
+  // refuse MT5 dataset selection before the trader ever saw a single
+  // candle, simply because the read-only history-refill effect ran once on
+  // mount. Only recording provenance when something real was actually
+  // revealed keeps "consumed" meaning what it says.
+  if (safeCandles.length > 0) await recordMarketDataProvenance(sessionId, canonicalSymbol, result.provenance);
+  return { ok: true, candles: safeCandles, provenance: result.provenance };
+}
+
+/**
+ * Strict no-future-candle delivery (Prompt 5 §5/§6/§10) — the ONLY function
+ * that may EXTEND a session's authoritative `replayCurrentTime` forward,
+ * i.e. the narrow "advance" primitive §6 asks for (covers Step/Play/seek/
+ * jump-to-start/day-nav — all of them are just "move the boundary forward
+ * to some target instant," differing only in how far the CLIENT chooses to
+ * ask for in one call). `requestedTime` is a target, never trusted
+ * directly: it is clamped to `[currentBoundary, periodEnd]` — it can never
+ * move the boundary BACKWARD (that stays `updateReplayProgress`'s job) and
+ * can never escape the review period, satisfying §15 even though the
+ * underlying MT5/vendor dataset may cover a wider range. Returns exactly
+ * the newly-permitted candles (those that were not yet visible under the
+ * OLD boundary), reusing the same `visibleCandles` rule as the read path
+ * above — one definition of "visible," one place either function can ever
+ * disagree about it: nowhere.
+ */
+export async function advanceReplayClock(
+  userId: string,
+  sessionId: string,
+  canonicalSymbol: string,
+  requestedTime: number,
+  /** The trader's current DISPLAY timeframe — this function always fetches
+   *  at base (1m) granularity regardless, but keeps the session's resume
+   *  point (§23 — reload/persistence) fully populated alongside
+   *  `replayCurrentTime` so `replayResumePoint` is never left null after
+   *  the very first advance. Defaults to "1m" when the caller doesn't
+   *  have a more specific one yet (e.g. the very first bootstrap call). */
+  timeframe: string = "1m",
+): Promise<{ ok: true; candles: Candle[]; provenance: CandleProvenance[]; currentTime: number } | Extract<FetchCandlesResult, { ok: false }>> {
+  const session = await prisma.replayReviewSession.findFirst({
+    where: { id: sessionId, userId },
+    select: { marketDataProvenance: true, startDate: true, endDate: true, replayCurrentTime: true },
+  });
+  if (!session) {
+    return { ok: false, error: { code: "PROVIDER_ERROR", message: "Replay review session not found." } };
   }
 
-  const result = await getHistoricalCandles(canonicalSymbol, from, to, provider);
+  const periodStart = session.startDate.getTime();
+  const periodEnd = session.endDate.getTime() + DAY_MS - 1;
+  const oldBoundaryRead = session.replayCurrentTime ? Math.min(session.replayCurrentTime.getTime(), periodEnd) : periodStart;
+  const requestedClamped = Math.min(requestedTime, periodEnd);
+
+  const map = (session.marketDataProvenance as unknown as MarketDataProvenanceMap | null) ?? {};
+  const resolved = resolvePinnedOrAutomaticProvider(userId, canonicalSymbol, map);
+  if (!resolved.ok) return resolved;
+
+  if (requestedClamped <= oldBoundaryRead) {
+    // Nothing new to reveal (a no-op advance, e.g. requestedTime <= oldBoundary).
+    return { ok: true, candles: [], provenance: [], currentTime: oldBoundaryRead };
+  }
+
+  // Prompt 7 §7/§8 hardening — fetch BEFORE writing. A provider/R2 failure
+  // (bad symbol, network outage, storage unavailable) must leave the
+  // authoritative boundary COMPLETELY untouched — a real regression this
+  // test suite caught: writing the boundary first and fetching second let
+  // a failed fetch still advance `replayCurrentTime` to the requested
+  // target, so a retry after recovery would find the boundary already
+  // "there" and skip re-fetching the very data that was never actually
+  // retrieved. `fetchFrom` uses the READ (possibly slightly stale under a
+  // genuine concurrent advance) `oldBoundaryRead` — safe: at worst this
+  // fetches a slightly wider range than strictly necessary, never fewer
+  // candles than needed, and the client-side merge is dedup-safe either way.
+  const fetchFrom = Math.max(periodStart, oldBoundaryRead - 60_000);
+  const result = await getHistoricalCandles(canonicalSymbol, fetchFrom, requestedClamped, resolved.provider);
   if (!result.ok) return result;
-  await recordMarketDataProvenance(sessionId, canonicalSymbol, result.provenance);
-  return { ok: true, candles: result.candles, provenance: result.provenance };
+
+  // Only NOW, once the fetch has genuinely succeeded, extend the
+  // authoritative boundary — atomically and race-safely (see
+  // `updateReplayProgress`'s own doc comment for the full rationale: a
+  // read-then-write clamp has a proven gap for a concurrent write to land
+  // in). `GREATEST(requestedTime, currentValue)` computed against the
+  // row's OWN value at write time means a concurrent advance and this one
+  // always converge on the correct maximum, regardless of resolution
+  // order — never a lost update. `RETURNING` hands back the ACTUAL
+  // resulting boundary.
+  const rows = await prisma.$queryRaw<{ replayCurrentTime: Date }[]>`
+    UPDATE "ReplayReviewSession"
+    SET "replayCurrentTime" = LEAST(GREATEST(${new Date(requestedClamped)}::timestamp, COALESCE("replayCurrentTime", ${new Date(periodStart)}::timestamp)), ${new Date(periodEnd)}::timestamp),
+        "replayCurrentAsset" = ${canonicalSymbol},
+        "replayCurrentTimeframe" = ${timeframe},
+        "updatedAt" = NOW()
+    WHERE "id" = ${sessionId} AND "userId" = ${userId}
+    RETURNING "replayCurrentTime"
+  `;
+  if (rows.length === 0) {
+    return { ok: false, error: { code: "PROVIDER_ERROR", message: "Replay review session not found." } };
+  }
+  const newBoundary = rows[0].replayCurrentTime.getTime();
+
+  // Only what's NEWLY visible under the extended boundary.
+  const newlyVisible = visibleCandles(result.candles, newBoundary, "1m").filter((c) => c.timestamp + 60_000 > oldBoundaryRead);
+  // Prompt 6 §20 fix — same reasoning as the read-only path above: advancing
+  // THROUGH a pure gap (e.g. a weekend) legitimately moves the boundary
+  // forward with zero newly-visible candles; that alone shouldn't "consume"
+  // this asset's provenance and lock out MT5 dataset selection before the
+  // trader has actually seen anything.
+  if (newlyVisible.length > 0) await recordMarketDataProvenance(sessionId, canonicalSymbol, result.provenance);
+  return { ok: true, candles: newlyVisible, provenance: result.provenance, currentTime: newBoundary };
+}
+
+// ── MT5 explicit Data Source selection (Edge Review Replay Data Source §14-16) ──
+
+/** True once a session's provenance for an asset has actually been used to
+ *  serve candles — the freeze-once lifecycle's own definition of "replay
+ *  has materially started" for that asset (§16: "before replay begins:
+ *  [Change]; after: Locked for this replay"). An entry can exist with zero
+ *  segments right after an explicit selection but before the chart has
+ *  fetched anything yet — that's still pre-lock. */
+function isProvenanceConsumed(entry: StoredMarketDataProvenance | undefined): boolean {
+  return (entry?.segments.length ?? 0) > 0;
+}
+
+export interface Mt5DataSourceOptionDTO extends MarketDataImportSummaryDTO {
+  compatible: boolean;
+  /** Empty when `compatible`. Human-readable, e.g. "Different symbol
+   *  (EURUSD)" or "Doesn't cover this review period" — never a bare code,
+   *  and never hidden: incompatible datasets are still listed (§6). */
+  incompatibilityReasons: string[];
+}
+
+/**
+ * Every one of the user's MT5 imports, annotated with whether it's usable
+ * for THIS session's asset/timeframe/review period — compatible ones
+ * first, never silently filtered out (§6/§18). Ownership of the session
+ * itself is enforced by the `userId` scope on the lookup below; each
+ * returned import is already ownership-scoped by `listMt5Imports`.
+ */
+export async function listMt5DataSourceOptions(
+  userId: string,
+  sessionId: string,
+  canonicalSymbol: string,
+  nativeTimeframe: Timeframe,
+): Promise<{ ok: true; options: Mt5DataSourceOptionDTO[] } | { ok: false; error: string }> {
+  const session = await prisma.replayReviewSession.findFirst({
+    where: { id: sessionId, userId },
+    select: { startDate: true, endDate: true },
+  });
+  if (!session) return { ok: false, error: "Review session not found." };
+
+  const periodFromMs = session.startDate.getTime();
+  const periodToMs = session.endDate.getTime() + DAY_MS - 1;
+
+  const imports = await listMt5Imports(userId);
+  const options: Mt5DataSourceOptionDTO[] = imports.map((imp) => {
+    const reasons: string[] = [];
+    if (imp.canonicalSymbol !== canonicalSymbol) reasons.push(`Different symbol (${imp.canonicalSymbol})`);
+    if (imp.nativeTimeframe !== nativeTimeframe) reasons.push(`Different timeframe (${imp.nativeTimeframe})`);
+    const impFromMs = new Date(imp.rangeFrom).getTime();
+    // The stored `rangeTo` is the LAST candle's own timestamp (its bar's
+    // START, not its end) — a dataset whose last bar starts at 23:59:00
+    // still fully covers a day ending at 23:59:59.999, so the comparison
+    // extends `rangeTo` by one full native-timeframe interval before
+    // checking it against the period's end.
+    const impToMs = new Date(imp.rangeTo).getTime() + timeframeToMs(imp.nativeTimeframe) - 1;
+    if (impFromMs > periodFromMs || impToMs < periodToMs) reasons.push("Doesn't cover this review period");
+    return { ...imp, compatible: reasons.length === 0, incompatibilityReasons: reasons };
+  });
+  options.sort((a, b) => Number(b.compatible) - Number(a.compatible));
+
+  return { ok: true, options };
+}
+
+/**
+ * §14/§15 (the user's own top priority for this feature) — explicitly
+ * establishes replay provenance for one asset: `providerId: "mt5-imported"`
+ * PLUS the exact `MarketDataImport` id, written directly to
+ * `marketDataProvenance` before any candle has ever been fetched under it.
+ * This is deliberate, trader-driven provenance — never routed through
+ * `resolveMarketDataProvider` (which must never choose MT5 automatically,
+ * see that function's own doc comment) and never inferred from import
+ * presence.
+ *
+ * Refuses once the asset's provenance is already consumed (§16 — "Locked
+ * for this replay"), refuses a dataset that doesn't actually belong to this
+ * user (via `getMt5Import`'s ownership scoping, §7/§23), refuses a
+ * symbol/timeframe mismatch, and refuses a dataset that doesn't cover the
+ * full review period (§19 — never a partial-coverage selection that would
+ * later force a silent provider fallback for the missing dates). An
+ * UNCONSUMED prior selection (segments still empty) may be freely
+ * overwritten — the trader is still allowed to change their mind before
+ * replay actually starts pulling candles.
+ */
+export async function selectMt5DataSource(
+  userId: string,
+  sessionId: string,
+  canonicalSymbol: string,
+  importId: string,
+  nativeTimeframe: Timeframe,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await prisma.replayReviewSession.findFirst({
+    where: { id: sessionId, userId },
+    select: { marketDataProvenance: true, startDate: true, endDate: true },
+  });
+  if (!session) return { ok: false, error: "Review session not found." };
+
+  const map = { ...((session.marketDataProvenance as unknown as MarketDataProvenanceMap | null) ?? {}) };
+  if (isProvenanceConsumed(map[canonicalSymbol])) {
+    return { ok: false, error: "Locked for this replay — candles have already been loaded for this asset." };
+  }
+
+  const imp = await getMt5Import(userId, importId);
+  if (!imp) return { ok: false, error: "That imported dataset could not be found." };
+  if (imp.canonicalSymbol !== canonicalSymbol) {
+    return { ok: false, error: `That dataset is for ${imp.canonicalSymbol}, not ${canonicalSymbol}.` };
+  }
+  if (imp.nativeTimeframe !== nativeTimeframe) {
+    return { ok: false, error: `That dataset is ${imp.nativeTimeframe} data, not ${nativeTimeframe}.` };
+  }
+  const periodFromMs = session.startDate.getTime();
+  const periodToMs = session.endDate.getTime() + DAY_MS - 1;
+  const impFromMs = new Date(imp.rangeFrom).getTime();
+  const impToMs = new Date(imp.rangeTo).getTime() + timeframeToMs(imp.nativeTimeframe) - 1;
+  if (impFromMs > periodFromMs || impToMs < periodToMs) {
+    return { ok: false, error: "This dataset doesn't cover the full review period." };
+  }
+
+  map[canonicalSymbol] = {
+    providerId: MT5_IMPORTED_PROVIDER_ID,
+    datasetId: imp.id,
+    priceBasis: "user-imported",
+    retrievedAt: new Date().toISOString(),
+    segments: [],
+    frozenAt: new Date().toISOString(),
+  };
+  await prisma.replayReviewSession.update({
+    where: { id: sessionId },
+    data: { marketDataProvenance: map as unknown as Prisma.InputJsonValue },
+  });
+  return { ok: true };
+}
+
+/**
+ * Reverts an UNCONSUMED explicit selection back to automatic resolution
+ * (Traditorium Historical Data) — deletes the asset's provenance entry
+ * entirely so the next `fetchReplayCandlesWithProvenance` call falls
+ * through to `resolveMarketDataProvider` exactly as if no selection had
+ * ever been made. Refuses once consumed, same as `selectMt5DataSource`.
+ */
+export async function resetMarketDataSourceSelection(
+  userId: string,
+  sessionId: string,
+  canonicalSymbol: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await prisma.replayReviewSession.findFirst({
+    where: { id: sessionId, userId },
+    select: { marketDataProvenance: true },
+  });
+  if (!session) return { ok: false, error: "Review session not found." };
+
+  const map = { ...((session.marketDataProvenance as unknown as MarketDataProvenanceMap | null) ?? {}) };
+  const existing = map[canonicalSymbol];
+  if (!existing) return { ok: true };
+  if (isProvenanceConsumed(existing)) {
+    return { ok: false, error: "Locked for this replay — candles have already been loaded for this asset." };
+  }
+
+  delete map[canonicalSymbol];
+  await prisma.replayReviewSession.update({
+    where: { id: sessionId },
+    data: { marketDataProvenance: map as unknown as Prisma.InputJsonValue },
+  });
+  return { ok: true };
 }

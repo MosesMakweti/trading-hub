@@ -2,8 +2,10 @@ import { FixtureMarketDataProvider } from "@/domain/market-data/providers/fixtur
 import { parseSymbol } from "@/domain/trade-plan/instrument-catalog";
 import { DatabentoHistoricalMarketDataProvider } from "@/server/services/market-data/databento-provider";
 import { TwelveDataHistoricalMarketDataProvider } from "@/server/services/market-data/twelve-data-provider";
+import { MT5_IMPORTED_PROVIDER_ID, Mt5ImportedHistoricalMarketDataProvider } from "@/server/services/market-data/mt5-imported-provider";
 import type { Candle } from "@/domain/market-data/candle";
 import type { CandleProvenance, FetchCandlesResult, HistoricalMarketDataProvider } from "@/domain/market-data/provider-types";
+import type { Timeframe } from "@/domain/market-data/timeframe";
 
 /**
  * Canonical futures symbols Databento is the production candidate for
@@ -84,9 +86,14 @@ function isMarketDataDisplayDevOverrideEnabled(): boolean {
  * (no licensing concern — synthetic data). Databento is permitted only when
  * `MARKET_DATA_EXTERNAL_DISPLAY_ENABLED=true`, or the explicit dev override
  * above — never merely because a session's provenance already names it.
+ * MT5 Imported (Stage 21.3B §4) is always permitted too, same reasoning as
+ * Fixture but for a different cause: it is the trader's OWN private data,
+ * never a third-party vendor feed, so there is no redistribution-licensing
+ * question to gate.
  */
 export function isProviderDisplayPermitted(providerId: string): boolean {
   if (providerId === fixtureProvider.id) return true;
+  if (providerId === MT5_IMPORTED_PROVIDER_ID) return true;
   if (providerId === databentoProvider.id) {
     return isMarketDataExternalDisplayEnabled() || isMarketDataDisplayDevOverrideEnabled();
   }
@@ -114,6 +121,14 @@ export function isProviderDisplayPermitted(providerId: string): boolean {
  * changes later) is enforced one layer up, in
  * `replay-review.service.ts`'s provenance freezing — see that file's own
  * doc comment.
+ *
+ * Stage 21.3B §4/§5 — deliberately DOES NOT route to MT5 Imported, by
+ * symbol or by any other automatic rule, and must not gain one until a
+ * later stage's explicit Data Source selector exists. A trader who has
+ * imported MT5 data for e.g. EURUSD must not have it silently override
+ * their existing Databento/Twelve Data/Fixture resolution for that symbol —
+ * MT5 Imported is reachable ONLY via `getProviderById("mt5-imported", ...)`
+ * (freeze-once provenance today; an explicit selector later).
  */
 export function resolveMarketDataProvider(canonicalSymbol: string): HistoricalMarketDataProvider {
   const upper = canonicalSymbol.toUpperCase();
@@ -133,16 +148,48 @@ export function resolveMarketDataProvider(canonicalSymbol: string): HistoricalMa
   return fixtureProvider;
 }
 
-/** Looks a provider up BY ID regardless of current config/availability —
- *  used only to honor freeze-once provenance (Stage 17B §13): a session
- *  that already recorded a provider for an asset must keep asking that same
- *  provider, even if `resolveMarketDataProvider` would answer differently
- *  today, and must surface a clear error rather than silently falling back
- *  to Fixture if that provider becomes unavailable mid-session. */
-export function getProviderById(providerId: string): HistoricalMarketDataProvider | null {
+/** Stage 21.3B §4/§6 — the extra per-lookup context `getProviderById` needs
+ *  ONLY for `"mt5-imported"`; every other provider ignores this entirely
+ *  (they're stateless singletons, see below). `userId` is required to
+ *  construct an MT5 provider instance at all — imported data is inherently
+ *  user-owned and there is no meaningful anonymous resolution. `timeframe`
+ *  defaults to `"1m"` (matching `Mt5ImportedHistoricalMarketDataProvider`'s
+ *  own constructor default) when omitted. `importId` optionally pins to one
+ *  specific `MarketDataImport` (§6) instead of the provider's default
+ *  "merge every overlapping import" behavior — the future Data Source UI is
+ *  expected to supply it once a trader picks a specific dataset. */
+export interface ProviderResolutionContext {
+  userId?: string;
+  timeframe?: Timeframe;
+  importId?: string;
+}
+
+/**
+ * Looks a provider up BY ID regardless of current config/availability —
+ * used to honor freeze-once provenance (Stage 17B §13): a session that
+ * already recorded a provider for an asset must keep asking that same
+ * provider, even if `resolveMarketDataProvider` would answer differently
+ * today, and must surface a clear error rather than silently falling back
+ * to Fixture if that provider becomes unavailable mid-session.
+ *
+ * Stage 21.3B §4 — `"mt5-imported"` is now a legitimate id here, making
+ * `getProviderById("mt5-imported", { userId })` possible — the exact hook a
+ * future Data Source selector (not built in this stage) needs. Unlike the
+ * three vendor/fixture providers above (module-level singletons, since they
+ * carry no per-user state), an MT5 provider is constructed fresh per call,
+ * scoped to `context.userId` — never cached or shared across users. Missing
+ * `context.userId` returns `null`, the same "can't resolve this" signal an
+ * unrecognized provider id already produces, rather than throwing or
+ * silently picking a user.
+ */
+export function getProviderById(providerId: string, context?: ProviderResolutionContext): HistoricalMarketDataProvider | null {
   if (providerId === databentoProvider.id) return databentoProvider;
   if (providerId === twelveDataProvider.id) return twelveDataProvider;
   if (providerId === fixtureProvider.id) return fixtureProvider;
+  if (providerId === MT5_IMPORTED_PROVIDER_ID) {
+    if (!context?.userId) return null;
+    return new Mt5ImportedHistoricalMarketDataProvider(context.userId, context.timeframe ?? "1m", context.importId);
+  }
   return null;
 }
 
@@ -234,6 +281,27 @@ export async function getHistoricalCandles(
   }
   if (from > to) {
     return { ok: false, error: { code: "PROVIDER_ERROR", message: "from must be <= to." } };
+  }
+
+  // Stage 21.3B — integration finding, caught by a real regression test:
+  // `dayCache`/`inFlightFetches` below are keyed by (providerId, symbol,
+  // day) ONLY — correct for Databento/Twelve Data/Fixture, whose data for a
+  // symbol+day is genuinely identical no matter who asks. MT5 Imported
+  // breaks that assumption: it's constructed PER USER (never a shared
+  // singleton, see `getProviderById`), so the same `"mt5-imported"` id can
+  // mean completely different private data depending on whose instance is
+  // asking. Routing it through this shared cache let one user's cached
+  // fetch answer a LATER, different user's request for the same
+  // symbol+day — a real cross-user leak, not a hypothetical one. MT5
+  // Imported therefore bypasses this cache entirely and calls the
+  // provider directly for the whole requested range in one shot (its own
+  // R2 reads are already chunked per calendar month — no day-splitting
+  // needed here). An uncached read is the correct trade over reusing a
+  // cache layer that was never designed for a per-user provider.
+  if (provider.id === MT5_IMPORTED_PROVIDER_ID) {
+    const result = await provider.fetchCandles({ canonicalSymbol, from, to });
+    if (!result.ok) return result;
+    return { ok: true, candles: result.candles, provenance: result.provenance ? [result.provenance] : [] };
   }
 
   const firstDay = Math.floor(from / DAY_MS) * DAY_MS;

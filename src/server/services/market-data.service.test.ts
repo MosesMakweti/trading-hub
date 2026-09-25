@@ -106,11 +106,51 @@ describe("market-data.service — provider selection (Stage 13 §7, extended Sta
     expect(getProviderById("twelvedata")?.id).toBe("twelvedata");
     expect(getProviderById("not-a-real-provider")).toBeNull();
   });
+
+  it("never routes any symbol to MT5 Imported automatically — resolveMarketDataProvider has no MT5 branch (Stage 21.3B §5)", () => {
+    // An MT5 import's mere existence must never override an existing
+    // user's Databento/Twelve Data/Fixture resolution for a symbol — that
+    // requires an explicit Data Source selection (not built this stage),
+    // never automatic symbol-based dispatch. This guards against a future
+    // edit accidentally adding such a branch to resolveMarketDataProvider.
+    for (const sym of ["EURUSD", "XAUUSD", "ES", "GBPUSD", "NAS100", "SOME_UNKNOWN_SYMBOL"]) {
+      expect(resolveMarketDataProvider(sym).id).not.toBe("mt5-imported");
+    }
+  });
+});
+
+describe("getProviderById — MT5 Imported (Stage 21.3B §4/§6)", () => {
+  it("resolves to an MT5 Imported provider instance when a userId is supplied", () => {
+    const provider = getProviderById("mt5-imported", { userId: "user_1" });
+    expect(provider?.id).toBe("mt5-imported");
+    expect(provider?.displayName).toBe("MT5 Imported");
+    expect(provider?.baseTimeframe).toBe("1m"); // default when no timeframe given
+  });
+
+  it("returns null without a userId — MT5 Imported cannot be resolved anonymously", () => {
+    expect(getProviderById("mt5-imported")).toBeNull();
+    expect(getProviderById("mt5-imported", {})).toBeNull();
+  });
+
+  it("honors an explicit timeframe context, defaulting to 1m when omitted", () => {
+    expect(getProviderById("mt5-imported", { userId: "user_1" })?.baseTimeframe).toBe("1m");
+    expect(getProviderById("mt5-imported", { userId: "user_1", timeframe: "5m" })?.baseTimeframe).toBe("5m");
+  });
+
+  it("constructs a fresh instance per call — never a shared singleton across users", () => {
+    const a = getProviderById("mt5-imported", { userId: "user_a" });
+    const b = getProviderById("mt5-imported", { userId: "user_b" });
+    expect(a).not.toBe(b);
+  });
 });
 
 describe("isProviderDisplayPermitted — licensing permission is separate from freeze-once provenance (Stage 17B.1 §10/§11)", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it("MT5 Imported is always permitted — the trader's own private data, no vendor licensing concern (Stage 21.3B §4)", () => {
+    expect(isProviderDisplayPermitted("mt5-imported")).toBe(true);
   });
 
   it("Fixture is always permitted — no licensing concern", () => {
@@ -210,6 +250,41 @@ describe("getHistoricalCandles — day-chunked cache (§8)", () => {
     const result = await getHistoricalCandles("EURUSD", saturday, saturday + DAY_MS - 1);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.candles).toEqual([]);
+  });
+
+  it("never shares the day-cache across providers sharing the mt5-imported id (Stage 21.3B — cross-user leak regression)", async () => {
+    // Two FAKE providers both claim id "mt5-imported" (exactly what two
+    // different users' real Mt5ImportedHistoricalMarketDataProvider
+    // instances do) but return different candles for the SAME
+    // symbol+day. If getHistoricalCandles's day-cache were still keyed by
+    // (providerId, symbol, day) alone for this id, the second call would
+    // wrongly return the first provider's cached candles.
+    function fakeMt5Provider(closePrice: number): HistoricalMarketDataProvider {
+      return {
+        id: "mt5-imported",
+        displayName: "MT5 Imported (fake)",
+        baseTimeframe: "1m",
+        isAvailable: () => true,
+        resolveSymbol: () => ({ supported: true, providerSymbol: "XAUUSD" }),
+        getSupportedRange: () => null,
+        fetchCandles: async (params) => ({
+          ok: true,
+          candles: [{ timestamp: params.from, open: closePrice, high: closePrice, low: closePrice, close: closePrice, volume: null }],
+          provenance: { providerId: "mt5-imported", retrievedAt: new Date().toISOString(), segments: [] },
+        }),
+      };
+    }
+
+    const from = Date.UTC(2026, 7, 10);
+    const ownerResult = await getHistoricalCandles("XAUUSD", from, from + 60_000, fakeMt5Provider(1111));
+    const attackerResult = await getHistoricalCandles("XAUUSD", from, from + 60_000, fakeMt5Provider(2222));
+
+    expect(ownerResult.ok).toBe(true);
+    expect(attackerResult.ok).toBe(true);
+    if (ownerResult.ok && attackerResult.ok) {
+      expect(ownerResult.candles[0]?.close).toBe(1111);
+      expect(attackerResult.candles[0]?.close).toBe(2222); // never the owner's cached 1111
+    }
   });
 });
 

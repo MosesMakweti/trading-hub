@@ -2,6 +2,8 @@ import { prisma } from "@/server/db";
 import { getDailyNote } from "@/server/services/journal.service";
 import { listDailyPnl, listRecentTrades, listTradesForDay } from "@/server/services/trades.service";
 import { getAnalyticsData, getAnalyticsFilterOptions, type AnalyticsFilters } from "@/server/services/analytics.service";
+import { getCanonicalAnalyticsDataset, summarizeCanonicalAnalytics } from "@/server/services/analytics-canonical.service";
+import { cumulativeWinRateSeries } from "@/domain/analytics/canonical-aggregations";
 import { getAccountBalance, listTradingAccounts } from "@/server/services/accounts.service";
 import { listStrategySessionWindows } from "@/server/services/strategy-sot.service";
 import { getTradingDay } from "@/server/services/trading-day.service";
@@ -192,6 +194,8 @@ export async function getDashboardData(
     previousAnalytics,
     propFirmHealth,
     dailyPnl,
+    canonicalRows,
+    previousCanonicalRows,
   ] = await Promise.all([
     getDailyNote(userId, todayKey),
     listTradesForDay(userId, todayKey),
@@ -204,7 +208,31 @@ export async function getDashboardData(
     getAnalyticsData(userId, prevRange.from, prevRange.to, filters),
     getPropFirmHealthSummaries(userId),
     listDailyPnl(userId),
+    // Analytics V2 §21 — Dashboard/Analytics must never show a
+    // differently-calculated value under the same metric name. Win Rate/
+    // Profit Factor/Expectancy are trade-performance (R) metrics, so they're
+    // sourced from the SAME canonical dataset Analytics uses, not the legacy
+    // %-of-account-equity numbers `getAnalyticsData` still computes (that
+    // function's own $ fields — netPnl, drawdown, balances — stay the
+    // authority for dollar/accounting metrics; see its doc comment).
+    getCanonicalAnalyticsDataset(userId, { from: params.from, to: params.to, accountId: params.accountId }),
+    getCanonicalAnalyticsDataset(userId, { from: prevRange.from, to: prevRange.to, accountId: params.accountId }),
   ]);
+
+  const canonical = summarizeCanonicalAnalytics(canonicalRows);
+  const previousCanonical = summarizeCanonicalAnalytics(previousCanonicalRows);
+  const withCanonicalR = <T extends typeof analytics>(source: T, summary: typeof canonical, rows: typeof canonicalRows): T => ({
+    ...source,
+    trading: {
+      ...source.trading,
+      winRate: summary.overview.winRate,
+      profitFactor: summary.overview.profitFactor,
+      expectancy: summary.overview.expectancy,
+      winRateSeries: cumulativeWinRateSeries(rows),
+    },
+  });
+  const dashboardAnalytics = withCanonicalR(analytics, canonical, canonicalRows);
+  const dashboardPreviousAnalytics = withCanonicalR(previousAnalytics, previousCanonical, previousCanonicalRows);
 
   const todayRisk = await getTodayRiskSummary(
     userId,
@@ -252,8 +280,8 @@ export async function getDashboardData(
     tradingDay,
     todayRisk,
     propFirmHealth,
-    analytics,
-    previousAnalytics,
+    analytics: dashboardAnalytics,
+    previousAnalytics: dashboardPreviousAnalytics,
     dailyPnl,
   };
 }

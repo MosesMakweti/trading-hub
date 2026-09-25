@@ -8,6 +8,7 @@ import {
 } from "@/server/services/replay-review.service";
 import { listReplayTrades } from "@/server/services/replay-trade.service";
 import { getReplayComparison } from "@/server/services/replay-comparison.service";
+import { listMt5Imports } from "@/server/services/mt5-import.service";
 import { listStrategyVersions } from "@/server/services/strategies.service";
 import { listTradingDayKeysInRange } from "@/server/services/trading-day.service";
 import { computeReviewPeriod } from "@/domain/replay/review-period";
@@ -50,11 +51,18 @@ export default async function EdgeReviewPage({
   const strategyId = params.strategy || null;
   const assetSymbols = params.assets ? params.assets.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean) : [];
 
-  const [filterOptions, weeklyReviewRow, session] = await Promise.all([
+  const [filterOptions, weeklyReviewRow, session, mt5Imports] = await Promise.all([
     getAnalyticsFilterOptions(user.id),
     getWeeklyReview(user.id, startDate, reviewType),
     findReplayReviewSessionForPeriod(user.id, { reviewType, startDate, endDate, strategyId, assetSymbols }),
+    listMt5Imports(user.id),
   ]);
+  // Edge Review Replay Data Source §9 hardening — the first-fetch gate
+  // (ReplayMarketPanel) only needs to pause for an asset the trader
+  // actually has SOME MT5 data for; without this, a trader with a single
+  // unrelated-symbol import would be prompted for every asset they review,
+  // not just the one(s) that could plausibly use it.
+  const mt5ImportedSymbols = [...new Set(mt5Imports.map((i) => i.canonicalSymbol))];
 
   const [baseline, historicalStrategyContext, dailyPlanDateKeys, replayTrades, comparisonFromService] = await Promise.all([
     session?.actualBaselineSnapshot
@@ -120,6 +128,7 @@ export default async function EdgeReviewPage({
         strategyId={strategyId}
         assetSymbols={assetSymbols}
         initialTab={initialTab}
+        mt5ImportedSymbols={mt5ImportedSymbols}
       />
     </FadeIn>
   );

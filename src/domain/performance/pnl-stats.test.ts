@@ -65,6 +65,41 @@ describe("maxDrawdown", () => {
     expect(dd.currentAmount).toBe(0);
     expect(dd.currentPercent).toBe(0);
   });
+
+  // Audit fixtures (Analytics V2 correctness pass) — maxDrawdown() is
+  // unit-agnostic (the caller decides R vs $), so an R-multiple cumulative
+  // curve is a valid input: "do not force R into a percentage-only function."
+  it("Audit Fixture C: R curve 0,2,1,4,3,3 — the two 1R peak-to-trough declines (2→1, 4→3), not the largest single trade", () => {
+    const dd = maxDrawdown([0, 2, 1, 4, 3, 3]);
+    expect(dd.amount).toBe(1);
+    // The two declines are both 1R in absolute terms but NOT equal in percent
+    // terms — 2→1 is a 50% decline off its peak, 4→3 is only 25% off its
+    // peak. `percent` correctly tracks the worse RELATIVE decline (50%),
+    // proving it's computed independently of `amount`, not derived from it.
+    expect(dd.percent).toBeCloseTo(50, 6);
+    expect(dd.currentAmount).toBe(1); // last point: peak 4, now 3
+    expect(dd.currentPercent).toBeCloseTo(25, 6);
+  });
+
+  it("Audit Fixture D: all-losses R curve 0,-1,-2,-4 never divides by a zero peak", () => {
+    const dd = maxDrawdown([0, -1, -2, -4]);
+    expect(dd.amount).toBe(4); // peak never exceeds the starting 0
+    expect(dd.percent).toBe(0); // decline / 0 is undefined — guarded to 0, never NaN/Infinity
+    expect(Number.isFinite(dd.percent)).toBe(true);
+    expect(Number.isNaN(dd.percent)).toBe(false);
+  });
+
+  it("Audit Fixture E: all-wins R curve 0,1,3,4 has zero drawdown throughout, no NaN/Infinity", () => {
+    const dd = maxDrawdown([0, 1, 3, 4]);
+    expect(dd.amount).toBe(0);
+    expect(dd.percent).toBe(0);
+    expect(dd.currentAmount).toBe(0);
+    expect(dd.currentPercent).toBe(0);
+  });
+
+  it("Audit Fixture F: no trades — a fully-defined, all-zero Drawdown, never null/undefined fields", () => {
+    expect(maxDrawdown([])).toEqual({ amount: 0, percent: 0, currentAmount: 0, currentPercent: 0, series: [] });
+  });
 });
 
 describe("recoveryFactor", () => {

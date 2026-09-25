@@ -9,10 +9,12 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ClipboardList,
+  Database,
   FlaskConical,
   Keyboard,
   Loader2,
   LocateFixed,
+  Lock,
   Minus,
   MousePointer2,
   NotebookText,
@@ -37,6 +39,7 @@ import { RichTextEditor } from "@/components/plan/rich-text-editor";
 import { TAG_STYLES, colorForName } from "@/components/ui/tag";
 import { dateKeyToUtcDate } from "@/lib/date";
 import {
+  advanceReplayClockAction,
   advanceReplayTradeExecution,
   clearReplayAnnotations,
   createReplayAnnotation,
@@ -56,13 +59,13 @@ import {
 import { ReplayDecisionPanel, type ChartPriceSelection } from "@/components/replay/replay-decision-panel";
 import { ReplayStrategyPanel } from "@/components/replay/replay-strategy-panel";
 import { ReplayDailyMarketPlanPanel } from "@/components/replay/replay-daily-market-plan-panel";
+import { DataSourceSheet } from "@/components/replay/data-source/data-source-sheet";
 import { utcDateToKey } from "@/lib/date";
 import { aggregateCandles } from "@/domain/market-data/aggregation";
 import { buildHigherTimeframeView, visibleCandles } from "@/domain/market-data/visible-candles";
 import { resolveChartPriceFormat } from "@/domain/market-data/chart-price-precision";
 import {
-  computeNextBackgroundChunk,
-  computeNextFetchWindow,
+  computeNextHistoryChunk,
   mergeLoadedRange,
   type LoadedRange,
 } from "@/domain/market-data/replay-prefetch-window";
@@ -152,6 +155,7 @@ export function ReplayMarketPanel({
   notes,
   notesSaved,
   onSaveNotes,
+  mt5ImportedSymbols,
 }: {
   session: ReplayReviewSessionDTO;
   assetOptions: string[];
@@ -161,6 +165,12 @@ export function ReplayMarketPanel({
   notes: unknown;
   notesSaved: boolean;
   onSaveNotes: (content: unknown) => Promise<{ success: boolean; error?: string }>;
+  /** The canonical symbols the trader has AT LEAST ONE MT5 import for
+   *  (server-resolved, zero extra round trips) — narrows the §9 first-fetch
+   *  gate to only the asset(s) where an MT5 choice is actually plausible,
+   *  rather than every asset merely because the trader has imported
+   *  something, somewhere, for an unrelated symbol. */
+  mt5ImportedSymbols: string[];
 }) {
   const periodStart = dateKeyToUtcDate(session.startDate).getTime();
   const periodEnd = dateKeyToUtcDate(session.endDate).getTime() + DAY_MS - 1;
@@ -182,6 +192,31 @@ export function ReplayMarketPanel({
   const [baseCandlesByAsset, setBaseCandlesByAsset] = useState<Record<string, Candle[]>>({});
   const [loadedRangesByAsset, setLoadedRangesByAsset] = useState<Record<string, LoadedRange[]>>({});
   const [sourceLabelByAsset, setSourceLabelByAsset] = useState<Record<string, string>>({});
+  // Edge Review Replay Data Source §14 — "a session can deliberately choose
+  // MT5 before its first candle fetch." An asset whose provenance was
+  // already frozen in an EARLIER visit to this session needs no decision
+  // (the auto-fetch just resumes that pinned source, exactly as before this
+  // feature existed — §9 "existing frozen session" case). A brand-new asset
+  // only pauses the auto-fetch when the trader has an MT5 import for THAT
+  // exact symbol (`mt5ImportedSymbols`) — zero behavior change for every
+  // trader who has never touched MT5 import, and no friction for an asset
+  // an MT5 import couldn't plausibly serve anyway.
+  const [sourceDecidedByAsset, setSourceDecidedByAsset] = useState<Record<string, boolean>>(() => {
+    const decided: Record<string, boolean> = {};
+    for (const asset of assetOptions) {
+      decided[asset] = !mt5ImportedSymbols.includes(asset) || session.marketDataProvenance?.[asset] != null;
+    }
+    return decided;
+  });
+  const [dataSourceSheetOpen, setDataSourceSheetOpen] = useState(false);
+  const [pinnedMt5DatasetByAsset, setPinnedMt5DatasetByAsset] = useState<Record<string, string | null>>(() => {
+    const pinned: Record<string, string | null> = {};
+    for (const asset of assetOptions) {
+      const entry = session.marketDataProvenance?.[asset];
+      pinned[asset] = entry?.providerId === "mt5-imported" ? (entry.datasetId ?? null) : null;
+    }
+    return pinned;
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [replayTrades, setReplayTrades] = useState<ReplayTradeDTO[]>(initialReplayTrades);
@@ -207,11 +242,54 @@ export function ReplayMarketPanel({
   const [pendingDrawingPoint, setPendingDrawingPoint] = useState<AnnotationPoint | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
 
-  const playTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const playTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Strict no-future-candle delivery (Prompt 5 §11) — the Play loop below
+  // needs the LATEST clock state between its own async steps (a `setTimeout`
+  // chain, not a plain interval — see that effect's own doc comment), so it
+  // reads this ref rather than the possibly-stale closure value.
+  const clockRef = useRef(clock);
+  useEffect(() => {
+    clockRef.current = clock;
+  }, [clock]);
+  // Prompt 6 hardening (§19 reload/persistence) — the LAST position this
+  // client successfully checkpointed to the server (by EITHER mechanism —
+  // see `persistProgress`'s own doc comment), seeded from the persisted
+  // resume point at mount. Deliberately tracked independently of
+  // `revealForward`'s own reveals: those advance the AUTHORITATIVE
+  // visibility boundary, which is a different, faster-moving thing than
+  // "what was last actually checkpointed" — conflating the two let a
+  // checkpoint silently regress when Play advanced entirely through
+  // already-revealed data without needing a fresh reveal in between.
+  const lastCheckpointedTimeRef = useRef(resume?.currentTime ?? periodStart);
+  // Prompt 6 hardening (§7/§8) — guards against CONCURRENT advancement: a
+  // rapid double-click on "Next" (or a manual Step landing mid-Play-tick)
+  // can otherwise start a SECOND `revealForward` before the first one's
+  // `apply()` has updated `clock`/`baseCandlesByAsset`, so both race from
+  // the same stale snapshot — at best a redundant fetch, at worst two
+  // overlapping `apply()` calls stepping from the same base and one of
+  // them spuriously concluding "nothing new" and marking FINISHED even
+  // though most of the review period is still ahead. Shared across
+  // `next()`, `shiftDay()`, and the Play loop: whoever gets there first
+  // runs; a concurrent caller is simply ignored (exactly like a disabled
+  // button while a request is in flight) rather than racing.
+  const advancingRef = useRef(false);
 
   const baseCandles = useMemo(() => baseCandlesByAsset[clock.asset] ?? [], [baseCandlesByAsset, clock.asset]);
   const annotations = useMemo(() => annotationsByAsset[clock.asset] ?? [], [annotationsByAsset, clock.asset]);
   const priceFormat = useMemo(() => resolveChartPriceFormat(clock.asset), [clock.asset]);
+
+  // §16, corrected Prompt 6 §20 — "Locked for this replay" once candles
+  // have ACTUALLY been served for this asset: either from an EARLIER visit
+  // (the server-seeded provenance's own segments) or from this mount's own
+  // reveal (tracked by `baseCandlesByAsset`, which only ever gains entries
+  // from REAL candle results — see `mergeCandles`). Deliberately NOT
+  // `loadedRangesByAsset`: that tracks what range was ASKED about (the
+  // read-only history sweep runs unconditionally on mount and would
+  // otherwise falsely "lock" every fresh session before a single candle
+  // was ever shown). The server-side provenance check was fixed the same
+  // way (`recordMarketDataProvenance` is now skipped for an empty result).
+  const dataSourceLocked =
+    (session.marketDataProvenance?.[clock.asset]?.segments.length ?? 0) > 0 || (baseCandlesByAsset[clock.asset]?.length ?? 0) > 0;
 
   // Refs so the execution-advance side effect (called from imperative event
   // handlers and the play-timer's setInterval closure) always sees the
@@ -265,62 +343,110 @@ export function ReplayMarketPanel({
     });
   }
 
-  // Chunked/prefetched candle loading (Stage 13 §8, reworked Stage 17B
-  // §23-24) — replaces the old "fetch the whole review period in one
-  // response" pattern. On asset switch, first loads a small ROLLING WINDOW
-  // around the clock's current position (fast initial paint, bounded
-  // request size against a real vendor), then keeps sweeping the REST of
-  // the review period in small background chunks so whole-period features
-  // (day navigation, jump-to-start) end up working exactly as before —
-  // assembled from many small requests instead of one giant one. Replay
-  // navigation still never triggers a NEW fetch itself; it only ever reads
-  // from `baseCandlesByAsset`, which this effect alone appends to.
+  /**
+   * Strict no-future-candle delivery (Prompt 5 §5/§6/§9/§10) — the ONLY
+   * function that reveals data the client didn't already have, and the
+   * ONLY caller of `advanceReplayClockAction` (the sole path that can
+   * extend a session's authoritative boundary forward — see that
+   * function's own doc comment). Used by Step/Play when local data runs
+   * out, and by seek-forward operations (jumpStart/shiftDay). Requests a
+   * SMALL lookahead past `minTargetTime` first (enough for one more base
+   * candle in the common, dense-data case), growing geometrically only if
+   * that comes back empty (a real market gap — weekend/holiday) — so a
+   * single Step typically reveals ~1 candle, while a gap is crossed in a
+   * handful of round trips instead of dozens of empty single-minute ones.
+   * Returns true once something new was actually revealed.
+   */
+  async function revealForward(asset: string, minTargetTime: number, timeframe: Timeframe): Promise<boolean> {
+    const loadedSoFar = loadedRangesByAssetRef.current[asset] ?? [];
+    const coveredThrough = loadedSoFar.length > 0 ? Math.max(...loadedSoFar.map((r) => r.to)) : periodStart - 1;
+    let lookahead = timeframeToMs("1m");
+    while (true) {
+      const target = Math.min(Math.max(minTargetTime, coveredThrough + 1) + lookahead, periodEnd);
+      const result = await advanceReplayClockAction({ sessionId: session.id, canonicalSymbol: asset, requestedTime: target, timeframe });
+      if (!result.success) {
+        toast.error(result.error.message);
+        return false;
+      }
+      if (result.candles.length > 0) {
+        setBaseCandlesByAsset((prev) => ({ ...prev, [asset]: mergeCandles(prev[asset] ?? [], result.candles) }));
+        setLoadedRangesByAsset((prev) => ({
+          ...prev,
+          [asset]: mergeLoadedRange(prev[asset] ?? [], { from: coveredThrough + 1, to: result.currentTime }),
+        }));
+        if (result.sourceLabel) setSourceLabelByAsset((prev) => ({ ...prev, [asset]: result.sourceLabel! }));
+        return true;
+      }
+      // Nothing revealed at this lookahead — either a real gap (try
+      // further) or genuinely nothing left in the review period.
+      if (target >= periodEnd) return false;
+      lookahead = Math.min(lookahead * 8, 7 * DAY_MS);
+    }
+  }
+
+  // Read-only historical re-fill (Stage 13 §8, reworked Stage 17B §23-24,
+  // corrected Prompt 5 §8) — pulls ALREADY-AUTHORIZED candles for the
+  // current asset up through the clock's own position, chunked to keep any
+  // single request small. This can NEVER reveal anything new (the server
+  // clips every response to the session's authoritative boundary
+  // regardless of what's requested here, see `fetchReplayCandlesWithProvenance`'s
+  // own doc comment) — it exists purely to rebuild client state (e.g.
+  // after a page reload, §23) without an extra "how far have I gotten"
+  // round trip. A brand-new session with nothing authorized yet falls
+  // through to `revealForward`, which is the only thing that can make the
+  // FIRST candle appear.
   useEffect(() => {
+    if (!sourceDecidedByAsset[clock.asset]) {
+      // §14 — waiting on the trader's explicit Data Source choice for this
+      // asset before ever fetching a candle; see `sourceDecidedByAsset`'s
+      // own doc comment above. Deferred a tick so this effect never calls
+      // setState synchronously within its own body.
+      queueMicrotask(() => setLoading(false));
+      return;
+    }
     let cancelled = false;
     const asset = clock.asset;
     const startingRanges = loadedRangesByAssetRef.current[asset] ?? [];
     const isFreshAsset = startingRanges.length === 0;
 
-    async function loadNext(loaded: LoadedRange[], priorityPhase: boolean): Promise<void> {
+    async function loadHistory(loaded: LoadedRange[]): Promise<void> {
       if (cancelled) return;
-      const window = priorityPhase
-        ? (computeNextFetchWindow(loaded, clock.currentTime, periodStart, periodEnd) ?? computeNextBackgroundChunk(loaded, periodStart, periodEnd))
-        : computeNextBackgroundChunk(loaded, periodStart, periodEnd);
-      if (!window) {
-        if (priorityPhase && isFreshAsset) setLoading(false);
-        return;
-      }
+      const chunk = computeNextHistoryChunk(loaded, clock.currentTime, periodStart, periodEnd);
+      if (!chunk) return;
 
-      const result = await getReplayCandles({ sessionId: session.id, canonicalSymbol: asset, from: window.from, to: window.to });
+      const result = await getReplayCandles({ sessionId: session.id, canonicalSymbol: asset, from: chunk.from, to: chunk.to });
       if (cancelled) return;
       if (!result.success) {
         setError(result.error.message);
-        setLoading(false);
         return;
       }
 
-      const nextLoaded = mergeLoadedRange(loaded, window);
+      const nextLoaded = mergeLoadedRange(loaded, chunk);
       setLoadedRangesByAsset((prev) => ({ ...prev, [asset]: nextLoaded }));
       setBaseCandlesByAsset((prev) => ({ ...prev, [asset]: mergeCandles(prev[asset] ?? [], result.candles) }));
       if (result.sourceLabel) setSourceLabelByAsset((prev) => ({ ...prev, [asset]: result.sourceLabel! }));
-      if (priorityPhase && isFreshAsset && computeNextFetchWindow(nextLoaded, clock.currentTime, periodStart, periodEnd) == null) {
-        setLoading(false);
-      }
-      // Keep going — the rolling window first, then the background sweep —
-      // until the whole period is covered.
-      void loadNext(nextLoaded, priorityPhase && computeNextFetchWindow(nextLoaded, clock.currentTime, periodStart, periodEnd) != null);
+      await loadHistory(nextLoaded);
     }
 
     void (async () => {
       if (isFreshAsset) setLoading(true);
       setError(null);
-      await loadNext(startingRanges, true);
+      await loadHistory(startingRanges);
+      if (cancelled) return;
+      if ((baseCandlesByAssetRef.current[asset]?.length ?? 0) === 0) {
+        // §21 — nothing has ever been authorized for this asset (a
+        // brand-new session/asset, `replayCurrentTime` still null
+        // server-side) — reveal the first real candle(s) explicitly, never
+        // more than that until the trader actually steps forward.
+        await revealForward(asset, periodStart, clock.timeframe);
+      }
+      setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clock.asset]);
+  }, [clock.asset, sourceDecidedByAsset[clock.asset]]);
 
   // Stage 18 §29 — annotations load per (session, asset), same isolation
   // discipline as candles; switching assets never mixes drawings between them.
@@ -477,8 +603,39 @@ export function ReplayMarketPanel({
 
   function persistProgress(next: ReplayClockState) {
     const point = toResumePoint(next);
-    void updateReplayProgress(session.id, point).then((r) => {
-      if (!r.success) toast.error(r.error);
+    // Prompt 6 hardening (§19 reload/persistence) — a Play/Step sequence
+    // often advances entirely through data ALREADY revealed by an earlier
+    // `revealForward` call, purely client-side (no server round trip per
+    // tick — see the Play loop's own doc comment). That means the
+    // server's OWN authoritative `replayCurrentTime` can lag behind the
+    // client's true position. `updateReplayProgress` deliberately refuses
+    // to move the checkpoint PAST the server's last-known boundary
+    // (Prompt 5 §18 — it must never become a bypass for the strict
+    // visibility boundary), so checkpointing a genuinely-forward position
+    // through it would silently clamp the resume point backward on
+    // pause/reload. Route a forward checkpoint through
+    // `advanceReplayClockAction` instead — safe (bounded to period end,
+    // and a cheap no-op fetch when the boundary is already there) and it
+    // updates the SAME resume fields. Direction is judged against
+    // `lastCheckpointedTimeRef` — this client's own record of what it last
+    // successfully persisted — never against `revealForward`'s own
+    // (separately-paced) reveals, which can legitimately race ahead of or
+    // lag behind a checkpoint moment without meaning anything about
+    // which persistence mechanism is safe to use here.
+    const isForward = next.currentTime > lastCheckpointedTimeRef.current;
+    const request = isForward
+      ? advanceReplayClockAction({ sessionId: session.id, canonicalSymbol: next.asset, requestedTime: next.currentTime, timeframe: next.timeframe }).then(
+          (r) => (r.success ? { success: true as const, checkpointedAt: r.currentTime } : { success: false as const, error: r.error.message }),
+        )
+      : updateReplayProgress(session.id, point).then((r) =>
+          r.success ? { success: true as const, checkpointedAt: next.currentTime } : { success: false as const, error: r.error },
+        );
+    void request.then((r) => {
+      if (!r.success) {
+        toast.error(r.error);
+        return;
+      }
+      lastCheckpointedTimeRef.current = r.checkpointedAt;
     });
   }
 
@@ -488,8 +645,42 @@ export function ReplayMarketPanel({
     if (checkpoint) persistProgress(next);
   }
 
-  function next() {
-    apply(advanceToNextCandle(clock, availableTimestamps));
+  /** The available timestamps for `asset`, recomputed FRESH from whatever
+   *  `baseCandlesByAssetRef` currently holds — used right after
+   *  `revealForward` merges new data in, since the memoized
+   *  `availableTimestamps` above won't reflect that until the next render. */
+  function freshTimestampsFor(asset: string, timeframe: Timeframe): number[] {
+    return aggregateCandles(baseCandlesByAssetRef.current[asset] ?? [], timeframe).map((c) => c.timestamp + timeframeToMs(timeframe));
+  }
+
+  /**
+   * Step forward (Prompt 5 §9/§10) — tries the LOCAL pure-clock transition
+   * first (data the client already legitimately holds, zero round trip).
+   * Only when that has nothing left (`advanceToNextCandle` left
+   * `currentTime` unchanged) does it ask the server to reveal more via
+   * `revealForward`, then retries locally against the freshly-merged data.
+   * There is never a moment where the client holds a candle it hasn't
+   * already applied — `revealForward` itself is what makes the new data
+   * exist at all.
+   */
+  async function next() {
+    const advanced = advanceToNextCandle(clock, availableTimestamps);
+    if (advanced.currentTime !== clock.currentTime) {
+      apply(advanced);
+      return;
+    }
+    if (advancingRef.current) return; // an advance is already in flight — ignore this extra click
+    advancingRef.current = true;
+    try {
+      const revealed = await revealForward(clock.asset, clock.currentTime + 1, clock.timeframe);
+      if (!revealed) {
+        apply({ ...clock, playback: "FINISHED" });
+        return;
+      }
+      apply(advanceToNextCandle(clock, freshTimestampsFor(clock.asset, clock.timeframe)));
+    } finally {
+      advancingRef.current = false;
+    }
   }
   function prev() {
     apply(retreatToPreviousCandle(clock, availableTimestamps));
@@ -497,8 +688,28 @@ export function ReplayMarketPanel({
   function togglePlay() {
     apply(clock.playback === "PLAYING" ? pauseClock(clock) : playClock(clock), true);
   }
+  /**
+   * Discards client-held candles beyond `keepThrough` for `asset` (Prompt 6
+   * §17 — a full Reset must not leave future-relative-to-the-reset-point
+   * data sitting in React state even though the chart itself already
+   * wouldn't render it). Deliberately used ONLY by a full reset
+   * (`jumpStart`), never by ordinary single-step retreat (`prev`) or
+   * backward day-nav — those revisit data the trader already legitimately
+   * saw moving forward, so discarding and immediately re-fetching the same
+   * already-authorized candles would serve no isolation purpose and would
+   * only hurt the common step-back-then-forward case.
+   */
+  function discardFutureRelativeData(asset: string, keepThrough: number) {
+    setBaseCandlesByAsset((prev) => ({ ...prev, [asset]: (prev[asset] ?? []).filter((c) => c.timestamp <= keepThrough) }));
+    setLoadedRangesByAsset((prev) => ({
+      ...prev,
+      [asset]: (prev[asset] ?? []).filter((r) => r.from <= keepThrough).map((r) => ({ from: r.from, to: Math.min(r.to, keepThrough) })),
+    }));
+  }
   function jumpStart() {
-    apply(jumpToStart(clock, availableTimestamps), true);
+    const next = jumpToStart(clock, availableTimestamps);
+    discardFutureRelativeData(clock.asset, next.currentTime);
+    apply(next, true);
   }
   function onSpeedChange(speed: PlaybackSpeed) {
     apply(setSpeed(clock, speed));
@@ -512,14 +723,37 @@ export function ReplayMarketPanel({
   function onTimeframeChange(timeframe: Timeframe) {
     apply(changeTimeframe(clock, timeframe), true);
   }
-  function shiftDay(delta: 1 | -1) {
-    const days = [...new Set(availableTimestamps.map(utcDayStart))].sort((a, b) => a - b);
+  /** Day navigation (§12 — an explicit, deliberate seek). Backward stays
+   *  purely local (every day the trader has already passed through is
+   *  already safely held). Forward may need to reveal a day that hasn't
+   *  been authorized yet — `revealForward` handles that exactly like Step
+   *  does, just requesting further ahead in one go since the trader
+   *  explicitly asked to skip to the next trading day, not one candle. */
+  async function shiftDay(delta: 1 | -1) {
+    let timestamps = availableTimestamps;
+    if (delta === 1) {
+      const targetDayStart = utcDayStart(clock.currentTime) + DAY_MS;
+      const alreadyCovers = timestamps.some((t) => utcDayStart(t) === targetDayStart);
+      if (!alreadyCovers) {
+        if (advancingRef.current) return; // an advance is already in flight
+        advancingRef.current = true;
+        let revealed: boolean;
+        try {
+          revealed = await revealForward(clock.asset, Math.min(targetDayStart + DAY_MS - 1, periodEnd), clock.timeframe);
+        } finally {
+          advancingRef.current = false;
+        }
+        if (!revealed) return;
+        timestamps = freshTimestampsFor(clock.asset, clock.timeframe);
+      }
+    }
+    const days = [...new Set(timestamps.map(utcDayStart))].sort((a, b) => a - b);
     const currentDay = utcDayStart(clock.currentTime);
     const idx = days.indexOf(currentDay);
     const targetIdx = idx === -1 ? (delta === 1 ? 0 : days.length - 1) : idx + delta;
     const targetDay = days[targetIdx];
     if (targetDay == null) return;
-    const dayTimestamps = availableTimestamps.filter((t) => utcDayStart(t) === targetDay);
+    const dayTimestamps = timestamps.filter((t) => utcDayStart(t) === targetDay);
     if (dayTimestamps.length === 0) return;
     apply({ ...clock, currentTime: delta === 1 ? dayTimestamps[0] : dayTimestamps[dayTimestamps.length - 1], playback: "PAUSED" }, true);
   }
@@ -597,31 +831,86 @@ export function ReplayMarketPanel({
     setDrawingTool((t) => (t === tool ? null : tool));
   }
 
-  // Playback timer — ticks at BASE_TICK_MS / speed, advancing one candle per
-  // tick. Persists a checkpoint only when playback naturally stops (FINISHED
-  // or an explicit pause), never on every tick.
+  // Playback timer (Prompt 5 §9/§11) — a recursive `setTimeout` chain, NOT a
+  // plain `setInterval`: each tick may need to AWAIT a server round trip
+  // (`revealForward`, exactly like Step) when local data runs out, and the
+  // next tick must never be scheduled until that resolves — a plain
+  // interval would fire the next tick regardless, racing ahead of
+  // server-validated data. Speed still governs the delay BETWEEN ticks;
+  // it never lets the client reveal more than one legitimate step's worth
+  // per tick, even at 10x (§11 — "the client may receive only candles that
+  // the server has legitimately advanced through").
   useEffect(() => {
-    if (clock.playback !== "PLAYING") {
-      if (playTimerRef.current) clearInterval(playTimerRef.current);
-      return;
+    if (clock.playback !== "PLAYING") return;
+    let cancelled = false;
+
+    async function tick() {
+      if (cancelled) return;
+      const current = clockRef.current;
+      if (current.playback !== "PLAYING") return;
+
+      let timestamps = freshTimestampsFor(current.asset, current.timeframe);
+      let advanced = advanceToNextCandle(current, timestamps);
+      if (advanced.currentTime === current.currentTime) {
+        if (advancingRef.current) {
+          // A manual Step/day-shift is already in flight — retry this
+          // tick shortly rather than racing it (§7/§8 concurrency guard).
+          if (!cancelled) playTimerRef.current = setTimeout(() => void tick(), 100);
+          return;
+        }
+        advancingRef.current = true;
+        let revealed: boolean;
+        try {
+          revealed = await revealForward(current.asset, current.currentTime + 1, current.timeframe);
+        } finally {
+          advancingRef.current = false;
+        }
+        if (cancelled || clockRef.current.playback !== "PLAYING") return; // paused/unmounted while waiting
+        if (!revealed) {
+          const finished = { ...current, playback: "FINISHED" as const };
+          apply(finished);
+          persistProgress(finished);
+          return;
+        }
+        timestamps = freshTimestampsFor(current.asset, current.timeframe);
+        advanced = advanceToNextCandle(current, timestamps);
+      }
+
+      // A timeframe switch mid-await doesn't pause (only asset-switch does,
+      // via `changeAsset`'s own PAUSED transition — see that function's
+      // doc comment), so it never cancels this tick. `advanced` was
+      // computed against `current.timeframe`, captured BEFORE the await —
+      // reapply whatever timeframe is CURRENT now so a switch that
+      // happened while this tick was waiting on `revealForward` is never
+      // silently reverted. `currentTime` itself stays a valid raw instant
+      // under any timeframe (see `ReplayClockState`'s own doc comment), so
+      // this is always safe, never a data-visibility change.
+      apply({ ...advanced, timeframe: clockRef.current.timeframe });
+      if (advanced.playback === "FINISHED") {
+        persistProgress(advanced);
+        return;
+      }
+      if (cancelled) return;
+      playTimerRef.current = setTimeout(() => void tick(), BASE_TICK_MS / clockRef.current.speed);
     }
-    playTimerRef.current = setInterval(() => {
-      setClock((prev) => {
-        const advanced = advanceToNextCandle(prev, availableTimestamps);
-        advanceExecutionIfNeeded(advanced.currentTime);
-        if (advanced.playback === "FINISHED") persistProgress(advanced);
-        return advanced;
-      });
-    }, BASE_TICK_MS / clock.speed);
+
+    playTimerRef.current = setTimeout(() => void tick(), BASE_TICK_MS / clock.speed);
     return () => {
-      if (playTimerRef.current) clearInterval(playTimerRef.current);
+      cancelled = true;
+      if (playTimerRef.current) clearTimeout(playTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clock.playback, clock.speed, availableTimestamps]);
+  }, [clock.playback, clock.speed]);
 
-  // Persist a checkpoint on unmount (leaving the tab/page) — a final catch-all.
+  // Persist a checkpoint on unmount (leaving the tab/page) — a final
+  // catch-all. Reads `clockRef.current`, NEVER the closed-over `clock`
+  // (Prompt 7 fix — `useEffect(fn, [])`'s cleanup closure is fixed at
+  // MOUNT time and never updates since this effect never re-runs; using
+  // `clock` directly here silently checkpointed the trader's position from
+  // when the page first loaded, not wherever they actually were when they
+  // left — the exact opposite of what a "final catch-all" is for).
   useEffect(() => {
-    return () => persistProgress(clock);
+    return () => persistProgress(clockRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -779,6 +1068,30 @@ export function ReplayMarketPanel({
               Data: {sourceLabelByAsset[clock.asset]}
             </span>
           )}
+          {!sourceDecidedByAsset[clock.asset] ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1 border-primary/40 px-2 text-[11px] text-primary"
+              onClick={() => setDataSourceSheetOpen(true)}
+            >
+              <Database className="size-3.5" />
+              Choose Data Source
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-[11px] text-muted-foreground"
+              onClick={() => setDataSourceSheetOpen(true)}
+              title={dataSourceLocked ? "Locked for this replay" : "Change this asset's data source"}
+            >
+              {dataSourceLocked ? <Lock className="size-3.5" /> : <Database className="size-3.5" />}
+              {dataSourceLocked ? "Locked" : "Data Source"}
+            </Button>
+          )}
           {clock.playback === "FINISHED" && (
             <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-secondary-foreground">End of period</span>
           )}
@@ -886,7 +1199,18 @@ export function ReplayMarketPanel({
                 </button>
               </div>
             )}
-            {loading ? (
+            {!sourceDecidedByAsset[clock.asset] ? (
+              <div className="flex h-[520px] flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+                <Database className="size-6" />
+                <p>
+                  You have MT5 data imported — choose a data source for {clock.asset} before Replay loads candles.
+                </p>
+                <Button type="button" size="sm" className="gap-1.5" onClick={() => setDataSourceSheetOpen(true)}>
+                  <Database className="size-3.5" />
+                  Choose Data Source
+                </Button>
+              </div>
+            ) : loading ? (
               <div className="flex h-[520px] items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 Loading historical data…
@@ -1004,6 +1328,21 @@ export function ReplayMarketPanel({
         Closed-candle semantics: only fully-closed {clock.timeframe} candles are shown — nothing still forming at{" "}
         {currentTimeLabel} is revealed.
       </p>
+
+      <DataSourceSheet
+        open={dataSourceSheetOpen}
+        onOpenChange={setDataSourceSheetOpen}
+        sessionId={session.id}
+        canonicalSymbol={clock.asset}
+        nativeTimeframe={clock.timeframe}
+        locked={dataSourceLocked}
+        currentSourceLabel={sourceLabelByAsset[clock.asset] ?? null}
+        currentDatasetId={pinnedMt5DatasetByAsset[clock.asset] ?? null}
+        onSourceDecided={(importId) => {
+          setPinnedMt5DatasetByAsset((prev) => ({ ...prev, [clock.asset]: importId }));
+          setSourceDecidedByAsset((prev) => ({ ...prev, [clock.asset]: true }));
+        }}
+      />
     </div>
   );
 }

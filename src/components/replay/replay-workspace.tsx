@@ -35,12 +35,14 @@ export function ReplayWorkspace({
   dailyPlanDateKeys,
   strategies,
   replayTrades,
+  mt5ImportedSymbols,
 }: {
   session: ReplayReviewSessionDTO;
   historicalStrategyContext: HistoricalStrategyContextDTO | null;
   dailyPlanDateKeys: string[];
   strategies: { id: string; name: string }[];
   replayTrades: ReplayTradeDTO[];
+  mt5ImportedSymbols: string[];
 }) {
   const router = useRouter();
   const [tab, setTab] = useState("market-replay");
@@ -163,7 +165,20 @@ export function ReplayWorkspace({
            *  Market Plan are now correctly time-pinned to the Replay
            *  Clock's OWN current position rather than a fixed session-start
            *  snapshot). */}
+          {/* Prompt 7 fix — `key={session.id}` forces React to fully
+           *  UNMOUNT/REMOUNT this component when the trader navigates to a
+           *  DIFFERENT review period client-side (Previous/Next period
+           *  arrows, changing the WEEKLY/MONTHLY toggle or asset scope —
+           *  all client-side `router.push()` calls, never a full page
+           *  reload). Without this, React reuses the SAME component
+           *  instance across the prop change, and every `useState`
+           *  initializer here (clock position, revealed candles, playback
+           *  state, ...) silently carries over from the OLD session —
+           *  discovered live: switching periods left the Replay Clock and
+           *  chart showing the PREVIOUS session's stale position/state
+           *  under the new session's own period boundaries. */}
           <ReplayMarketPanel
+            key={session.id}
             session={session}
             assetOptions={assetOptions}
             strategies={strategies}
@@ -172,6 +187,7 @@ export function ReplayWorkspace({
             notes={session.notes}
             notesSaved={notesSaved}
             onSaveNotes={saveNotes}
+            mt5ImportedSymbols={mt5ImportedSymbols}
           />
 
           {/* A quick jump to any OTHER day's full Journal plan page for

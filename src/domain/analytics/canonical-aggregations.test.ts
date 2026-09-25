@@ -277,6 +277,21 @@ describe("buildCumulativeRealizedRCurve", () => {
   it("renders safely for an empty dataset", () => {
     expect(buildCumulativeRealizedRCurve([])).toEqual([]);
   });
+
+  it("Audit Fixture B: +2R,-1R,+3R,-1R,0R produces a genuinely cumulative running sum, not isolated per-trade values", () => {
+    const rows = [
+      closedTrade({ tradeId: "1", dateKey: "2026-01-01", actualRR: 2, settledRealizedR: 2 }),
+      closedTrade({ tradeId: "2", dateKey: "2026-01-02", actualRR: -1, settledRealizedR: -1 }),
+      closedTrade({ tradeId: "3", dateKey: "2026-01-03", actualRR: 3, settledRealizedR: 3 }),
+      closedTrade({ tradeId: "4", dateKey: "2026-01-04", actualRR: -1, settledRealizedR: -1 }),
+      closedTrade({ tradeId: "5", dateKey: "2026-01-05", actualRR: 0, settledRealizedR: 0 }),
+    ];
+    const curve = buildCumulativeRealizedRCurve(rows);
+    // Starting from an implicit 0 (the curve itself has no leading zero point —
+    // that's the caller's starting-balance concern, see pnl-stats.test.ts's
+    // Fixture C, which drives maxDrawdown() with the equivalent [0,2,1,4,3,3]).
+    expect(curve.map((p) => p.cumulativeR)).toEqual([2, 1, 4, 3, 3]);
+  });
 });
 
 describe("summarizePlannedVsActual", () => {

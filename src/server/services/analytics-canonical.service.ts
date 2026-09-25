@@ -47,6 +47,12 @@ export interface CanonicalAnalyticsFilters {
   validationState?: "NOT_VALIDATED" | "VALIDATED" | "OVERRIDDEN";
   behaviourLabel?: string;
   moodTag?: string;
+  /** Analytics V2 §21 — Dashboard's "All accounts" selector: narrows to
+   *  trades ALSO allocated to this account (mirrors getAnalyticsData's own
+   *  `t.allocations.some(...)` filter). Not part of `CanonicalAnalyticsTradeRow`
+   *  itself (R is a per-Trade fact, not a per-allocation one) — applied to the
+   *  raw Trade rows before they're built into canonical rows. */
+  accountId?: string;
 }
 
 const canonicalTradeInclude = {
@@ -69,7 +75,11 @@ export async function getCanonicalAnalyticsDataset(
       : undefined;
 
   const trades = await prisma.trade.findMany({
-    where: { userId, ...(tradeDate ? { tradeDate } : {}) },
+    where: {
+      userId,
+      ...(tradeDate ? { tradeDate } : {}),
+      ...(filters.accountId ? { allocations: { some: { tradingAccountId: filters.accountId } } } : {}),
+    },
     include: canonicalTradeInclude,
     orderBy: [{ tradeDate: "asc" }, { executionMinutes: "asc" }],
   });

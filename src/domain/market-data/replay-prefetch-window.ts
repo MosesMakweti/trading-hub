@@ -1,26 +1,30 @@
 /**
- * Replay candle chunking/prefetch (Stage 17B §23-24) — decides the next
- * day-aligned chunk of candles Replay should REQUEST, given what's already
- * loaded and where the Replay Clock currently sits. This deliberately
- * replaces the old "fetch the whole review period in one response" pattern
- * (fine for a synthetic Fixture, unworkable against a real vendor's rate
- * limits/payload size and Vercel's request-size limits — Stage 17A/§25):
- * every request this drives is bounded to at most `MAX_CHUNK_DAYS` days.
+ * Read-only historical re-fill chunking (Stage 17B §23-24, corrected Prompt
+ * 5 §8/§26 — strict no-future-candle delivery) — decides the next
+ * day-aligned chunk of ALREADY-AUTHORIZED candles Replay should request via
+ * the read-only `getReplayCandles` action. Every request this drives is
+ * bounded to at most `MAX_CHUNK_DAYS` days, purely for response-size/vendor
+ * rate-limit reasons (Stage 17A/§25) — never for visibility. Visibility is
+ * enforced entirely server-side now (`replay-review.service.ts`'s
+ * `fetchReplayCandlesWithProvenance`, which clips every response to the
+ * session's own authoritative `replayCurrentTime` regardless of what range
+ * is requested here).
  *
- * Two callers use this, both in `replay-market-panel.tsx`:
- *  - `computeNextFetchWindow` — HIGH PRIORITY: a small rolling window around
- *    the Clock's current position, so the trader's immediate viewport and
- *    near-future stepping/playing rarely block on network.
- *  - `computeNextBackgroundChunk` — LOW PRIORITY: once the rolling window is
- *    satisfied, keep sweeping the REST of the review period in small
- *    chunks in the background, so day-navigation (`shiftDay`) and
- *    jump-to-start across the whole period keep working exactly as before
- *    this refactor — just assembled from many small requests instead of one
- *    giant one.
- *
- * This module decides WHAT TO FETCH ONLY. Chart visibility stays governed
- * exclusively by the Replay Clock via `visible-candles.ts` — "prefetched !=
- * visible" is unchanged by this refactor.
+ * Prompt 5 REMOVED this module's old `PREFETCH_DAYS_AHEAD`/
+ * `computeNextFetchWindow`/`computeNextBackgroundChunk` — their entire
+ * purpose was requesting candles AHEAD of the Replay Clock "so playback
+ * feels smoother later." That is precisely the mechanism that put future
+ * OHLC in browser memory before this hardening pass (see that pass's own
+ * completion report, §A "Previous Leakage Path"). Forward REVEALING
+ * (Step/Play/seek/jump-to-start/day-nav) no longer uses this module at
+ * all — it goes through `advanceReplayClockAction`
+ * (`replay-review.service.ts`'s `advanceReplayClock`), which the client
+ * calls directly with a target instant the server independently clamps.
+ * This module is left with exactly one job: efficiently re-fetching
+ * history the session has ALREADY legitimately revealed (e.g. rebuilding
+ * client state after a page reload, §23) — bounded to the client's own
+ * current clock position, never further, so a stale/idle tab never
+ * wastefully asks for a whole review period's worth of empty responses.
  */
 const DAY_MS = 86_400_000;
 
@@ -29,24 +33,23 @@ export interface LoadedRange {
   to: number;
 }
 
-/** How far behind/ahead of the clock's current position to keep candles
- *  loaded via the HIGH-priority window. Asymmetric on purpose: playing
- *  forward continuously is the common case; stepping back one day is rare. */
-export const PREFETCH_DAYS_BEHIND = 1;
-export const PREFETCH_DAYS_AHEAD = 3;
-
 /** Cap on any single request's span — keeps every request small regardless
- *  of caller, satisfying §23's "never a whole multi-week response" goal
- *  even for the background sweep. */
+ *  of caller, satisfying §23's "never a whole multi-week response" goal. */
 export const MAX_CHUNK_DAYS = 7;
 
 function dayStart(ms: number): number {
   return Math.floor(ms / DAY_MS) * DAY_MS;
 }
 
-function isDayCovered(loaded: LoadedRange[], day: number): boolean {
-  const dayEnd = day + DAY_MS - 1;
-  return loaded.some((r) => r.from <= day && r.to >= dayEnd);
+/** Is `[from, to]` (the FULL span actually being asked about — which may be
+ *  a partial day when `to` isn't day-aligned, e.g. `computeNextHistoryChunk`
+ *  bounding to a mid-day clock position) already covered by `loaded`? This
+ *  is deliberately NOT "is the whole calendar day covered" — requiring
+ *  full-day coverage for a span that can never reach a full day (because
+ *  `to` itself lands before the day's end) would never be satisfied,
+ *  looping forever. */
+function isRangeCovered(loaded: LoadedRange[], from: number, to: number): boolean {
+  return loaded.some((r) => r.from <= from && r.to >= to);
 }
 
 /** The first uncovered day-aligned chunk within `[from, to]`, batching up to
@@ -54,12 +57,15 @@ function isDayCovered(loaded: LoadedRange[], day: number): boolean {
 export function findNextUncoveredChunk(loaded: LoadedRange[], from: number, to: number, maxDays: number = MAX_CHUNK_DAYS): LoadedRange | null {
   if (from > to) return null;
   for (let day = dayStart(from); day <= to; day += DAY_MS) {
-    if (isDayCovered(loaded, day)) continue;
-    let rangeEnd = Math.min(day + DAY_MS - 1, to);
+    const dayEnd = Math.min(day + DAY_MS - 1, to);
+    if (isRangeCovered(loaded, day, dayEnd)) continue;
+    let rangeEnd = dayEnd;
     let count = 1;
     let next = day + DAY_MS;
-    while (next <= to && count < maxDays && !isDayCovered(loaded, next)) {
-      rangeEnd = Math.min(next + DAY_MS - 1, to);
+    while (next <= to && count < maxDays) {
+      const nextDayEnd = Math.min(next + DAY_MS - 1, to);
+      if (isRangeCovered(loaded, next, nextDayEnd)) break;
+      rangeEnd = nextDayEnd;
       next += DAY_MS;
       count += 1;
     }
@@ -69,24 +75,17 @@ export function findNextUncoveredChunk(loaded: LoadedRange[], from: number, to: 
 }
 
 /**
- * HIGH-priority: the next chunk needed to keep a small rolling window
- * around `clockTime` fully loaded. Returns null once that window (clamped
- * to the review period) is fully covered.
+ * The next chunk of ALREADY-AUTHORIZED history to pull via the read-only
+ * `getReplayCandles`, sweeping `[periodStart, min(periodEnd, clockTime)]`
+ * in bounded chunks — deliberately bounded to the caller's OWN current
+ * clock position (never `periodEnd` directly), so this never wastefully
+ * requests candles the session hasn't reached yet even though doing so
+ * would be harmless (the server would just return nothing past its own
+ * boundary — §7). Returns null once that bounded range is fully covered.
  */
-export function computeNextFetchWindow(loaded: LoadedRange[], clockTime: number, periodStart: number, periodEnd: number): LoadedRange | null {
-  const wantFrom = Math.max(periodStart, dayStart(clockTime) - PREFETCH_DAYS_BEHIND * DAY_MS);
-  const wantTo = Math.min(periodEnd, dayStart(clockTime) + (PREFETCH_DAYS_AHEAD + 1) * DAY_MS - 1);
-  return findNextUncoveredChunk(loaded, wantFrom, wantTo, Number.MAX_SAFE_INTEGER);
-}
-
-/**
- * LOW-priority background sweep: once the rolling window is satisfied, keep
- * filling in the rest of `[periodStart, periodEnd]` in small
- * (`MAX_CHUNK_DAYS`-bounded) chunks so whole-period features (day
- * navigation, jump-to-start) still work once the sweep finishes.
- */
-export function computeNextBackgroundChunk(loaded: LoadedRange[], periodStart: number, periodEnd: number): LoadedRange | null {
-  return findNextUncoveredChunk(loaded, periodStart, periodEnd, MAX_CHUNK_DAYS);
+export function computeNextHistoryChunk(loaded: LoadedRange[], clockTime: number, periodStart: number, periodEnd: number): LoadedRange | null {
+  const boundedTo = Math.min(clockTime, periodEnd);
+  return findNextUncoveredChunk(loaded, periodStart, boundedTo, MAX_CHUNK_DAYS);
 }
 
 /** Merges a newly-fetched range into the loaded-ranges list, coalescing

@@ -3,18 +3,20 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, History, Loader2, Sparkles, TrendingUp } from "lucide-react";
+import { ChevronLeft, ChevronRight, History, Loader2, Sparkles, TrendingUp, Upload } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AssetTagInput } from "@/components/strategy-lab/asset-tag-input";
 import { EmptyState } from "@/components/shared/empty-state";
 import { TAG_STYLES, colorForName } from "@/components/ui/tag";
 import { formatDateKeyLong, formatDateKeyShort } from "@/lib/date";
 import { startReplayReviewForPeriod } from "@/actions/replay.actions";
 import { ReplayWorkspace } from "@/components/replay/replay-workspace";
+import { Mt5ImportWizard } from "@/components/replay/data-source/mt5-import-wizard";
 import { EdgeOverviewPanel } from "@/components/edge/edge-overview-panel";
 import { EdgeComparisonPanel } from "@/components/edge/edge-comparison-panel";
 import { EdgeImprovementsPanel } from "@/components/edge/edge-improvements-panel";
@@ -69,6 +71,7 @@ export function EdgeReviewWorkspace({
   strategyId,
   assetSymbols,
   initialTab,
+  mt5ImportedSymbols,
 }: {
   reviewType: ReplayReviewType;
   period: string;
@@ -91,10 +94,20 @@ export function EdgeReviewWorkspace({
   strategyId: string | null;
   assetSymbols: string[];
   initialTab: "overview" | "replay" | "comparison" | "improvements" | "analyst";
+  mt5ImportedSymbols: string[];
 }) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
   const [starting, startTransition] = useTransition();
+  // A trader who has never imported MT5 data for a given symbol before has
+  // no way to reach the import wizard from inside a Replay session: that
+  // session's own "Choose Data Source" pause only triggers when an MT5
+  // import for the asset ALREADY exists (see ReplayMarketPanel's
+  // `sourceDecidedByAsset`), so the very first-ever import for a symbol
+  // must happen somewhere session-independent. `Mt5ImportWizard` itself has
+  // no session dependency (just user-scoped actions), so it's reused here
+  // as-is, standalone, ahead of ever opening Replay for that symbol.
+  const [mt5SheetOpen, setMt5SheetOpen] = useState(false);
 
   function navigate(next: { period?: string; type?: ReplayReviewType; strategy?: string | null; assets?: string[] }) {
     const params = new URLSearchParams();
@@ -225,8 +238,41 @@ export function EdgeReviewWorkspace({
               })}
             </div>
           )}
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="ml-auto h-8 gap-1.5 text-xs"
+            onClick={() => setMt5SheetOpen(true)}
+          >
+            <Upload className="size-3.5" />
+            Import MT5 Data
+          </Button>
         </div>
       </div>
+
+      <Sheet open={mt5SheetOpen} onOpenChange={setMt5SheetOpen}>
+        <SheetContent side="right" className="w-full overflow-y-auto p-4 sm:max-w-lg">
+          <SheetHeader className="px-0">
+            <SheetTitle>Import MT5 Data</SheetTitle>
+            <SheetDescription>
+              Import a candle export from MT5 so it&apos;s available to pick as a Replay data source for any session.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-4">
+            <Mt5ImportWizard
+              canonicalSymbolHint=""
+              onImported={() => {
+                toast.success("MT5 data imported — available in “Choose Data Source” for a new Replay session.");
+                setMt5SheetOpen(false);
+                router.refresh();
+              }}
+              onCancel={() => setMt5SheetOpen(false)}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList>
@@ -255,6 +301,7 @@ export function EdgeReviewWorkspace({
               dailyPlanDateKeys={dailyPlanDateKeys}
               strategies={strategies}
               replayTrades={replayTrades}
+              mt5ImportedSymbols={mt5ImportedSymbols}
             />
           ) : (
             <EmptyState

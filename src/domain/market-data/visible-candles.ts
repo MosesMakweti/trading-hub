@@ -1,9 +1,24 @@
 /**
- * THE no-hindsight rule (Stage 13 §11-12/§17) — the ONE place that decides
- * what market data a Replay session may see at a given historical moment.
- * No chart, indicator, or decision-logic component may independently decide
- * what "future" means; every one of them must go through `visibleCandles`
- * (or `buildHigherTimeframeView`, which is built on top of it).
+ * THE no-hindsight rule (Stage 13 §11-12/§17, corrected Prompt 5 §3-5) — the
+ * ONE place that decides what market data a Replay session may see at a
+ * given historical moment. No chart, indicator, or decision-logic component
+ * may independently decide what "future" means; every one of them must go
+ * through `visibleCandles` (or `buildHigherTimeframeView`, which is built
+ * on top of it).
+ *
+ * DUAL ROLE, ONE RULE — read this carefully before touching either side:
+ *   SERVER (`replay-review.service.ts`'s `fetchReplayCandlesWithProvenance`/
+ *   `advanceReplayClock`) calls this SAME function as the PRIMARY security
+ *   boundary — it is what actually strips future candles out of a provider's
+ *   response before anything crosses the network to the browser.
+ *   CLIENT (`replay-market-panel.tsx`) also calls it when building the
+ *   chart's view, but only as DEFENSE-IN-DEPTH — by the time candles reach
+ *   the client, the server has already guaranteed nothing future is among
+ *   them, so this second call can never do real work; it exists so a bug
+ *   elsewhere in the client can't accidentally render something it
+ *   shouldn't, not so the client itself is trusted to enforce the boundary.
+ *   Do NOT ever remove the server-side call site believing the client-side
+ *   one is sufficient — it is not, and never was meant to be alone.
  *
  * CANDLE REVEAL SEMANTICS (§12, documented decision): `replayTime` is a
  * "closed-candle" clock — a candle at `timestamp` with duration `tf` becomes
