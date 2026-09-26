@@ -19,6 +19,7 @@ import { GRADE_VARIANT } from "@/lib/grade-variant";
 import { parseSymbol, formatTargetPrice } from "@/domain/trade-plan/instrument-catalog";
 import { PRE_TRADE_MOOD_TAG_LABELS, type PreTradeMoodTagValue } from "@/domain/psychology/pre-trade-mood";
 import type { TradeListItemDTO, TradeDiscrepancyDTO } from "@/types/trades";
+import { useJournalLinks, useWorkspace } from "@/components/workspace/workspace-context";
 
 const LIFECYCLE_LABEL: Record<string, string> = {
   FULLY_CLOSED: "Fully closed",
@@ -68,6 +69,8 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const { isBacktest } = useWorkspace();
+  const links = useJournalLinks();
 
   function handleDelete() {
     startTransition(async () => {
@@ -319,19 +322,22 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
           className="gap-1.5"
           aria-label="Open trade workspace"
           nativeButton={false}
-          render={<Link href={`/journal/${dateKey}/trades/${trade.id}`} />}
+          render={<Link href={links.tradeHref(dateKey, trade.id)} />}
         >
           <SquareArrowOutUpRight className="size-3.5" />
           Open
         </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Delete trade"
-          onClick={() => setConfirmOpen(true)}
-        >
-          <Trash2 />
-        </Button>
+        {/* The Backtesting Journal is review-only — simulated trades are changed in the Session. */}
+        {!isBacktest && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Delete trade"
+            onClick={() => setConfirmOpen(true)}
+          >
+            <Trash2 />
+          </Button>
+        )}
       </div>
 
       <ConfirmDialog

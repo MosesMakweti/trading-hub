@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
+import { runInWorkspaceScope } from "@/server/workspace/scope";
+import { resolveRecordScope, runInRecordScope } from "@/server/workspace/action-scope";
 import {
   behaviourLabelCreateSchema,
   behaviourLabelUpdateSchema,
@@ -62,7 +64,8 @@ export async function archiveBehaviourLabelAction(id: string): Promise<Result> {
 
 export async function loadTradeBehaviourLabelsAction(tradeId: string) {
   const user = await requireUser();
-  return svc.listTradeBehaviourLabels(user.id, tradeId);
+  const scope = await resolveRecordScope(user.id, { trade: tradeId }, "read");
+  return runInWorkspaceScope(scope, () => svc.listTradeBehaviourLabels(user.id, tradeId));
 }
 
 export async function setTradeBehaviourLabelsAction(
@@ -71,13 +74,15 @@ export async function setTradeBehaviourLabelsAction(
   input: unknown,
 ): Promise<Result> {
   const user = await requireUser();
-  const parsed = setTradeBehaviourLabelsSchema.safeParse(input);
-  if (!parsed.success) return { success: false, error: "Invalid input." };
-  try {
-    await svc.setTradeBehaviourLabels(user.id, tradeId, parsed.data.labelIds);
-  } catch (error) {
-    return { success: false, error: errorMessage(error, "Failed to save behaviour labels.") };
-  }
-  revalidatePath(`/journal/${dateKey}/trades/${tradeId}`);
-  return { success: true };
+  return runInRecordScope(user.id, { trade: tradeId }, "write", async () => {
+    const parsed = setTradeBehaviourLabelsSchema.safeParse(input);
+    if (!parsed.success) return { success: false, error: "Invalid input." };
+    try {
+      await svc.setTradeBehaviourLabels(user.id, tradeId, parsed.data.labelIds);
+    } catch (error) {
+      return { success: false, error: errorMessage(error, "Failed to save behaviour labels.") };
+    }
+    revalidatePath(`/journal/${dateKey}/trades/${tradeId}`);
+    return { success: true };
+  });
 }

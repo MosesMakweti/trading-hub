@@ -249,7 +249,7 @@ export async function getDashboardData(
         account.totalPayouts?.toNumber() ?? null,
       );
     } else {
-      const currentBalance = await getAccountBalance(account.id);
+      const currentBalance = await getAccountBalance(userId, account.id);
       returnPercent = computeBrokerageMetrics({
         startingBalance: account.startingBalance?.toNumber() ?? null,
         currentBalance,

@@ -17,6 +17,7 @@ import { useDebouncedAutosave, type SaveState } from "@/hooks/use-debounced-auto
 import { updateTodaysPlan } from "@/actions/today.actions";
 import type { TodaysPlanDTO, DailyAssetAnalysisDTO } from "@/types/today";
 import type { SessionWindow } from "@/domain/schedule/session-countdown";
+import { useDayRef } from "@/components/workspace/workspace-context";
 
 /**
  * Daily Market Plan (Stage 11) — the single, integrated planning workflow
@@ -52,6 +53,7 @@ export function DailyMarketPlanSection({
   activeSessions: string[];
   sessionWindows: SessionWindow[];
 }) {
+  const dayRef = useDayRef(dateKey);
   const router = useRouter();
 
   const [risk, setRisk] = useState(plan.riskBudgetPercent == null ? "" : String(plan.riskBudgetPercent));
@@ -74,7 +76,7 @@ export function DailyMarketPlanSection({
       if (num !== null && (Number.isNaN(num) || num < 0 || num > 100)) {
         return { success: false, error: "Risk budget must be 0–100%." };
       }
-      return updateTodaysPlan(dateKey, { riskBudgetPercent: num });
+      return updateTodaysPlan(dayRef, { riskBudgetPercent: num });
     },
     onError: (m) => {
       if (m) toast.error(m);
@@ -90,7 +92,7 @@ export function DailyMarketPlanSection({
       if (num !== null && (Number.isNaN(num) || num < 0 || !Number.isInteger(num))) {
         return { success: false, error: "Max trades must be a whole number." };
       }
-      return updateTodaysPlan(dateKey, { maxTradesPerDay: num });
+      return updateTodaysPlan(dayRef, { maxTradesPerDay: num });
     },
     onError: (m) => {
       if (m) toast.error(m);
@@ -100,7 +102,7 @@ export function DailyMarketPlanSection({
   async function changeSessions(next: string[]) {
     setSessions(next);
     setSessionsSave("saving");
-    const r = await updateTodaysPlan(dateKey, { activeSessions: next });
+    const r = await updateTodaysPlan(dayRef, { activeSessions: next });
     if (r.success) setSessionsSave("saved");
     else {
       setSessionsSave("error");
@@ -111,7 +113,7 @@ export function DailyMarketPlanSection({
   async function toggleNewsAcknowledged(checked: boolean) {
     setNewsAcknowledged(checked);
     setNewsSave("saving");
-    const r = await updateTodaysPlan(dateKey, { newsAcknowledged: checked });
+    const r = await updateTodaysPlan(dayRef, { newsAcknowledged: checked });
     if (r.success) setNewsSave("saved");
     else {
       setNewsSave("error");
@@ -122,7 +124,7 @@ export function DailyMarketPlanSection({
   function toggleComplete() {
     const next = !isComplete;
     startComplete(async () => {
-      const r = await updateTodaysPlan(dateKey, { planComplete: next });
+      const r = await updateTodaysPlan(dayRef, { planComplete: next });
       if (!r.success) {
         toast.error(r.error);
         return;
@@ -161,7 +163,7 @@ export function DailyMarketPlanSection({
             <RichTextEditor
               initialContent={plan.lookingFor}
               placeholder="e.g. Liquidity sweep of the Asia low into NY open, then a reversal…"
-              onSave={(content) => updateTodaysPlan(dateKey, { lookingFor: content })}
+              onSave={(content) => updateTodaysPlan(dayRef, { lookingFor: content })}
             />
           </div>
 
@@ -182,7 +184,7 @@ export function DailyMarketPlanSection({
             <RichTextEditor
               initialContent={plan.importantConditions}
               placeholder="Conditions worth noting going in — volatility, correlated markets, illiquid holiday session…"
-              onSave={(content) => updateTodaysPlan(dateKey, { importantConditions: content })}
+              onSave={(content) => updateTodaysPlan(dayRef, { importantConditions: content })}
             />
           </div>
 
@@ -191,7 +193,7 @@ export function DailyMarketPlanSection({
             <RichTextEditor
               initialContent={plan.stayOutConditions}
               placeholder="Conditions that mean staying flat today — no clear structure, red-folder news window, choppy range…"
-              onSave={(content) => updateTodaysPlan(dateKey, { stayOutConditions: content })}
+              onSave={(content) => updateTodaysPlan(dayRef, { stayOutConditions: content })}
             />
           </div>
         </div>
@@ -214,7 +216,7 @@ export function DailyMarketPlanSection({
             <RichTextEditor
               initialContent={plan.newsNotes}
               placeholder="Events to watch — time, currency/market, expected impact…"
-              onSave={(content) => updateTodaysPlan(dateKey, { newsNotes: content })}
+              onSave={(content) => updateTodaysPlan(dayRef, { newsNotes: content })}
             />
           </div>
 
@@ -223,7 +225,7 @@ export function DailyMarketPlanSection({
             <RichTextEditor
               initialContent={plan.dailyFundamentalOutlook}
               placeholder="Overall macro backdrop for the day — this is general, not per-asset (see each asset's own fundamentals above)…"
-              onSave={(content) => updateTodaysPlan(dateKey, { dailyFundamentalOutlook: content })}
+              onSave={(content) => updateTodaysPlan(dayRef, { dailyFundamentalOutlook: content })}
             />
           </div>
         </div>

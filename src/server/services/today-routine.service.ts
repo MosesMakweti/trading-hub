@@ -1,6 +1,7 @@
-import { Prisma, type TradingDay } from "@prisma/client";
+import type { TradingDay } from "@prisma/client";
 
 import { prisma } from "@/server/db";
+import { canonicalJson } from "@/lib/canonical-json";
 import { getOrCreateTradingDay, getTradingDay } from "@/server/services/trading-day.service";
 import { getOrCreateDefaultRoutine } from "@/server/services/routine.service";
 import {
@@ -64,11 +65,24 @@ export async function getOrCreateDayRoutine(userId: string, day: TradingDay): Pr
 
   // Persist only when the structure actually changed, so a normal page load isn't
   // a write (and doesn't churn the cache) — but a Settings edit is picked up here.
-  if (!stored || JSON.stringify(stored.sections) !== JSON.stringify(sections)) {
-    await prisma.tradingDay.update({
-      where: { id: day.id },
-      data: { routineSnapshot: snapshot as unknown as Prisma.InputJsonValue },
-    });
+  // Compared canonically: the stored copy round-trips through jsonb, which
+  // reorders keys, so a plain JSON.stringify comparison always differed and
+  // every render rewrote the whole snapshot — including the (possibly stale)
+  // `responses` it had read, clobbering ticks saved in between (found in
+  // Backtesting V1 QA). Only `sections` is ever written here, atomically, so
+  // responses saved concurrently by setRoutineResponse are never overwritten.
+  if (!stored) {
+    await prisma.$executeRaw`
+      UPDATE "TradingDay"
+      SET "routineSnapshot" = COALESCE("routineSnapshot", ${JSON.stringify(snapshot)}::jsonb), "updatedAt" = NOW()
+      WHERE "id" = ${day.id}
+    `;
+  } else if (canonicalJson(stored.sections) !== canonicalJson(sections)) {
+    await prisma.$executeRaw`
+      UPDATE "TradingDay"
+      SET "routineSnapshot" = jsonb_set("routineSnapshot", '{sections}', ${JSON.stringify(sections)}::jsonb), "updatedAt" = NOW()
+      WHERE "id" = ${day.id}
+    `;
   }
 
   return { snapshot, readyAt };
@@ -88,15 +102,24 @@ export async function setRoutineResponse(
   const exists = snapshot.sections.some((s) => s.items.some((i) => i.id === itemId));
   if (!exists) throw new Error("Unknown routine item.");
 
-  snapshot.responses = {
-    ...snapshot.responses,
-    [itemId]: { ...snapshot.responses[itemId], ...response },
-  };
-
-  await prisma.tradingDay.update({
-    where: { id: day.id },
-    data: { routineSnapshot: snapshot as unknown as Prisma.InputJsonValue },
-  });
+  // Atomic merge of ONE response into the stored snapshot. Rapid checkbox
+  // ticks send concurrent saves; the previous read-modify-write of the whole
+  // JSON let them overwrite each other (lost updates — found in Backtesting V1
+  // QA: 14 of 17 ticks survived, so the readiness gate then refused). The row
+  // lock serializes the merges. `day.id` comes from the environment-scoped
+  // lookup above, so this raw statement can only touch the right day.
+  const patch = JSON.stringify(response);
+  await prisma.$executeRaw`
+    UPDATE "TradingDay"
+    SET "routineSnapshot" = jsonb_set(
+          "routineSnapshot",
+          '{responses}',
+          COALESCE("routineSnapshot"->'responses', '{}'::jsonb)
+            || jsonb_build_object(${itemId}::text, COALESCE("routineSnapshot"->'responses'->${itemId}::text, '{}'::jsonb) || ${patch}::jsonb)
+        ),
+        "updatedAt" = NOW()
+    WHERE "id" = ${day.id}
+  `;
 }
 
 /**

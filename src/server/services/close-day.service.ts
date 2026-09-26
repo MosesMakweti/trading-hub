@@ -3,7 +3,9 @@ import type { TagColor, TradingDay } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { computeTradeExecutionSummary } from "@/domain/trades/trade-execution-summary";
+import { settledWinLossClass } from "@/domain/analytics/canonical-dataset";
 import { toTradeDiscrepancy } from "@/server/services/trade-discrepancy";
+import { currentSettlementBasis, settlementInclude, settlementInputs } from "@/server/services/settlement-basis";
 import { getOrCreateTradingDay, endDay } from "@/server/services/trading-day.service";
 import { reconcileTradeLifecycleForTrade } from "@/server/services/trade-review.service";
 import type { DailyReflectionInput, CloseTradingDayInput } from "@/lib/validation/close-day";
@@ -23,7 +25,7 @@ function tradeWhereForDay(userId: string, dateKey: string) {
 
 const dayCloseTradeInclude = {
   actualPartialExits: true,
-  performanceRiskSnapshot: { select: { initialStop: true, realizedR: true, performancePnl: true, settledAt: true } },
+  ...settlementInclude,
   behaviourLabels: { include: { behaviourLabel: true } },
   psychology: { select: { psychologyPercent: true } },
 } as const;
@@ -66,7 +68,9 @@ export interface DayCloseSummaryDTO {
    *  answered one (never a fabricated average of zero data points). */
   averagePsychologyPercent: number | null;
   /** Today V2 Final Phase §8/§17 — valid setups the trader spotted but never
-   *  took (TradeOpportunity: status MISSED, setupValid !== false), the same
+   *  took (TradeOpportunity: status MISSED, scored valid — setupValid ===
+   *  true; `{ not: false }` excludes NULL in SQL, i.e. unscored setups are not
+   *  counted), the same
    *  "missed opportunity" concept the Discrepancy Gap already scores.
    *  Deliberately never conflated with a losing Trade — a missed setup has
    *  no Trade row at all. */
@@ -90,6 +94,29 @@ export interface DayCloseSummaryDTO {
   warnings: string[];
 }
 
+/**
+ * A trade's win/loss/breakeven for the Journal's day counts — the canonical
+ * settled result (`settledWinLossClass`), the exact rule Analytics uses, in
+ * both environments: LIVE by Performance Account settlement, BACKTEST by
+ * price-derived settlement (`summary` is built from the basis's settlement).
+ * The trader's FULLY_CLOSED confirmation no longer gates the count (LIVE used
+ * to require it — a leftover from before Analytics V2, commit 8e88cc7 — so a
+ * settled-but-unreviewed trade was a win in Analytics and uncounted here).
+ *
+ * CONTRADICTORY isn't a result: it flags a LIVE trade the trader marked
+ * Fully Closed that has no settled result yet (a readiness warning only).
+ * Backtesting never raised it and still doesn't.
+ */
+function dayOutcome(
+  trade: { reviewLifecycleStatus: string | null },
+  summary: { settled: boolean; realizedRSoFar: number | null },
+  basis: "PERFORMANCE_ACCOUNT" | "PRICE_DERIVED",
+): "WIN" | "LOSS" | "BREAKEVEN" | "CONTRADICTORY" | null {
+  const settled = settledWinLossClass(summary);
+  if (settled) return settled;
+  return basis === "PERFORMANCE_ACCOUNT" && trade.reviewLifecycleStatus === "FULLY_CLOSED" ? "CONTRADICTORY" : null;
+}
+
 /** The compact pre-close summary + readiness warnings (Stage 8 §1/§5/§8/§9). */
 export async function getDayCloseSummary(userId: string, dateKey: string): Promise<DayCloseSummaryDTO> {
   const [day, trades, missedValidOpportunityCount] = await Promise.all([
@@ -98,7 +125,9 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
     // TradeOpportunity = "a valid setup appeared," deliberately separate from
     // Trade (Final Phase §17) — a missed valid opportunity has no Trade row
     // at all, so it can only ever be counted here, never conflated with a
-    // losing trade.
+    // losing trade. "Valid" = scored valid (setupValid === true): the Prisma
+    // `{ not: false }` filter excludes NULL, matching the Discrepancy Gap's
+    // own definition (opportunity-mapper.ts: `valid: setupValid === true`).
     prisma.tradeOpportunity.count({
       where: { userId, spottedAt: dateKeyToUtcDate(dateKey), status: "MISSED", setupValid: { not: false }, deletedAt: null },
     }),
@@ -127,8 +156,10 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
 
   let noReflectionCount = 0;
   let contradictoryFullyClosedCount = 0;
+  const basis = currentSettlementBasis();
 
   for (const trade of trades) {
+    const settlement = settlementInputs(trade, basis);
     switch (trade.reviewLifecycleStatus) {
       case "FULLY_CLOSED":
         fullyClosedCount++;
@@ -159,7 +190,7 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
     // A cancelled idea was never meant to settle — excluded from the
     // settled/pending split the same way it's excluded from R/PnL below.
     if (trade.reviewLifecycleStatus !== "CANCELLED_NEVER_TRIGGERED") {
-      if (trade.performanceRiskSnapshot?.settledAt != null) settledCount++;
+      if (settlement.settled) settledCount++;
       else pendingCount++;
     }
 
@@ -198,29 +229,24 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
         actualEntry: trade.actualEntry?.toString() ?? null,
         actualStopLoss: trade.actualStopLoss?.toString() ?? null,
         actualExit: trade.actualExit?.toString() ?? null,
-        resolvedInitialStop: trade.performanceRiskSnapshot?.initialStop?.toString() ?? null,
+        resolvedInitialStop: settlement.resolvedInitialStop,
         partials: trade.actualPartialExits.map((p) => ({
           exitPrice: p.exitPrice.toString(),
           percentClosed: p.percentClosed?.toString() ?? null,
         })),
-        settled: trade.performanceRiskSnapshot?.settledAt != null,
-        settledRealizedR: trade.performanceRiskSnapshot?.realizedR?.toString() ?? null,
-        settledPnl: trade.performanceRiskSnapshot?.performancePnl?.toString() ?? null,
+        settled: settlement.settled,
+        settledRealizedR: settlement.settledRealizedR,
+        settledPnl: settlement.settledPnl,
       });
 
       if (summary.realizedRSoFar != null) totalRealizedRSoFar += summary.realizedRSoFar;
       if (summary.pnl != null) totalPnl += summary.pnl;
 
-      if (trade.reviewLifecycleStatus === "FULLY_CLOSED") {
-        if (trade.actualRR != null) {
-          const r = trade.actualRR.toNumber();
-          if (r > 0.001) wins++;
-          else if (r < -0.001) losses++;
-          else breakevens++;
-        } else {
-          contradictoryFullyClosedCount++;
-        }
-      }
+      const outcome = dayOutcome(trade, summary, basis);
+      if (outcome === "WIN") wins++;
+      else if (outcome === "LOSS") losses++;
+      else if (outcome === "BREAKEVEN") breakevens++;
+      else if (outcome === "CONTRADICTORY") contradictoryFullyClosedCount++;
     }
 
     const hasReflectionText = [trade.whatWentWell, trade.whatWentWrong, trade.whatCouldImprove].some(
@@ -354,6 +380,10 @@ export interface DailyPerformanceSummaryDTO {
   wins: number;
   losses: number;
   breakevens: number;
+  /** Valid setups recorded as MISSED on this day — the same filter Day
+   *  Summary uses (`setupValid: { not: false }`, which in SQL excludes NULL,
+   *  i.e. only setups scored valid). */
+  missedCount: number;
 }
 
 /**
@@ -373,8 +403,9 @@ export async function listDailyPerformanceSummaries(userId: string): Promise<Dai
       actualExit: true,
       actualRR: true,
       reviewLifecycleStatus: true,
+      plannedStopLoss: true,
       actualPartialExits: { select: { exitPrice: true, percentClosed: true } },
-      performanceRiskSnapshot: { select: { initialStop: true, realizedR: true, performancePnl: true, settledAt: true } },
+      ...settlementInclude,
     },
   });
 
@@ -382,12 +413,13 @@ export async function listDailyPerformanceSummaries(userId: string): Promise<Dai
   const get = (dateKey: string) => {
     let entry = byDay.get(dateKey);
     if (!entry) {
-      entry = { dateKey, executedTradeCount: 0, cancelledCount: 0, totalRealizedR: 0, totalPnl: 0, wins: 0, losses: 0, breakevens: 0 };
+      entry = { dateKey, executedTradeCount: 0, cancelledCount: 0, totalRealizedR: 0, totalPnl: 0, wins: 0, losses: 0, breakevens: 0, missedCount: 0 };
       byDay.set(dateKey, entry);
     }
     return entry;
   };
 
+  const basis = currentSettlementBasis();
   for (const trade of trades) {
     const dateKey = utcDateToKey(trade.tradeDate);
     const entry = get(dateKey);
@@ -399,31 +431,45 @@ export async function listDailyPerformanceSummaries(userId: string): Promise<Dai
     if (trade.actualEntry == null) continue; // a pending/unstarted idea — no result yet either way
 
     entry.executedTradeCount++;
+    const settlement = settlementInputs(trade, basis);
     const summary = computeTradeExecutionSummary({
       direction: trade.direction,
       actualEntry: trade.actualEntry.toString(),
       actualStopLoss: trade.actualStopLoss?.toString() ?? null,
       actualExit: trade.actualExit?.toString() ?? null,
-      resolvedInitialStop: trade.performanceRiskSnapshot?.initialStop?.toString() ?? null,
+      resolvedInitialStop: settlement.resolvedInitialStop,
       partials: trade.actualPartialExits.map((p) => ({
         exitPrice: p.exitPrice.toString(),
         percentClosed: p.percentClosed?.toString() ?? null,
       })),
-      settled: trade.performanceRiskSnapshot?.settledAt != null,
-      settledRealizedR: trade.performanceRiskSnapshot?.realizedR?.toString() ?? null,
-      settledPnl: trade.performanceRiskSnapshot?.performancePnl?.toString() ?? null,
+      settled: settlement.settled,
+      settledRealizedR: settlement.settledRealizedR,
+      settledPnl: settlement.settledPnl,
     });
 
     if (summary.realizedRSoFar != null) entry.totalRealizedR += summary.realizedRSoFar;
     if (summary.pnl != null) entry.totalPnl += summary.pnl;
 
-    if (trade.reviewLifecycleStatus === "FULLY_CLOSED" && trade.actualRR != null) {
-      const r = trade.actualRR.toNumber();
-      if (r > 0.001) entry.wins++;
-      else if (r < -0.001) entry.losses++;
-      else entry.breakevens++;
-    }
+    const outcome = dayOutcome(trade, summary, basis);
+    if (outcome === "WIN") entry.wins++;
+    else if (outcome === "LOSS") entry.losses++;
+    else if (outcome === "BREAKEVEN") entry.breakevens++;
   }
 
+  // One grouped query for missed setups (environment-scoped like the trades above).
+  const missed = await prisma.tradeOpportunity.groupBy({
+    by: ["spottedAt"],
+    where: { userId, status: "MISSED", setupValid: { not: false }, deletedAt: null },
+    _count: { _all: true },
+  });
+  for (const m of missed) get(utcDateToKey(m.spottedAt)).missedCount += m._count._all;
+
   return Array.from(byDay.values());
+}
+
+/** Date keys of the CLOSED (archived) days in the current workspace scope —
+ *  the Backtesting Journal's "completed day" marker. Read-only. */
+export async function listClosedDayKeys(userId: string): Promise<string[]> {
+  const days = await prisma.tradingDay.findMany({ where: { userId, status: "ARCHIVED" }, select: { date: true }, orderBy: { date: "asc" } });
+  return days.map((d) => utcDateToKey(d.date));
 }

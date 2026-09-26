@@ -11,6 +11,9 @@ import * as tradesService from "@/server/services/trades.service";
 import * as tradePlanService from "@/server/services/trade-plan.service";
 import { toApiTradeDTO } from "@/server/services/api-trade-dto";
 
+import { LIVE_SCOPE, runLive } from "@/server/workspace/scope";
+import { assertDatabaseSeesScope } from "@/server/workspace/scope-tripwire";
+
 export const runtime = "nodejs";
 
 /**
@@ -40,7 +43,20 @@ function badRequest(request: Request, error: string, status: number, extra?: Rec
   return withCors(request, NextResponse.json({ error, ...extra }, { status }));
 }
 
+/**
+ * Backtesting V1: the TradingView extension API is LIVE-only by design. The
+ * whole handler runs in an explicit LIVE scope (verified by the tripwire), and
+ * the request schema has no backtestRunId — an unknown key is stripped — so
+ * no request can place a trade into a Backtest Run.
+ */
 export async function POST(request: Request) {
+  return runLive(() => {
+    assertDatabaseSeesScope(LIVE_SCOPE);
+    return handleCreateTrade(request);
+  });
+}
+
+async function handleCreateTrade(request: Request) {
   const auth = await requireApiUser(request);
   if (!auth.ok) return withCors(request, auth.response);
   const userId = auth.user.id;

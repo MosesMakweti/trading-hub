@@ -16,6 +16,7 @@ import { PerformanceAccountCard } from "@/components/dashboard/performance-accou
 import { PrivacyModeProvider } from "@/components/dashboard/privacy-mode";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
+import { LIVE_WORKSPACE, WorkspaceProvider } from "@/components/workspace/workspace-context";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FadeIn } from "@/components/shared/motion";
 
@@ -143,7 +144,10 @@ export default async function DashboardPage({
 
         <section id="notes" className="glass space-y-3 rounded-xl p-4 scroll-mt-20">
           <h2 className="text-sm font-medium text-muted-foreground">Today&apos;s Notes</h2>
-          <DailyNoteEditor dateKey={today} initialContent={data.todayNote?.content ?? null} />
+          {/* The Dashboard's quick note is the LIVE Journal's note for today. */}
+          <WorkspaceProvider value={LIVE_WORKSPACE}>
+            <DailyNoteEditor dateKey={today} initialContent={data.todayNote?.content ?? null} />
+          </WorkspaceProvider>
         </section>
 
         {recentReflections.length > 0 && (

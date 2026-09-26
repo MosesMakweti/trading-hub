@@ -67,10 +67,13 @@ export function nextSessionEvent(
 export function resolveDefaultSession(
   activeSessionNames: string[],
   windows: SessionWindow[],
-  nowMinutesSinceMidnight: number,
+  /** Null when there is no meaningful wall clock (a Backtest Session replays
+   *  a historical date) — then only an unambiguous single session defaults. */
+  nowMinutesSinceMidnight: number | null,
 ): string | null {
   if (activeSessionNames.length === 0) return null;
   if (activeSessionNames.length === 1) return activeSessionNames[0];
+  if (nowMinutesSinceMidnight == null) return null;
 
   const activeNameSet = new Set(activeSessionNames.map((n) => n.trim().toLowerCase()));
   const candidateWindows = windows.filter((w) => activeNameSet.has(w.name.trim().toLowerCase()));

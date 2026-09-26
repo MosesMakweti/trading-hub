@@ -6,13 +6,9 @@ import type { WeekProps, WeekdaysProps } from "react-day-picker";
 import { cn } from "@/lib/utils";
 import { localDateToKey } from "@/lib/date";
 import { deriveDayResultState } from "@/domain/trades/day-result-state";
+import { summarizePeriod, type DaySummaryLike } from "@/domain/journal/period-summary";
 import { formatRR, formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
 
-interface DailyPerformance {
-  executedTradeCount: number;
-  totalRealizedR: number;
-  totalPnl: number;
-}
 
 // A week's background tint scales with how big the week's realized R was:
 // ±GRADIENT_CAP_R or beyond reaches full intensity, smaller weeks fade toward
@@ -43,18 +39,11 @@ export function JournalWeekRow({
   children,
   className,
   dailyPerformance,
+  showPnl = true,
   ...props
-}: WeekProps & { dailyPerformance: Map<string, DailyPerformance> }) {
-  let totalR = 0;
-  let totalPnl = 0;
-  let tradeCount = 0;
-  for (const day of week.days) {
-    const entry = dailyPerformance.get(localDateToKey(day.date));
-    if (!entry) continue;
-    totalR += entry.totalRealizedR;
-    totalPnl += entry.totalPnl;
-    tradeCount += entry.executedTradeCount;
-  }
+}: WeekProps & { dailyPerformance: Map<string, DaySummaryLike>; showPnl?: boolean }) {
+  const weekKeys = new Set(week.days.map((day) => localDateToKey(day.date)));
+  const { totalR, totalPnl, trades: tradeCount } = summarizePeriod(dailyPerformance.values(), (key) => weekKeys.has(key));
   const state = deriveDayResultState(tradeCount, totalR);
   const tone = state === "WIN" ? "success" : state === "LOSS" ? "danger" : "muted";
 
@@ -75,7 +64,7 @@ export function JournalWeekRow({
           WEEK_COL,
           "flex flex-col items-center justify-center gap-0.5 border-l border-foreground/10 px-1 text-center transition-colors",
         )}
-        aria-label={tradeCount > 0 ? `Week total: ${formatRR(totalR)}, ${formatSignedCurrency(totalPnl)}` : "Week total: no trades"}
+        aria-label={tradeCount > 0 ? `Week total: ${formatRR(totalR)}${showPnl ? `, ${formatSignedCurrency(totalPnl)}` : ""}` : "Week total: no trades"}
       >
         <span className="text-[9px] leading-none tracking-wide text-muted-foreground uppercase">Week</span>
         <span
@@ -88,7 +77,7 @@ export function JournalWeekRow({
         >
           {tradeCount > 0 ? formatRR(totalR) : "—"}
         </span>
-        {tradeCount > 0 && (
+        {tradeCount > 0 && showPnl && (
           <span className="text-[9px] leading-none text-muted-foreground/70 tabular-nums">
             {formatSignedCurrency(totalPnl)}
           </span>

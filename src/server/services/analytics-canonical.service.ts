@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { buildCanonicalTradeRow, type CanonicalAnalyticsTradeRow } from "@/domain/analytics/canonical-dataset";
@@ -22,6 +24,23 @@ import {
   toMetricInputs,
 } from "@/domain/analytics/canonical-aggregations";
 import * as metrics from "@/domain/performance/metrics";
+import { currentSettlementBasis, settlementInclude, settlementInputs, type SettlementBasis } from "@/server/services/settlement-basis";
+import { executionSnapshot } from "@/server/services/selected-tags";
+
+/** Selected confluence names, labelled with the direction applicability frozen
+ *  in the trade's OWN strategy snapshot (never live Strategy Lab config). */
+function frozenConfluenceLabels(selected: unknown, strategyExecutionSnapshot: unknown): string[] {
+  const names = Array.isArray(selected) ? (selected as unknown[]).filter((n): n is string => typeof n === "string") : [];
+  const byName = new Map((executionSnapshot(strategyExecutionSnapshot).confluences ?? []).map((c) => [c.name.toLowerCase(), c.directionApplicability]));
+  return names.map((name) => {
+    const dir = byName.get(name.toLowerCase());
+    return dir === "BULLISH" ? `${name} · Bullish` : dir === "BEARISH" ? `${name} · Bearish` : name;
+  });
+}
+
+function nameList(value: unknown): string[] {
+  return Array.isArray(value) ? (value as unknown[]).filter((n): n is string => typeof n === "string") : [];
+}
 import type { SetupValidationSnapshot } from "@/domain/trades/setup-validation";
 
 /**
@@ -55,88 +74,106 @@ export interface CanonicalAnalyticsFilters {
   accountId?: string;
 }
 
-const canonicalTradeInclude = {
+export const canonicalTradeInclude = {
   actualPartialExits: true,
-  performanceRiskSnapshot: { select: { initialStop: true, realizedR: true, performancePnl: true, settledAt: true } },
+  ...settlementInclude,
   behaviourLabels: { include: { behaviourLabel: true } },
   psychology: { select: { psychologyPercent: true } },
 } as const;
 
+export type CanonicalTradeRecord = Prisma.TradeGetPayload<{ include: typeof canonicalTradeInclude }>;
+
+/** One Trade (loaded with `canonicalTradeInclude`) → its canonical row, under
+ *  the given settlement basis. Shared by the dataset loader and the Backtest
+ *  Run overview (which batches several runs into one query). */
+export function toCanonicalRow(t: CanonicalTradeRecord, basis: SettlementBasis): CanonicalAnalyticsTradeRow {
+  const settlement = settlementInputs(t, basis);
+  const setupSnapshot = t.setupValidationSnapshot as unknown as SetupValidationSnapshot | null;
+  return buildCanonicalTradeRow({
+    tradeId: t.id,
+    dateKey: utcDateToKey(t.tradeDate),
+    direction: t.direction,
+    assetSymbol: t.assetSymbol,
+    strategyId: t.strategyId,
+    strategyName: t.strategyNameSnapshot,
+    session: t.selectedSession,
+    reviewLifecycleStatus: t.reviewLifecycleStatus,
+    validationState: t.validationState,
+    overrideReason: t.overrideReason,
+    setupTypeName: setupSnapshot?.setupType.name ?? null,
+    validationScore: setupSnapshot?.score ?? null,
+    dailyBiasSnapshot: t.dailyBiasSnapshot as CanonicalAnalyticsTradeRow["dailyBiasSnapshot"],
+    plannedR: t.expectedRR?.toNumber() ?? null,
+    actualRR: t.actualRR?.toNumber() ?? null,
+    actualEntry: t.actualEntry?.toNumber() ?? null,
+    actualStopLoss: t.actualStopLoss?.toNumber() ?? null,
+    actualExit: t.actualExit?.toNumber() ?? null,
+    resolvedInitialStop: settlement.resolvedInitialStop,
+    partials: t.actualPartialExits.map((p) => ({
+      exitPrice: p.exitPrice.toNumber(),
+      percentClosed: p.percentClosed?.toNumber() ?? null,
+    })),
+    settled: settlement.settled,
+    settledRealizedR: settlement.settledRealizedR,
+    settledPnl: settlement.settledPnl,
+    preTradeMoodTags: t.preTradeMoodTags,
+    moodIntensity: t.preTradeMoodIntensity,
+    behaviourLabels: t.behaviourLabels
+      .filter((l) => l.behaviourLabel.deletedAt == null)
+      .map((l) => ({ name: l.behaviourLabel.name, polarity: l.behaviourLabel.polarity })),
+    adherencePercent: t.adherencePercent,
+    confluencePercent: t.confluencePercent,
+    executionPercent: t.executionPercent,
+    tradeQualityPercent: t.tradeQualityPercent,
+    psychologyPercent: t.psychology?.psychologyPercent ?? null,
+    timeframe: t.timeframe,
+    entryModel: t.selectedEntryModel,
+    confluences: frozenConfluenceLabels(t.selectedConfluences, t.strategyExecutionSnapshot),
+    executionConfirmations: nameList(t.selectedExecution),
+    setupScore: t.setupScore,
+    setupRating: t.setupRating,
+    setupValid: t.setupValid,
+  });
+}
+
 export async function getCanonicalAnalyticsDataset(
-  userId: string,
-  filters: CanonicalAnalyticsFilters,
+userId: string,
+filters: CanonicalAnalyticsFilters,
 ): Promise<CanonicalAnalyticsTradeRow[]> {
-  const tradeDate =
-    filters.from != null || filters.to != null
-      ? {
-          ...(filters.from != null ? { gte: dateKeyToUtcDate(filters.from) } : {}),
-          ...(filters.to != null ? { lte: dateKeyToUtcDate(filters.to) } : {}),
-        }
-      : undefined;
+const tradeDate =
+  filters.from != null || filters.to != null
+    ? {
+        ...(filters.from != null ? { gte: dateKeyToUtcDate(filters.from) } : {}),
+        ...(filters.to != null ? { lte: dateKeyToUtcDate(filters.to) } : {}),
+      }
+    : undefined;
 
-  const trades = await prisma.trade.findMany({
-    where: {
-      userId,
-      ...(tradeDate ? { tradeDate } : {}),
-      ...(filters.accountId ? { allocations: { some: { tradingAccountId: filters.accountId } } } : {}),
-    },
-    include: canonicalTradeInclude,
-    orderBy: [{ tradeDate: "asc" }, { executionMinutes: "asc" }],
-  });
+const trades = await prisma.trade.findMany({
+  where: {
+    userId,
+    ...(tradeDate ? { tradeDate } : {}),
+    ...(filters.accountId ? { allocations: { some: { tradingAccountId: filters.accountId } } } : {}),
+  },
+  include: canonicalTradeInclude,
+  orderBy: [{ tradeDate: "asc" }, { executionMinutes: "asc" }],
+});
 
-  const rows = trades.map((t) => {
-    const setupSnapshot = t.setupValidationSnapshot as unknown as SetupValidationSnapshot | null;
-    return buildCanonicalTradeRow({
-      tradeId: t.id,
-      dateKey: utcDateToKey(t.tradeDate),
-      direction: t.direction,
-      assetSymbol: t.assetSymbol,
-      strategyId: t.strategyId,
-      strategyName: t.strategyNameSnapshot,
-      session: t.selectedSession,
-      reviewLifecycleStatus: t.reviewLifecycleStatus,
-      validationState: t.validationState,
-      overrideReason: t.overrideReason,
-      setupTypeName: setupSnapshot?.setupType.name ?? null,
-      validationScore: setupSnapshot?.score ?? null,
-      dailyBiasSnapshot: t.dailyBiasSnapshot as CanonicalAnalyticsTradeRow["dailyBiasSnapshot"],
-      plannedR: t.expectedRR?.toNumber() ?? null,
-      actualRR: t.actualRR?.toNumber() ?? null,
-      actualEntry: t.actualEntry?.toNumber() ?? null,
-      actualStopLoss: t.actualStopLoss?.toNumber() ?? null,
-      actualExit: t.actualExit?.toNumber() ?? null,
-      resolvedInitialStop: t.performanceRiskSnapshot?.initialStop?.toNumber() ?? null,
-      partials: t.actualPartialExits.map((p) => ({
-        exitPrice: p.exitPrice.toNumber(),
-        percentClosed: p.percentClosed?.toNumber() ?? null,
-      })),
-      settled: t.performanceRiskSnapshot?.settledAt != null,
-      settledRealizedR: t.performanceRiskSnapshot?.realizedR?.toNumber() ?? null,
-      settledPnl: t.performanceRiskSnapshot?.performancePnl?.toNumber() ?? null,
-      preTradeMoodTags: t.preTradeMoodTags,
-      moodIntensity: t.preTradeMoodIntensity,
-      behaviourLabels: t.behaviourLabels
-        .filter((l) => l.behaviourLabel.deletedAt == null)
-        .map((l) => ({ name: l.behaviourLabel.name, polarity: l.behaviourLabel.polarity })),
-      adherencePercent: t.adherencePercent,
-      confluencePercent: t.confluencePercent,
-      executionPercent: t.executionPercent,
-      tradeQualityPercent: t.tradeQualityPercent,
-      psychologyPercent: t.psychology?.psychologyPercent ?? null,
-    });
-  });
+// LIVE: Performance-Account settlement (unchanged). BACKTEST: price-derived
+// settlement — see settlement-basis.ts.
+const basis = currentSettlementBasis();
+const rows = trades.map((t) => toCanonicalRow(t, basis));
 
-  return rows.filter(
-    (r) =>
-      (!filters.strategyId || r.strategyId === filters.strategyId) &&
-      (!filters.setupTypeName || r.setupTypeName === filters.setupTypeName) &&
-      (!filters.asset || r.assetSymbol === filters.asset) &&
-      (!filters.direction || r.direction === filters.direction) &&
-      (!filters.session || r.session === filters.session) &&
-      (!filters.validationState || r.validationState === filters.validationState) &&
-      (!filters.behaviourLabel || r.behaviourLabels.some((l) => l.name === filters.behaviourLabel)) &&
-      (!filters.moodTag || r.preTradeMoodTags.includes(filters.moodTag)),
-  );
+return rows.filter(
+  (r) =>
+    (!filters.strategyId || r.strategyId === filters.strategyId) &&
+    (!filters.setupTypeName || r.setupTypeName === filters.setupTypeName) &&
+    (!filters.asset || r.assetSymbol === filters.asset) &&
+    (!filters.direction || r.direction === filters.direction) &&
+    (!filters.session || r.session === filters.session) &&
+    (!filters.validationState || r.validationState === filters.validationState) &&
+    (!filters.behaviourLabel || r.behaviourLabels.some((l) => l.name === filters.behaviourLabel)) &&
+    (!filters.moodTag || r.preTradeMoodTags.includes(filters.moodTag)),
+);
 }
 
 export interface CanonicalFilterOptionsDTO {

@@ -90,6 +90,7 @@ export function OpportunitiesSection({
                 opportunity={o}
                 linkableTrades={linkableTrades}
                 editable={editable}
+                strategies={strategies}
               />
             </StaggerItem>
           ))}

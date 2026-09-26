@@ -12,6 +12,7 @@ import {
 type SimpleResult = { success: true } | { success: false; error: string };
 
 const SECTIONS: DataSection[] = [
+  "backtesting",
   "journal-trades",
   "today-plans",
   "strategies",

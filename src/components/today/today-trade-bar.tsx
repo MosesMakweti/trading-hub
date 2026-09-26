@@ -7,6 +7,7 @@ import { TradeStatusBadge } from "@/components/journal/workspace/workspace-ui";
 import { AddTradeDialog } from "@/components/today/add-trade-dialog";
 import type { SessionWindow } from "@/domain/schedule/session-countdown";
 import type { TradeWorkspaceDTO } from "@/types/trades";
+import { useWorkspace } from "@/components/workspace/workspace-context";
 
 /**
  * Shared header for the Today trade tabs: pick which of today's trades is in
@@ -35,6 +36,7 @@ export function TodayTradeBar({
   activeSessions?: string[];
   sessionWindows?: SessionWindow[];
 }) {
+  const { isBacktest } = useWorkspace();
   return (
     <div className="glass flex flex-wrap items-center gap-2 rounded-2xl p-2.5">
       <div className="flex flex-1 flex-wrap items-center gap-1.5">
@@ -62,7 +64,9 @@ export function TodayTradeBar({
       </div>
 
       <div className="flex items-center gap-1.5">
-        {focusedId && (
+        {/* The standalone trade page is part of the live Journal; a simulated
+            trade is worked entirely in the Session. */}
+        {focusedId && !isBacktest && (
           <Button
             variant="ghost"
             size="sm"

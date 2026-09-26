@@ -1,6 +1,9 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
+import { applyWorkspaceScope } from "@/server/workspace/prisma-scope";
+import { currentWorkspaceScope } from "@/server/workspace/scope";
+
 const SOFT_DELETE_MODELS = new Set([
   "EntryModel",
   "RoutineSection",
@@ -53,16 +56,43 @@ function withSoftDelete(client: PrismaClient) {
   });
 }
 
-const globalForPrisma = globalThis as unknown as {
-  prisma?: ReturnType<typeof withSoftDelete>;
-};
+// Backtesting Environment (Stage 1) — LIVE vs BACKTEST row isolation, driven
+// by the ambient workspace scope. See server/workspace/prisma-scope.ts.
+function withWorkspaceScope<C extends ReturnType<typeof withSoftDelete>>(client: C) {
+  return client.$extends({
+    client: {
+      /** The workspace scope exactly as THIS client's query hooks see it —
+       *  read through the same module instance the hooks close over. Used by
+       *  server/workspace/action-scope.ts as a fail-closed tripwire: if a
+       *  future change ever split the scope store again (the Stage 3 bug), an
+       *  action would refuse to run instead of silently writing LIVE rows. */
+      $workspaceScope() {
+        return currentWorkspaceScope();
+      },
+    },
+    query: {
+      $allModels: {
+        async $allOperations(params) {
+          return applyWorkspaceScope(params as unknown as Parameters<typeof applyWorkspaceScope>[0]);
+        },
+      },
+    },
+  });
+}
 
 function createPrismaClient() {
   const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-  return withSoftDelete(new PrismaClient({ adapter }));
+  return withWorkspaceScope(withSoftDelete(new PrismaClient({ adapter })));
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
+const globalForPrisma = globalThis as unknown as {
+  prisma?: ReturnType<typeof createPrismaClient>;
+};
+
+// A client cached by an earlier module evaluation (dev HMR) that predates the
+// current extension shape is replaced rather than reused.
+const cachedPrisma = globalForPrisma.prisma;
+export const prisma = cachedPrisma && "$workspaceScope" in cachedPrisma ? cachedPrisma : createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;

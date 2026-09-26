@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db";
+import { currentSettlementBasis, settlementInclude, settlementInputs } from "@/server/services/settlement-basis";
 import { computeTradeExecutionSummary } from "@/domain/trades/trade-execution-summary";
 import { buildPlannedVsActual } from "@/domain/trades/planned-vs-actual";
 import type { PlannedVsActualDTO } from "@/domain/trades/planned-vs-actual";
@@ -127,10 +128,12 @@ export async function getTradeReviewData(userId: string, tradeId: string): Promi
     include: {
       plannedTargets: { orderBy: { targetOrder: "asc" } },
       actualPartialExits: { orderBy: { exitOrder: "asc" } },
-      performanceRiskSnapshot: true,
+      ...settlementInclude,
     },
   });
   if (!trade) throw new Error("Trade not found.");
+  // LIVE: Performance-settled result; BACKTEST: price-derived (settlement-basis.ts).
+  const settlement = settlementInputs(trade, currentSettlementBasis());
 
   const planned: PlannedVsActualDTO["planned"] = {
     entry: trade.plannedEntry?.toNumber() ?? null,
@@ -150,19 +153,19 @@ export async function getTradeReviewData(userId: string, tradeId: string): Promi
     actualEntry: trade.actualEntry?.toString() ?? null,
     actualStopLoss: trade.actualStopLoss?.toString() ?? null,
     actualExit: trade.actualExit?.toString() ?? null,
-    resolvedInitialStop: trade.performanceRiskSnapshot?.initialStop?.toString() ?? null,
+    resolvedInitialStop: settlement.resolvedInitialStop,
     partials: trade.actualPartialExits.map((p) => ({
       exitPrice: p.exitPrice.toString(),
       percentClosed: p.percentClosed?.toString() ?? null,
     })),
-    settled: trade.performanceRiskSnapshot?.settledAt != null,
-    settledRealizedR: trade.performanceRiskSnapshot?.realizedR?.toString() ?? null,
-    settledPnl: trade.performanceRiskSnapshot?.performancePnl?.toString() ?? null,
+    settled: settlement.settled,
+    settledRealizedR: settlement.settledRealizedR,
+    settledPnl: settlement.settledPnl,
   });
 
   const actual: PlannedVsActualDTO["actual"] = {
     entry: trade.actualEntry?.toNumber() ?? null,
-    stopLoss: trade.actualStopLoss?.toNumber() ?? (trade.performanceRiskSnapshot?.initialStop?.toNumber() ?? null),
+    stopLoss: trade.actualStopLoss?.toNumber() ?? settlement.resolvedInitialStop,
     exits: trade.actualPartialExits.map((e) => ({
       exitOrder: e.exitOrder,
       exitPrice: e.exitPrice.toNumber(),

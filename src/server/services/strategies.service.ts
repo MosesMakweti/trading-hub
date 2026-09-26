@@ -208,6 +208,25 @@ export async function getStrategy(userId: string, id: string) {
 }
 
 /**
+ * The strategy's CURRENT full tree frozen in the same shape as a published
+ * StrategyVersion.snapshot, without publishing or bumping the version.
+ * Backtesting (Stage 1) freezes this onto a BacktestRun at creation so the
+ * experiment stays interpretable after later Strategy Lab edits. Null if the
+ * strategy doesn't exist / isn't the user's.
+ */
+export async function captureStrategySnapshot(
+  userId: string,
+  strategyId: string,
+): Promise<{ name: string; version: number; snapshot: StrategyVersionSnapshot } | null> {
+  const strategy = await prisma.strategy.findFirst({
+    where: { id: strategyId, userId },
+    include: strategyTreeInclude,
+  });
+  if (!strategy) return null;
+  return { name: strategy.name, version: strategy.version, snapshot: buildSnapshot(strategy) };
+}
+
+/**
  * Publishes the current state of a strategy as an immutable version snapshot,
  * then bumps `Strategy.version` so the live strategy becomes the next (editable,
  * unpublished) version. Every published version is preserved verbatim as JSON, so

@@ -21,6 +21,7 @@ import { getDailyAssetAnalysisBias } from "@/actions/daily-asset-analysis.action
 import { ContextualCommitmentReminder } from "@/components/journal/contextual-commitment-reminder";
 import type { EffectiveSetupScenario } from "@/server/services/strategy-setup-types.service";
 import type { TradeFormValues } from "@/lib/validation/trades";
+import { useDayRef } from "@/components/workspace/workspace-context";
 
 const NO_SETUP_TYPE = "__none__";
 
@@ -397,6 +398,7 @@ export function DailyBiasBadge({
   control: Control<TradeFormValues>;
   dateKey: string;
 }) {
+  const dayRef = useDayRef(dateKey);
   const assetSymbol = useWatch({ control, name: "assetSymbol" });
   const direction = useWatch({ control, name: "direction" });
   const [finalBias, setFinalBias] = useState<"LONG" | "SHORT" | "NEUTRAL" | null>(null);
@@ -406,7 +408,7 @@ export function DailyBiasBadge({
     const symbol = (assetSymbol ?? "").trim();
     const timer = setTimeout(() => {
       void (async () => {
-        const result = symbol ? await getDailyAssetAnalysisBias(dateKey, symbol) : { finalBias: null };
+        const result = symbol ? await getDailyAssetAnalysisBias(dayRef, symbol) : { finalBias: null };
         if (active) setFinalBias(result.finalBias);
       })();
     }, 350);
@@ -414,7 +416,7 @@ export function DailyBiasBadge({
       active = false;
       clearTimeout(timer);
     };
-  }, [dateKey, assetSymbol]);
+  }, [dayRef, assetSymbol]);
 
   if (!finalBias || finalBias === "NEUTRAL") return null;
 

@@ -58,7 +58,12 @@ function pad(n: number) {
   return String(n).padStart(2, "0");
 }
 
-function buildMonths(year: number, dailyPerformance: Map<string, DailyPerformance>, todayKey: string): MonthData[] {
+function buildMonths(
+  year: number,
+  dailyPerformance: Map<string, DailyPerformance>,
+  isAvailable: (dateKey: string) => boolean,
+  todayKey: string | null,
+): MonthData[] {
   return MONTH_NAMES.map((name, index) => {
     const daysInMonth = new Date(year, index + 1, 0).getDate();
     const leadingBlanks = new Date(year, index, 1).getDay();
@@ -68,7 +73,7 @@ function buildMonths(year: number, dailyPerformance: Map<string, DailyPerformanc
     for (let day = 1; day <= daysInMonth; day += 1) {
       const dateKey = `${year}-${pad(index + 1)}-${pad(day)}`;
       const entry = dailyPerformance.get(dateKey);
-      const isFuture = dateKey > todayKey;
+      const isFuture = !isAvailable(dateKey);
       const resultState = deriveDayResultState(entry?.executedTradeCount ?? 0, entry?.totalRealizedR ?? 0);
       const state: DayState = isFuture
         ? "future"
@@ -80,7 +85,7 @@ function buildMonths(year: number, dailyPerformance: Map<string, DailyPerformanc
               ? "loss"
               : "breakeven";
       if (entry) totalR += entry.totalRealizedR;
-      cells.push({ day, dateKey, state, isToday: dateKey === todayKey, entry });
+      cells.push({ day, dateKey, state, isToday: todayKey != null && dateKey === todayKey, entry });
     }
 
     return { index, name, totalR, leadingBlanks, cells };
@@ -113,7 +118,7 @@ const LEGEND_DOT: Record<DayState, string> = {
   future: "bg-foreground/5",
 };
 
-function YearDayCell({ cell, onSelectDay }: { cell: DayCell; onSelectDay: (dateKey: string) => void }) {
+function YearDayCell({ cell, onSelectDay, showPnl }: { cell: DayCell; onSelectDay: (dateKey: string) => void; showPnl: boolean }) {
   const base = cn(
     "flex aspect-square items-center justify-center rounded-sm text-[9px] leading-none tabular-nums transition-colors",
     STATE_BG[cell.state],
@@ -147,7 +152,7 @@ function YearDayCell({ cell, onSelectDay }: { cell: DayCell; onSelectDay: (dateK
           <div className="font-medium">{formatDateKeyShort(cell.dateKey)}</div>
           <div className="text-[11px] opacity-90">
             {hasTrades
-              ? `${formatRR(entry.totalRealizedR)} (${formatSignedCurrency(entry.totalPnl)}) · ${entry.executedTradeCount} trade${entry.executedTradeCount === 1 ? "" : "s"} · ${entry.wins}W / ${entry.losses}L`
+              ? `${formatRR(entry.totalRealizedR)}${showPnl ? ` (${formatSignedCurrency(entry.totalPnl)})` : ""} · ${entry.executedTradeCount} trade${entry.executedTradeCount === 1 ? "" : "s"} · ${entry.wins}W / ${entry.losses}L`
               : entry && entry.cancelledCount > 0
                 ? `No executed trades · ${entry.cancelledCount} cancelled`
                 : "No trades"}
@@ -158,12 +163,11 @@ function YearDayCell({ cell, onSelectDay }: { cell: DayCell; onSelectDay: (dateK
   );
 }
 
-const LEGEND: { state: DayState; label: string }[] = [
+const LEGEND_BASE: { state: DayState; label: string }[] = [
   { state: "win", label: "Win" },
   { state: "loss", label: "Loss" },
   { state: "breakeven", label: "Breakeven" },
   { state: "none", label: "No trades" },
-  { state: "future", label: "Upcoming" },
 ];
 
 export function YearView({
@@ -172,15 +176,27 @@ export function YearView({
   onSelectMonth,
   onSelectDay,
   onChangeYear,
+  isDayAvailable,
+  unavailableLabel = "Upcoming",
+  showPnl = true,
 }: {
   year: number;
   dailyPerformance: Map<string, DailyPerformance>;
   onSelectMonth: (monthIndex: number) => void;
   onSelectDay: (dateKey: string) => void;
   onChangeYear: (year: number) => void;
+  /** Backtesting (Stage 5): which dates belong to the run; defaults to "not in
+   *  the future" (the live Journal). Unavailable days render muted/inert. */
+  isDayAvailable?: (dateKey: string) => boolean;
+  unavailableLabel?: string;
+  showPnl?: boolean;
 }) {
-  const todayKey = useMemo(() => localDateToKey(new Date()), []);
-  const months = useMemo(() => buildMonths(year, dailyPerformance, todayKey), [year, dailyPerformance, todayKey]);
+  const todayKey = useMemo(() => (isDayAvailable ? null : localDateToKey(new Date())), [isDayAvailable]);
+  const months = useMemo(
+    () => buildMonths(year, dailyPerformance, isDayAvailable ?? ((key) => key <= localDateToKey(new Date())), todayKey),
+    [year, dailyPerformance, isDayAvailable, todayKey],
+  );
+  const legend = [...LEGEND_BASE, { state: "future" as DayState, label: unavailableLabel }];
 
   return (
     <div className="glass space-y-5 rounded-2xl p-4">
@@ -238,7 +254,7 @@ export function YearView({
                 <div key={`${m.index}-blank-${i}`} />
               ))}
               {m.cells.map((cell) => (
-                <YearDayCell key={cell.dateKey} cell={cell} onSelectDay={onSelectDay} />
+                <YearDayCell key={cell.dateKey} cell={cell} onSelectDay={onSelectDay} showPnl={showPnl} />
               ))}
             </div>
           </div>
@@ -246,7 +262,7 @@ export function YearView({
       </div>
 
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 border-t border-foreground/10 pt-3">
-        {LEGEND.map(({ state, label }) => (
+        {legend.map(({ state, label }) => (
           <div key={state} className="flex items-center gap-1.5">
             <span className={cn("size-2.5 rounded-sm", LEGEND_DOT[state])} />
             <span className="text-[11px] text-muted-foreground">{label}</span>

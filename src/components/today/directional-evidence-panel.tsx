@@ -20,6 +20,7 @@ import {
 } from "@/domain/today/directional-evidence";
 import type { DirectionalEvidenceItemDTO } from "@/types/today";
 import type { FinalBias } from "@/lib/validation/daily-asset-analysis";
+import { useDayRef } from "@/components/workspace/workspace-context";
 
 const TONE: Record<EvidenceDirection, { label: string; chip: string; bar: string; text: string }> = {
   BULLISH: {
@@ -118,6 +119,7 @@ export function DirectionalEvidencePanel({
   items: DirectionalEvidenceItemDTO[];
   finalBias: FinalBias | null;
 }) {
+  const dayRef = useDayRef(dateKey);
   const [localItems, setLocalItems] = useState(items);
   const [expanded, setExpanded] = useState(items.length > 0);
   const [newLabel, setNewLabel] = useState("");
@@ -132,7 +134,7 @@ export function DirectionalEvidencePanel({
     const label = newLabel.trim();
     if (!label) return;
     startAdd(async () => {
-      const r = await addDirectionalEvidenceItem(dateKey, { dailyAssetAnalysisId, label, direction: newDirection });
+      const r = await addDirectionalEvidenceItem(dayRef, { dailyAssetAnalysisId, label, direction: newDirection });
       if (!r.success) {
         toast.error(r.error);
         return;

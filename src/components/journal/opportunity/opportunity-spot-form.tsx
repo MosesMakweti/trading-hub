@@ -21,6 +21,7 @@ import { SetupScoreCard } from "@/components/journal/setup-score-card";
 import { loadStrategyReference } from "@/actions/trades.actions";
 import { createOpportunity } from "@/actions/opportunity.actions";
 import type { StrategyReferenceDTO } from "@/types/strategies";
+import { useDayRef } from "@/components/workspace/workspace-context";
 
 interface StrategyOption {
   id: string;
@@ -43,6 +44,7 @@ export function OpportunitySpotForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const dayRef = useDayRef(dateKey);
   const [strategyId, setStrategyId] = useState("");
   const [reference, setReference] = useState<StrategyReferenceDTO | null>(null);
   const [refLoading, setRefLoading] = useState(false);
@@ -135,7 +137,7 @@ export function OpportunitySpotForm({
     if (!strategyId) return toast.error("Select a strategy.");
     if (!assetSymbol) return toast.error("Select an asset.");
     startTransition(async () => {
-      const res = await createOpportunity(dateKey, {
+      const res = await createOpportunity(dayRef, {
         strategyId,
         assetSymbol,
         direction,

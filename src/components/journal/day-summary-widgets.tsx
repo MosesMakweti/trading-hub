@@ -37,7 +37,8 @@ function Stat({
   );
 }
 
-export function DaySummaryGrid({ summary }: { summary: DayCloseSummaryDTO }) {
+/** `showPnl=false` in a backtest — simulated days are R-only (no Performance Account money). */
+export function DaySummaryGrid({ summary, showPnl = true }: { summary: DayCloseSummaryDTO; showPnl?: boolean }) {
   return (
     <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-background/40 p-3 sm:grid-cols-4">
       <Stat label="Trades recorded" value={String(summary.tradeCount)} />
@@ -51,7 +52,7 @@ export function DaySummaryGrid({ summary }: { summary: DayCloseSummaryDTO }) {
         value={formatRR(summary.totalRealizedRSoFar)}
         tone={summary.totalRealizedRSoFar >= 0 ? "success" : "danger"}
       />
-      <Stat label="Performance PnL" value={formatSignedCurrency(summary.totalPnl)} tone={summary.totalPnl >= 0 ? "success" : "danger"} />
+      {showPnl && <Stat label="Performance PnL" value={formatSignedCurrency(summary.totalPnl)} tone={summary.totalPnl >= 0 ? "success" : "danger"} />}
       <Stat label="W / L / BE" value={`${summary.wins} / ${summary.losses} / ${summary.breakevens}`} />
       <Stat label="Overrides" value={String(summary.overrideCount)} tone={summary.overrideCount > 0 ? "danger" : "muted"} />
       <Stat

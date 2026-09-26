@@ -1,6 +1,8 @@
 import { Decimal } from "decimal.js";
 
 import { prisma, type TransactionClient } from "@/server/db";
+import { isBacktestScope } from "@/server/workspace/scope";
+import { settleBacktestTrade } from "@/server/services/settlement-basis";
 import { getOrCreatePerformanceAccount, PERFORMANCE_ACCOUNT_STARTING_BALANCE } from "@/server/services/accounts.service";
 import {
   computeCompoundedBalance,
@@ -146,11 +148,12 @@ export async function getPerformanceBalanceBefore(userId: string, orderKey: Trad
  * up to this exact moment, see updatePerformanceRiskOverride below).
  */
 export async function lockPerformanceRiskSnapshot(userId: string, tradeId: string): Promise<void> {
+  if (isBacktestScope()) return; // simulated trades never touch the Performance Account
   const existing = await prisma.performanceRiskSnapshot.findUnique({ where: { tradeId } });
   if (existing) return;
 
   const trade = await prisma.trade.findFirst({ where: { id: tradeId, userId } });
-  if (!trade || trade.actualEntry == null) return;
+  if (!trade || trade.actualEntry == null || trade.backtestRunId != null) return;
 
   const config = await getPerformanceConfig(userId);
   const performanceAllocation = await prisma.tradeAccountAllocation.findFirst({
@@ -268,6 +271,11 @@ export type SettlementResult =
   | { status: "SETTLED"; realizedR: Decimal; performancePnl: Decimal }
   | { status: "NOT_CALCULABLE"; reason: string };
 
+const BACKTEST_NOT_APPLICABLE: SettlementResult = {
+  status: "NOT_CALCULABLE",
+  reason: "Backtest trades never settle against the Performance Account.",
+};
+
 /**
  * The main recalculation entrypoint (spec §9/§10/§13) — call after any
  * change to actualEntry/actualStopLoss/actualExit/partial exits. Reads the
@@ -282,6 +290,12 @@ export type SettlementResult =
  * PnL), never a fabricated 0.
  */
 export async function settlePerformanceTrade(userId: string, tradeId: string): Promise<SettlementResult> {
+  if (isBacktestScope()) {
+    // Never a Performance settlement — only the trade's own price-derived
+    // result (see settleBacktestTrade).
+    await settleBacktestTrade(userId, tradeId);
+    return BACKTEST_NOT_APPLICABLE;
+  }
   await ensureInitialStopResolved(userId, tradeId);
 
   const [trade, snapshot, partials] = await Promise.all([
@@ -289,6 +303,7 @@ export async function settlePerformanceTrade(userId: string, tradeId: string): P
     prisma.performanceRiskSnapshot.findUnique({ where: { tradeId } }),
     prisma.tradeActualPartialExit.findMany({ where: { tradeId, userId }, select: { exitPrice: true, percentClosed: true } }),
   ]);
+  if (trade?.backtestRunId != null) return BACKTEST_NOT_APPLICABLE;
   if (!trade || !snapshot) {
     return { status: "NOT_CALCULABLE", reason: "No locked Performance risk snapshot yet (no actual entry recorded)." };
   }
@@ -354,6 +369,7 @@ export async function updatePerformanceRiskOverride(userId: string, tradeId: str
 
   const trade = await prisma.trade.findFirst({ where: { id: tradeId, userId } });
   if (!trade) throw new Error("Trade not found.");
+  if (trade.backtestRunId != null) throw new Error("Backtest trades have no Performance Account risk.");
 
   const existingSnapshot = await prisma.performanceRiskSnapshot.findUnique({ where: { tradeId } });
   if (existingSnapshot) {
@@ -396,6 +412,7 @@ export async function getPerformanceRiskContext(userId: string, tradeId: string)
     prisma.performanceRiskSnapshot.findUnique({ where: { tradeId } }),
   ]);
   if (!trade) throw new Error("Trade not found.");
+  if (trade.backtestRunId != null) throw new Error("Backtest trades have no Performance Account risk.");
 
   if (snapshot) {
     // Locked — read the frozen historical values, never recompute them from

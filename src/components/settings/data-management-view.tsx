@@ -15,6 +15,7 @@ import {
   Trash2,
   TriangleAlert,
   type LucideIcon,
+  History,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -41,15 +42,27 @@ const SECTIONS: SectionMeta[] = [
     icon: BookOpenCheck,
     title: "Journal & Trades",
     description:
-      "Every logged trade — entries, execution, psychology, and before/after screenshots.",
+      "Every live logged trade — entries, execution, psychology, and before/after screenshots. Backtesting data is kept.",
     detail: (
       <>
-        <p>This permanently deletes every logged trade, including its execution details, psychology questionnaire, and before/after images — plus any spotted trade opportunities (executed &amp; missed).</p>
+        <p>This permanently deletes every live logged trade, including its execution details, psychology questionnaire, and before/after images — plus any spotted trade opportunities (executed &amp; missed). Backtest Runs are not affected.</p>
         <p>Your equity curve, P&amp;L, win rate, discrepancy gap, edge capture, and strategy adherence will reset automatically — they are calculated from these trades.</p>
       </>
     ),
     count: (c) => c.trades,
     noun: "trades",
+  },
+  {
+    key: "backtesting",
+    icon: History,
+    title: "Backtesting",
+    description:
+      "Every Backtest Run — its simulated days, trades, reviews, notes, and screenshots. Live trading data is kept.",
+    detail: (
+      <p>This permanently deletes all of your Backtest Runs and everything recorded inside them — simulated days, trades, missed setups, reviews, notes and images. Your live Journal, trades, analytics and accounts are not affected.</p>
+    ),
+    count: (c) => c.backtestRuns,
+    noun: "runs",
   },
   {
     key: "today-plans",
@@ -253,6 +266,7 @@ export function DataManagementView({ counts }: { counts: DataCounts }) {
             <p>This permanently deletes <span className="font-medium text-foreground">everything you have created</span>:</p>
             <ul className="ml-4 list-disc space-y-0.5">
               <li>All trades, journal entries, and psychology</li>
+              <li>All Backtest Runs and their simulated days, trades and notes</li>
               <li>Today sessions, trade plans, and weekly reviews</li>
               <li>All strategies and Strategy Lab data</li>
               <li>Prop-firm &amp; brokerage accounts</li>

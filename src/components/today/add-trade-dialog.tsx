@@ -17,6 +17,7 @@ import {
 import { formatDateKeyLong } from "@/lib/date";
 import { TradeForm } from "@/components/journal/trade-form";
 import { resolveDefaultSession, type SessionWindow } from "@/domain/schedule/session-countdown";
+import { useWorkspace } from "@/components/workspace/workspace-context";
 
 /**
  * Logs a new trade WITHOUT leaving the Today workflow — the full trade form
@@ -40,6 +41,7 @@ export function AddTradeDialog({
   trigger,
   initialAssetSymbol,
   initialStrategyId,
+  opportunityId,
   finalBias,
   activeSessions,
   sessionWindows,
@@ -50,6 +52,8 @@ export function AddTradeDialog({
   trigger?: ReactElement;
   /** Only passed when launched from a specific asset's Today's Plan card. */
   initialAssetSymbol?: string;
+  /** Launched from a spotted opportunity: the new trade resolves it to EXECUTED. */
+  opportunityId?: string;
   /** That asset's DailyAssetAnalysis.activeStrategyId — a form default only,
    *  never a historical trade owner (see the schema's own doc comment). */
   initialStrategyId?: string | null;
@@ -67,11 +71,14 @@ export function AddTradeDialog({
   // A one-shot default at dialog-open time, not a live-updating display (see
   // SessionCountdown for that pattern) — a plain `new Date()` read is fine,
   // there's no rendered text here that could visibly mismatch on hydration.
+  const { isBacktest } = useWorkspace();
   const now = new Date();
   const initialSession = resolveDefaultSession(
     activeSessions ?? [],
     sessionWindows ?? [],
-    now.getHours() * 60 + now.getMinutes(),
+    // A backtest replays a historical date — the real clock says nothing
+    // about which session the replayed chart is in.
+    isBacktest ? null : now.getHours() * 60 + now.getMinutes(),
   );
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -99,7 +106,9 @@ export function AddTradeDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Add trade — {formatDateKeyLong(dateKey)}</DialogTitle>
-          <DialogDescription>Logs into today without leaving your workflow.</DialogDescription>
+          <DialogDescription>
+            {isBacktest ? "Logs into this simulated day without leaving your session." : "Logs into today without leaving your workflow."}
+          </DialogDescription>
         </DialogHeader>
         <TradeForm
           key={instance}
@@ -111,6 +120,7 @@ export function AddTradeDialog({
           initialStrategyId={initialStrategyId ?? undefined}
           initialBias={initialBias}
           initialSession={initialSession}
+          opportunityId={opportunityId}
           // Stage 6 — declutter Today's live "Add Trade Idea" flow. Account
           // allocation stays fully available from the standalone Journal
           // create/edit trade pages; the automatic Performance Account

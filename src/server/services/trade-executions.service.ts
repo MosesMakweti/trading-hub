@@ -109,9 +109,11 @@ function sizePosition(marketCategory: MarketCategory, riskAmount: Decimal, sizin
 async function loadIdea(userId: string, tradeId: string) {
   const trade = await prisma.trade.findFirst({
     where: { id: tradeId, userId },
-    select: { id: true, direction: true, plannedEntry: true, plannedStopLoss: true, plannedTarget: true },
+    select: { id: true, direction: true, plannedEntry: true, plannedStopLoss: true, plannedTarget: true, backtestRunId: true },
   });
   if (!trade) throw new Error("Trade not found.");
+  // Backtesting — also enforced by a DB trigger; this is the friendly error.
+  if (trade.backtestRunId != null) throw new Error("Backtest trades can't be executed on Prop Firm accounts.");
   return trade;
 }
 

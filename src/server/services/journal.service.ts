@@ -22,21 +22,38 @@ export async function getDailyNote(userId: string, dateKey: string) {
  */
 export async function getOrCreateDailyNote(userId: string, dateKey: string) {
   const date = dateKeyToUtcDate(dateKey);
-  return prisma.dailyNote.upsert({
-    where: { userId_date: { userId, date } },
-    create: { userId, date },
-    update: {},
-  });
+  return retryOnUniqueRace(() =>
+    prisma.dailyNote.upsert({
+      where: { userId_date: { userId, date } },
+      create: { userId, date },
+      update: {},
+    }),
+  );
 }
 
 export async function upsertDailyNote(userId: string, dateKey: string, data: DailyNoteInput) {
   const date = dateKeyToUtcDate(dateKey);
   const content = (data.content ?? Prisma.JsonNull) as Prisma.InputJsonValue;
-  return prisma.dailyNote.upsert({
-    where: { userId_date: { userId, date } },
-    create: { userId, date, content },
-    update: { content },
-  });
+  return retryOnUniqueRace(() =>
+    prisma.dailyNote.upsert({
+      where: { userId_date: { userId, date } },
+      create: { userId, date, content },
+      update: { content },
+    }),
+  );
+}
+
+/** Backtesting V1: DailyNote is environment-scoped (live note vs a run's note
+ *  for the same date). The scope filter makes Prisma run these upserts as
+ *  find-then-create, so a concurrent create can lose on the (partial) unique
+ *  index — retried once, like getOrCreateTradingDay. */
+async function retryOnUniqueRace<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") return fn();
+    throw e;
+  }
 }
 
 /**

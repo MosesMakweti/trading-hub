@@ -10,7 +10,9 @@ export function fmtR(n: number | null): string {
 }
 
 export function fmtUsd(n: number): string {
-  return `${n >= 0 ? "+" : ""}$${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  // The sign was previously dropped for losses (−500 rendered "$500").
+  const sign = n > 0 ? "+" : n < 0 ? "-" : "";
+  return `${sign}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 }
 
 export function tone(n: number | null | undefined): "success" | "danger" | "neutral" {

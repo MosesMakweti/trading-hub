@@ -14,6 +14,7 @@ import {
   ListChecks,
   Loader2,
   Lock,
+  History,
   NotebookText,
   Sun,
   Zap,
@@ -59,6 +60,9 @@ import type {
 import type { TradeWorkspaceDTO } from "@/types/trades";
 import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
 import type { AdherenceResultDTO, AdherenceTrend, EdgeReviewCommitmentDailyStatus, TodayCommitmentsDTO } from "@/types/edge-improvements";
+import { useDayRef, useWorkspace } from "@/components/workspace/workspace-context";
+import { CarryForwardCard } from "@/components/backtesting/carry-forward-card";
+import type { CarryForwardDTO } from "@/server/services/trading-workspace.service";
 
 // The Today workflow section tabs — Pre-Session -> Today's Plan -> Trade Idea
 // -> Execution -> Review -> Day Summary (Today V2 Final Phase §5). The
@@ -95,6 +99,7 @@ export function TodayWorkspace({
   commitmentDailyStates,
   commitmentAdherence,
   sessionWindows,
+  carryForward = null,
 }: {
   day: TradingDayDTO;
   // Only serializable data crosses the server→client boundary; the icon-bearing
@@ -121,7 +126,15 @@ export function TodayWorkspace({
   // trade" entry points (TradingDay.activeSessions itself lives on
   // `todaysPlan.activeSessions`, already in scope below).
   sessionWindows: SessionWindow[];
+  /** Backtest only — the previous simulated day's carry-forward (Refinement
+   *  inside the run). Live Today's refinement is Edge Review commitments. */
+  carryForward?: CarryForwardDTO | null;
 }) {
+  const dayRef = useDayRef(day.dateKey);
+  // The only environment branch in the workflow shell: a backtest renders
+  // under the run's own page header, and swaps live-only Edge Review
+  // commitments for the run's own carried-forward refinement.
+  const { isBacktest } = useWorkspace();
   const router = useRouter();
   // The Pre-Session Routine gates the rest of the day: the trader must have confirmed
   // readiness AND every mandatory routine item must still be complete. (Confirmation
@@ -155,7 +168,7 @@ export function TodayWorkspace({
   const [archiving, startArchive] = useTransition();
   function reopen() {
     startArchive(async () => {
-      const result = await reopenDay(day.dateKey);
+      const result = await reopenDay(dayRef);
       if (!result.success) {
         toast.error(result.error);
         return;
@@ -271,12 +284,19 @@ export function TodayWorkspace({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <span className="bg-brand-gradient inline-flex size-8 items-center justify-center rounded-lg text-white shadow-glow">
-            <Sun className="size-4" />
+            {isBacktest ? <History className="size-4" /> : <Sun className="size-4" />}
           </span>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Today</h1>
-            <p className="mt-1 text-sm text-muted-foreground">{formatDateKeyLong(day.dateKey)}</p>
-          </div>
+          {isBacktest ? (
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">Simulated session</h2>
+              <p className="text-sm text-muted-foreground">{formatDateKeyLong(day.dateKey)}</p>
+            </div>
+          ) : (
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Today</h1>
+              <p className="mt-1 text-sm text-muted-foreground">{formatDateKeyLong(day.dateKey)}</p>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={isArchived ? "secondary" : "success"}>
@@ -293,12 +313,16 @@ export function TodayWorkspace({
         </div>
       </div>
 
-      <TodayFocusFromReview
-        commitments={reviewCommitments}
-        todayKey={day.dateKey}
-        initialDailyStates={commitmentDailyStates}
-        adherence={commitmentAdherence}
-      />
+      {isBacktest ? (
+        <CarryForwardCard carryForward={carryForward} />
+      ) : (
+        <TodayFocusFromReview
+          commitments={reviewCommitments}
+          todayKey={day.dateKey}
+          initialDailyStates={commitmentDailyStates}
+          adherence={commitmentAdherence}
+        />
+      )}
 
       <WorkflowProgress steps={steps} title="Workflow" />
 

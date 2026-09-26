@@ -1,5 +1,9 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // partialIndexes — Backtesting (Stage 1): live rows keep their original
+  // per-user uniqueness via partial unique indexes scoped to
+  // `backtestRunId IS NULL`, while backtest rows get per-run uniqueness.
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -65,6 +69,8 @@ model User {
 
   apiTokens         ApiToken[]
   apiIdempotencyKeys ApiIdempotencyKey[]
+
+  backtestRuns BacktestRun[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -78,7 +84,15 @@ model DailyNote {
   content   Json?
   deletedAt DateTime?
 
-  @@unique([userId, date])
+  // Backtesting V1 — environment discriminator (same contract as
+  // TradingDay.backtestRunId): NULL = the live Journal's note for that date;
+  // a run id = that Backtest Run's note for its simulated date. Immutable
+  // (DB trigger), scoped by the workspace-scope extension.
+  backtestRunId String?
+  backtestRun   BacktestRun? @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date], map: "DailyNote_userId_date_key", where: raw("\"backtestRunId\" IS NULL"))
+  @@unique([backtestRunId, date])
 }
 
 // TradeOS V2 — the day-centric backbone (one "session" record per trading day).
@@ -200,12 +214,27 @@ model TradingDay {
   dayMainLesson   String?
   dayCarryForward String?
 
+  // Backtesting (Stage 1) — the environment discriminator. NULL = a LIVE
+  // trading day (every pre-existing row). Non-null = this day is a simulated
+  // day inside that Backtest Run, and `date` is the run's historical
+  // simulation date, never the real calendar date. Immutable after insert
+  // (DB trigger) so a simulated day can never be re-labelled live. Reads are
+  // scoped automatically by the workspace-scope Prisma extension
+  // (server/workspace/prisma-scope.ts); see docs/BACKTESTING.md.
+  backtestRunId String?
+  backtestRun   BacktestRun? @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   dailyAssetAnalyses DailyAssetAnalysis[]
 
-  @@unique([userId, date])
+  // One LIVE day per user per date (the original @@unique([userId, date]),
+  // now partial so it ignores backtest rows) and one simulated day per run
+  // per date. Two runs can therefore both simulate 2024-05-14, and a run can
+  // simulate a date that is also a real live day, without colliding.
+  @@unique([userId, date], map: "TradingDay_userId_date_key", where: raw("\"backtestRunId\" IS NULL"))
+  @@unique([backtestRunId, date])
   @@index([userId, status])
 }
 
@@ -777,7 +806,21 @@ model Trade {
   // Trade Review overhaul (Stage 7) — see BehaviourLabel below.
   behaviourLabels         TradeBehaviourLabel[]
 
-  @@unique([userId, tradeNumber])
+  // Backtesting (Stage 1) — environment discriminator (see TradingDay's
+  // identical field). NULL = LIVE trade. Non-null = a simulated trade that
+  // belongs to that Backtest Run: it is excluded from every live read by the
+  // workspace-scope Prisma extension, it can never carry a Performance
+  // Account allocation/snapshot or a Prop Firm execution (DB triggers), and
+  // it can never be re-labelled live (immutable, DB trigger).
+  backtestRunId String?
+  backtestRun   BacktestRun? @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+
+  // tradeNumber stays a per-user monotonic counter for LIVE trades (partial
+  // unique, identical semantics to the original @@unique([userId,
+  // tradeNumber])), and becomes a per-run counter for backtest trades.
+  @@unique([userId, tradeNumber], map: "Trade_userId_tradeNumber_key", where: raw("\"backtestRunId\" IS NULL"))
+  @@unique([backtestRunId, tradeNumber])
+  @@index([backtestRunId, tradeDate])
   @@index([userId, tradeDate])
   @@index([userId, status])
   @@index([userId, reviewLifecycleStatus])
@@ -933,10 +976,18 @@ model TradeOpportunity {
   // one-to-one). Null for every non-executed outcome.
   executedTrade Trade?
 
+  // Backtesting (Stage 1) — environment discriminator, same contract as
+  // Trade.backtestRunId. A missed setup spotted while replaying a historical
+  // day belongs to its run and never reaches live opportunity analytics. A
+  // DB trigger keeps Trade.opportunityId links within one environment.
+  backtestRunId String?
+  backtestRun   BacktestRun? @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime? // soft delete (registered in server/db.ts)
 
+  @@index([backtestRunId, spottedAt])
   @@index([userId, spottedAt])
   @@index([userId, status])
   @@index([userId, strategyId])
@@ -1376,6 +1427,7 @@ model Strategy {
   versions             StrategyVersion[] // published, immutable snapshots of the tree
   replayReviewSessions ReplayReviewSession[] // optional scope narrowing (Replay foundation, Stage 12)
   replayTrades         ReplayTrade[]
+  backtestRuns         BacktestRun[] // experiments run against this strategy (SetNull on delete)
 
   @@index([userId, deletedAt, sortOrder])
 }
@@ -3632,4 +3684,76 @@ model AiReviewAnalystReport {
   generatedAt DateTime @default(now())
 
   @@index([userId, replayReviewSessionId, generatedAt])
+}
+
+// ── Backtesting Environment (Stage 1) ────────────────────────────────────────
+// A Backtest Run is ONE testing experiment ("EURUSD Strategy V3, Jan → Jun
+// 2024"). It owns every simulated TradingDay / Trade / TradeOpportunity via
+// their `backtestRunId` — the Today V2 workflow tables are REUSED (not
+// duplicated) and isolated by that discriminator. See docs/BACKTESTING.md.
+//
+// Strategy Lab stays the single source of strategy configuration: the run
+// links the live Strategy (SetNull) and freezes a snapshot of its tree at
+// creation (same shape as StrategyVersion.snapshot) so a run stays
+// interpretable after the strategy is later edited; each simulated Trade also
+// freezes its own strategy/setup snapshots exactly like a live trade.
+//
+// Deleting a run cascades its days/trades/opportunities (and everything
+// hanging off them); media attachments have no FK and are cleaned up in app
+// code by the run service before the delete.
+enum BacktestRunStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+model BacktestRun {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+
+  strategyId              String?
+  strategy                Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  strategyNameSnapshot    String?
+  strategyVersionSnapshot Int?
+  strategySnapshot        Json?
+
+  // Assets under test (free-text symbols, like Strategy.applicableAssets).
+  assets String[] @default([])
+
+  // The historical testing period (inclusive), date-only like TradingDay.date.
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+
+  // Which UTC weekdays count as trading days for progress (0 = Sun … 6 =
+  // Sat). Defaults to Mon–Fri so weekends never dilute progress.
+  tradingWeekdays Int[] @default([1, 2, 3, 4, 5])
+
+  status BacktestRunStatus @default(ACTIVE)
+
+  // Resume pointer — the simulation date the trader last worked on, stored
+  // server-side (never only in browser state).
+  lastSessionDate DateTime? @db.Date
+  lastActiveAt    DateTime?
+
+  // Optional simulated equity — R stays the primary unit. Entirely separate
+  // from TradingAccount/Performance Account/Prop Firm infrastructure.
+  startingBalance     Decimal? @db.Decimal(14, 2)
+  riskPercentPerTrade Decimal? @db.Decimal(6, 3)
+  currency            String?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  archivedAt DateTime?
+
+  tradingDays   TradingDay[]
+  trades        Trade[]
+  opportunities TradeOpportunity[]
+  dailyNotes    DailyNote[]
+
+  @@index([userId, status, updatedAt])
+  @@index([strategyId])
 }

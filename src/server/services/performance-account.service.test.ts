@@ -286,7 +286,7 @@ describe("performance-account.service.ts — settlement pipeline (Stage C)", () 
     const performanceAccount = await prisma.tradingAccount.findFirstOrThrow({
       where: { userId: user.id, kind: "PERFORMANCE" },
     });
-    const balance = await getAccountBalance(performanceAccount.id);
+    const balance = await getAccountBalance(user.id, performanceAccount.id);
     expect(balance).toBeCloseTo(100_000 + 2000, 6); // starting balance + ONLY the settled trade's PnL
 
     const pendingAlloc = await performanceAllocation(pendingTrade.id);

@@ -41,6 +41,19 @@ function accountBaseline(account: {
 }
 
 /**
+ * Owner-scoped, non-deleted lookup (findFirst goes through the soft-delete
+ * extension; the previous `findUniqueOrThrow({ id })` checked neither the
+ * owner nor `deletedAt`). Every caller already passed an id from a
+ * user-scoped query, so this was latent rather than reachable — the userId
+ * now makes the guarantee local instead of relying on every future caller.
+ */
+async function findOwnedAccount(userId: string, accountId: string) {
+  const account = await prisma.tradingAccount.findFirst({ where: { id: accountId, userId } });
+  if (!account) throw new Error("Trading account not found.");
+  return account;
+}
+
+/**
  * currentBalance is never stored — it's baseline (accountSize for prop-firm,
  * startingBalance for brokerage/performance) plus the sum of this account's
  * trade allocation PnLs, so it can never drift from the trade history that's
@@ -55,8 +68,8 @@ function accountBaseline(account: {
  * rather than $0.00 wherever it's shown per-trade (track record, recent
  * trades, etc.).
  */
-export async function getAccountBalance(accountId: string, excludeTradeId?: string): Promise<number> {
-  const account = await prisma.tradingAccount.findUniqueOrThrow({ where: { id: accountId } });
+export async function getAccountBalance(userId: string, accountId: string, excludeTradeId?: string): Promise<number> {
+  const account = await findOwnedAccount(userId, accountId);
   const allocations = await prisma.tradeAccountAllocation.findMany({
     where: {
       tradingAccountId: accountId,
@@ -85,11 +98,11 @@ export interface AccountTrackRecordEntry {
  *  balance — never manually entered. A pending trade's own `pnl` is null
  *  (Stage C) but still contributes 0 to `runningBalance`/`currentBalance`,
  *  same "aggregate vs per-trade display" split as getAccountBalance above. */
-export async function getAccountTrackRecord(accountId: string): Promise<{
+export async function getAccountTrackRecord(userId: string, accountId: string): Promise<{
   currentBalance: number;
   entries: AccountTrackRecordEntry[];
 }> {
-  const account = await prisma.tradingAccount.findUniqueOrThrow({ where: { id: accountId } });
+  const account = await findOwnedAccount(userId, accountId);
   const allocations = await prisma.tradeAccountAllocation.findMany({
     where: { tradingAccountId: accountId, trade: { deletedAt: null } },
     include: { trade: true },

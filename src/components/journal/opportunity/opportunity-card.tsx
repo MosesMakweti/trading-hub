@@ -34,6 +34,8 @@ import {
   type OpportunityStatus,
 } from "@/types/opportunity";
 import type { SetupRating } from "@/domain/trades/setup-score";
+import { useWorkspace } from "@/components/workspace/workspace-context";
+import { AddTradeDialog } from "@/components/today/add-trade-dialog";
 
 export interface LinkableTrade {
   id: string;
@@ -68,16 +70,20 @@ export function OpportunityCard({
   opportunity: o,
   linkableTrades,
   editable,
+  strategies = [],
 }: {
   dateKey: string;
   opportunity: OpportunityListItemDTO;
   linkableTrades: LinkableTrade[];
   editable: boolean;
+  /** For the in-Session "Log trade" dialog (Backtesting). */
+  strategies?: { id: string; name: string; version: number }[];
 }) {
   const [panel, setPanel] = useState<"none" | "miss" | "link">("none");
   const [linkTradeId, setLinkTradeId] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pending, startTransition] = useTransition();
+  const { isBacktest } = useWorkspace();
 
   const status = STATUS_META[o.status];
   const isPending = o.status === "PENDING";
@@ -194,12 +200,17 @@ export function OpportunityCard({
         <div className="flex items-center justify-between rounded-xl border border-success/25 bg-success/5 p-3 text-sm">
           <span className="text-muted-foreground">
             Executed as{" "}
-            <Link
-              href={`/journal/${dateKey}/trades/${o.executedTrade.id}`}
-              className="font-medium text-foreground hover:underline"
-            >
-              Trade #{o.executedTrade.tradeNumber ?? "—"}
-            </Link>{" "}
+            {isBacktest ? (
+              // Simulated trades live in the Session, not the live Journal.
+              <span className="font-medium text-foreground">Trade #{o.executedTrade.tradeNumber ?? "—"}</span>
+            ) : (
+              <Link
+                href={`/journal/${dateKey}/trades/${o.executedTrade.id}`}
+                className="font-medium text-foreground hover:underline"
+              >
+                Trade #{o.executedTrade.tradeNumber ?? "—"}
+              </Link>
+            )}{" "}
             · <span className="tabular-nums">{fmtR(o.executedTrade.actualRR)}</span>
           </span>
           {editable && (
@@ -226,16 +237,37 @@ export function OpportunityCard({
               Link executed
             </Button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            nativeButton={false}
-            render={<Link href={`/journal/${dateKey}/trades/new?opportunityId=${o.id}`} />}
-          >
-            <CandlestickChart className="size-3.5" />
-            Log trade
-          </Button>
+          {/* Backtesting: the SAME add-trade dialog the Session uses, carrying the
+              opportunity — the server creates the trade in this run and date
+              and links it only within the same run. Live keeps its Journal page. */}
+          {isBacktest && (
+            <AddTradeDialog
+              dateKey={dateKey}
+              accounts={[]}
+              strategies={strategies}
+              opportunityId={o.id}
+              initialAssetSymbol={o.assetSymbol}
+              initialStrategyId={o.strategyId}
+              trigger={
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <CandlestickChart className="size-3.5" />
+                  Log trade
+                </Button>
+              }
+            />
+          )}
+          {!isBacktest && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              nativeButton={false}
+              render={<Link href={`/journal/${dateKey}/trades/new?opportunityId=${o.id}`} />}
+            >
+              <CandlestickChart className="size-3.5" />
+              Log trade
+            </Button>
+          )}
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPanel("miss")}>
             <XCircle className="size-3.5" />
             Missed

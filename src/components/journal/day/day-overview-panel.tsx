@@ -8,7 +8,7 @@ import type { DayCloseSummaryDTO } from "@/server/services/close-day.service";
  * Journal rebuild (Stage 9 §3) — the day's historical overview, entirely
  * from Stage 8's getDayCloseSummary. No calculations are re-derived here.
  */
-export function DayOverviewPanel({ summary }: { summary: DayCloseSummaryDTO }) {
+export function DayOverviewPanel({ summary, showPnl = true }: { summary: DayCloseSummaryDTO; showPnl?: boolean }) {
   return (
     <div className="glass space-y-3 rounded-2xl p-4">
       <div className="flex items-center justify-between">
@@ -20,7 +20,7 @@ export function DayOverviewPanel({ summary }: { summary: DayCloseSummaryDTO }) {
           {summary.dayStatus === "ARCHIVED" ? "Archived" : "Active"}
         </Badge>
       </div>
-      <DaySummaryGrid summary={summary} />
+      <DaySummaryGrid summary={summary} showPnl={showPnl} />
     </div>
   );
 }

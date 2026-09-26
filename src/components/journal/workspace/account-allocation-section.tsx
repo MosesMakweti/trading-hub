@@ -10,18 +10,23 @@ import { AccountPerformanceBreakdown } from "@/components/journal/workspace/acco
 import { PerformanceAccountRow } from "@/components/journal/workspace/performance-account-row";
 import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
 import type { AccountAllocationSelectorDTO, ExecutionDTO } from "@/types/prop-firms";
+import { useWorkspace } from "@/components/workspace/workspace-context";
 
-export function AccountAllocationSection({
-  dateKey,
-  tradeId,
-  propFirmAccounts,
-  executions,
-}: {
+type AccountAllocationSectionProps = {
   dateKey: string;
   tradeId: string;
   propFirmAccounts: AccountAllocationSelectorDTO[];
   executions: ExecutionDTO[];
-}) {
+};
+
+/** Performance Account + Prop Firm allocation are LIVE accounting — a
+ *  simulated trade never has either (also refused server-side / by DB trigger). */
+export function AccountAllocationSection(props: AccountAllocationSectionProps) {
+  const { isBacktest } = useWorkspace();
+  return isBacktest ? null : <LiveAccountAllocationSection {...props} />;
+}
+
+function LiveAccountAllocationSection({ dateKey, tradeId, propFirmAccounts, executions }: AccountAllocationSectionProps) {
   const editable = useWorkspaceEditable();
   const [addedAccountIds, setAddedAccountIds] = useState<string[]>([]);
   const [pickerValue, setPickerValue] = useState<string>("");

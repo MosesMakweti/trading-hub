@@ -1,121 +1,21 @@
 import { requireUser } from "@/server/guards";
-import {
-  archivePastActiveDays,
-  getOrCreateTradingDay,
-  toTradingDayDTO,
-  toTodaysPlanDTO,
-} from "@/server/services/trading-day.service";
-import { getTradeFormOptions, listTradesForDay } from "@/server/services/trades.service";
-import { toTradeWorkspaceDTO } from "@/server/services/trade-workspace.mapper";
-import { getOrCreateDayRoutine } from "@/server/services/today-routine.service";
-import { getDailyAnalytics } from "@/server/services/analytics.service";
-import { listOpportunityDtosForDay } from "@/server/services/opportunity.service";
-import {
-  listDailyAssetAnalyses,
-  toDailyAssetAnalysisDTO,
-} from "@/server/services/daily-asset-analysis.service";
-import { listActivePropFirmAccountsForSelector } from "@/server/services/prop-firms.service";
-import { listExecutionsForTrades } from "@/server/services/trade-executions.service";
-import { toAccountAllocationSelectorDTO, toExecutionDTO } from "@/server/services/prop-firms.mapper";
-import { getActiveCommitmentsForToday, getAdherenceSummaries, getCommitmentDailyStates } from "@/server/services/edge-review-commitment.service";
-import { listStrategySessionWindows } from "@/server/services/strategy-sot.service";
-import { dateKeyToUtcDate, localDateToKey } from "@/lib/date";
-import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
+import { loadTradingWorkspace } from "@/server/services/trading-workspace.service";
+import { localDateToKey } from "@/lib/date";
 import { FadeIn } from "@/components/shared/motion";
 import { TodayWorkspace } from "@/components/today/today-workspace";
-import type { DailyAnalyticsDTO, TodaysPlanDTO } from "@/types/today";
-import type { AdherenceResultDTO, AdherenceTrend, EdgeReviewCommitmentDailyStatus } from "@/types/edge-improvements";
+import { LIVE_WORKSPACE, WorkspaceProvider } from "@/components/workspace/workspace-context";
 
 export default async function TodayPage() {
   const user = await requireUser();
+  // LIVE: the effective date is the real trading day.
   const todayKey = localDateToKey(new Date());
-
-  // Auto-archive on date rollover: finalize any still-active past day before
-  // opening today (so it lands in the Journal).
-  await archivePastActiveDays(user.id, todayKey);
-
-  // Create the day once, THEN load everything else — passing the day into the
-  // routine service avoids a second concurrent upsert racing the (userId, date) unique.
-  const day = await getOrCreateTradingDay(user.id, todayKey);
-  const [trades, routine, dailyPerf, propFirmAccountsRaw, tradeFormOptions, opportunities, assetAnalyses, reviewCommitments, sessionWindows] =
-    await Promise.all([
-      listTradesForDay(user.id, todayKey),
-      getOrCreateDayRoutine(user.id, day),
-      getDailyAnalytics(user.id, todayKey),
-      listActivePropFirmAccountsForSelector(user.id),
-      getTradeFormOptions(user.id),
-      listOpportunityDtosForDay(user.id, todayKey),
-      listDailyAssetAnalyses(user.id, todayKey),
-      getActiveCommitmentsForToday(user.id),
-      // Today V2 (T3) — session inheritance for a new Trade Idea (see
-      // domain/schedule/session-countdown.ts's resolveDefaultSession,
-      // applied client-side at dialog-open time in add-trade-dialog.tsx).
-      listStrategySessionWindows(user.id),
-    ]);
-
-  // Stage 16 §18 — daily acknowledgement, keyed by commitment id, for today only.
-  const allSurfacedCommitments = [...reviewCommitments.weekly, ...reviewCommitments.monthly];
-  const allCommitmentIds = allSurfacedCommitments.map((c) => c.id);
-  const [dailyStatesMap, adherenceSummaries] = await Promise.all([
-    getCommitmentDailyStates(user.id, allCommitmentIds, dateKeyToUtcDate(todayKey)),
-    getAdherenceSummaries(user.id, allSurfacedCommitments.map((c) => ({ id: c.id, lineageId: c.lineageId }))),
-  ]);
-  const dailyStates: Record<string, EdgeReviewCommitmentDailyStatus> = Object.fromEntries(dailyStatesMap);
-  // Stage 19 §12 — compact adherence context for Today, never full analytics.
-  const commitmentAdherence: Record<string, { current: AdherenceResultDTO; trend: AdherenceTrend }> = Object.fromEntries(adherenceSummaries);
-  const executionsRaw = await listExecutionsForTrades(user.id, trades.map((t) => t.id));
-  const executionsByTradeId: Record<string, ReturnType<typeof toExecutionDTO>[]> = {};
-  for (const row of executionsRaw) {
-    const dto = toExecutionDTO(row);
-    (executionsByTradeId[dto.tradeId] ??= []).push(dto);
-  }
-
-  const dailyAnalytics: DailyAnalyticsDTO = { ...dailyPerf, analyzed: day.analyzedAt != null };
-
-  const todaysPlan: TodaysPlanDTO = toTodaysPlanDTO(day);
-
-  // Pre-Session/Today's Plan/Day Summary are owned by the TradingDay; Trade
-  // Idea/Execution/Review are derived from the day's trades. Feed both into
-  // the shared workflow state machine (Today V2 Final Phase §5 — six steps,
-  // none of them a newly-persisted status).
-  const done: WorkflowDoneState = {
-    preSession: day.prepCompletedAt != null,
-    todaysPlan: day.planCompletedAt != null,
-    tradeIdea: trades.length > 0,
-    execution: trades.some((t) => t.actualEntry != null),
-    review: trades.some((t) => t.reviewedAt != null),
-    daySummary: day.analyzedAt != null,
-  };
-  const stepStatuses = deriveWorkflowSteps(done);
+  const data = await loadTradingWorkspace(user.id, todayKey, { environment: "LIVE" });
 
   return (
     <FadeIn className="mx-auto max-w-5xl">
-      <TodayWorkspace
-        day={toTradingDayDTO(day)}
-        stepStatuses={stepStatuses}
-        routine={routine}
-        todaysPlan={todaysPlan}
-        trades={trades.map(toTradeWorkspaceDTO)}
-        dailyAnalytics={dailyAnalytics}
-        propFirmAccounts={propFirmAccountsRaw.map(toAccountAllocationSelectorDTO)}
-        executionsByTradeId={executionsByTradeId}
-        tradeFormAccounts={tradeFormOptions.accounts.map((a) => ({ id: a.id, name: a.name, kind: a.kind }))}
-        tradeFormStrategies={tradeFormOptions.strategies.map((s) => ({ id: s.id, name: s.name, version: s.version }))}
-        opportunities={opportunities}
-        dailyAssetAnalyses={assetAnalyses.map(toDailyAssetAnalysisDTO)}
-        reviewCommitments={reviewCommitments}
-        commitmentDailyStates={dailyStates}
-        commitmentAdherence={commitmentAdherence}
-        sessionWindows={sessionWindows}
-        linkableTrades={trades
-          .filter((t) => t.opportunityId == null)
-          .map((t) => ({
-            id: t.id,
-            tradeNumber: t.tradeNumber,
-            assetSymbol: t.assetSymbol,
-            direction: t.direction,
-          }))}
-      />
+      <WorkspaceProvider value={LIVE_WORKSPACE}>
+        <TodayWorkspace {...data} />
+      </WorkspaceProvider>
     </FadeIn>
   );
 }

@@ -1,4 +1,6 @@
-import { prisma } from "@/server/db";
+import { Prisma } from "@prisma/client";
+
+import { prisma, type TransactionClient } from "@/server/db";
 import { deleteMediaFile } from "@/lib/media-storage";
 import { isR2Configured } from "@/lib/r2";
 import type { MediaOwnerType } from "@prisma/client";
@@ -465,4 +467,69 @@ export async function deleteMediaAttachment(
   await prisma.mediaAsset.delete({ where: { id: attachment.media.id } });
 
   return { ownerType: attachment.ownerType, ownerId: attachment.ownerId };
+}
+
+// ── Reference-aware bulk media cleanup (Backtesting V1) ─────────────────────
+// Shared by Backtest Run deletion and Data Management. Usage, inside ONE
+// transaction: collect candidates → remove the owners' attachments → delete
+// the owner rows (cascading plan screenshots) → deleteUnreferencedMediaAssets.
+// An asset still attached to anything else (a live record, another run) is
+// kept. Storage objects for the returned keys are removed only after commit.
+
+type MediaTx = Pick<TransactionClient, "mediaAttachment" | "mediaAsset" | "$queryRaw">;
+
+export interface MediaOwnerSet {
+  ownerType: MediaOwnerType;
+  ownerIds: string[];
+}
+
+export function mediaOwnerFilter(userId: string, owners: MediaOwnerSet[]) {
+  return {
+    media: { userId },
+    OR: owners.filter((o) => o.ownerIds.length > 0).map((o) => ({ ownerType: o.ownerType, ownerId: { in: o.ownerIds } })),
+  };
+}
+
+/** Asset ids attached to these owners, plus the original/preview assets of
+ *  these trades' plan screenshots (which have no MediaAttachment of their own). */
+export async function collectMediaCandidates(tx: MediaTx, userId: string, owners: MediaOwnerSet[], screenshotTradeIds: string[]) {
+  const withIds = owners.filter((o) => o.ownerIds.length > 0);
+  const [attachments, screenshots] = await Promise.all([
+    withIds.length ? tx.mediaAttachment.findMany({ where: mediaOwnerFilter(userId, withIds), select: { mediaId: true } }) : Promise.resolve([]),
+    screenshotTradeIds.length
+      ? tx.$queryRaw<{ mediaAssetId: string; previewMediaAssetId: string | null }[]>`
+          SELECT "mediaAssetId", "previewMediaAssetId" FROM "TradePlanScreenshot" WHERE "tradeId" IN (${Prisma.join(screenshotTradeIds)})
+        `
+      : Promise.resolve([]),
+  ]);
+  return [
+    ...new Set([
+      ...attachments.map((a) => a.mediaId),
+      ...screenshots.flatMap((s) => (s.previewMediaAssetId ? [s.mediaAssetId, s.previewMediaAssetId] : [s.mediaAssetId])),
+    ]),
+  ];
+}
+
+export async function removeOwnerAttachments(tx: MediaTx, userId: string, owners: MediaOwnerSet[]): Promise<void> {
+  if (owners.every((o) => o.ownerIds.length === 0)) return;
+  await tx.mediaAttachment.deleteMany({ where: mediaOwnerFilter(userId, owners) });
+}
+
+/** Deletes the candidate assets nothing references anymore; returns their storage keys. */
+export async function deleteUnreferencedMediaAssets(tx: MediaTx, userId: string, candidateIds: string[]): Promise<string[]> {
+  if (candidateIds.length === 0) return [];
+  const stillReferenced = await tx.mediaAsset.findMany({
+    where: {
+      id: { in: candidateIds },
+      OR: [{ attachments: { some: {} } }, { planScreenshotOriginalOf: { isNot: null } }, { planScreenshotPreviewOf: { isNot: null } }],
+    },
+    select: { id: true },
+  });
+  const keep = new Set(stillReferenced.map((a) => a.id));
+  const orphaned = await tx.mediaAsset.findMany({
+    where: { userId, id: { in: candidateIds.filter((id) => !keep.has(id)) } },
+    select: { id: true, storageKey: true },
+  });
+  await tx.mediaAsset.deleteMany({ where: { id: { in: orphaned.map((a) => a.id) } } });
+  return orphaned.map((a) => a.storageKey);
 }

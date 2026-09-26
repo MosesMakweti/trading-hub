@@ -21,6 +21,7 @@ import {
   type RoutineSnapshot,
 } from "@/domain/today/routine-snapshot";
 import { saveRoutineResponse, setRoutineReady } from "@/actions/today-routine.actions";
+import { useDayRef } from "@/components/workspace/workspace-context";
 
 export interface DayRoutineDTO {
   snapshot: RoutineSnapshot;
@@ -38,6 +39,7 @@ export function PreSessionRoutineSection({
    *  to Today's Plan), `false` = reopened (parent re-locks). */
   onReadyChange?: (ready: boolean) => void;
 }) {
+  const dayRef = useDayRef(dateKey);
   const router = useRouter();
   const [responses, setResponses] = useState<Record<string, RoutineResponse>>(
     routine.snapshot.responses ?? {},
@@ -50,6 +52,12 @@ export function PreSessionRoutineSection({
   // the save: the server would read the DB before that write completes and
   // see the item as still incomplete.
   const pendingSavesRef = useRef<Set<Promise<unknown>>>(new Set());
+  // Saves run ONE AT A TIME, in click order. Firing a server action per tick
+  // concurrently let some in-flight requests be aborted client-side (each
+  // action re-renders the page) — the checkbox showed ticked while the save
+  // never reached the server, and the readiness gate then refused. Found in
+  // Backtesting V1 QA; the server also merges each response atomically.
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const snapshot: RoutineSnapshot = { sections: routine.snapshot.sections, responses };
   const progress = routineProgress(snapshot);
@@ -63,16 +71,15 @@ export function PreSessionRoutineSection({
   const isReady = readyAt != null && mandatoryDone;
 
   function persist(itemId: string, patch: RoutineResponse) {
-    startTransition(async () => {
-      const promise = saveRoutineResponse(dateKey, itemId, patch);
-      pendingSavesRef.current.add(promise);
-      try {
-        const result = await promise;
+    const promise = saveChainRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const result = await saveRoutineResponse(dayRef, itemId, patch);
         if (!result.success) toast.error(result.error);
-      } finally {
-        pendingSavesRef.current.delete(promise);
-      }
-    });
+      });
+    saveChainRef.current = promise;
+    pendingSavesRef.current.add(promise);
+    void promise.finally(() => pendingSavesRef.current.delete(promise));
   }
 
   function toggleCheck(itemId: string, checked: boolean) {
@@ -91,7 +98,7 @@ export function PreSessionRoutineSection({
       // the gate, so a save that's still in flight can't make a just-completed
       // item look unchecked to the DB-backed validation below.
       await Promise.allSettled(pendingSavesRef.current);
-      const result = await setRoutineReady(dateKey, next);
+      const result = await setRoutineReady(dayRef, next);
       if (!result.success) {
         toast.error(result.error);
         return;

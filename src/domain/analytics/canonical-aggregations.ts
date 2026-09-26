@@ -369,3 +369,91 @@ export function toStrategyPerformanceSummary(rows: CanonicalAnalyticsTradeRow[])
     averageAdherencePercent: avg(adherence),
   };
 }
+
+// ── Backtesting Analytics (Stage 5/6) — additive aggregators over the SAME
+// canonical rows. Nothing here changes an existing live summary.
+
+export function aggregateByTimeframe(rows: CanonicalAnalyticsTradeRow[]): RGroupStats[] {
+  return groupBy(rows, (r) => r.timeframe?.trim() || null, (k) => k).sort((a, b) => b.count - a.count);
+}
+
+export function aggregateByEntryModel(rows: CanonicalAnalyticsTradeRow[]): RGroupStats[] {
+  return groupBy(rows, (r) => r.entryModel?.trim() || null, (k) => k).sort((a, b) => b.count - a.count);
+}
+
+/** Multi-valued grouping: a trade contributes to EVERY group it carries. */
+function groupByMany(rows: CanonicalAnalyticsTradeRow[], keysOf: (row: CanonicalAnalyticsTradeRow) => string[]): RGroupStats[] {
+  const byKey = new Map<string, CanonicalAnalyticsTradeRow[]>();
+  for (const row of rows) {
+    for (const key of new Set(keysOf(row))) (byKey.get(key) ?? byKey.set(key, []).get(key)!).push(row);
+  }
+  return Array.from(byKey.entries())
+    .map(([key, groupRows]) => computeRGroupStats(key, key, groupRows))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+/** Per-confluence results (descriptive, not causal). Direction-specific
+ *  confluences are separate groups, so a bullish and a bearish variant are
+ *  never merged or treated as co-required. */
+export function aggregateByConfluence(rows: CanonicalAnalyticsTradeRow[]): RGroupStats[] {
+  return groupByMany(rows, (r) => r.confluences);
+}
+
+export function aggregateByExecutionConfirmation(rows: CanonicalAnalyticsTradeRow[]): RGroupStats[] {
+  return groupByMany(rows, (r) => r.executionConfirmations);
+}
+
+export interface FinalizedRCurvePoint {
+  /** 1-based position in the chronological sequence of finalized trades. */
+  index: number;
+  dateKey: string;
+  tradeId: string;
+  r: number;
+  cumulativeR: number;
+  /** Highest cumulativeR reached so far (starts at 0 — the run's origin). */
+  peakR: number;
+  /** cumulativeR − peakR (≤ 0). */
+  drawdownR: number;
+}
+
+/**
+ * Cumulative R over FINALIZED trades only (a still-open position has no
+ * result yet), in simulated-market chronology: the dataset is already ordered
+ * by trade date then execution time, and the sort here is stable on dateKey,
+ * so creation time never influences the sequence.
+ */
+export function buildFinalizedRCurve(rows: CanonicalAnalyticsTradeRow[]): FinalizedRCurvePoint[] {
+  const finalized = rows
+    .filter((r) => r.isExecuted && r.finalizedR != null)
+    .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+  let cumulative = 0;
+  let peak = 0;
+  return finalized.map((r, i) => {
+    cumulative += r.finalizedR!;
+    peak = Math.max(peak, cumulative);
+    return { index: i + 1, dateKey: r.dateKey, tradeId: r.tradeId, r: r.finalizedR!, cumulativeR: cumulative, peakR: peak, drawdownR: cumulative - peak };
+  });
+}
+
+export interface RDrawdownSummary {
+  /** Largest peak-to-trough decline in R (≤ 0); 0 when there's never been one. */
+  maxDrawdownR: number;
+  /** cumulativeR at the peak preceding the max drawdown. */
+  peakR: number;
+  /** cumulativeR at the trough of the max drawdown. */
+  troughR: number;
+  /** Drawdown at the latest trade (≤ 0). */
+  currentDrawdownR: number;
+}
+
+export function summarizeRDrawdown(curve: FinalizedRCurvePoint[]): RDrawdownSummary | null {
+  if (curve.length === 0) return null;
+  let worst = curve[0];
+  for (const p of curve) if (p.drawdownR < worst.drawdownR) worst = p;
+  return {
+    maxDrawdownR: Math.min(0, worst.drawdownR),
+    peakR: worst.drawdownR < 0 ? worst.peakR : worst.cumulativeR,
+    troughR: worst.cumulativeR,
+    currentDrawdownR: curve[curve.length - 1].drawdownR,
+  };
+}

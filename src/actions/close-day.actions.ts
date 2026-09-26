@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
+import type { WorkspaceDayRef } from "@/lib/validation/workspace";
+import { runInDayScope } from "@/server/workspace/action-scope";
 import { dayEditableGuard } from "@/actions/day-guard";
 import { dailyReflectionSchema, closeTradingDaySchema } from "@/lib/validation/close-day";
 import * as closeDayService from "@/server/services/close-day.service";
@@ -15,47 +17,53 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export async function loadDayCloseSummaryAction(
-  dateKey: string,
+  day: WorkspaceDayRef,
 ): Promise<{ success: true; data: DayCloseSummaryDTO } | { success: false; error: string }> {
   const user = await requireUser();
-  try {
-    const data = await closeDayService.getDayCloseSummary(user.id, dateKey);
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: errorMessage(error, "Could not load the day summary.") };
-  }
+  return runInDayScope(user.id, day, "read", async (dateKey) => {
+    try {
+      const data = await closeDayService.getDayCloseSummary(user.id, dateKey);
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: errorMessage(error, "Could not load the day summary.") };
+    }
+  });
 }
 
-export async function saveDailyReflectionAction(dateKey: string, input: unknown): Promise<SimpleResult> {
+export async function saveDailyReflectionAction(day: WorkspaceDayRef, input: unknown): Promise<SimpleResult> {
   const user = await requireUser();
-  const blocked = await dayEditableGuard(user.id, dateKey);
-  if (blocked) return blocked;
+  return runInDayScope(user.id, day, "write", async (dateKey) => {
+    const blocked = await dayEditableGuard(user.id, dateKey);
+    if (blocked) return blocked;
 
-  const parsed = dailyReflectionSchema.safeParse(input);
-  if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
-  }
-  try {
-    await closeDayService.saveDailyReflection(user.id, dateKey, parsed.data);
-  } catch (error) {
-    return { success: false, error: errorMessage(error, "Failed to save.") };
-  }
-  revalidatePath("/today");
-  return { success: true };
+    const parsed = dailyReflectionSchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    }
+    try {
+      await closeDayService.saveDailyReflection(user.id, dateKey, parsed.data);
+    } catch (error) {
+      return { success: false, error: errorMessage(error, "Failed to save.") };
+    }
+    revalidatePath("/today");
+    return { success: true };
+  });
 }
 
-export async function closeTradingDayAction(dateKey: string, input: unknown): Promise<SimpleResult> {
+export async function closeTradingDayAction(day: WorkspaceDayRef, input: unknown): Promise<SimpleResult> {
   const user = await requireUser();
-  const parsed = closeTradingDaySchema.safeParse(input);
-  if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
-  }
-  try {
-    await closeDayService.closeTradingDay(user.id, dateKey, parsed.data);
-  } catch (error) {
-    return { success: false, error: errorMessage(error, "Failed to close the day.") };
-  }
-  revalidatePath("/today");
-  revalidatePath("/journal");
-  return { success: true };
+  return runInDayScope(user.id, day, "write", async (dateKey) => {
+    const parsed = closeTradingDaySchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    }
+    try {
+      await closeDayService.closeTradingDay(user.id, dateKey, parsed.data);
+    } catch (error) {
+      return { success: false, error: errorMessage(error, "Failed to close the day.") };
+    }
+    revalidatePath("/today");
+    revalidatePath("/journal");
+    return { success: true };
+  });
 }

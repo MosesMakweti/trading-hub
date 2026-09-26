@@ -28,8 +28,8 @@ export default async function AccountsPage() {
   ]);
 
   const [performanceTrackRecord, otherTrackRecords] = await Promise.all([
-    getAccountTrackRecord(performanceAccount.id),
-    Promise.all(accountRows.map((row) => getAccountTrackRecord(row.id))),
+    getAccountTrackRecord(user.id, performanceAccount.id),
+    Promise.all(accountRows.map((row) => getAccountTrackRecord(user.id, row.id))),
   ]);
 
   // Performance Account: equity curve + lightweight core stats. A pending

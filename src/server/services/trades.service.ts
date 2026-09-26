@@ -1,7 +1,8 @@
 import { Prisma } from "@prisma/client";
 
-import { prisma } from "@/server/db";
+import { prisma, type TransactionClient } from "@/server/db";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
+import { currentWorkspaceScope, isBacktestScope, scopeBacktestRunId } from "@/server/workspace/scope";
 import { dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import { scorePsychology, type PsychologyAnswer } from "@/domain/psychology/scoring";
 import { deriveStatus, nextClosedAt, nextReviewedAt } from "@/domain/trades/lifecycle";
@@ -175,6 +176,12 @@ function tradeMarketData(data: TradeInput) {
  * later form re-save can never silently change historical risk.
  */
 async function buildAllocations(userId: string, data: TradeInput, excludeTradeId?: string) {
+  // Backtesting — a simulated trade never participates in the Performance
+  // Account or any real account (also enforced by a DB trigger).
+  if (isBacktestScope()) {
+    if (data.allocations.length > 0) throw new Error("Backtest trades can't be allocated to trading accounts.");
+    return [];
+  }
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
   const performanceConfig = await getPerformanceConfig(userId);
   const performanceRiskPercent = data.performanceRiskPercentOverride ?? performanceConfig.defaultRiskPercent.toNumber();
@@ -511,10 +518,31 @@ export async function getTradeOrdinal(userId: string, createdAt: Date) {
  * reused. The @@unique([userId, tradeNumber]) guards against a rare concurrent
  * collision — the second create would fail and can be retried.
  */
-async function nextTradeNumber(userId: string): Promise<number> {
-  const rows = await prisma.$queryRaw<{ max: number }[]>`
-    SELECT COALESCE(MAX("tradeNumber"), 0)::int AS max FROM "Trade" WHERE "userId" = ${userId}
-  `;
+// Raw SQL (includes soft-deleted rows so a number is never reused) — so it
+// bypasses the workspace-scope extension and must scope itself: LIVE trades
+// number per user (backtestRunId IS NULL), backtest trades number per run.
+//
+// Must run inside the creating transaction: a transaction-scoped advisory lock
+// keyed by (user, environment) serializes concurrent creates in the SAME
+// environment (MAX+1 would otherwise hand two of them the same number), while
+// different users/runs never wait on each other. Released at commit/rollback.
+async function nextTradeNumber(tx: TransactionClient, userId: string): Promise<number> {
+  const runId = scopeBacktestRunId();
+  if (runId === undefined) {
+    throw new Error(`nextTradeNumber requires a LIVE or BACKTEST scope (got ${currentWorkspaceScope().environment}).`);
+  }
+  const lockKey = `trade-number:${userId}:${runId ?? "live"}`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+  const rows =
+    runId === null
+      ? await tx.$queryRaw<{ max: number }[]>`
+          SELECT COALESCE(MAX("tradeNumber"), 0)::int AS max FROM "Trade"
+          WHERE "userId" = ${userId} AND "backtestRunId" IS NULL
+        `
+      : await tx.$queryRaw<{ max: number }[]>`
+          SELECT COALESCE(MAX("tradeNumber"), 0)::int AS max FROM "Trade"
+          WHERE "userId" = ${userId} AND "backtestRunId" = ${runId}
+        `;
   return (rows[0]?.max ?? 0) + 1;
 }
 
@@ -526,7 +554,9 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
   const setupValidation = await buildSetupValidation(userId, data, snapshots);
   const dailyBiasSnapshot = await getFinalBiasForAsset(userId, dateKey, data.assetSymbol);
   const assetLink = tradeMarketData(data);
-  const tradeNumber = await nextTradeNumber(userId);
+  if (isBacktestScope() && data.propFirmExecutions.length > 0) {
+    throw new Error("Backtest trades can't be executed on Prop Firm accounts.");
+  }
 
   const now = new Date();
   const hasReview = hasText(data.psychPostTradeReflection) ||
@@ -536,6 +566,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
   const reviewedAt = nextReviewedAt(null, hasReview, now);
 
   return prisma.$transaction(async (tx) => {
+    const tradeNumber = await nextTradeNumber(tx, userId);
     const trade = await tx.trade.create({
       data: {
         userId,
@@ -550,7 +581,7 @@ export async function createTrade(userId: string, dateKey: string, data: TradeIn
         ...strategyExec,
         ...setupValidation,
         dailyBiasSnapshot,
-        allocations: { create: allocations },
+        ...(allocations.length > 0 ? { allocations: { create: allocations } } : {}),
         ...(psychology ? { psychology: { create: psychology } } : {}),
       },
       include: tradeInclude,
@@ -647,7 +678,7 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
         ...strategyExec,
         ...setupValidation,
         dailyBiasSnapshot,
-        allocations: { create: allocations },
+        ...(allocations.length > 0 ? { allocations: { create: allocations } } : {}),
         // Only (re)write the questionnaire when it's fully answered; an
         // incomplete set leaves any existing score untouched.
         ...(psychology ? { psychology: { upsert: { create: psychology, update: psychology } } } : {}),
@@ -787,7 +818,7 @@ export interface DailyPnlEntry {
  */
 export async function listDailyPnl(userId: string): Promise<DailyPnlEntry[]> {
   const performanceAccount = await getOrCreatePerformanceAccount(userId);
-  const { entries } = await getAccountTrackRecord(performanceAccount.id);
+  const { entries } = await getAccountTrackRecord(userId, performanceAccount.id);
 
   const byDay = new Map<string, { pnl: number; count: number; wins: number; losses: number }>();
   for (const e of entries) {

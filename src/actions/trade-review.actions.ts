@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
+import { runInWorkspaceScope } from "@/server/workspace/scope";
+import { resolveRecordScope, runInRecordScope } from "@/server/workspace/action-scope";
 import { setReviewLifecycleStatusSchema } from "@/lib/validation/trade-review";
 import { partialExitUpsertSchema } from "@/lib/validation/trade-plan";
 import * as reviewService from "@/server/services/trade-review.service";
@@ -32,12 +34,14 @@ export async function loadTradeReviewDataAction(
   tradeId: string,
 ): Promise<{ success: true; data: TradeReviewDataDTO } | { success: false; error: string }> {
   const user = await requireUser();
-  try {
-    const data = await reviewService.getTradeReviewData(user.id, tradeId);
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: errorMessage(error, "Could not load the trade review.") };
-  }
+  return runInRecordScope(user.id, { trade: tradeId }, "read", async () => {
+    try {
+      const data = await reviewService.getTradeReviewData(user.id, tradeId);
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: errorMessage(error, "Could not load the trade review.") };
+    }
+  });
 }
 
 export async function setReviewLifecycleStatusAction(
@@ -46,17 +50,19 @@ export async function setReviewLifecycleStatusAction(
   input: unknown,
 ): Promise<Result> {
   const user = await requireUser();
-  const parsed = setReviewLifecycleStatusSchema.safeParse(input);
-  if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
-  }
-  try {
-    await reviewService.setReviewLifecycleStatus(user.id, tradeId, parsed.data);
-  } catch (error) {
-    return { success: false, error: errorMessage(error, "Failed to save.") };
-  }
-  revalidateTrade(dateKey, tradeId);
-  return { success: true };
+  return runInRecordScope(user.id, { trade: tradeId }, "write", async () => {
+    const parsed = setReviewLifecycleStatusSchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    }
+    try {
+      await reviewService.setReviewLifecycleStatus(user.id, tradeId, parsed.data);
+    } catch (error) {
+      return { success: false, error: errorMessage(error, "Failed to save.") };
+    }
+    revalidateTrade(dateKey, tradeId);
+    return { success: true };
+  });
 }
 
 // ── Actual Partial Exits (Stage 7 §2) — the first UI surface for the
@@ -82,7 +88,8 @@ export interface PartialExitRowDTO {
 // actions below, which never hand the row back to the client).
 export async function listPartialExitsAction(tradeId: string): Promise<PartialExitRowDTO[]> {
   const user = await requireUser();
-  const rows = await partialExitService.listPartialExits(user.id, tradeId);
+  const scope = await resolveRecordScope(user.id, { trade: tradeId }, "read");
+  const rows = await runInWorkspaceScope(scope, () => partialExitService.listPartialExits(user.id, tradeId));
   return rows.map((r) => ({
     id: r.id,
     exitOrder: r.exitOrder,
@@ -101,28 +108,32 @@ export async function listPartialExitsAction(tradeId: string): Promise<PartialEx
 
 export async function upsertPartialExitAction(dateKey: string, tradeId: string, input: unknown): Promise<Result> {
   const user = await requireUser();
-  const parsed = partialExitUpsertSchema.safeParse(input);
-  if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
-  }
-  try {
-    await partialExitService.upsertPartialExit(user.id, tradeId, parsed.data);
-  } catch (error) {
-    return { success: false, error: errorMessage(error, "Failed to save the partial exit.") };
-  }
-  revalidateTrade(dateKey, tradeId);
-  revalidatePerformanceSurfaces();
-  return { success: true };
+  return runInRecordScope(user.id, { trade: tradeId }, "write", async () => {
+    const parsed = partialExitUpsertSchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    }
+    try {
+      await partialExitService.upsertPartialExit(user.id, tradeId, parsed.data);
+    } catch (error) {
+      return { success: false, error: errorMessage(error, "Failed to save the partial exit.") };
+    }
+    revalidateTrade(dateKey, tradeId);
+    revalidatePerformanceSurfaces();
+    return { success: true };
+  });
 }
 
 export async function deletePartialExitAction(dateKey: string, tradeId: string, partialExitId: string): Promise<Result> {
   const user = await requireUser();
-  try {
-    await partialExitService.deletePartialExit(user.id, tradeId, partialExitId);
-  } catch (error) {
-    return { success: false, error: errorMessage(error, "Failed to remove the partial exit.") };
-  }
-  revalidateTrade(dateKey, tradeId);
-  revalidatePerformanceSurfaces();
-  return { success: true };
+  return runInRecordScope(user.id, { trade: tradeId }, "write", async () => {
+    try {
+      await partialExitService.deletePartialExit(user.id, tradeId, partialExitId);
+    } catch (error) {
+      return { success: false, error: errorMessage(error, "Failed to remove the partial exit.") };
+    }
+    revalidateTrade(dateKey, tradeId);
+    revalidatePerformanceSurfaces();
+    return { success: true };
+  });
 }

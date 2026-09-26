@@ -6,6 +6,7 @@ import { ShieldAlert } from "lucide-react";
 import { getContextualReminder } from "@/actions/edge-improvements.actions";
 import type { AutomaticEvidenceRuleKey } from "@/domain/improvements/commitment-adherence";
 import type { ContextualReminderDTO } from "@/types/edge-improvements";
+import { useWorkspace } from "@/components/workspace/workspace-context";
 
 /**
  * Trade Idea contextual commitment reminder (Stage 19.1 §3-7) — surfaces a
@@ -19,6 +20,12 @@ import type { ContextualReminderDTO } from "@/types/edge-improvements";
  * (§6), so at most one reminder ever shows for a given rule set.
  */
 export function ContextualCommitmentReminder({ ruleKeys }: { ruleKeys: AutomaticEvidenceRuleKey[] }) {
+  // Edge Review commitments describe LIVE trading — never surfaced in a backtest.
+  const { isBacktest } = useWorkspace();
+  return isBacktest ? null : <LiveContextualCommitmentReminder ruleKeys={ruleKeys} />;
+}
+
+function LiveContextualCommitmentReminder({ ruleKeys }: { ruleKeys: AutomaticEvidenceRuleKey[] }) {
   const [reminder, setReminder] = useState<ContextualReminderDTO | null>(null);
 
   useEffect(() => {

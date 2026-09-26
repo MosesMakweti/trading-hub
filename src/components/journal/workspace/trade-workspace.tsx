@@ -30,6 +30,8 @@ export function TradeWorkspace({
   propFirmAccounts = [],
   executions = [],
   dailyMarketContext = null,
+  backHref,
+  editHref,
 }: {
   trade: TradeWorkspaceDTO;
   editable?: boolean;
@@ -43,8 +45,14 @@ export function TradeWorkspace({
   /** Stage 11 §18 — the asset's live Daily Market Plan context, reused from
    *  DailyAssetAnalysis; null when there is none for that day/asset. */
   dailyMarketContext?: DailyMarketContextDTO | null;
+  /** Backtesting Journal (Stage 5) — the run's day page; defaults to the live Journal. */
+  backHref?: string;
+  /** Null hides "Edit trade" (the Backtesting Journal is review-only). */
+  editHref?: string | null;
 }) {
   const dateKey = trade.dateKey;
+  const back = backHref ?? `/journal/${dateKey}`;
+  const edit = editHref === undefined ? `/journal/${dateKey}/trades/${trade.id}/edit` : editHref;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -55,7 +63,7 @@ export function TradeWorkspace({
             size="icon-sm"
             aria-label="Back to day"
             nativeButton={false}
-            render={<Link href={`/journal/${dateKey}`} />}
+            render={<Link href={back} />}
           >
             <ChevronLeft />
           </Button>
@@ -64,11 +72,11 @@ export function TradeWorkspace({
             <p className="text-sm font-medium">{formatDateKeyLong(dateKey)}</p>
           </div>
         </div>
-        {editable && (
+        {editable && edit && (
           <Button
             className="gap-1.5"
             nativeButton={false}
-            render={<Link href={`/journal/${dateKey}/trades/${trade.id}/edit`} />}
+            render={<Link href={edit} />}
           >
             <Pencil className="size-3.5" />
             Edit trade

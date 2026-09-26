@@ -8,16 +8,30 @@ import type { TodaysPlanDTO, TradingDayDTO } from "@/types/today";
 
 /**
  * Get-or-create the TradingDay record for a user's day (the Today workspace
- * backbone). Idempotent + concurrency-safe via upsert on the (userId, date)
- * unique. TradingDay has no soft delete — a day is archived, never removed.
+ * backbone). TradingDay has no soft delete — a day is archived, never removed.
+ *
+ * Backtesting (Stage 1): environment-aware via the ambient workspace scope —
+ * the scope extension ANDs `backtestRunId` into the lookup and stamps it on
+ * create, so the same call returns the LIVE day on /today and the run's
+ * simulated day inside a Backtest Session. The extra filter makes Prisma run
+ * the upsert as find-then-create rather than a native ON CONFLICT, so a
+ * concurrent create can lose the race on the (partial) unique index — retried
+ * once as a plain read, which then finds the winner's row.
  */
 export async function getOrCreateTradingDay(userId: string, dateKey: string): Promise<TradingDay> {
   const date = dateKeyToUtcDate(dateKey);
-  return prisma.tradingDay.upsert({
-    where: { userId_date: { userId, date } },
-    update: {},
-    create: { userId, date },
-  });
+  const upsert = () =>
+    prisma.tradingDay.upsert({
+      where: { userId_date: { userId, date } },
+      update: {},
+      create: { userId, date },
+    });
+  try {
+    return await upsert();
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") return upsert();
+    throw e;
+  }
 }
 
 /** Read-only lookup (no create) — used where a view should reflect the day's

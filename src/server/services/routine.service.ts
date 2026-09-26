@@ -31,6 +31,13 @@ export async function getOrCreateDefaultRoutine(userId: string) {
   const existing = await prisma.routineSection.count({ where: { userId } });
   if (existing === 0) {
     await prisma.$transaction(async (tx) => {
+      // Concurrent first loads (e.g. a page render racing a refresh) must not
+      // BOTH seed — that duplicated every section and doubled the mandatory
+      // items (found in Backtesting Stage 5/6 QA). A per-user transaction
+      // lock serializes seeding; the re-check inside it sees a winner's rows.
+      const lockKey = `routine-seed:${userId}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+      if ((await tx.routineSection.count({ where: { userId } })) > 0) return;
       for (let s = 0; s < DEFAULT_ROUTINE.length; s++) {
         const section = DEFAULT_ROUTINE[s];
         const created = await tx.routineSection.create({

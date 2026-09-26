@@ -18,6 +18,7 @@ import { loadDayCloseSummaryAction, saveDailyReflectionAction } from "@/actions/
 import type { DayCloseSummaryDTO } from "@/server/services/close-day.service";
 import type { DailyReflectionInput } from "@/lib/validation/close-day";
 import type { DailyAnalyticsDTO } from "@/types/today";
+import { useDayRef, useWorkspace } from "@/components/workspace/workspace-context";
 
 const pct = (n: number | null) => (n == null ? "—" : `${n.toFixed(0)}%`);
 const rr = (n: number | null) => (n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`);
@@ -45,6 +46,8 @@ export function DailyAnalyticsSection({
   dateKey: string;
   analytics: DailyAnalyticsDTO;
 }) {
+  const dayRef = useDayRef(dateKey);
+  const { isBacktest } = useWorkspace();
   const a = analytics;
   const router = useRouter();
   const [reviewed, setReviewed] = useState(a.analyzed);
@@ -54,18 +57,18 @@ export function DailyAnalyticsSection({
   useEffect(() => {
     let active = true;
     void (async () => {
-      const result = await loadDayCloseSummaryAction(dateKey);
+      const result = await loadDayCloseSummaryAction(dayRef);
       if (active && result.success) setSummary(result.data);
     })();
     return () => {
       active = false;
     };
-  }, [dateKey]);
+  }, [dayRef]);
 
   function toggle() {
     const next = !reviewed;
     startTransition(async () => {
-      const result = await setDayAnalyzed(dateKey, next);
+      const result = await setDayAnalyzed(dayRef, next);
       if (!result.success) {
         toast.error(result.error);
         return;
@@ -117,7 +120,7 @@ export function DailyAnalyticsSection({
 
       {summary ? (
         <>
-          <DaySummaryGrid summary={summary} />
+          <DaySummaryGrid summary={summary} showPnl={!isBacktest} />
           <DayBehaviourRecap summary={summary} />
 
           <div className="grid grid-cols-1 gap-3 rounded-xl border border-border bg-background/30 p-3 sm:grid-cols-2">
@@ -182,11 +185,12 @@ function ReflectionField({
   initialValue: string | null;
   className?: string;
 }) {
+  const dayRef = useDayRef(dateKey);
   const [value, setValue] = useState(initialValue ?? "");
   const state = useDebouncedAutosave({
     value,
     serialize: (v) => v.trim(),
-    save: (v) => saveDailyReflectionAction(dateKey, { [field]: v.trim() } as DailyReflectionInput),
+    save: (v) => saveDailyReflectionAction(dayRef, { [field]: v.trim() } as DailyReflectionInput),
     onError: (m) => {
       if (m) toast.error(m);
     },

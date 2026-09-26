@@ -39,6 +39,7 @@ import { computeDistance } from "@/domain/trade-plan/distance";
 import { computeTargetRMultiples, computeWeightedPlannedR } from "@/domain/trade-plan/planned-rr";
 import { validatePlan, hasBlockingIssues, type PlanValidationIssue } from "@/domain/trade-plan/plan-validation";
 import type { StrategyReferenceDTO } from "@/types/strategies";
+import { useDayRef } from "@/components/workspace/workspace-context";
 
 interface PlanTargetRow {
   key: string;
@@ -205,6 +206,7 @@ export function TradeForm({
   initialSession,
   showAccountAllocation = true,
 }: TradeFormProps) {
+  const dayRef = useDayRef(dateKey);
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -465,7 +467,7 @@ export function TradeForm({
     setIsSubmitting(true);
     const result =
       mode === "create"
-        ? await createTrade(dateKey, values, opportunityId)
+        ? await createTrade(dayRef, values, opportunityId)
         : await updateTrade(dateKey, tradeId!, values);
 
     if (!result.success) {

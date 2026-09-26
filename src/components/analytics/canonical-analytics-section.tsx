@@ -46,7 +46,7 @@ export function Card({ title, hint, children }: { title: string; hint?: string; 
  *  length is |totalR| relative to the group's max, so the strongest
  *  performer visually reads as the longest bar without implying a fixed
  *  0-100 scale. */
-export function GroupRow({ stat, maxAbsR }: { stat: RGroupStats; maxAbsR: number }) {
+export function GroupRow({ stat, maxAbsR, showPnl = true }: { stat: RGroupStats; maxAbsR: number; showPnl?: boolean }) {
   const widthPercent = maxAbsR > 0 ? Math.min(100, (Math.abs(stat.totalR) / maxAbsR) * 100) : 0;
   return (
     <div className="space-y-1">
@@ -69,13 +69,14 @@ export function GroupRow({ stat, maxAbsR }: { stat: RGroupStats; maxAbsR: number
         <span>avg {fmtR(stat.averageR)}</span>
         <span>win rate {stat.winRate != null ? `${stat.winRate.toFixed(0)}%` : "—"}</span>
         <span>expectancy {fmtR(stat.expectancy)}</span>
-        <span className="ml-auto">{fmtUsd(stat.totalPnl)}</span>
+        {showPnl && <span className="ml-auto">{fmtUsd(stat.totalPnl)}</span>}
       </div>
     </div>
   );
 }
 
-export function GroupList({ stats, emptyLabel }: { stats: RGroupStats[]; emptyLabel: string }) {
+/** `showPnl=false` for R-only datasets (Backtesting). */
+export function GroupList({ stats, emptyLabel, showPnl = true }: { stats: RGroupStats[]; emptyLabel: string; showPnl?: boolean }) {
   const withData = stats.filter((s) => s.count > 0);
   if (withData.length === 0) {
     return <p className="text-xs text-muted-foreground/60 italic">{emptyLabel}</p>;
@@ -84,7 +85,7 @@ export function GroupList({ stats, emptyLabel }: { stats: RGroupStats[]; emptyLa
   return (
     <div className="space-y-3">
       {stats.map((s) => (
-        <GroupRow key={s.key} stat={s} maxAbsR={maxAbsR} />
+        <GroupRow key={s.key} stat={s} maxAbsR={maxAbsR} showPnl={showPnl} />
       ))}
     </div>
   );
@@ -94,7 +95,7 @@ export function GroupList({ stats, emptyLabel }: { stats: RGroupStats[]; emptyLa
 // one of the three modes in the unified EquityCurveChart (R / $ / %),
 // rather than a separate chart duplicating the same data.
 
-export function BehaviourLists({ stats }: { stats: BehaviourLabelStats[] }) {
+export function BehaviourLists({ stats, showPnl = true }: { stats: BehaviourLabelStats[]; showPnl?: boolean }) {
   const positive = stats.filter((s) => s.polarity === "POSITIVE" && s.count > 0);
   const negative = stats.filter((s) => s.polarity === "NEGATIVE" && s.count > 0);
   if (positive.length === 0 && negative.length === 0) {
@@ -104,11 +105,11 @@ export function BehaviourLists({ stats }: { stats: BehaviourLabelStats[] }) {
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <div className="space-y-2">
         <span className="text-[11px] font-semibold tracking-wide text-success uppercase">Positive</span>
-        <GroupList stats={positive} emptyLabel="None recorded." />
+        <GroupList stats={positive} emptyLabel="None recorded." showPnl={showPnl} />
       </div>
       <div className="space-y-2">
         <span className="text-[11px] font-semibold tracking-wide text-danger uppercase">Negative</span>
-        <GroupList stats={negative} emptyLabel="None recorded." />
+        <GroupList stats={negative} emptyLabel="None recorded." showPnl={showPnl} />
       </div>
     </div>
   );

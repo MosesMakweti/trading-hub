@@ -12,28 +12,72 @@ import { YearView } from "@/components/journal/year-view";
 import { localDateToKey } from "@/lib/date";
 import type { DailyPerformanceSummaryDTO } from "@/server/services/close-day.service";
 
+export interface JournalCalendarRunContext {
+  /** The run's journal base path, e.g. /backtesting/<id>/journal. */
+  hrefBase: string;
+  startDateKey: string;
+  endDateKey: string;
+  tradingWeekdays: number[];
+  closedDates: string[];
+  /** Month the calendar opens on (the run's current position). */
+  initialDateKey: string;
+}
+
+function keyToLocalDate(key: string): Date {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/**
+ * The Journal calendar (Month + Year). Live Journal: no `run`. Backtesting
+ * Journal (Stage 5): `run` scopes navigation/links to one Backtest Run, dims
+ * days outside its period or trading weekdays, marks closed days, shows missed
+ * setups, and hides money (backtests are R-first).
+ */
 export function JournalCalendar({
   noteDates,
   dailyPerformance,
+  run,
+  onVisibleMonthChange,
 }: {
   noteDates: string[];
   dailyPerformance: DailyPerformanceSummaryDTO[];
+  run?: JournalCalendarRunContext;
+  /** Reports the visible month (first day, local) — for a period summary. */
+  onVisibleMonthChange?: (month: Date) => void;
 }) {
   const router = useRouter();
+  const hrefBase = run?.hrefBase ?? "/journal";
+  const closedDateSet = useMemo(() => new Set(run?.closedDates ?? []), [run?.closedDates]);
+  const isInRange = useMemo(
+    () =>
+      run
+        ? (key: string) =>
+            key >= run.startDateKey && key <= run.endDateKey && run.tradingWeekdays.includes(keyToLocalDate(key).getDay())
+        : undefined,
+    [run],
+  );
   const noteDateSet = useMemo(() => new Set(noteDates), [noteDates]);
   const dailyPerformanceMap = useMemo(
     () => new Map(dailyPerformance.map((d) => [d.dateKey, d])),
     [dailyPerformance],
   );
   const [view, setView] = useState<"month" | "year">("month");
-  const [month, setMonth] = useState<Date>(new Date());
+  const [month, setMonthState] = useState<Date>(run ? keyToLocalDate(run.initialDateKey) : new Date());
+  function setMonth(next: Date) {
+    setMonthState(next);
+    onVisibleMonthChange?.(new Date(next.getFullYear(), next.getMonth(), 1));
+  }
 
   function goToDay(date: Date) {
-    router.push(`/journal/${localDateToKey(date)}`);
+    const key = localDateToKey(date);
+    if (isInRange && !isInRange(key)) return;
+    router.push(`${hrefBase}/${key}`);
   }
 
   function goToDayKey(dateKey: string) {
-    router.push(`/journal/${dateKey}`);
+    if (isInRange && !isInRange(dateKey)) return;
+    router.push(`${hrefBase}/${dateKey}`);
   }
 
   return (
@@ -45,9 +89,15 @@ export function JournalCalendar({
             <TabsTrigger value="year">Year</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button variant="outline" size="sm" onClick={() => setMonth(new Date())}>
-          Today
-        </Button>
+        {run ? (
+          <Button variant="outline" size="sm" onClick={() => setMonth(keyToLocalDate(run.initialDateKey))}>
+            Current position
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" onClick={() => setMonth(new Date())}>
+            Today
+          </Button>
+        )}
       </div>
 
       {view === "month" ? (
@@ -59,10 +109,18 @@ export function JournalCalendar({
           classNames={{ months: "w-full", month: "w-full", month_grid: "w-full" }}
           components={{
             DayButton: (props) => (
-              <JournalDayButton {...props} noteDates={noteDateSet} dailyPerformance={dailyPerformanceMap} />
+              <JournalDayButton
+                {...props}
+                noteDates={noteDateSet}
+                dailyPerformance={dailyPerformanceMap}
+                hrefBase={hrefBase}
+                isInRange={isInRange}
+                closedDates={run ? closedDateSet : undefined}
+                showMissed={!!run}
+              />
             ),
             Weekdays: JournalWeekdaysRow,
-            Week: (props) => <JournalWeekRow {...props} dailyPerformance={dailyPerformanceMap} />,
+            Week: (props) => <JournalWeekRow {...props} dailyPerformance={dailyPerformanceMap} showPnl={!run} />,
           }}
         />
       ) : (
@@ -75,6 +133,9 @@ export function JournalCalendar({
             setView("month");
           }}
           onChangeYear={(y) => setMonth(new Date(y, month.getMonth(), 1))}
+          isDayAvailable={isInRange}
+          unavailableLabel={run ? "Outside run" : undefined}
+          showPnl={!run}
         />
       )}
     </div>

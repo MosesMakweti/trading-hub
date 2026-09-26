@@ -27,6 +27,7 @@ import type { DayBias } from "@/lib/validation/today";
 import type { FinalBias } from "@/lib/validation/daily-asset-analysis";
 import type { DailyAssetAnalysisDTO } from "@/types/today";
 import type { SessionWindow } from "@/domain/schedule/session-countdown";
+import { useDayRef } from "@/components/workspace/workspace-context";
 
 const MARKET_BIASES: { value: DayBias; label: string; selected: "default" | "destructive" | "secondary" }[] = [
   { value: "BULLISH", label: "Bullish", selected: "default" },
@@ -101,6 +102,7 @@ export function TodayAssetsSection({
   activeSessions: string[];
   sessionWindows: SessionWindow[];
 }) {
+  const dayRef = useDayRef(dateKey);
   const router = useRouter();
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(analyses.length === 1 ? [analyses[0].id] : []),
@@ -123,7 +125,7 @@ export function TodayAssetsSection({
     const symbol = symbolRaw.trim();
     if (!symbol) return;
     startCreate(async () => {
-      const r = await createOrGetDailyAssetAnalysis(dateKey, { assetSymbol: symbol });
+      const r = await createOrGetDailyAssetAnalysis(dayRef, { assetSymbol: symbol });
       if (!r.success) {
         toast.error(r.error);
         return;

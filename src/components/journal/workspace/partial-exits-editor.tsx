@@ -15,6 +15,7 @@ import {
   upsertPartialExitAction,
   type PartialExitRowDTO,
 } from "@/actions/trade-review.actions";
+import { useWorkspace } from "@/components/workspace/workspace-context";
 
 function isoToDatetimeLocal(iso: string): string {
   const d = new Date(iso);
@@ -29,8 +30,11 @@ interface DraftRow {
   notes: string;
 }
 
-function emptyDraft(): DraftRow {
-  return { exitPrice: "", percentClosed: "", exitedAt: isoToDatetimeLocal(new Date().toISOString()), notes: "" };
+/** New exit rows default to "now" — except in a backtest, where the real
+ *  clock is meaningless: the simulation date, at the current time of day. */
+function emptyDraft(dateKey: string, isBacktest: boolean): DraftRow {
+  const now = isoToDatetimeLocal(new Date().toISOString());
+  return { exitPrice: "", percentClosed: "", exitedAt: isBacktest ? `${dateKey}${now.slice(10)}` : now, notes: "" };
 }
 
 /**
@@ -42,6 +46,7 @@ function emptyDraft(): DraftRow {
  */
 export function PartialExitsEditor({ dateKey, tradeId }: { dateKey: string; tradeId: string }) {
   const editable = useWorkspaceEditable();
+  const { isBacktest } = useWorkspace();
   const router = useRouter();
   const [exits, setExits] = useState<PartialExitRowDTO[] | null>(null);
   const [draft, setDraft] = useState<DraftRow | null>(null);
@@ -155,7 +160,7 @@ export function PartialExitsEditor({ dateKey, tradeId }: { dateKey: string; trad
       </div>
 
       {editable && draft == null && (
-        <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setDraft(emptyDraft())}>
+        <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setDraft(emptyDraft(dateKey, isBacktest))}>
           <Plus className="size-3.5" />
           Add exit
         </Button>
@@ -168,6 +173,7 @@ export function PartialExitsEditor({ dateKey, tradeId }: { dateKey: string; trad
               type="number"
               step="any"
               placeholder="Exit price"
+              aria-label="Partial exit price"
               value={draft.exitPrice}
               onChange={(e) => setDraft({ ...draft, exitPrice: e.target.value })}
             />
@@ -175,11 +181,13 @@ export function PartialExitsEditor({ dateKey, tradeId }: { dateKey: string; trad
               type="number"
               step="any"
               placeholder="% closed"
+              aria-label="Percent closed"
               value={draft.percentClosed}
               onChange={(e) => setDraft({ ...draft, percentClosed: e.target.value })}
             />
             <Input
               type="datetime-local"
+              aria-label="Exited at"
               className="col-span-2"
               value={draft.exitedAt}
               onChange={(e) => setDraft({ ...draft, exitedAt: e.target.value })}
@@ -187,6 +195,7 @@ export function PartialExitsEditor({ dateKey, tradeId }: { dateKey: string; trad
           </div>
           <Input
             placeholder="Notes (optional)"
+            aria-label="Partial exit notes"
             value={draft.notes}
             onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
           />
