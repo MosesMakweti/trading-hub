@@ -3837,8 +3837,7 @@ model HistoricalDataset {
   updatedAt DateTime  @updatedAt
   readyAt   DateTime?
 
-  runPins         BacktestRunDataset[]
-  replayPositions BacktestReplayPosition[]
+  runPins BacktestRunDataset[]
 
   @@index([userId, status, createdAt])
   @@index([userId, symbol])
@@ -3910,9 +3909,10 @@ model HistoricalImportUpload {
 }
 
 /// Which HistoricalDataset a Backtest Run replays for one of its assets.
-/// Replaceable until replay starts on that asset; `frozenAt` is set (by a DB
-/// trigger) when the first replay position is created, after which the
-/// dataset can't change — a run is reproducibly tied to the history it used.
+/// Replaceable until replay starts in the run; `frozenAt` is set (by DB
+/// triggers) when the run's first replay position is created — or at once for
+/// a pin attached after that — after which the dataset can't change: a run is
+/// reproducibly tied to the history it used.
 model BacktestRunDataset {
   id            String            @id @default(cuid())
   userId        String
@@ -3929,42 +3929,33 @@ model BacktestRunDataset {
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
-  positions BacktestReplayPosition[]
-
   @@unique([backtestRunId, assetSymbol])
   @@index([datasetId])
 }
 
-/// The authoritative replay clock for one run × simulation date × asset: the
-/// open time of the latest REVEALED M1 bar. Only ever moves forward (DB
-/// trigger), only to real bars, and never leaves its simulation date (CHECK).
-/// Every replay candle read derives its cutoff from here — never from the
-/// browser. The displayed timeframe is a view concern and isn't stored.
+/// The authoritative replay clock for one run × simulation date: the SHARED
+/// simulated world time. Every asset of the run is seen as of this minute
+/// (its latest real bar at or before it), so no asset can reveal information
+/// later than the others — one clock per run and day, never one per asset.
+/// It only moves forward (DB trigger), always to a minute at which at least
+/// one of the run's pinned datasets has a real bar, and never leaves its date
+/// (CHECK). Every replay candle read derives its cutoff from here — never from
+/// the browser. The displayed asset and timeframe are view concerns.
 model BacktestReplayPosition {
-  id             String             @id @default(cuid())
+  id             String      @id @default(cuid())
   userId         String
   backtestRunId  String
-  backtestRun    BacktestRun        @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
-  pinId          String
-  pin            BacktestRunDataset @relation(fields: [pinId], references: [id], onDelete: Cascade)
-  /// Copy of the pin's dataset (trigger-checked) so reads need no join.
-  datasetId      String
-  dataset        HistoricalDataset  @relation(fields: [datasetId], references: [id], onDelete: NoAction)
-  assetSymbol    String
-  simulationDate DateTime           @db.Date
-  /// Wall-clock minute (dataset clock) of the latest revealed M1 bar.
+  backtestRun    BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+  simulationDate DateTime    @db.Date
+  /// World time: wall-clock minute (dataset/server clock) of the latest revealed moment.
   currentMinute  Int
-  /// First/last M1 bar of this simulation date in the dataset (fixed — READY data is immutable).
-  dayFirstMinute Int
-  dayLastMinute  Int
   /// Bumped on every advance.
-  version        Int                @default(0)
-  /// Recent command ids ([{id, minute}], bounded) — a retried command is
+  version        Int         @default(0)
+  /// Recent command ids ([{id, from, to}], bounded) — a retried command is
   /// recognised and not applied twice.
-  recentCommands Json               @default("[]")
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  recentCommands Json        @default("[]")
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
-  @@unique([backtestRunId, simulationDate, assetSymbol])
-  @@index([pinId])
+  @@unique([backtestRunId, simulationDate])
 }

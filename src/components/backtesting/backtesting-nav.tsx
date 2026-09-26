@@ -16,7 +16,7 @@ export function BacktestingNav({ runId }: { runId: string | null }) {
   const pathname = usePathname();
   const items = [
     { label: "Overview", href: "/backtesting", active: pathname === "/backtesting" },
-    ...(["session", "journal", "analytics"] as const).map((segment) => ({
+    ...(["session", "replay", "journal", "analytics"] as const).map((segment) => ({
       label: segment[0].toUpperCase() + segment.slice(1),
       href: runId ? `/backtesting/${runId}/${segment}` : null,
       active: runId != null && pathname.startsWith(`/backtesting/${runId}/${segment}`),

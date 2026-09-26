@@ -1,28 +1,31 @@
 /**
  * Native Replay — the authoritative replay clock.
  *
- * One position per Backtest Run × simulation date × asset
- * (BacktestReplayPosition): the open time of the latest REVEALED M1 bar.
- * Everything a replay chart may see is derived from it:
+ * ONE clock per Backtest Run × simulation date (BacktestReplayPosition): the
+ * run's shared simulated WORLD time. Every asset of the run is seen as of it —
+ * its latest real bar at or before world time — so no asset can reveal
+ * information later than any other (per-asset clocks allowed EURUSD at 10:00
+ * to inform a GBPUSD decision at 09:20).
  *
- *   browser: "M30 candles, please"  →  server: position = 09:17 → M1 ≤ 09:17 → M30
+ *   browser: "GBPUSD M30 candles"  →  server: world = 09:37 → GBPUSD M1 ≤ 09:37 → M30
  *
- * The browser never supplies a cutoff. It can only ask the clock to move —
- * forward, to real bars, inside the simulation date — and every move is one
- * locked transaction (no lost or doubled advances). The database backs this up
- * independently: positions only increase, always sit on an actual bar, and
- * never leave their date.
+ * The browser never supplies a cutoff; it can only ask the clock to move —
+ * forward, inside the date — and every move is one locked transaction. The
+ * database backs this up: world time only increases, stays in its date, and is
+ * always a minute at which one of the run's datasets has a real bar.
  *
- * Semantics (docs/NATIVE_REPLAY.md › Replay clock):
- * - initial position: the first M1 bar of the simulation date;
- * - +N bars: the N-th next actual bar (gaps are skipped, never filled);
- * - +1 displayed candle: to the last bar of the candle the next bar opens or
- *   continues — i.e. "finish the current candle", then one whole candle per press;
- * - seek: to the last bar at or before a wall-clock time later today;
- * - no rewind: the clock never moves back (the chart may pan over revealed history);
- * - the day's last bar is the end — the next day is an explicit Session move;
- * - read-only (completed/archived) runs keep their positions and candles; only
- *   movement is refused.
+ * THE TIMELINE is the union of the real M1 bar minutes of the run's pinned
+ * datasets on that date. Semantics (docs/NATIVE_REPLAY.md › Replay clock):
+ * - initial world time: the earliest bar of the date across the run's datasets;
+ * - +N: the N-th next timeline minute (a minute any asset traded) — gaps are
+ *   crossed, never filled; an asset without a bar at that minute simply keeps
+ *   showing its latest earlier bar;
+ * - +1 displayed candle: to the last timeline minute of the candle the next
+ *   timeline minute belongs to ("finish the current candle", then one whole
+ *   candle per press);
+ * - seek: to the last timeline minute at or before a later wall-clock time today;
+ * - no rewind; the date's last timeline minute is the end of the day;
+ * - read-only (completed/archived) runs: readable, never moved.
  */
 import { Prisma, type BacktestRun } from "@prisma/client";
 
@@ -36,15 +39,20 @@ import { getHistoricalCandles, type CandleDTO, type CandlesResult } from "@/serv
 export const MAX_STEP_BARS = 1440;
 const RECENT_COMMANDS = 32;
 
-export interface ReplayRef {
+/** The clock: one per run × simulation date. */
+export interface ReplayClockRef {
   runId: string;
   dateKey: string;
+}
+
+/** A view of one asset at the clock's world time. */
+export interface ReplayRef extends ReplayClockRef {
   assetSymbol: string;
 }
 
 /** A refusal meant for the trader (message shown verbatim). */
 export class ReplayError extends Error {}
-/** Unknown run/asset/position for this user — indistinguishable from someone else's. */
+/** Unknown run/asset for this user — indistinguishable from someone else's. */
 export class ReplayNotFoundError extends Error {
   constructor() {
     super("Replay not found.");
@@ -56,17 +64,26 @@ export type ReplayCommand =
   | { kind: "CANDLE"; timeframe: ReplayTimeframe }
   | { kind: "SEEK"; to: WallClockMinute };
 
-export type ReplayStatus = "NO_DATASET" | "NO_BARS_FOR_DATE" | "NOT_STARTED" | "ACTIVE";
+export type ReplayStatus = "NO_DATASETS" | "NO_BARS_FOR_DATE" | "NOT_STARTED" | "ACTIVE";
+
+export interface ReplayAssetDTO {
+  assetSymbol: string;
+  dataset: { id: string; symbol: string; sourceSymbol: string; priceScale: number; timeBasis: "BROKER_SERVER"; frozen: boolean } | null;
+  /** This asset's bars on the date (null: no dataset, or no bars that day). */
+  day: { firstBar: string; lastBar: string; barCount: number } | null;
+  /** Its latest real bar at or before world time (null before its first bar of the day). */
+  latestBar: string | null;
+}
 
 export interface ReplayStateDTO {
   runId: string;
   dateKey: string;
-  assetSymbol: string;
   readOnly: boolean;
   status: ReplayStatus;
-  dataset: { id: string; symbol: string; sourceSymbol: string; priceScale: number; timeBasis: "BROKER_SERVER" } | null;
-  day: { firstBar: string; lastBar: string; firstMinute: number; lastMinute: number; barCount: number } | null;
-  position: { minute: number; time: string; version: number; atDayEnd: boolean; revealedBarsToday: number } | null;
+  assets: ReplayAssetDTO[];
+  /** The date's timeline across all of the run's datasets. */
+  day: { firstBar: string; lastBar: string; firstMinute: number; lastMinute: number; minutes: number } | null;
+  position: { minute: number; time: string; version: number; atDayEnd: boolean; revealedMinutes: number } | null;
 }
 
 export interface AdvanceResult {
@@ -75,119 +92,117 @@ export interface AdvanceResult {
   moved: boolean;
   fromMinute: number;
   toMinute: number;
-  /** The M1 bars revealed by this command, ascending (for display animation). */
+  /** The viewed asset's M1 bars revealed by this command, ascending (for incremental chart updates). */
   revealed: CandleDTO[];
   state: ReplayStateDTO;
 }
 
 interface Context {
   run: BacktestRun;
-  ref: ReplayRef;
+  ref: ReplayClockRef;
   dayStart: WallClockMinute;
+  dayEnd: WallClockMinute;
 }
 
-async function resolve(userId: string, ref: ReplayRef, mode: "read" | "write"): Promise<Context> {
+async function resolve(userId: string, ref: ReplayClockRef, mode: "read" | "write"): Promise<Context> {
   const run = await requireBacktestRun(userId, ref.runId);
   assertDateWithinRun(run, ref.dateKey);
-  if (!run.assets.includes(ref.assetSymbol)) throw new ReplayNotFoundError();
   if (mode === "write" && run.status !== "ACTIVE") throw new ReplayError("This run is read-only — replay can be viewed but not advanced.");
   const dayStart = parseWallClock(`${ref.dateKey}T00:00`);
   if (dayStart == null) throw new ReplayNotFoundError();
-  return { run, ref, dayStart };
+  return { run, ref, dayStart, dayEnd: dayStart + MINUTES_PER_DAY - 1 };
 }
 
-function findPin(ctx: Context) {
-  return prisma.backtestRunDataset.findUnique({
-    where: { backtestRunId_assetSymbol: { backtestRunId: ctx.run.id, assetSymbol: ctx.ref.assetSymbol } },
-    include: { dataset: true },
-  });
+function loadPins(ctx: Context) {
+  return prisma.backtestRunDataset.findMany({ where: { backtestRunId: ctx.run.id }, include: { dataset: true } });
+}
+
+/** Dataset keys (HistoricalDataset.seq) of the run's READY pinned datasets — the timeline's sources. */
+async function timelineSeqs(tx: TransactionClient | typeof prisma, runId: string): Promise<number[]> {
+  const rows = await tx.$queryRaw<{ seq: number }[]>`
+    SELECT d."seq" FROM "BacktestRunDataset" p JOIN "HistoricalDataset" d ON d."id" = p."datasetId"
+    WHERE p."backtestRunId" = ${runId} AND d."status" = 'READY'
+  `;
+  return rows.map((r) => r.seq);
 }
 
 function findPosition(userId: string, ctx: Context) {
   return prisma.backtestReplayPosition.findFirst({
-    where: { userId, backtestRunId: ctx.run.id, assetSymbol: ctx.ref.assetSymbol, simulationDate: new Date(`${ctx.ref.dateKey}T00:00:00Z`) },
+    where: { userId, backtestRunId: ctx.run.id, simulationDate: new Date(`${ctx.ref.dateKey}T00:00:00Z`) },
   });
 }
 
-async function dayBars(datasetSeq: number, dayStart: number): Promise<{ first: number; last: number; count: number } | null> {
-  const [row] = await prisma.$queryRaw<{ first: number | null; last: number | null; count: number }[]>`
-    SELECT min("minute") AS first, max("minute") AS last, count(*)::int AS count
-    FROM "HistoricalBar" WHERE "datasetSeq" = ${datasetSeq} AND "minute" BETWEEN ${dayStart} AND ${dayStart + MINUTES_PER_DAY - 1}
-  `;
-  return row.first == null || row.last == null ? null : { first: row.first, last: row.last, count: row.count };
-}
-
-async function countBars(datasetSeq: number, from: number, to: number): Promise<number> {
-  const [row] = await prisma.$queryRaw<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM "HistoricalBar" WHERE "datasetSeq" = ${datasetSeq} AND "minute" BETWEEN ${from} AND ${to}
-  `;
-  return row.n;
-}
-
 async function buildState(userId: string, ctx: Context): Promise<ReplayStateDTO> {
-  const base = { runId: ctx.run.id, dateKey: ctx.ref.dateKey, assetSymbol: ctx.ref.assetSymbol, readOnly: ctx.run.status !== "ACTIVE" };
-  const pin = await findPin(ctx);
-  if (!pin) return { ...base, status: "NO_DATASET", dataset: null, day: null, position: null };
-  const ds = pin.dataset;
-  const dataset = { id: ds.id, symbol: ds.symbol, sourceSymbol: ds.sourceSymbol, priceScale: ds.priceScale, timeBasis: ds.timeBasis };
-  const bars = await dayBars(ds.seq, ctx.dayStart);
-  if (!bars) return { ...base, status: "NO_BARS_FOR_DATE", dataset, day: null, position: null };
-  const day = { firstBar: formatWallClock(bars.first), lastBar: formatWallClock(bars.last), firstMinute: bars.first, lastMinute: bars.last, barCount: bars.count };
-  const pos = await findPosition(userId, ctx);
-  if (!pos) return { ...base, status: "NOT_STARTED", dataset, day, position: null };
+  const base = { runId: ctx.run.id, dateKey: ctx.ref.dateKey, readOnly: ctx.run.status !== "ACTIVE" };
+  const [pins, pos] = await Promise.all([loadPins(ctx), findPosition(userId, ctx)]);
+  const world = pos?.currentMinute ?? null;
+  const readyPins = pins.filter((p) => p.dataset.status === "READY");
+  const perSeq = readyPins.length
+    ? await prisma.$queryRaw<{ seq: number; first: number; last: number; count: number; latest: number | null }[]>`
+        SELECT "datasetSeq" AS seq, min("minute") AS first, max("minute") AS last, count(*)::int AS count,
+               max("minute") FILTER (WHERE "minute" <= ${world ?? -1}) AS latest
+        FROM "HistoricalBar"
+        WHERE "datasetSeq" = ANY(${readyPins.map((p) => p.dataset.seq)}::int4[]) AND "minute" BETWEEN ${ctx.dayStart} AND ${ctx.dayEnd}
+        GROUP BY "datasetSeq"
+      `
+    : [];
+  const bySeq = new Map(perSeq.map((r) => [r.seq, r]));
+
+  const assets: ReplayAssetDTO[] = ctx.run.assets.map((assetSymbol) => {
+    const pin = pins.find((p) => p.assetSymbol === assetSymbol);
+    if (!pin) return { assetSymbol, dataset: null, day: null, latestBar: null };
+    const ds = pin.dataset;
+    const d = bySeq.get(ds.seq);
+    return {
+      assetSymbol,
+      dataset: { id: ds.id, symbol: ds.symbol, sourceSymbol: ds.sourceSymbol, priceScale: ds.priceScale, timeBasis: ds.timeBasis, frozen: pin.frozenAt != null },
+      day: d ? { firstBar: formatWallClock(d.first), lastBar: formatWallClock(d.last), barCount: d.count } : null,
+      latestBar: d?.latest != null ? formatWallClock(d.latest) : null,
+    };
+  });
+
+  if (readyPins.length === 0) return { ...base, status: "NO_DATASETS", assets, day: null, position: null };
+  if (perSeq.length === 0) return { ...base, status: "NO_BARS_FOR_DATE", assets, day: null, position: null };
+  const [timeline] = await prisma.$queryRaw<{ minutes: number; revealed: number }[]>`
+    SELECT count(DISTINCT "minute")::int AS minutes, count(DISTINCT "minute") FILTER (WHERE "minute" <= ${world ?? -1})::int AS revealed
+    FROM "HistoricalBar"
+    WHERE "datasetSeq" = ANY(${readyPins.map((p) => p.dataset.seq)}::int4[]) AND "minute" BETWEEN ${ctx.dayStart} AND ${ctx.dayEnd}
+  `;
+  const firstMinute = Math.min(...perSeq.map((r) => r.first));
+  const lastMinute = Math.max(...perSeq.map((r) => r.last));
+  const day = { firstBar: formatWallClock(firstMinute), lastBar: formatWallClock(lastMinute), firstMinute, lastMinute, minutes: timeline.minutes };
+  if (!pos) return { ...base, status: "NOT_STARTED", assets, day, position: null };
   return {
     ...base,
     status: "ACTIVE",
-    dataset,
+    assets,
     day,
-    position: {
-      minute: pos.currentMinute,
-      time: formatWallClock(pos.currentMinute),
-      version: pos.version,
-      atDayEnd: pos.currentMinute >= pos.dayLastMinute,
-      revealedBarsToday: await countBars(ds.seq, pos.dayFirstMinute, pos.currentMinute),
-    },
+    position: { minute: pos.currentMinute, time: formatWallClock(pos.currentMinute), version: pos.version, atDayEnd: pos.currentMinute >= lastMinute, revealedMinutes: timeline.revealed },
   };
 }
 
-export async function getReplayState(userId: string, ref: ReplayRef): Promise<ReplayStateDTO> {
+export async function getReplayState(userId: string, ref: ReplayClockRef): Promise<ReplayStateDTO> {
   return buildState(userId, await resolve(userId, ref, "read"));
 }
 
-/** Replay state for every asset of the run on one date (the Session's status area). */
-export async function getRunReplayStates(userId: string, runId: string, dateKey: string): Promise<ReplayStateDTO[]> {
-  const run = await requireBacktestRun(userId, runId);
-  return Promise.all(run.assets.map((assetSymbol) => getReplayState(userId, { runId, dateKey, assetSymbol })));
-}
-
 /**
- * Starts replay for run × date × asset at the date's first M1 bar. Idempotent:
- * an existing position is returned unchanged. Creating the first position on a
- * pin freezes the pin (DB trigger).
+ * Starts the run's clock for a date at the earliest bar of that date across
+ * its datasets. Idempotent. The run's first position freezes all its pins.
  */
-export async function initializeReplay(userId: string, ref: ReplayRef): Promise<ReplayStateDTO> {
+export async function initializeReplay(userId: string, ref: ReplayClockRef): Promise<ReplayStateDTO> {
   const ctx = await resolve(userId, ref, "write");
-  const pin = await findPin(ctx);
-  if (!pin) throw new ReplayError(`No historical dataset is attached for ${ref.assetSymbol} — attach one on the Historical data page.`);
-  if (pin.dataset.status !== "READY") throw new ReplayError("The attached dataset isn't ready.");
-  const bars = await dayBars(pin.dataset.seq, ctx.dayStart);
-  if (!bars) throw new ReplayError(`The ${pin.dataset.symbol} dataset has no bars on ${ref.dateKey}.`);
+  const seqs = await timelineSeqs(prisma, ctx.run.id);
+  if (seqs.length === 0) throw new ReplayError("No historical dataset is attached to this run — attach MT5 M1 data on the Historical data page.");
+  const [row] = await prisma.$queryRaw<{ first: number | null }[]>`
+    SELECT min("minute") AS first FROM "HistoricalBar" WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" BETWEEN ${ctx.dayStart} AND ${ctx.dayEnd}
+  `;
+  if (row.first == null) throw new ReplayError(`None of this run's datasets has market data on ${ref.dateKey}.`);
   try {
     await prisma.backtestReplayPosition.create({
-      data: {
-        userId,
-        backtestRunId: ctx.run.id,
-        pinId: pin.id,
-        datasetId: pin.datasetId,
-        assetSymbol: ref.assetSymbol,
-        simulationDate: new Date(`${ref.dateKey}T00:00:00Z`),
-        currentMinute: bars.first,
-        dayFirstMinute: bars.first,
-        dayLastMinute: bars.last,
-      },
+      data: { userId, backtestRunId: ctx.run.id, simulationDate: new Date(`${ref.dateKey}T00:00:00Z`), currentMinute: row.first },
     });
   } catch (error) {
-    // Already started (e.g. two tabs initialising at once) — keep the existing position.
+    // Already started (e.g. two tabs at once) — keep the existing position.
     if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
   }
   return buildState(userId, ctx);
@@ -196,42 +211,38 @@ export async function initializeReplay(userId: string, ref: ReplayRef): Promise<
 interface LockedPosition {
   id: string;
   currentMinute: number;
-  dayFirstMinute: number;
-  dayLastMinute: number;
   recentCommands: { id: string; from: number; to: number }[];
-  seq: number;
 }
 
-/** The target bar for a command, or null to stay put. Pure SQL over immutable bars. */
-async function targetMinute(tx: TransactionClient, pos: LockedPosition, command: ReplayCommand, dayStart: number): Promise<number | null> {
-  const cur = pos.currentMinute;
-  const last = pos.dayLastMinute;
+/** The target world minute for a command, or null to stay put. Pure SQL over immutable bars. */
+async function targetMinute(tx: TransactionClient, seqs: number[], cur: number, command: ReplayCommand, ctx: Context): Promise<number | null> {
+  const { dayStart, dayEnd } = ctx;
   if (command.kind === "BARS") {
     const [row] = await tx.$queryRaw<{ m: number | null }[]>`
-      SELECT max("minute") AS m FROM (
-        SELECT "minute" FROM "HistoricalBar"
-        WHERE "datasetSeq" = ${pos.seq} AND "minute" > ${cur} AND "minute" <= ${last}
-        ORDER BY "minute" LIMIT ${command.count}
+      SELECT max(m) AS m FROM (
+        SELECT DISTINCT "minute" AS m FROM "HistoricalBar"
+        WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" > ${cur} AND "minute" <= ${dayEnd}
+        ORDER BY m LIMIT ${command.count}
       ) s
     `;
     return row.m;
   }
   if (command.kind === "CANDLE") {
     const [next] = await tx.$queryRaw<{ m: number | null }[]>`
-      SELECT min("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ${pos.seq} AND "minute" > ${cur} AND "minute" <= ${last}
+      SELECT min("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" > ${cur} AND "minute" <= ${dayEnd}
     `;
     if (next.m == null) return null;
-    const candleLast = Math.min(bucketEnd(bucketStart(next.m, command.timeframe), command.timeframe) - 1, last);
+    const candleLast = Math.min(bucketEnd(bucketStart(next.m, command.timeframe), command.timeframe) - 1, dayEnd);
     const [row] = await tx.$queryRaw<{ m: number | null }[]>`
-      SELECT max("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ${pos.seq} AND "minute" BETWEEN ${next.m} AND ${candleLast}
+      SELECT max("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" BETWEEN ${next.m} AND ${candleLast}
     `;
     return row.m;
   }
   // SEEK
-  if (command.to < dayStart || command.to > dayStart + MINUTES_PER_DAY - 1) throw new ReplayError("You can only jump within the current simulation day.");
+  if (command.to < dayStart || command.to > dayEnd) throw new ReplayError("You can only jump within the current simulation day.");
   if (command.to < cur) throw new ReplayError("Replay only moves forward — you can scroll back over what's already revealed on the chart.");
   const [row] = await tx.$queryRaw<{ m: number | null }[]>`
-    SELECT max("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ${pos.seq} AND "minute" > ${cur} AND "minute" <= ${Math.min(command.to, last)}
+    SELECT max("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" > ${cur} AND "minute" <= ${command.to}
   `;
   return row.m;
 }
@@ -245,28 +256,34 @@ function validateCommand(command: ReplayCommand): void {
 }
 
 /**
- * Moves the clock. Atomic: the position row is locked for the whole
- * read-compute-write, so concurrent commands apply one after another. A
+ * Moves the run's world clock. Atomic: the position row is locked for the
+ * whole read-compute-write, so concurrent commands apply one after another. A
  * `commandId` makes a retried request safe — if that id was already applied,
- * the earlier result is returned and nothing moves again.
+ * the earlier result is returned and nothing moves again. `viewAsset` (one of
+ * the run's assets) selects whose newly revealed M1 bars come back.
  */
-export async function advanceReplay(userId: string, ref: ReplayRef, command: ReplayCommand, commandId?: string | null): Promise<AdvanceResult> {
+export async function advanceReplay(
+  userId: string,
+  ref: ReplayClockRef,
+  command: ReplayCommand,
+  commandId?: string | null,
+  viewAsset?: string | null,
+): Promise<AdvanceResult> {
   validateCommand(command);
   const ctx = await resolve(userId, ref, "write");
+  if (viewAsset != null && !ctx.run.assets.includes(viewAsset)) throw new ReplayNotFoundError();
   const outcome = await prisma.$transaction(async (tx) => {
     const [pos] = await tx.$queryRaw<LockedPosition[]>`
-      SELECT p."id", p."currentMinute", p."dayFirstMinute", p."dayLastMinute", p."recentCommands", d."seq"
-      FROM "BacktestReplayPosition" p
-      JOIN "HistoricalDataset" d ON d."id" = p."datasetId"
-      WHERE p."userId" = ${userId} AND p."backtestRunId" = ${ctx.run.id} AND p."assetSymbol" = ${ref.assetSymbol}
-        AND p."simulationDate" = ${ref.dateKey}::date
-      FOR UPDATE OF p
+      SELECT "id", "currentMinute", "recentCommands" FROM "BacktestReplayPosition"
+      WHERE "userId" = ${userId} AND "backtestRunId" = ${ctx.run.id} AND "simulationDate" = ${ref.dateKey}::date
+      FOR UPDATE
     `;
     if (!pos) throw new ReplayError("Replay hasn't started for this day yet.");
     const seen = commandId ? pos.recentCommands.find((c) => c.id === commandId) : undefined;
     if (seen) return { applied: false, from: seen.from, to: seen.to };
 
-    const target = await targetMinute(tx, pos, command, ctx.dayStart);
+    const seqs = await timelineSeqs(tx, ctx.run.id);
+    const target = seqs.length ? await targetMinute(tx, seqs, pos.currentMinute, command, ctx) : null;
     const to = target != null && target > pos.currentMinute ? target : pos.currentMinute;
     const recent = commandId ? [...pos.recentCommands, { id: commandId, from: pos.currentMinute, to }].slice(-RECENT_COMMANDS) : pos.recentCommands;
     if (to !== pos.currentMinute || commandId) {
@@ -283,21 +300,24 @@ export async function advanceReplay(userId: string, ref: ReplayRef, command: Rep
   });
 
   const state = await buildState(userId, ctx);
-  const revealed =
-    outcome.to > outcome.from && state.dataset
-      ? (await getHistoricalCandles(userId, { datasetId: state.dataset.id, timeframe: "M1", cutoff: outcome.to, from: outcome.from + 1, to: outcome.to, limit: MAX_STEP_BARS })).candles
-      : [];
+  let revealed: CandleDTO[] = [];
+  const viewed = viewAsset ? state.assets.find((a) => a.assetSymbol === viewAsset)?.dataset : null;
+  if (viewed && outcome.to > outcome.from) {
+    revealed = (await getHistoricalCandles(userId, { datasetId: viewed.id, timeframe: "M1", cutoff: outcome.to, from: outcome.from + 1, to: outcome.to, limit: MAX_STEP_BARS })).candles;
+  }
   return { applied: outcome.applied, moved: outcome.to > outcome.from, fromMinute: outcome.from, toMinute: outcome.to, revealed, state };
 }
 
 export interface ReplayCandlesResult extends CandlesResult {
+  assetSymbol: string;
   position: { minute: number; time: string; version: number };
 }
 
 /**
- * Candles for the replay chart, as of the STORED position. The caller chooses
- * the timeframe, how many candles, and (to pan back over revealed history) an
- * earlier `to` — never the cutoff: anything after the position is unreachable.
+ * One asset's candles as of the run's STORED world time. The caller chooses
+ * the asset, timeframe, how many candles and (to pan back over revealed
+ * history) an earlier `to` — never the cutoff: nothing after world time is
+ * reachable, for any asset.
  */
 export async function getReplayCandles(
   userId: string,
@@ -306,15 +326,20 @@ export async function getReplayCandles(
 ): Promise<ReplayCandlesResult> {
   if (!isReplayTimeframe(query.timeframe)) throw new ReplayError("Unknown timeframe.");
   const ctx = await resolve(userId, ref, "read");
-  const pos = await findPosition(userId, ctx);
+  if (!ctx.run.assets.includes(ref.assetSymbol)) throw new ReplayNotFoundError();
+  const [pos, pin] = await Promise.all([
+    findPosition(userId, ctx),
+    prisma.backtestRunDataset.findUnique({ where: { backtestRunId_assetSymbol: { backtestRunId: ctx.run.id, assetSymbol: ref.assetSymbol } } }),
+  ]);
   if (!pos) throw new ReplayError("Replay hasn't started for this day yet.");
+  if (!pin) throw new ReplayError(`No historical dataset is attached to ${ref.assetSymbol}.`);
   const cutoff = pos.currentMinute;
   const result = await getHistoricalCandles(userId, {
-    datasetId: pos.datasetId,
+    datasetId: pin.datasetId,
     timeframe: query.timeframe,
     cutoff,
     to: query.to == null ? null : Math.min(query.to, cutoff),
     limit: query.limit ?? null,
   });
-  return { ...result, position: { minute: cutoff, time: formatWallClock(cutoff), version: pos.version } };
+  return { ...result, assetSymbol: ref.assetSymbol, position: { minute: cutoff, time: formatWallClock(cutoff), version: pos.version } };
 }

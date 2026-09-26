@@ -64,6 +64,8 @@ async function setup(label: string, opts: { assets?: string[] } = {}) {
 }
 const ref = (runId: string, dateKey = "2024-05-14", assetSymbol = "EURUSD"): ReplayRef => ({ runId, dateKey, assetSymbol });
 const at = async (userId: string, r: ReplayRef) => (await getReplayState(userId, r)).position?.time;
+/** Advance the run's clock, viewing EURUSD (whose revealed bars come back). */
+const adv = (userId: string, r: ReplayRef, command: Parameters<typeof advanceReplay>[2], commandId?: string) => advanceReplay(userId, r, command, commandId, r.assetSymbol);
 
 describe("dataset pinning", () => {
   it("validates compatibility, freezes on first replay position, and protects the dataset", async () => {
@@ -129,24 +131,24 @@ describe("the replay clock", () => {
   it("starts at the first real bar of the simulation date (not 00:00, never the whole day)", async () => {
     expect((await getReplayState(userId, ref(runId))).status).toBe("NOT_STARTED");
     const s = await initializeReplay(userId, ref(runId));
-    expect(s).toMatchObject({ status: "ACTIVE", day: { firstBar: "2024-05-14T08:00", lastBar: "2024-05-14T15:59", barCount: 418 } });
-    expect(s.position).toMatchObject({ time: "2024-05-14T08:00", revealedBarsToday: 1, atDayEnd: false });
+    expect(s).toMatchObject({ status: "ACTIVE", day: { firstBar: "2024-05-14T08:00", lastBar: "2024-05-14T15:59", minutes: 418 } });
+    expect(s.position).toMatchObject({ time: "2024-05-14T08:00", revealedMinutes: 1, atDayEnd: false });
     // Idempotent.
     expect((await initializeReplay(userId, ref(runId))).position?.time).toBe("2024-05-14T08:00");
     // A date without bars.
-    await expect(initializeReplay(userId, ref(runId, "2024-05-16"))).rejects.toThrow(/no bars on 2024-05-16/);
+    await expect(initializeReplay(userId, ref(runId, "2024-05-16"))).rejects.toThrow(/market data on 2024-05-16/);
     expect((await getReplayState(userId, ref(runId, "2024-05-16"))).status).toBe("NO_BARS_FOR_DATE");
   });
 
   it("+1 moves to the next ACTUAL bar — straight over missing minutes", async () => {
     await advanceReplay(userId, ref(runId), { kind: "SEEK", to: wc("2024-05-14T09:14") });
-    const r = await advanceReplay(userId, ref(runId), { kind: "BARS", count: 1 });
+    const r = await adv(userId, ref(runId), { kind: "BARS", count: 1 });
     expect([formatWallClock(r.fromMinute), formatWallClock(r.toMinute)]).toEqual(["2024-05-14T09:14", "2024-05-14T09:17"]);
     expect(r.revealed.map((c) => c.time)).toEqual(["2024-05-14T09:17"]); // no 09:15 / 09:16 invented
   });
 
   it("+N reveals the N-th next bar in one atomic step", async () => {
-    const r = await advanceReplay(userId, ref(runId), { kind: "BARS", count: 5 });
+    const r = await adv(userId, ref(runId), { kind: "BARS", count: 5 });
     expect(formatWallClock(r.toMinute)).toBe("2024-05-14T09:22");
     expect(r.revealed.map((c) => c.time.slice(11))).toEqual(["09:18", "09:19", "09:20", "09:21", "09:22"]);
   });
@@ -177,9 +179,10 @@ describe("the replay clock", () => {
   });
 
   it("the database itself refuses rewinding, non-bar positions and leaving the date", async () => {
-    const where = { backtestRunId: runId, assetSymbol: "EURUSD" };
+    const where = { backtestRunId: runId, simulationDate: new Date("2024-05-14T00:00:00Z") };
     await expect(prisma.backtestReplayPosition.updateMany({ where, data: { currentMinute: wc("2024-05-14T09:00") } })).rejects.toThrow(/only moves forward/);
-    await expect(prisma.backtestReplayPosition.updateMany({ where: { ...where, simulationDate: new Date("2024-05-14T00:00:00Z") }, data: { currentMinute: wc("2024-05-15T08:30") } })).rejects.toThrow();
+    await expect(prisma.backtestReplayPosition.updateMany({ where, data: { currentMinute: wc("2024-05-15T08:30") } })).rejects.toThrow(/within_day/);
+    await expect(prisma.backtestReplayPosition.updateMany({ where, data: { currentMinute: wc("2024-05-14T23:00") } })).rejects.toThrow(/actual M1 bar/);
   });
 });
 
@@ -199,7 +202,7 @@ describe("multi-timeframe synchronization and forming candles", () => {
     const seen: string[] = [];
     let previousHigh = 0;
     for (let i = 0; i < 30; i += 1) {
-      const step = await advanceReplay(userId, ref(runId), { kind: "BARS", count: 1 });
+      const step = await adv(userId, ref(runId), { kind: "BARS", count: 1 });
       const { candles } = await getReplayCandles(userId, ref(runId), { timeframe: "M30", limit: 3 });
       const last = candles[candles.length - 1];
       expect(last.time).toBe(formatWallClock(step.toMinute) < "2024-05-14T09:30" ? "2024-05-14T09:00" : "2024-05-14T09:30");
@@ -258,21 +261,100 @@ describe("multi-timeframe synchronization and forming candles", () => {
   });
 });
 
-describe("dates, assets and runs each have their own clock", () => {
-  it("14 May, 15 May and GBPUSD keep independent positions", async () => {
-    const { userId, run, ds } = await setup("independent", { assets: ["EURUSD", "GBPUSD"] });
-    const gbpRows = fixtureRows().map((r) => [...r]);
-    const gbp = await importHistoricalDataset(userId, { bytes: enc(mt5Text(gbpRows)), fileName: "GBPUSD_M1_202405140800_202405151000.csv" });
-    await attachDatasetToRun(userId, { runId: run.id, assetSymbol: "EURUSD", datasetId: ds.id });
-    await attachDatasetToRun(userId, { runId: run.id, assetSymbol: "GBPUSD", datasetId: gbp.id });
-    for (const [dateKey, asset] of [["2024-05-14", "EURUSD"], ["2024-05-15", "EURUSD"], ["2024-05-14", "GBPUSD"]] as const) await initializeReplay(userId, ref(run.id, dateKey, asset));
+/** GBPUSD on 14 May: 08:00–15:59 like EURUSD, but WITHOUT 09:36–09:37, with a
+ *  massive spike at 09:38, and with one bar at 12:30 (EURUSD has no 12:xx). */
+function gbpRows(): string[][] {
+  const rows = fixtureRows()
+    .filter((r) => r[0] === "2024.05.14" && !["09:36", "09:37"].includes(r[1]))
+    .map((r) => (r[1] === "09:38" ? [r[0], r[1], "1.26000", "9.99999", "0.00001", "5.00000", "10"] : r[1] === "09:15" ? r : [r[0], r[1], ...r.slice(2, 6).map((x) => (Number(x) + 0.2).toFixed(5)), r[6]]));
+  rows.push(["2024.05.14", "12:30", "1.28000", "1.28010", "1.27990", "1.28005", "10"]);
+  return rows.sort((a, b) => a[1].localeCompare(b[1]));
+}
 
-    await advanceReplay(userId, ref(run.id), { kind: "SEEK", to: wc("2024-05-14T09:37") });
-    expect(await at(userId, ref(run.id, "2024-05-15"))).toBe("2024-05-15T08:12"); // its own first bar
-    await advanceReplay(userId, ref(run.id, "2024-05-15"), { kind: "BARS", count: 10 });
-    expect(await at(userId, ref(run.id, "2024-05-14"))).toBe("2024-05-14T09:37"); // untouched
-    expect(await at(userId, ref(run.id, "2024-05-14", "GBPUSD"))).toBe("2024-05-14T08:00"); // other asset untouched
-    expect(await at(userId, ref(run.id, "2024-05-15"))).toBe("2024-05-15T08:22");
+describe("one world clock per run and date (multi-asset)", () => {
+  let userId: string;
+  let runId: string;
+  beforeAll(async () => {
+    const s = await setup("world", { assets: ["EURUSD", "GBPUSD"] });
+    userId = s.userId;
+    runId = s.run.id;
+    const gbp = await importHistoricalDataset(userId, { bytes: enc(mt5Text(gbpRows())), fileName: "GBPUSD_M1_202405140800_202405141559.csv" });
+    await attachDatasetToRun(userId, { runId, assetSymbol: "EURUSD", datasetId: s.ds.id });
+    await attachDatasetToRun(userId, { runId, assetSymbol: "GBPUSD", datasetId: gbp.id });
+    await initializeReplay(userId, ref(runId));
+  });
+
+  it("every asset is read as of the same world time; a gap shows that asset's latest earlier bar", async () => {
+    await adv(userId, ref(runId), { kind: "SEEK", to: wc("2024-05-14T09:37") });
+    const state = await getReplayState(userId, ref(runId));
+    expect(state.position?.time).toBe("2024-05-14T09:37");
+    expect(state.assets.map((a) => [a.assetSymbol, a.latestBar])).toEqual([["EURUSD", "2024-05-14T09:37"], ["GBPUSD", "2024-05-14T09:35"]]);
+  });
+
+  it("switching EURUSD → GBPUSD at 09:37: the GBPUSD 09:38 spike appears in no timeframe, and the clock doesn't move", async () => {
+    const before = (await getReplayState(userId, ref(runId))).position!;
+    for (const timeframe of ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1", "MN1"] as const) {
+      const gbp = await getReplayCandles(userId, ref(runId, "2024-05-14", "GBPUSD"), { timeframe, limit: 500, to: wc("2024-05-14T15:59") });
+      expect(gbp.position.time, timeframe).toBe("2024-05-14T09:37");
+      expect(Math.max(...gbp.candles.map((c) => c.high)), timeframe).toBeLessThan(1.5);
+      expect(Math.min(...gbp.candles.map((c) => c.low)), timeframe).toBeGreaterThan(1.2);
+      expect(gbp.candles.at(-1)!.close, timeframe).toBe((await getReplayCandles(userId, ref(runId, "2024-05-14", "GBPUSD"), { timeframe: "M1", limit: 1 })).candles[0].close);
+      const eur = await getReplayCandles(userId, ref(runId), { timeframe, limit: 500 });
+      expect(eur.candles.at(-1)!.close, timeframe).toBe((await getReplayCandles(userId, ref(runId), { timeframe: "M1", limit: 1 })).candles[0].close);
+    }
+    const after = (await getReplayState(userId, ref(runId))).position!;
+    expect([after.minute, after.version]).toEqual([before.minute, before.version]);
+    // The M1 view of GBPUSD ends at its last real bar before world time; no 09:36/09:37 invented.
+    const m1 = await getReplayCandles(userId, ref(runId, "2024-05-14", "GBPUSD"), { timeframe: "M1", limit: 3 });
+    expect(m1.candles.map((c) => c.time.slice(11))).toEqual(["09:33", "09:34", "09:35"]);
+  });
+
+  it("the timeline is the union of the assets' bars: +1 visits 09:38, and 12:30 exists only for GBPUSD", async () => {
+    const r = await advanceReplay(userId, ref(runId), { kind: "BARS", count: 1 }, null, "GBPUSD");
+    expect(formatWallClock(r.toMinute)).toBe("2024-05-14T09:38");
+    expect(r.revealed.map((c) => c.time.slice(11))).toEqual(["09:38"]); // GBPUSD's bar, now legitimately revealed
+    await adv(userId, ref(runId), { kind: "SEEK", to: wc("2024-05-14T11:59") });
+    const noon = await adv(userId, ref(runId), { kind: "BARS", count: 1 });
+    expect(formatWallClock(noon.toMinute)).toBe("2024-05-14T12:30"); // a GBPUSD-only minute
+    expect(noon.revealed).toEqual([]); // EURUSD had nothing new
+    expect((await getReplayState(userId, ref(runId))).assets.map((a) => a.latestBar)).toEqual(["2024-05-14T11:59", "2024-05-14T12:30"]);
+    expect(formatWallClock((await adv(userId, ref(runId), { kind: "BARS", count: 1 })).toMinute)).toBe("2024-05-14T13:00");
+  });
+
+  it("history paging (chart navigation) walks back contiguously and never past world time", async () => {
+    const pos = (await getReplayState(userId, ref(runId))).position!;
+    const page1 = await getReplayCandles(userId, ref(runId), { timeframe: "M5", limit: 20 });
+    expect(page1.candles.at(-1)!.minute).toBeLessThanOrEqual(pos.minute);
+    const page2 = await getReplayCandles(userId, ref(runId), { timeframe: "M5", limit: 20, to: page1.candles[0].minute - 1 });
+    expect(page2.candles).toHaveLength(20);
+    expect(page2.candles.at(-1)!.minute + 5).toBeLessThanOrEqual(page1.candles[0].minute); // older, no overlap
+    expect(page2.candles.every((c) => c.state === "COMPLETED")).toBe(true);
+    // Paging back to the dataset's start ends cleanly.
+    const oldest = await getReplayCandles(userId, ref(runId), { timeframe: "M5", limit: 5000, to: page2.candles[0].minute - 1 });
+    expect(oldest.hasMoreBefore).toBe(false);
+    expect(oldest.candles[0].time).toBe("2024-05-14T08:00");
+    // Navigation never moved the clock.
+    expect((await getReplayState(userId, ref(runId))).position).toEqual(pos);
+  });
+
+  it("each simulation date keeps its own world time", async () => {
+    await initializeReplay(userId, ref(runId, "2024-05-15"));
+    expect(await at(userId, ref(runId, "2024-05-15"))).toBe("2024-05-15T08:12"); // its own first bar (EURUSD only that day)
+    await adv(userId, ref(runId, "2024-05-15"), { kind: "BARS", count: 10 });
+    expect(await at(userId, ref(runId, "2024-05-14"))).toBe("2024-05-14T13:00"); // untouched
+    expect(await at(userId, ref(runId, "2024-05-15"))).toBe("2024-05-15T08:22");
+  });
+
+  it("an asset attached after replay started joins the shared clock, frozen at once", async () => {
+    const s = await setup("late-pin", { assets: ["EURUSD", "GBPUSD"] });
+    await attachDatasetToRun(s.userId, { runId: s.run.id, assetSymbol: "EURUSD", datasetId: s.ds.id });
+    await initializeReplay(s.userId, ref(s.run.id));
+    await adv(s.userId, ref(s.run.id), { kind: "SEEK", to: wc("2024-05-14T09:40") });
+    const gbp = await importHistoricalDataset(s.userId, { bytes: enc(mt5Text(gbpRows())), fileName: "GBPUSD_M1_202405140800_202405141559.csv" });
+    const pin = await attachDatasetToRun(s.userId, { runId: s.run.id, assetSymbol: "GBPUSD", datasetId: gbp.id });
+    expect(pin.frozen).toBe(true);
+    const view = await getReplayCandles(s.userId, ref(s.run.id, "2024-05-14", "GBPUSD"), { timeframe: "M1", limit: 2 });
+    expect(view.candles.map((c) => c.time.slice(11))).toEqual(["09:39", "09:40"]); // as of world time, nothing later
   });
 });
 
@@ -294,8 +376,8 @@ describe("concurrency and retries", () => {
     const { userId, run, ds } = await setup("retry");
     await attachDatasetToRun(userId, { runId: run.id, assetSymbol: "EURUSD", datasetId: ds.id });
     await initializeReplay(userId, ref(run.id));
-    const first = await advanceReplay(userId, ref(run.id), { kind: "BARS", count: 3 }, "same-id");
-    const retry = await advanceReplay(userId, ref(run.id), { kind: "BARS", count: 3 }, "same-id");
+    const first = await adv(userId, ref(run.id), { kind: "BARS", count: 3 }, "same-id");
+    const retry = await adv(userId, ref(run.id), { kind: "BARS", count: 3 }, "same-id");
     const both = await Promise.all([1, 2].map(() => advanceReplay(userId, ref(run.id), { kind: "BARS", count: 1 }, "dup-id")));
     expect(first).toMatchObject({ applied: true, toMinute: wc("2024-05-14T08:03") });
     expect(retry).toMatchObject({ applied: false, toMinute: wc("2024-05-14T08:03") });
@@ -317,7 +399,7 @@ describe("playback determinism", () => {
       const revealed: string[] = [];
       let moved = true;
       while (moved) {
-        const r = await advanceReplay(userId, ref(run.id), { kind: "BARS", count: batch });
+        const r = await adv(userId, ref(run.id), { kind: "BARS", count: batch });
         moved = r.moved;
         revealed.push(...r.revealed.map((c) => `${c.time}|${c.open}|${c.high}|${c.low}|${c.close}`));
       }
@@ -343,10 +425,11 @@ describe("ownership and run status", () => {
     await expect(getReplayCandles(b.userId, ref(a.run.id), { timeframe: "M1" })).rejects.toBeInstanceOf(BacktestRunNotFoundError);
     await expect(advanceReplay(b.userId, ref(a.run.id), { kind: "BARS", count: 1 })).rejects.toBeInstanceOf(BacktestRunNotFoundError);
     await expect(initializeReplay(b.userId, ref(a.run.id))).rejects.toBeInstanceOf(BacktestRunNotFoundError);
-    // An asset the run doesn't have is not found either.
-    await expect(getReplayState(a.userId, ref(a.run.id, "2024-05-14", "GBPUSD"))).rejects.toBeInstanceOf(ReplayNotFoundError);
+    // An asset the run doesn't have is not found either (reading or as the view asset).
+    await expect(getReplayCandles(a.userId, ref(a.run.id, "2024-05-14", "GBPUSD"), { timeframe: "M1" })).rejects.toBeInstanceOf(ReplayNotFoundError);
+    await expect(advanceReplay(a.userId, ref(a.run.id), { kind: "BARS", count: 1 }, null, "GBPUSD")).rejects.toBeInstanceOf(ReplayNotFoundError);
     // B's run can't reach A's position, and A is untouched.
-    expect((await getReplayState(b.userId, ref(b.run.id))).status).toBe("NO_DATASET");
+    expect((await getReplayState(b.userId, ref(b.run.id))).status).toBe("NO_DATASETS");
     expect(await at(a.userId, ref(a.run.id))).toBe("2024-05-14T08:00");
     // The database refuses a cross-user pin even if app code were bypassed.
     await expect(prisma.backtestRunDataset.create({ data: { userId: b.userId, backtestRunId: b.run.id, assetSymbol: "EURUSD", datasetId: a.ds.id } })).rejects.toThrow(/same user/);

@@ -56,49 +56,66 @@ export interface AggregateOptions {
 }
 
 /**
+ * COMPLETED once the cutoff has reached the bucket's last minute (whether or
+ * not that minute had a bar), otherwise FORMING.
+ */
+export function candleState(bucketStartMinute: WallClockMinute, timeframe: ReplayTimeframe, cutoff: WallClockMinute): CandleState {
+  return cutoff >= bucketEnd(bucketStartMinute, timeframe) - 1 ? "COMPLETED" : "FORMING";
+}
+
+/** A new candle from bar `i` (the first bar of its bucket). */
+export function openCandle(bars: CanonicalM1Bars, i: number, timeframe: ReplayTimeframe, cutoff: WallClockMinute): EngineCandle {
+  const start = bucketStart(bars.minute[i], timeframe);
+  return {
+    time: start,
+    open: bars.open[i],
+    high: bars.high[i],
+    low: bars.low[i],
+    close: bars.close[i],
+    tickVolume: bars.tickVolume ? bars.tickVolume[i] : null,
+    realVolume: bars.realVolume ? bars.realVolume[i] : null,
+    spread: bars.spread ? bars.spread[i] : null,
+    barCount: 1,
+    lastBarTime: bars.minute[i],
+    state: candleState(start, timeframe, cutoff),
+  };
+}
+
+/** Adds bar `i` (a later bar of the same bucket) to `candle`, in place. */
+export function extendCandle(candle: EngineCandle, bars: CanonicalM1Bars, i: number): void {
+  if (bars.high[i] > candle.high) candle.high = bars.high[i];
+  if (bars.low[i] < candle.low) candle.low = bars.low[i];
+  candle.close = bars.close[i];
+  if (candle.tickVolume != null) candle.tickVolume += bars.tickVolume![i];
+  if (candle.realVolume != null) candle.realVolume += bars.realVolume![i];
+  if (candle.spread != null && bars.spread![i] < candle.spread) candle.spread = bars.spread![i];
+  candle.barCount += 1;
+  candle.lastBarTime = bars.minute[i];
+}
+
+/**
  * Aggregates `bars` (ascending, unique) into candles. Bars after `cutoff` are
  * skipped here even if a caller passed them (the service also never fetches
- * them) — the engine is the lookahead boundary of last resort.
+ * them) — the engine is the lookahead boundary of last resort. The client
+ * chart model builds its forming candle with these same `openCandle` /
+ * `extendCandle` / `candleState` functions, so both sides agree exactly.
  */
 export function aggregateCandles(bars: CanonicalM1Bars, options: AggregateOptions): EngineCandle[] {
   const { timeframe, cutoff } = options;
   const out: EngineCandle[] = [];
   let current: EngineCandle | null = null;
-  let currentEnd = 0;
 
   for (let i = 0; i < bars.count; i += 1) {
     const m = bars.minute[i];
     if (m > cutoff) break; // ascending — nothing after this is revealed
     const start = bucketStart(m, timeframe);
     if (options.fromBucket != null && start < options.fromBucket) continue;
-
     if (current == null || start !== current.time) {
       if (current) out.push(current);
-      currentEnd = bucketEnd(start, timeframe);
-      current = {
-        time: start,
-        open: bars.open[i],
-        high: bars.high[i],
-        low: bars.low[i],
-        close: bars.close[i],
-        tickVolume: bars.tickVolume ? bars.tickVolume[i] : null,
-        realVolume: bars.realVolume ? bars.realVolume[i] : null,
-        spread: bars.spread ? bars.spread[i] : null,
-        barCount: 1,
-        lastBarTime: m,
-        state: cutoff >= currentEnd - 1 ? "COMPLETED" : "FORMING",
-      };
-      continue;
+      current = openCandle(bars, i, timeframe, cutoff);
+    } else {
+      extendCandle(current, bars, i);
     }
-
-    if (bars.high[i] > current.high) current.high = bars.high[i];
-    if (bars.low[i] < current.low) current.low = bars.low[i];
-    current.close = bars.close[i];
-    if (current.tickVolume != null) current.tickVolume += bars.tickVolume![i];
-    if (current.realVolume != null) current.realVolume += bars.realVolume![i];
-    if (current.spread != null && bars.spread![i] < current.spread) current.spread = bars.spread![i];
-    current.barCount += 1;
-    current.lastBarTime = m;
   }
   if (current) out.push(current);
   return out;

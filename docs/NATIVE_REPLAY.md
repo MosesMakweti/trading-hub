@@ -1,9 +1,10 @@
 # Native Replay V2 — historical data & candle engine
 
-**Status: Prompts 1–2 complete** — MT5 M1 import (direct-to-R2), canonical
+**Status: Prompts 1–3 complete** — MT5 M1 import (direct-to-R2), canonical
 storage, the timeframe aggregation engine with progressively forming
-candles, run↔dataset pinning and the authoritative replay clock. **Not built
-yet:** the full-screen chart, drawings, position tools. Product direction: [BACKTESTING.md › Native Replay V2](./BACKTESTING.md#native-replay-v2-next-project).
+candles, run↔dataset pinning, the run-wide authoritative replay clock, and
+the full-screen replay chart workspace. **Not built yet:** drawing tools,
+Long/Short Position, Convert to Trade Idea. Product direction: [BACKTESTING.md › Native Replay V2](./BACKTESTING.md#native-replay-v2-next-project).
 
 ```
 MT5 M1 CSV
@@ -14,9 +15,9 @@ HistoricalDataset + HistoricalBar               (server/services/native-replay/h
    ↓  domain/native-replay/candle-engine.ts     (pure aggregation, COMPLETED / FORMING)
 BacktestRunDataset (run × asset → dataset, frozen once replay starts)
    ↓
-BacktestReplayPosition (run × date × asset → latest revealed M1 bar)   (server/services/native-replay/backtest-replay.service.ts)
-   ↓  getReplayCandles: cutoff = stored position, never the browser's
-[next] full-screen replay chart
+BacktestReplayPosition (run × date → shared WORLD time)   (server/services/native-replay/backtest-replay.service.ts)
+   ↓  getReplayCandles(asset, timeframe): cutoff = world time, never the browser's
+/backtesting/[runId]/replay — full-screen chart workspace   (components/native-replay/replay-workspace.tsx)
 ```
 
 ## Independence from Edge Review
@@ -263,8 +264,9 @@ sweep (on each new upload)                    → PENDING/PROCESSING past expire
 owner, dataset READY and M1, `normalizeSymbol(asset) === dataset.symbol`
 (broker spellings like `EURUSD.a` compare equal; XAUUSD never attaches to
 EURUSD), and bars inside the run period (the number of covered days is
-reported). Before replay starts a pin can be replaced or detached. **The first
-replay position freezes it** (DB trigger sets `frozenAt`); after that the
+reported). Before replay starts a pin can be replaced or detached. **The run's
+first replay position freezes all its pins** (DB trigger sets `frozenAt`; a pin
+attached later is frozen at once); after that the
 database refuses changing its dataset/asset, un-freezing, or deleting it —
 only deleting the run removes it (the run's cascade). A pinned dataset can't
 be deleted: the service names the runs using it, and the pin's foreign key
@@ -272,53 +274,96 @@ be deleted: the service names the runs using it, and the pin's foreign key
 its pins and positions, never datasets. DB triggers also enforce same owner,
 READY-only attach, and that the asset is one of the run's.
 
-## Replay clock (BacktestReplayPosition)
+## Replay clock (BacktestReplayPosition) — one world time per run and day
 
-- **Key:** run × simulation date × asset. The simulation date is the
-  Backtesting session date, read on the dataset's (broker server) clock.
-- **Value:** `currentMinute` = the open time of the latest REVEALED M1 bar.
-  The displayed timeframe is not stored — it is a view over the same moment,
-  so switching M5↔H4 never moves time.
-- **Initial position:** the first actual M1 bar of the date (never the whole
-  day; not assumed to be 00:00). No session-open intelligence is assumed —
-  the trader can jump forward (e.g. to London open).
-- **Day boundary:** the date's last bar is the end. Play stops there; the
-  next day is an explicit Session move with its own position.
-- **+N bars** (`+1m` = N 1): the N-th next ACTUAL bar — gaps are crossed, never
-  filled (09:14 → +1 → 09:17 when 09:15–16 are missing; 11:59 → 13:00 across a
-  missing hour).
-- **+1 displayed candle:** to the last bar of the candle the next bar belongs
-  to — at 09:17 on M30 that finishes the current candle (→ 09:29); each further
-  press reveals one whole candle (→ 09:59). Always resolves to a real bar.
-- **Seek:** a wall-clock time later the same day → the last bar at or before
-  it. Earlier than now → refused; another day → refused.
-- **No rewind.** Trades and notes recorded at a replay time were decided with
-  what was revealed; moving the clock back would let later knowledge leak into
-  them. The chart may pan over revealed history freely; the clock can't move
-  back (service rule AND DB trigger). A deliberate "restart day" (with
-  consequences for that day's records) is future work.
-- **Atomic moves:** each command locks the position row (`SELECT … FOR UPDATE`)
-  for read-compute-write, so concurrent commands apply in sequence. Each
-  carries a client command id; the last 32 are remembered on the position, so
-  a network retry of an applied command returns the earlier result instead of
-  moving again. Distinct commands all apply.
-- **Candles:** `getReplayCandles(run, date, asset, timeframe, limit, to?)` loads
-  the stored position and reads with cutoff = position. `to` only pans back
-  (clamped to the position). No endpoint accepts a cutoff; the Prompt 1
-  dataset candle route (arbitrary cutoff) was removed for that reason.
-- **Assets:** each asset has its own clock (datasets have different bars and
-  gaps). Caveat: two assets at different times can leak correlated information
-  (EURUSD at 10:12 reveals the dollar move GBPUSD at 09:37 hasn't reached). V2
-  shows one asset at a time; a run-wide lock-step mode is a candidate for the
-  multi-asset chart stage.
-- **Run status:** COMPLETED/ARCHIVED runs keep pins, positions and candles
-  (readable); every move and attach is refused.
-- **Playback** is browser-driven (no server timer): one command per tick,
-  sequential, ≤ 5 requests/s. 1x = one M1 bar per second; ticks never faster
-  than 200ms, so 10x/20x reveal 2/4 bars per tick. Every advance returns the
-  revealed M1 bars for animation. Speed changes only delays: the revealed
-  sequence and final state are identical at every speed (tested). Pause sends
-  nothing further; the last applied command's position is the stored one.
+- **Key:** run × simulation date. **Value:** `currentMinute` = the run's
+  shared simulated WORLD time (wall-clock minute, dataset/server clock).
+- **Why not per asset** (the Prompt 2 model): independent clocks let EURUSD at
+  10:00 inform a GBPUSD decision at 09:20 — cross-asset lookahead. Every asset
+  is now read as of the same world time: its latest real bar at or before it.
+  If GBPUSD has no 09:37 bar, GBPUSD shows 09:35 — the world clock is never
+  moved back to it.
+- **The timeline** is the union of the real M1 bar minutes of the run's
+  pinned datasets on that date. World time is always one of those minutes
+  (DB trigger: a minute at which at least one pinned dataset has a bar).
+- **Initial world time:** the earliest bar of the date across the datasets.
+- **+N:** the N-th next timeline minute (any asset traded) — gaps crossed, never
+  filled. **+1 displayed candle:** to the last timeline minute of the candle
+  the next timeline minute belongs to. **Seek:** the last timeline minute at or
+  before a later time today. **End of day:** the date's last timeline minute.
+- **No rewind** (service + DB trigger), identity immutable, stays in its date
+  (CHECK). Moves are locked transactions with retry-safe command ids (as
+  before). Single-asset runs behave exactly as in Prompt 2.
+- **Pins:** the run's first world position freezes every pin of the run; an
+  asset attached after replay started joins the clock frozen at once.
+- **Migration** (`20260927100000_native_replay_run_wide_clock`): per-asset rows
+  were merged into one per run × date keeping the LATEST time (already revealed;
+  an earlier one would move a clock backwards); columns pin/dataset/asset/day
+  range dropped; new guard trigger.
+- **Candles:** `getReplayCandles({run, date, asset}, {timeframe, limit, to?})` —
+  asset and timeframe are the caller's view choice; the cutoff is the stored
+  world time. `to` only pans back.
+- **Run status:** COMPLETED/ARCHIVED runs are readable, never moved.
+
+## Replay workspace (/backtesting/[runId]/replay?date=)
+
+A `(replay)` route group with its own layout: authenticated like the app, but
+without its sidebar/top bar/backdrop — the chart gets the viewport. Toolbar:
+back to Session · asset · timeframes (M1 M5 M15 M30 H1 H4 D1 + More: the other
+nine) · simulation date (prev/next trading day via the run calendar) · replay
+time · +1m · +5m · +1 candle · Play/Pause · speed · Jump (server time) · volume
+· Session. Left rail: crosshair / magnet (reserved for the drawing tools).
+Status bar: world time, revealed minutes, the viewed asset's latest bar when a
+gap puts it behind world time, shortcuts.
+
+- **Chart library: lightweight-charts 5** (already a dependency — Apache-2.0,
+  attribution logo kept). Chosen because it (1) renders time as UTC with no
+  timezone support — exactly right for broker wall-clock time; (2) updates the
+  last bar incrementally (`series.update`); (3) handles thousands of bars with
+  pan/zoom/crosshair; (4) exposes coordinate conversion
+  (`timeToCoordinate`/`coordinateToTime`, `priceToCoordinate`/
+  `coordinateToPrice`) and series/pane primitives — the foundation for drawings
+  and position tools; (5) supports panes (volume now, indicators later).
+  Colours are hex/rgba (its parser rejects `oklch`/`var()`).
+- **Broker time on the chart:** `chart-time.ts` is the only bridge — chart time
+  = wall-clock minute × 60; every label (axis ticks, crosshair, legend) comes
+  from our integer formatters. Tested with `TZ` set to Lusaka, London, New York,
+  Tokyo, UTC; the browser QA rendered pixel-identical charts under three
+  timezones.
+- **Gaps:** bars are index-spaced — missing minutes, weekends and closures are
+  compressed out (standard financial-chart behaviour, option B). No bar is ever
+  created for a missing minute; the time axis labels the real times on either
+  side of a gap.
+- **Forming candle / printing:** each step returns the viewed asset's newly
+  revealed M1 bars; `chart-model.ts` folds them into the displayed candles with
+  the engine's own `openCandle` / `extendCandle` / `candleState` (no second copy
+  of the candle math — equivalence tested against the server at every cutoff,
+  all 16 timeframes), and only the changed candles are sent to the chart. No
+  intra-minute path is invented; the candle changes once per revealed minute.
+- **Reconciliation (server wins):** full server reads on open, asset/timeframe
+  switch, older-history paging, pause, tab restore and after a failed/duplicate
+  step; mismatches replace the client's candles. Nothing is optimistic: the
+  clock and chart move only on server replies.
+- **History:** opens with up to 500 revealed candles (prior days included);
+  panning left prefetches older pages (≈1.5 screens ahead) — chart navigation
+  only, it never touches the clock. The right edge is the world time: the chart
+  holds no later candles (empty `rightOffset` space, `fixRightEdge`).
+- **Follow:** the view follows new candles only while the latest candle is on
+  screen; after panning back it stays put (even while playing) and shows
+  "Return to replay" (R).
+- **Zoom:** a fresh view (timeframe/asset switch) starts at the default bar
+  spacing, fitting short histories to the width.
+- **Keyboard:** Space play/pause · → +1m · Shift+→ +1 candle · R return to
+  replay. Ignored while typing and inside the Session panel.
+- **Session panel:** the existing Backtesting Session workflow (same loader and
+  components as the Session page, in the run's BACKTEST scope), server-rendered
+  into a collapsible right panel (~28% on desktop, overlay below 1024px). It
+  stays mounted when hidden.
+- **View state** (localStorage per run: asset, timeframe, panel, volume) is kept
+  apart from replay state (server) — changing it never moves the clock.
+- **Accessibility:** labelled controls, `aria-pressed` toggles, a live status
+  region with the replay time, a textual OHLC legend; no motion beyond candle
+  updates (panel transition honours reduced motion).
 
 ## Performance (local Docker Postgres, M-series Mac)
 
@@ -363,6 +408,16 @@ forming candle client-side from the revealed M1 bars each step returns and
 only refetch history on timeframe change / pan, keeping H4+ history reads
 (~0.5s) off the hot path.
 
+## Replay workspace performance (browser, dev build, 1920×1080)
+
+| | |
+|---|---|
+| Open → 500 M1 candles rendered | 0.82s (one `setData`) |
+| Timeframe switch (H1 / H4 / M30 / M1) | 59–98ms |
+| Asset switch | 109–129ms |
+| +1m chart update (series.update) | 0.2–0.4ms avg |
+| 20x playback, 25s | 125 incremental updates, 5.0 req/s, update median 2.8ms / max 6.1ms, 0 `setData`, 0 chart re-renders; JS heap 49MB → 35MB after GC (no growth) |
+
 ## Tests
 
 - `domain/native-replay/timeframes.test.ts` — boundaries for every timeframe, W1 Sunday rule, MN1 Jan/Feb-leap/Dec transitions.
@@ -370,8 +425,9 @@ only refetch history on timeframe change / pan, keeping H4+ history reads
 - `domain/native-replay/import-analysis.test.ts` — formats, strict decimals, precision, malformed timestamps, invalid OHLC, duplicates, ordering, volume, non-M1, symbol, row ceiling, gap classification.
 - `server/services/native-replay/historical-dataset.service.test.ts` — import lifecycle (preview, READY, INVALID, mid-write failure, crash sweep), DB backstops, ownership, service ≡ engine for every timeframe, cutoff enforcement, limits.
 - `server/services/native-replay/historical-upload.service.test.ts` — direct-upload lifecycle (presign, preview, import once, concurrent completes, INVALID cleanup, size/type limits, ownership, owned-prefix CHECK, sweep never touching other objects).
-- `server/services/native-replay/backtest-replay.service.test.ts` — pin compatibility/freeze/delete protection (service + DB), initial position, +1 over gaps, +N, +1 candle, seek rules, DB-refused rewind, M30 forming lifecycle, H4 at 09:37, M1…D1 synchronisation, lookahead attacks, date/asset independence, 10 concurrent steps, retried command ids, speed determinism, ownership, read-only runs.
+- `domain/native-replay/chart-model.test.ts` — client model ≡ server engine at every cutoff (random batches, world time past the asset's last bar, all timeframes), M30 printing 09:00→09:30, duplicate steps, wire precision, timezone-independent labels.
+- `server/services/native-replay/backtest-replay.service.test.ts` — world clock across assets (latest bar ≤ world time, GBPUSD 09:38 spike invisible at 09:37 in every timeframe, union timeline, late pins), history paging, pin compatibility/freeze/delete protection (service + DB), initial position, +1 over gaps, +N, +1 candle, seek rules, DB-refused rewind, M30 forming lifecycle, H4 at 09:37, M1…D1 synchronisation, lookahead attacks, date/asset independence, 10 concurrent steps, retried command ids, speed determinism, ownership, read-only runs.
 
-## Next: the full-screen replay workspace
+## Next: drawing and position tools (Prompt 4)
 
-See the Prompt 2 stage report.
+See the Prompt 3 stage report.

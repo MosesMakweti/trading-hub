@@ -10,7 +10,7 @@ import {
   datasetUnpinSchema,
   processImportUploadSchema,
   replayCandlesSchema,
-  replayRefSchema,
+  replayClockSchema,
 } from "@/lib/validation/native-replay";
 import { BacktestDateOutOfRangeError, BacktestRunNotFoundError } from "@/server/services/backtest-run.service";
 import * as datasetService from "@/server/services/native-replay/historical-dataset.service";
@@ -144,7 +144,7 @@ export async function detachDatasetFromRunAction(input: unknown): Promise<Ok<obj
 
 export async function getReplayStateAction(input: unknown): Promise<Ok<{ state: replayService.ReplayStateDTO }> | Fail> {
   const user = await requireUser();
-  const parsed = replayRefSchema.safeParse(input);
+  const parsed = replayClockSchema.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
   try {
     return { success: true, state: await replayService.getReplayState(user.id, parsed.data) };
@@ -155,7 +155,7 @@ export async function getReplayStateAction(input: unknown): Promise<Ok<{ state: 
 
 export async function initializeReplayAction(input: unknown): Promise<Ok<{ state: replayService.ReplayStateDTO }> | Fail> {
   const user = await requireUser();
-  const parsed = replayRefSchema.safeParse(input);
+  const parsed = replayClockSchema.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
   try {
     return { success: true, state: await replayService.initializeReplay(user.id, parsed.data) };
@@ -168,9 +168,9 @@ export async function advanceReplayAction(input: unknown): Promise<Ok<{ result: 
   const user = await requireUser();
   const parsed = advanceReplaySchema.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
-  const { command, commandId, ...ref } = parsed.data;
+  const { command, commandId, viewAsset, ...ref } = parsed.data;
   try {
-    return { success: true, result: await replayService.advanceReplay(user.id, ref, command, commandId) };
+    return { success: true, result: await replayService.advanceReplay(user.id, ref, command, commandId, viewAsset) };
   } catch (error) {
     return fail(error, "Couldn't advance the replay.");
   }
