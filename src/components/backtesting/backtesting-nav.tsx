@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
  * Backtesting's section navigation: Overview plus the run-scoped Session,
  * Journal and Analytics. On the Overview (no run in context) the run-scoped
  * items point at the most recently worked-on active run, and are disabled when
- * there's none — never a dead link.
+ * there's none — never a dead link. "Historical data" manages the Native
+ * Replay MT5 datasets, which belong to the user rather than to a run.
  */
 export function BacktestingNav({ runId }: { runId: string | null }) {
   const pathname = usePathname();
@@ -20,6 +21,8 @@ export function BacktestingNav({ runId }: { runId: string | null }) {
       href: runId ? `/backtesting/${runId}/${segment}` : null,
       active: runId != null && pathname.startsWith(`/backtesting/${runId}/${segment}`),
     })),
+    // Native Replay — imported MT5 M1 market data (user-owned, shared by runs).
+    { label: "Historical data", href: "/backtesting/data", active: pathname.startsWith("/backtesting/data") },
   ];
 
   return (

@@ -211,9 +211,11 @@ Live-vs-backtest comparison is ready at the data layer: both are the same
 
 ## Native Replay V2 (next project)
 
-> **Documentation only.** None of this exists yet: no tables, migrations,
-> chart components, aggregation engine, replay clock, drawings or upload UI.
-> It begins in the next project.
+> **Progress:** the MT5 M1 historical-data foundation and candle engine are
+> built — see [NATIVE_REPLAY.md](./NATIVE_REPLAY.md) (`HistoricalDataset` /
+> `HistoricalBar`, validation, aggregation with progressively forming
+> candles). Not yet built: run↔dataset pin, replay clock, chart, drawings,
+> position tools.
 
 Native Replay V2 replaces the external chart in the V1 flow with a
 Traditorium-native, full-screen replay workspace. It feeds the Backtesting

@@ -10,11 +10,13 @@ import {
   type RunPeriod,
 } from "@/domain/backtesting/run-calendar";
 import { loadTradingWorkspace } from "@/server/services/trading-workspace.service";
+import { getRunReplayStates } from "@/server/services/native-replay/backtest-replay.service";
 import { FadeIn } from "@/components/shared/motion";
 import { BacktestSessionShell, type SessionDayState } from "@/components/backtesting/backtest-session-shell";
 import { TodayWorkspace } from "@/components/today/today-workspace";
 import { WorkspaceProvider } from "@/components/workspace/workspace-context";
 import { WorkspaceEditableProvider } from "@/components/journal/workspace/editable-context";
+import { ReplayControlPanel } from "@/components/native-replay/replay-control-panel";
 
 /**
  * Backtesting Session. Security + context order: authenticated user → owns
@@ -39,7 +41,11 @@ export default async function BacktestSessionPage({
   const dateKey = normalizeSessionDateKey(period, requested, run.resumeDateKey);
   if (dateKey !== requested) redirect(`/backtesting/${run.id}/session?date=${dateKey}`);
 
-  const data = await loadTradingWorkspace(user.id, dateKey, { environment: "BACKTEST", runId: run.id });
+  const [data, replayStates] = await Promise.all([
+    loadTradingWorkspace(user.id, dateKey, { environment: "BACKTEST", runId: run.id }),
+    // Native Replay: dataset attached? replay started? current replay time? (per asset)
+    getRunReplayStates(user.id, run.id, dateKey),
+  ]);
   const dayState: SessionDayState = isBacktestDayComplete(data.day)
     ? "COMPLETED"
     : data.stepStatuses.some((s) => s.status === "done") || data.trades.length > 0
@@ -60,6 +66,9 @@ export default async function BacktestSessionPage({
         totalTradingDays={tradingDays.length}
         dayState={dayState}
       >
+        <div className="mb-4">
+          <ReplayControlPanel key={dateKey} states={replayStates} />
+        </div>
         <WorkspaceProvider value={{ environment: "BACKTEST", runId: run.id }}>
           <WorkspaceEditableProvider editable={run.status === "ACTIVE"}>
             {/* key = the simulated day: date navigation is client-side, and the

@@ -71,6 +71,9 @@ model User {
   apiIdempotencyKeys ApiIdempotencyKey[]
 
   backtestRuns BacktestRun[]
+  // Native Replay V2 — user-owned MT5 M1 datasets (independent of Edge Review's MarketDataImport)
+  historicalDatasets HistoricalDataset[]
+  historicalImportUploads HistoricalImportUpload[]
 }
 
 // "The trading day" the user considers it, independent of instants — stored
@@ -3753,7 +3756,215 @@ model BacktestRun {
   trades        Trade[]
   opportunities TradeOpportunity[]
   dailyNotes    DailyNote[]
+  // Native Replay V2 — which historical dataset each asset replays, and the
+  // authoritative replay position per simulation date × asset.
+  datasets        BacktestRunDataset[]
+  replayPositions BacktestReplayPosition[]
 
   @@index([userId, status, updatedAt])
   @@index([strategyId])
+}
+
+// ── Native Replay V2 — historical market data ────────────────────────────────
+// Native Replay's own subsystem: it does not use (and is not used by) Edge
+// Review's MarketDataImport / providers / replay sessions. See
+// docs/NATIVE_REPLAY.md.
+
+enum HistoricalDataSource {
+  MT5
+}
+
+enum HistoricalDatasetStatus {
+  IMPORTING // bars being written — never served
+  READY // complete and validated — the only state Native Replay reads
+  FAILED // import aborted; bars removed; kept only to show why
+}
+
+/// The clock the bar timestamps are on. MT5 exports carry the broker
+/// server's wall-clock time and no timezone metadata, so that is the only
+/// basis today; nothing is ever converted or guessed.
+enum HistoricalTimeBasis {
+  BROKER_SERVER
+}
+
+/// One imported MT5 M1 history for one symbol, owned by a user (not by a
+/// Backtest Run — runs will reference datasets in a later stage).
+model HistoricalDataset {
+  id     String @id @default(cuid())
+  /// Compact integer key for HistoricalBar rows (a cuid per bar row would
+  /// cost ~22 extra bytes × millions of rows in heap and index).
+  seq    Int    @unique @default(autoincrement())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  source        HistoricalDataSource
+  /// The broker's own symbol, verbatim ("EURUSD.a", "XAUUSDm", "GOLD").
+  sourceSymbol  String
+  /// Normalised identity ("EURUSD", "XAUUSD") — sourceSymbol stays recoverable.
+  symbol        String
+  /// Always "M1": the only stored resolution; every other timeframe is derived.
+  baseTimeframe String @default("M1")
+
+  timeBasis        HistoricalTimeBasis @default(BROKER_SERVER)
+  /// Broker server offset from UTC, ONLY if the trader stated it. Null =
+  /// unknown (never inferred). Informational — never used for candle boundaries.
+  utcOffsetMinutes Int?
+
+  /// Prices are stored as integers × 10^priceScale (MT5 points): exact.
+  priceScale     Int
+  /// Wall-clock minutes since 1970-01-01 00:00 on the dataset's clock.
+  firstBarMinute Int?
+  lastBarMinute  Int?
+  barCount       Int  @default(0)
+
+  hasTickVolume Boolean @default(false)
+  hasRealVolume Boolean @default(false)
+  hasSpread     Boolean @default(false)
+
+  originalFileName String?
+  fileSizeBytes    Int?
+  fileSha256       String?
+  /// Detected source layout (delimiter, header, date/time shape, columns).
+  sourceFormat     Json
+  /// The full HistoricalImportReport computed at import time.
+  validationReport Json
+  parserVersion    Int     @default(1)
+
+  status        HistoricalDatasetStatus @default(IMPORTING)
+  failureReason String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  readyAt   DateTime?
+
+  runPins         BacktestRunDataset[]
+  replayPositions BacktestReplayPosition[]
+
+  @@index([userId, status, createdAt])
+  @@index([userId, symbol])
+}
+
+/// One canonical M1 bar. Range reads ("bars of dataset D between T1 and T2,
+/// ascending") are served by the primary key alone.
+///
+/// No Prisma relation / foreign key on purpose: a row-level FK check made
+/// bulk import ~14× slower (500k bars: 24.8s vs 1.8s). The same guarantees
+/// are enforced by statement-level triggers instead (see migration
+/// 20260926220000): bars may only be inserted for an existing dataset that
+/// is IMPORTING (the dataset row is KEY SHARE-locked, as an FK would), bars
+/// are immutable, and deleting a dataset (including via its user) deletes
+/// its bars.
+model HistoricalBar {
+  /// HistoricalDataset.seq
+  datasetSeq Int
+  /// Bar open time: wall-clock minutes since 1970-01-01 00:00 (dataset clock).
+  minute     Int
+  /// Prices × 10^HistoricalDataset.priceScale.
+  open       Int
+  high       Int
+  low        Int
+  close      Int
+  tickVolume Int?
+  realVolume Float?
+  /// Points, as exported by MT5.
+  spread     Int?
+
+  @@id([datasetSeq, minute])
+}
+
+enum HistoricalImportUploadStatus {
+  PENDING // presigned URL issued; the browser uploads straight to R2
+  PROCESSING // server is validating/importing the uploaded object
+  COMPLETED // dataset created; source object deleted
+  FAILED // refused or failed; source object deleted
+  EXPIRED // abandoned; source object deleted by the sweep
+}
+
+/// A large MT5 file uploaded by the browser DIRECTLY to R2 (presigned PUT,
+/// signed size + type), then imported server-side from R2 — the bytes never
+/// pass through an application request (Vercel caps request bodies at 4.5MB).
+/// The source object is temporary: deleted once imported, refused or abandoned.
+model HistoricalImportUpload {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Server-generated: native-replay-imports/<userId>/<id>.csv — never client-chosen.
+  objectKey      String                       @unique
+  fileName       String
+  declaredBytes  Int
+  symbolOverride String?
+  status         HistoricalImportUploadStatus @default(PENDING)
+  /// Last validation report (preview or import).
+  report         Json?
+  failureReason  String?
+  /// Set once the import produced a dataset.
+  datasetId      String?
+  /// After this the upload is abandoned and its object is swept.
+  expiresAt      DateTime
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+
+  @@index([userId, status])
+  @@index([status, expiresAt])
+}
+
+/// Which HistoricalDataset a Backtest Run replays for one of its assets.
+/// Replaceable until replay starts on that asset; `frozenAt` is set (by a DB
+/// trigger) when the first replay position is created, after which the
+/// dataset can't change — a run is reproducibly tied to the history it used.
+model BacktestRunDataset {
+  id            String            @id @default(cuid())
+  userId        String
+  backtestRunId String
+  backtestRun   BacktestRun       @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+  /// The run's asset, as listed in BacktestRun.assets.
+  assetSymbol   String
+  datasetId     String
+  /// NO ACTION (checked at statement end): a pinned dataset can't be deleted —
+  /// the service explains which runs use it — while deleting a user still works
+  /// (the run cascade removes the pins within the same statement).
+  dataset       HistoricalDataset @relation(fields: [datasetId], references: [id], onDelete: NoAction)
+  frozenAt      DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  positions BacktestReplayPosition[]
+
+  @@unique([backtestRunId, assetSymbol])
+  @@index([datasetId])
+}
+
+/// The authoritative replay clock for one run × simulation date × asset: the
+/// open time of the latest REVEALED M1 bar. Only ever moves forward (DB
+/// trigger), only to real bars, and never leaves its simulation date (CHECK).
+/// Every replay candle read derives its cutoff from here — never from the
+/// browser. The displayed timeframe is a view concern and isn't stored.
+model BacktestReplayPosition {
+  id             String             @id @default(cuid())
+  userId         String
+  backtestRunId  String
+  backtestRun    BacktestRun        @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+  pinId          String
+  pin            BacktestRunDataset @relation(fields: [pinId], references: [id], onDelete: Cascade)
+  /// Copy of the pin's dataset (trigger-checked) so reads need no join.
+  datasetId      String
+  dataset        HistoricalDataset  @relation(fields: [datasetId], references: [id], onDelete: NoAction)
+  assetSymbol    String
+  simulationDate DateTime           @db.Date
+  /// Wall-clock minute (dataset clock) of the latest revealed M1 bar.
+  currentMinute  Int
+  /// First/last M1 bar of this simulation date in the dataset (fixed — READY data is immutable).
+  dayFirstMinute Int
+  dayLastMinute  Int
+  /// Bumped on every advance.
+  version        Int                @default(0)
+  /// Recent command ids ([{id, minute}], bounded) — a retried command is
+  /// recognised and not applied twice.
+  recentCommands Json               @default("[]")
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@unique([backtestRunId, simulationDate, assetSymbol])
+  @@index([pinId])
 }

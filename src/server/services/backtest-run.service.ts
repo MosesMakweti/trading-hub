@@ -272,6 +272,17 @@ function runStats(rows: CanonicalAnalyticsTradeRow[], missedTrades: number): Bac
 }
 
 /** Every run the user owns, most recently worked-on first. */
+/** The most recently worked-on ACTIVE run — what the Backtesting nav links
+ *  Session/Journal/Analytics to outside a run's own pages. */
+export async function getCurrentActiveRunId(userId: string): Promise<string | null> {
+  const run = await prisma.backtestRun.findFirst({
+    where: { userId, status: "ACTIVE" },
+    orderBy: [{ lastActiveAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
+    select: { id: true },
+  });
+  return run?.id ?? null;
+}
+
 export async function listBacktestRunOverviews(userId: string): Promise<BacktestRunOverviewDTO[]> {
   const runs = await prisma.backtestRun.findMany({
     where: { userId },
