@@ -104,6 +104,10 @@ Things a Chrome Web Store reviewer is likely to specifically check, flagged here
 - **Data handling disclosure form**: the Store's own "Privacy practices" questionnaire (separate from the privacy policy URL) will need to be filled out accurately — declare that the extension handles authentication tokens and user-uploaded images sent to a single, disclosed remote server (Traditorium), and that recognition is AI-based.
 - **Functionality requiring an account**: the extension is non-functional without a Traditorium account and token — this is expected and fine, but the listing description should say so plainly (already reflected above) so a reviewer isn't confused by "nothing happens" on first install.
 
+## Switching the web app from private-beta download to the store
+
+The private beta ships as a Developer-mode "Load unpacked" download from Settings → Integrations (see README "Private-beta distribution"). Once the listing is live and approved, set `EXTENSION_DISTRIBUTION` in `src/lib/extension-distribution.ts` to `{ channel: "chrome-web-store", storeUrl: "<the real listing URL>" }` — the Integrations card then shows "Install from Chrome Web Store" and drops the Developer-mode steps. Beta testers who loaded the unpacked build should remove it and install from the store (an unpacked copy has a different extension ID and won't auto-update).
+
 ## What this document does not do
 
 It does not create a Chrome Web Store developer account, does not pay the one-time developer registration fee, does not upload a package, and does not fill out or submit the Store's listing form. Those are the literal next actions once this document's remaining gaps (privacy policy, screenshots, support URL) are resolved and a live TradingView E2E pass (see the README's Release Gate) has actually been performed — not before.

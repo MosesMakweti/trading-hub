@@ -8,6 +8,7 @@
     "build": "node build.mjs --env=production",
     "build:dev": "node build.mjs --env=development",
     "package": "node package.mjs",
+    "release:web": "node package.mjs && node publish-web.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "tsc --noEmit"

@@ -36,15 +36,14 @@
  */
 import { chartContextsEqual, type TradingViewChartContext } from "@shared/chart-context";
 import type { ExtensionMessage, TradingViewDetectedMessage } from "@shared/messages";
-import { API_BASE_URL } from "@shared/config";
+import { DEBUG } from "@shared/config";
 import { detectChartContext } from "./chart-detector";
 
 const RECONCILE_INTERVAL_MS = 3000;
 
-// §16 — debug logging only in a dev build (config.ts's API_BASE_URL is the
-// one existing signal for "this is a dev build" — no new mechanism, and no
-// token is ever in scope here to accidentally log in the first place.
-const DEBUG = API_BASE_URL.includes("localhost");
+// §16 — debug logging only in a dev build (`DEBUG` is a build-time constant,
+// see config.ts — stripped from production output). No token is ever in
+// scope here to accidentally log in the first place.
 
 let lastSent: TradingViewChartContext | null = null;
 

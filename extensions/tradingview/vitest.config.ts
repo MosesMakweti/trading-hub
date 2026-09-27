@@ -13,6 +13,7 @@ export default defineConfig({
   // test value instead of a build target.
   define: {
     __TRADITORIUM_API_BASE_URL__: JSON.stringify("http://localhost:3000"),
+    __TRADITORIUM_DEBUG__: "false",
   },
   test: {
     environment: "node",

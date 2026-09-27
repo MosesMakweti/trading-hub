@@ -121,7 +121,7 @@ Every message type is defined once in `src/shared/messages.ts` and imported by e
 | `npm run build:dev` | `http://localhost:3000` | `http://localhost:3000/*` | "…(Dev)" suffix |
 | `npm run build` | `https://traditorium.com` | `https://traditorium.com/*` | no suffix |
 
-`build.mjs` requires an explicit `--env=development|production` and exits with an error otherwise — it's structurally impossible to run a build with no flag and get a mystery target. A production build additionally fails outright if the actual dev host string (`http://localhost:3000` or `http://localhost:3000/*`) is found anywhere in the built `manifest.json`/`background.js`/`content.js`/`panel.js` bytes — see "Production build & packaging." The API token is never a build-time value — it's pure runtime user data entered through the UI.
+`build.mjs` requires an explicit `--env=development|production` and exits with an error otherwise — it's structurally impossible to run a build with no flag and get a mystery target. A production build additionally fails outright if `localhost`, `127.0.0.1`, the dev host permission, a source-map reference, or `console.log`/`console.debug` is found anywhere in the built `manifest.json`/`background.js`/`content.js`/`panel.js` bytes — see "Production build & packaging." The API token is never a build-time value — it's pure runtime user data entered through the UI.
 
 ### CORS
 
@@ -167,7 +167,7 @@ A checklist covering the token/API/media/recognition surface:
 | Message validation | Every message is a typed, closed-union `{ type: "..." }` object (`@shared/messages.ts`) — the background's router is a `switch` over the same union, so an unrecognized/malformed message type is a compile-time impossibility, not a runtime guard. The background never trusts a message payload merely because it arrived from an extension context — every field is typed and every downstream call validates/classifies before use, the same discipline applied to any external input. |
 | Malformed API responses | Every `api-client.ts` function validates the response shape before trusting it and returns a `malformed`/`server` failure rather than throwing or passing through `undefined` fields. |
 | Bundle contents | No `eval`, no dynamically fetched/executed script, no remote code of any kind — every byte the extension runs ships inside the package. No TradingView private/undocumented API usage, no WebSocket/network interception, no injection of screenshot bytes back into the TradingView page context. |
-| Logging | The content script only logs (to the page console) when pointed at `localhost` (a dev build), and never anything token-related. No telemetry or analytics exist anywhere in this extension. |
+| Logging | The content script only logs chart-detection diagnostics (to the page console) in a development build — `DEBUG` is a build-time constant (`__TRADITORIUM_DEBUG__`) and the branch is removed from production output — and never anything token-related. No telemetry or analytics exist anywhere in this extension. |
 | Screenshot privacy | See "Screenshot privacy" below — full-viewport capture, always previewed before upload, never automatic, best-effort deleted if abandoned. |
 | Token-management UI | Reuses the existing `createApiTokenAction`/`listApiTokensAction`/`revokeApiTokenAction` server actions verbatim — no new backend authorization logic was introduced for it. The raw token is rendered once, from the action's own return value, never re-fetched or re-displayed on a later page load; `tokenHash` is never selected into any response type reachable by this UI. |
 
@@ -356,11 +356,19 @@ The automated suite mocks every `chrome.*` API and the network boundary. It does
 
 ## Production build & packaging
 
-`npm run build` (production target) additionally **validates its own output** before declaring success: it scans the built `manifest.json`/`background.js`/`content.js`/`panel/panel.js` bytes for the actual development host strings (`http://localhost:3000`, `http://localhost:3000/*`) and fails the build if either appears, and confirms the manifest was correctly templated to the real production API base URL. (A bare substring search for the word "localhost" would false-positive on `tradingview-detect.ts`'s own dev-logging guard, `API_BASE_URL.includes("localhost")` — which legitimately contains that word as a comparison target, evaluated to `false` once `API_BASE_URL` is the production URL — so the check targets the real host strings specifically, not the word.)
+`npm run build` (production target) additionally **validates its own output** before declaring success: it scans the built `manifest.json`/`background.js`/`content.js`/`panel/panel.js` bytes for `localhost`, `127.0.0.1`, the dev host permission, `sourceMappingURL`, `console.log` and `console.debug`, fails the build if any appears, and confirms the manifest was correctly templated to the real production API base URL. Diagnostic logging is gated by the build-time `__TRADITORIUM_DEBUG__` define (true only for `build:dev`), and esbuild's `minifySyntax` folds those branches out of production output — identifiers and whitespace stay readable for store review. No source maps are emitted.
 
 `npm run package` (`package.mjs`) always runs a **fresh** production build first (never packages a stale or development `dist/`), then zips exactly `dist/`'s own contents — never `src/`, `test/`, `node_modules/`, `.env`, secrets, logs, or any other development artifact, because `dist/` never contains any of those in the first place (it's already the minimal runtime output `build.mjs` produces). The result lands at `extensions/tradingview/releases/traditorium-tradingview-<version>.zip` (gitignored, like `dist/`). The script then lists every entry in the produced ZIP and fails if anything outside the known runtime set (`manifest.json`, `background.js`, `content.js`, `icons/`, `panel/`) or matching a forbidden pattern (`.env*`, `node_modules`, `*.test.ts`, `*.map`, `.git*`) is present.
 
 A dedicated secret scan (bearer/`td_live_` tokens, `ANTHROPIC_API_KEY`, `AUTH_SECRET`, AWS/R2 credentials, a live `DATABASE_URL`) was run against both `dist/` and the packaged ZIP as part of this release-candidate pass — clean, no matches. Re-run this scan on every future package before considering it distributable.
+
+## Private-beta distribution
+
+Until the extension is on the Chrome Web Store, traders install it themselves from **Traditorium → Settings → Integrations → Traditorium for TradingView → Download Extension**, then load it with Chrome's Developer mode (the step-by-step instructions are on that page).
+
+- The ZIP is a **versioned static file** in the web app: `public/downloads/traditorium-tradingview-<version>.zip`, served at `https://traditorium.com/downloads/traditorium-tradingview-<version>.zip` with `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and `X-Robots-Tag: noindex` (`next.config.ts`). It is committed deliberately, like any other public asset — it contains no secrets (the API base URL is public; auth is a per-user token created after install).
+- To publish a new build: bump `version` in `package.json` **and** `manifest.template.json`, run `npm run release:web` (fresh production build → package + inspection → copy into `public/downloads/`, removing older extension ZIPs), then set `EXTENSION_VERSION` in `src/lib/extension-distribution.ts`. `src/lib/extension-distribution.test.ts` fails until the versions agree, and it re-inspects the published ZIP (runtime-only entries, production manifest, no dev hosts/source maps/logging/secrets).
+- When the Chrome Web Store listing exists, set `EXTENSION_DISTRIBUTION` in `src/lib/extension-distribution.ts` to `{ channel: "chrome-web-store", storeUrl }` with the real listing URL: the card switches to "Install from Chrome Web Store" and hides the Developer-mode steps. The static ZIP can then be removed.
 
 ## Chrome / Edge compatibility
 
@@ -378,7 +386,7 @@ Manifest V3 APIs this extension actually depends on:
 
 **Practical minimum: Chrome/Chromium 114**, set by `chrome.sidePanel` — everything else this extension uses is available well before that version. `build.mjs`'s esbuild target (`chrome114`) matches this exactly, so the JavaScript syntax emitted is never more modern than what the minimum supported version can run.
 
-**Supported**: Google Chrome and Chromium-based Microsoft Edge, both 114+. One package serves both — Edge implements the same `chrome.*` extension APIs (including `sidePanel`) with no separate build, submission, or code path needed; there is no real technical reason to maintain two.
+**Supported**: Google Chrome / Chromium 114+. **Microsoft Edge 114+ is compatible but unverified** — Edge implements the same `chrome.*` extension APIs (including `sidePanel`), so the one package should work there with no separate build or code path, but it has not been tested on Edge.
 
 **Not supported, and not claimed anywhere in this project**: Firefox (no Manifest V3 Side Panel equivalent) and Safari (a fundamentally different extension model). No compatibility shims or polyfills for either exist or are planned.
 

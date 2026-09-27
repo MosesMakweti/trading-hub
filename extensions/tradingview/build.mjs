@@ -59,8 +59,14 @@ copyFileSync(path.join(ROOT, "src/panel/panel.css"), path.join(DIST, "panel/pane
 // 3. JS bundles. API_BASE_URL is baked in here (esbuild `define`) — see
 //    src/shared/config.ts's doc comment for why this is a build-time
 //    constant, not a runtime-read secret.
-const define = { __TRADITORIUM_API_BASE_URL__: JSON.stringify(target.apiBaseUrl) };
-const common = { bundle: true, target: "chrome114", define, logLevel: "info" };
+const define = {
+  __TRADITORIUM_API_BASE_URL__: JSON.stringify(target.apiBaseUrl),
+  __TRADITORIUM_DEBUG__: JSON.stringify(envArg === "development"),
+};
+// minifySyntax folds the constant `if (DEBUG)` branches away (production
+// ships no diagnostic logging) while keeping identifiers and whitespace
+// readable for Chrome Web Store review. No source maps are emitted.
+const common = { bundle: true, target: "chrome114", define, minifySyntax: true, sourcemap: false, logLevel: "info" };
 
 await Promise.all([
   // "type": "module" in manifest.background lets the service worker use
@@ -85,13 +91,9 @@ await Promise.all([
 //    a broken package silently. Skipped for the development target, where
 //    localhost is the correct, expected value.
 if (envArg === "production") {
-  // Deliberately NOT a bare "localhost" substring check — content.js
-  // legitimately contains the string "localhost" as a comparison target
-  // inside its own dev-logging guard (`API_BASE_URL.includes("localhost")`,
-  // see tradingview-detect.ts), which is correct, dead code at runtime once
-  // API_BASE_URL is folded to the production URL, not a leak. What must
-  // never appear is the ACTUAL dev host/permission string.
-  const forbidden = [TARGETS.development.apiBaseUrl, TARGETS.development.apiHostPermission];
+  // Any dev host (bare "localhost" included), a source-map reference, or
+  // diagnostic logging in the shipped bytes fails the build.
+  const forbidden = ["localhost", "127.0.0.1", TARGETS.development.apiHostPermission, "sourceMappingURL", "console.debug", "console.log"];
   const outputFiles = ["manifest.json", "background.js", "content.js", "panel/panel.js"].map((f) => path.join(DIST, f));
   const offenders = outputFiles.filter((f) => {
     const contents = readFileSync(f, "utf8");

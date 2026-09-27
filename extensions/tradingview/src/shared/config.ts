@@ -17,3 +17,11 @@
 declare const __TRADITORIUM_API_BASE_URL__: string;
 
 export const API_BASE_URL = __TRADITORIUM_API_BASE_URL__;
+
+/** Diagnostic logging switch, fixed per build target by build.mjs (`true`
+ *  for development, `false` for production). A literal define — not derived
+ *  from the URL at runtime — so esbuild removes the debug branches from the
+ *  production bundle entirely instead of shipping them as dead code. */
+declare const __TRADITORIUM_DEBUG__: boolean;
+
+export const DEBUG = __TRADITORIUM_DEBUG__;

@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { ExtensionInstallCard } from "@/components/settings/extension-install-card";
 import { createApiTokenAction, listApiTokensAction, revokeApiTokenAction } from "@/actions/api-tokens.actions";
 import type { ApiTokenSummary } from "@/server/services/api-tokens.service";
 
@@ -91,6 +92,15 @@ export function IntegrationsView({ initialTokens }: { initialTokens: ApiTokenSum
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Extension &amp; API Tokens</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Connect the TradingView Companion extension, or any other tool that speaks Traditorium&apos;s API, with a personal access token.
+        </p>
+      </div>
+
+      <ExtensionInstallCard />
+
+      <div>
+        <h2 className="text-base font-semibold">Extension tokens</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Create a token here and paste it into the Traditorium Companion to connect.
         </p>
       </div>
 
