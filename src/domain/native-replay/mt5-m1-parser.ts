@@ -415,10 +415,21 @@ export function parseM1Text(text: string, limits: { maxRows?: number } = {}): M1
   return { ok: true, format, dataLines, rows, errorCount, errorCountsByKind, errorSamples };
 }
 
-const MT5_FILE_NAME = /^([A-Za-z0-9#._\-!]+?)_(M\d+|H\d+|D1|W1|MN1?)_\d{8,12}_\d{8,12}\.(csv|txt)$/i;
+/**
+ * MT5's default export name is `SYMBOL_TIMEFRAME_<from>_<to>` — often with NO
+ * extension (e.g. `XAUUSD.n_M1_202606161656_202609252354`), sometimes `.csv`
+ * or `.txt`. Parsed from the RIGHT: the structural `_TF_<from>_<to>` suffix
+ * (plus an optional .csv/.txt) is matched at the end, and everything before it
+ * is the broker symbol — so a dotted symbol like `XAUUSD.n` or `US30.cash` is
+ * never mistaken for a file extension. The name is only a hint; the content is
+ * what gets validated.
+ */
+const MT5_FILE_NAME = /^(.+)_(M\d+|H\d+|D1|W1|MN1?)_(\d{8,12})_(\d{8,12})(?:\.(?:csv|txt))?$/i;
+const SYMBOL_CHARS = /^[A-Za-z0-9#._\-!]{1,32}$/;
 
-/** MT5's default export name is `SYMBOL_TIMEFRAME_<from>_<to>.csv`. */
 export function readMt5FileName(fileName: string): { symbol: string; timeframe: string } | null {
-  const m = MT5_FILE_NAME.exec(fileName.trim().split(/[\\/]/).pop() ?? "");
-  return m ? { symbol: m[1], timeframe: m[2].toUpperCase() } : null;
+  const base = fileName.trim().split(/[\\/]/).pop() ?? "";
+  const m = MT5_FILE_NAME.exec(base);
+  if (!m || !SYMBOL_CHARS.test(m[1])) return null;
+  return { symbol: m[1], timeframe: m[2].toUpperCase() };
 }

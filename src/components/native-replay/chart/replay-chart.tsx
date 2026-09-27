@@ -18,6 +18,7 @@ import {
 import type { EngineCandle } from "@/domain/native-replay/candle-engine";
 import { formatCrosshairTime, formatTickMark, fromChartTime, toChartTime } from "@/domain/native-replay/chart-time";
 import { replayChartPalette } from "./chart-theme";
+import type { DrawingController } from "../drawings/drawing-controller";
 
 /**
  * Native Replay chart — a thin imperative wrapper over lightweight-charts.
@@ -34,7 +35,7 @@ import { replayChartPalette } from "./chart-theme";
  *
  * No future: the chart only ever holds candles up to the replay position, so
  * scrolling right shows empty space (`rightOffset`), never unrevealed bars;
- * `fixRightEdge` stops the scroll there.
+ * the scroll is clamped to MAX_EMPTY_BARS past the last candle.
  *
  * Prompt 4 foundation: `chart()`/`series()` expose the library's coordinate
  * conversions (timeToCoordinate/coordinateToTime, priceToCoordinate/
@@ -62,10 +63,14 @@ interface Props {
   onNearLeftEdge: () => void;
   /** Whether the right edge (the replay position) is in view. */
   onFollowChange: (following: boolean) => void;
+  /** Chart drawings: attached to the chart's series (re-attached if the chart is rebuilt). */
+  drawings?: DrawingController;
 }
 
 const RIGHT_OFFSET_BARS = 10;
 const DEFAULT_BAR_SPACING = 8;
+/** How far past the replay position the view may scroll (empty space — never candles). */
+const MAX_EMPTY_BARS = 40;
 
 declare global {
   interface Window {
@@ -84,12 +89,14 @@ export function countCommit(kind: "chartCommits" | "workspaceCommits"): void {
   if (m) m[kind] += 1;
 }
 
-const ReplayChartInner = forwardRef<ReplayChartHandle, Props>(function ReplayChart({ theme, priceScale, showVolume, onCrosshair, onNearLeftEdge, onFollowChange }, ref) {
+const ReplayChartInner = forwardRef<ReplayChartHandle, Props>(function ReplayChart({ theme, priceScale, showVolume, onCrosshair, onNearLeftEdge, onFollowChange, drawings }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const candlesByTime = useRef(new Map<number, EngineCandle>());
+  /** Same candles, ascending — kept incrementally for the drawing layer's coordinates. */
+  const sorted = useRef<EngineCandle[]>([]);
   const scaleRef = useRef(priceScale);
   const callbacks = useRef({ onCrosshair, onNearLeftEdge, onFollowChange });
   const followRef = useRef(true);
@@ -127,7 +134,10 @@ const ReplayChartInner = forwardRef<ReplayChartHandle, Props>(function ReplayCha
         rightOffset: RIGHT_OFFSET_BARS,
         barSpacing: DEFAULT_BAR_SPACING,
         minBarSpacing: 1,
-        fixRightEdge: true,
+        // Not fixRightEdge (it removes the empty space right of the last candle,
+        // where positions/projections are planned): scrolling right is clamped
+        // to MAX_EMPTY_BARS instead — see onRange. No candle exists there.
+        fixRightEdge: false,
         shiftVisibleRangeOnNewBar: true, // follows the market only while the right edge is in view
         timeVisible: true,
         secondsVisible: false,
@@ -155,6 +165,9 @@ const ReplayChartInner = forwardRef<ReplayChartHandle, Props>(function ReplayCha
 
     const existing = [...candlesByTime.current.values()].sort((a, b) => a.time - b.time);
     if (existing.length) series.setData(existing.map(toBar));
+    sorted.current = existing;
+    drawings?.attach(chart, series, el);
+    drawings?.setCandles(existing, priceScale);
 
     const onRange = (range: LogicalRange | null) => {
       // Prefetch older history while ~1.5 screens are still loaded to the left,
@@ -162,6 +175,12 @@ const ReplayChartInner = forwardRef<ReplayChartHandle, Props>(function ReplayCha
       if (range && range.from < Math.max(50, 1.5 * (range.to - range.from))) callbacks.current.onNearLeftEdge();
       // Following = the latest candle (the replay position) is on screen.
       const info = range ? series.barsInLogicalRange(range) : null;
+      // Keep the right edge near the replay position: at most MAX_EMPTY_BARS of empty space.
+      if (range && info && info.barsAfter < -MAX_EMPTY_BARS) {
+        const excess = -MAX_EMPTY_BARS - info.barsAfter;
+        chart.timeScale().setVisibleLogicalRange({ from: range.from - excess, to: range.to - excess });
+        return;
+      }
       const following = info == null || info.barsAfter <= 0;
       if (following !== followRef.current) {
         followRef.current = following;
@@ -176,6 +195,7 @@ const ReplayChartInner = forwardRef<ReplayChartHandle, Props>(function ReplayCha
     chart.subscribeCrosshairMove(onMove);
 
     return () => {
+      drawings?.detach();
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange);
       chart.unsubscribeCrosshairMove(onMove);
       chart.remove();
@@ -207,6 +227,8 @@ const ReplayChartInner = forwardRef<ReplayChartHandle, Props>(function ReplayCha
       const chart = chartRef.current;
       const series = seriesRef.current;
       candlesByTime.current = new Map(candles.map((c) => [c.time, c]));
+      sorted.current = [...candles];
+      drawings?.setCandles(sorted.current, scaleRef.current);
       if (!chart || !series) return;
       const range = chart.timeScale().getVisibleLogicalRange();
       series.setData(candles.map(toBar));
@@ -234,9 +256,13 @@ const ReplayChartInner = forwardRef<ReplayChartHandle, Props>(function ReplayCha
       const t0 = performance.now();
       for (const c of changed) {
         candlesByTime.current.set(c.time, c);
+        const last = sorted.current[sorted.current.length - 1];
+        if (!last || c.time > last.time) sorted.current.push(c);
+        else if (c.time === last.time) sorted.current[sorted.current.length - 1] = c;
         series.update(toBar(c));
         volumeRef.current?.update(toVolume(c));
       }
+      drawings?.setCandles(sorted.current, scaleRef.current);
       const m = metrics();
       if (m) {
         m.updates += 1;

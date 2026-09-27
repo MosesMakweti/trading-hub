@@ -1,5 +1,6 @@
 "use client";
 
+import type { TradeIdeaPrefill } from "@/domain/native-replay/drawings/trade-idea";
 import { useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -45,6 +46,11 @@ export function AddTradeDialog({
   finalBias,
   activeSessions,
   sessionWindows,
+  initialPlan,
+  open: controlledOpen,
+  onOpenChange,
+  onCreated,
+  hideTrigger = false,
 }: {
   dateKey: string;
   accounts: { id: string; name: string; kind: string }[];
@@ -66,6 +72,14 @@ export function AddTradeDialog({
   /** The trader's globally configured session windows, for disambiguating
    *  which of several active-today sessions is happening right now. */
   sessionWindows?: SessionWindow[];
+  /** Native Replay: pre-fill from a Long/Short Position drawing (reviewed by the trader before saving). */
+  initialPlan?: TradeIdeaPrefill;
+  /** Controlled open state (the replay chart opens the dialog itself). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Called with the new trade's id after a successful save. */
+  onCreated?: (tradeId: string) => void;
+  hideTrigger?: boolean;
 }) {
   const initialBias = finalBias === "LONG" ? "BULLISH" : finalBias === "SHORT" ? "BEARISH" : undefined;
   // A one-shot default at dialog-open time, not a live-updating display (see
@@ -81,7 +95,12 @@ export function AddTradeDialog({
     isBacktest ? null : now.getHours() * 60 + now.getMinutes(),
   );
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
   // Remount the form each open so it starts blank.
   const [instance, setInstance] = useState(0);
 
@@ -93,7 +112,7 @@ export function AddTradeDialog({
         if (next) setInstance((n) => n + 1);
       }}
     >
-      <DialogTrigger
+      {!hideTrigger && <DialogTrigger
         render={
           trigger ?? (
             <Button size="sm" className="gap-1.5">
@@ -102,7 +121,7 @@ export function AddTradeDialog({
             </Button>
           )
         }
-      />
+      />}
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Add trade — {formatDateKeyLong(dateKey)}</DialogTitle>
@@ -111,8 +130,9 @@ export function AddTradeDialog({
           </DialogDescription>
         </DialogHeader>
         <TradeForm
-          key={instance}
+          key={initialPlan ? `plan-${JSON.stringify(initialPlan)}` : instance}
           mode="create"
+          initialPlan={initialPlan}
           dateKey={dateKey}
           accounts={accounts}
           strategies={strategies}
@@ -126,8 +146,9 @@ export function AddTradeDialog({
           // create/edit trade pages; the automatic Performance Account
           // allocation still happens server-side regardless (trades.service.ts).
           showAccountAllocation={false}
-          onSuccess={() => {
+          onSuccess={(tradeId) => {
             setOpen(false);
+            onCreated?.(tradeId);
             // Launched from a specific asset's plan card: the trader is
             // still on Today's Plan, so point them at where the new trade
             // actually landed (the Trade Idea tab) instead of leaving them

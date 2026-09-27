@@ -28,6 +28,7 @@ import {
   headImportObject,
   importObjectKey,
   IMPORT_CONTENT_TYPE,
+  listStaleImportObjects,
   presignImportUpload,
   readImportObject,
 } from "@/lib/historical-import-storage";
@@ -43,7 +44,6 @@ import {
 export const UPLOAD_URL_TTL_SECONDS = 15 * 60;
 /** How long an uploaded-but-not-imported file may sit in R2. */
 export const UPLOAD_RETENTION_MS = 24 * 60 * 60 * 1000;
-const FILE_NAME_PATTERN = /\.(csv|txt)$/i;
 
 export class ImportUploadError extends Error {}
 export class ImportUploadNotFoundError extends Error {
@@ -65,8 +65,11 @@ export async function createImportUpload(
   input: { fileName: string; sizeBytes: number; symbol?: string | null },
 ): Promise<CreatedImportUpload> {
   await sweepExpiredImportUploads(userId);
+  void sweepOrphanedImportObjects().catch((error) => console.error("[native-replay/upload] orphan sweep failed", error));
   const fileName = input.fileName.trim().split(/[\\/]/).pop()?.slice(0, 255) ?? "";
-  if (!FILE_NAME_PATTERN.test(fileName)) throw new ImportUploadError("Choose the .csv or .txt file MT5 exported.");
+  // MT5 exports are often extensionless (XAUUSD.n_M1_…): the name is only a
+  // hint — the content is validated strictly when the file is read back.
+  if (!fileName) throw new ImportUploadError("Choose the MT5 Market Bars export file.");
   if (!Number.isInteger(input.sizeBytes) || input.sizeBytes <= 0) throw new ImportUploadError("The file is empty.");
   if (input.sizeBytes > MAX_HISTORICAL_IMPORT_BYTES) {
     throw new ImportUploadError(`The file is larger than ${MAX_HISTORICAL_IMPORT_BYTES / 1024 / 1024}MB. Split the history into several exports.`);
@@ -186,4 +189,30 @@ export async function sweepExpiredImportUploads(userId?: string): Promise<number
     if (marked.count === 1) await removeObject(upload);
   }
   return stale.length;
+}
+
+const ORPHAN_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+let lastOrphanSweep = 0;
+
+/**
+ * Deletes import objects no in-progress upload refers to, once they're past the
+ * retention window — e.g. the rows were removed with their user, or an upload
+ * row was lost. Runs at most hourly per server instance (piggy-backing on new
+ * uploads); only ever touches the import prefix.
+ */
+export async function sweepOrphanedImportObjects(options: { force?: boolean } = {}): Promise<number> {
+  if (!options.force && Date.now() - lastOrphanSweep < ORPHAN_SWEEP_INTERVAL_MS) return 0;
+  lastOrphanSweep = Date.now();
+  const stale = await listStaleImportObjects(new Date(Date.now() - UPLOAD_RETENTION_MS));
+  if (stale.length === 0) return 0;
+  const live = new Set(
+    (await prisma.historicalImportUpload.findMany({ where: { objectKey: { in: stale }, status: { in: ["PENDING", "PROCESSING"] } }, select: { objectKey: true } })).map((u) => u.objectKey),
+  );
+  let deleted = 0;
+  for (const key of stale) {
+    if (live.has(key)) continue;
+    await deleteImportObject(key);
+    deleted += 1;
+  }
+  return deleted;
 }

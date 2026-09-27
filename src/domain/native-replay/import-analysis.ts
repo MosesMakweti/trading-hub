@@ -31,7 +31,16 @@ export interface SymbolResolution {
  *  Used for both dataset symbols and Backtest Run assets so they compare alike. */
 export function normalizeSymbol(raw: string): string {
   const parsed = parseSymbol(raw);
-  return parsed.spec?.canonicalSymbol ?? parsed.cleanedSymbol;
+  if (parsed.spec) return parsed.spec.canonicalSymbol;
+  // Broker account-tier suffixes the shared catalog doesn't list ("XAUUSD.n",
+  // "US30.cash"): strip ONE trailing ".xxx" and accept it only when the root
+  // is an already-known instrument — never inventing a mapping.
+  const dotted = /^(.+)\.[A-Za-z0-9]{1,6}$/.exec(raw.trim());
+  if (dotted) {
+    const root = parseSymbol(dotted[1]);
+    if (root.spec) return root.spec.canonicalSymbol;
+  }
+  return parsed.cleanedSymbol;
 }
 
 export function resolveDatasetSymbol(fileName: string | null, override: string | null | undefined): SymbolResolution {

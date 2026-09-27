@@ -10,6 +10,10 @@ import {
   datasetUnpinSchema,
   processImportUploadSchema,
   replayCandlesSchema,
+  saveDrawingSchema,
+  drawingRefSchema,
+  listDrawingsSchema,
+  linkDrawingSchema,
   replayClockSchema,
 } from "@/lib/validation/native-replay";
 import { BacktestDateOutOfRangeError, BacktestRunNotFoundError } from "@/server/services/backtest-run.service";
@@ -17,6 +21,8 @@ import * as datasetService from "@/server/services/native-replay/historical-data
 import * as uploadService from "@/server/services/native-replay/historical-upload.service";
 import * as pinService from "@/server/services/native-replay/backtest-dataset-pin.service";
 import * as replayService from "@/server/services/native-replay/backtest-replay.service";
+import * as drawingService from "@/server/services/native-replay/chart-drawing.service";
+import type { ChartDrawing } from "@/domain/native-replay/drawings/model";
 import { CandleRangeTooLargeError } from "@/server/services/native-replay/historical-candles.service";
 import type { HistoricalImportReport } from "@/domain/native-replay/m1-dataset";
 
@@ -35,7 +41,9 @@ function fail(error: unknown, fallback: string): Fail {
     error instanceof uploadService.ImportUploadNotFoundError ||
     error instanceof BacktestRunNotFoundError ||
     error instanceof BacktestDateOutOfRangeError ||
-    error instanceof CandleRangeTooLargeError
+    error instanceof CandleRangeTooLargeError ||
+    error instanceof drawingService.DrawingError ||
+    error instanceof drawingService.DrawingNotFoundError
   ) {
     return { success: false, error: error.message };
   }
@@ -185,5 +193,53 @@ export async function getReplayCandlesAction(input: unknown): Promise<Ok<{ candl
     return { success: true, candles: await replayService.getReplayCandles(user.id, ref, { timeframe, limit, to }) };
   } catch (error) {
     return fail(error, "Couldn't load candles.");
+  }
+}
+
+// ── Chart drawings (no revalidation: the chart keeps its own state) ────────
+
+export async function listDrawingsAction(input: unknown): Promise<Ok<{ drawings: ChartDrawing[] }> | Fail> {
+  const user = await requireUser();
+  const parsed = listDrawingsSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  try {
+    return { success: true, drawings: await drawingService.listDrawings(user.id, parsed.data.runId, parsed.data.assetSymbol) };
+  } catch (error) {
+    return fail(error, "Couldn't load drawings.");
+  }
+}
+
+export async function saveDrawingAction(input: unknown): Promise<Ok<{ drawing: ChartDrawing }> | Fail> {
+  const user = await requireUser();
+  const parsed = saveDrawingSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  try {
+    return { success: true, drawing: await drawingService.saveDrawing(user.id, parsed.data.runId, parsed.data.drawing) };
+  } catch (error) {
+    return fail(error, "Couldn't save the drawing.");
+  }
+}
+
+export async function deleteDrawingAction(input: unknown): Promise<Ok<object> | Fail> {
+  const user = await requireUser();
+  const parsed = drawingRefSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  try {
+    await drawingService.deleteDrawing(user.id, parsed.data.runId, parsed.data.assetSymbol, parsed.data.drawingId);
+    return { success: true };
+  } catch (error) {
+    return fail(error, "Couldn't delete the drawing.");
+  }
+}
+
+export async function linkDrawingToTradeAction(input: unknown): Promise<Ok<object> | Fail> {
+  const user = await requireUser();
+  const parsed = linkDrawingSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  try {
+    await drawingService.linkDrawingToTrade(user.id, parsed.data.runId, parsed.data.assetSymbol, parsed.data.drawingId, parsed.data.tradeId);
+    return { success: true };
+  } catch (error) {
+    return fail(error, "Couldn't link the drawing.");
   }
 }

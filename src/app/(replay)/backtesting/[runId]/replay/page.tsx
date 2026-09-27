@@ -53,6 +53,12 @@ export default async function ReplayPage({
       dayIndex={tradingDays.indexOf(dateKey) + 1}
       totalTradingDays={tradingDays.length}
       initialState={state}
+      tradeForm={{
+        accounts: data.tradeFormAccounts,
+        strategies: data.tradeFormStrategies,
+        activeSessions: data.todaysPlan.activeSessions,
+        sessionWindows: data.sessionWindows,
+      }}
       sessionPanel={
         <WorkspaceProvider value={{ environment: "BACKTEST", runId: run.id }}>
           <WorkspaceEditableProvider editable={run.status === "ACTIVE"}>

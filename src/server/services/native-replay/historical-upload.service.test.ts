@@ -9,6 +9,7 @@ vi.mock("@/lib/historical-import-storage", async () => {
     presignImportUpload: vi.fn(async (key: string, size: number) => `https://r2.test/${key}?size=${size}&signed=1`),
     headImportObject: vi.fn(async (key: string) => objects.get(key)?.byteLength ?? null),
     readImportObject: vi.fn(async (key: string) => objects.get(key)!),
+    listStaleImportObjects: vi.fn(async () => [...objects.keys()].filter((k) => k.startsWith(actual.IMPORT_OBJECT_PREFIX) && k.includes("old-"))),
     deleteImportObject: vi.fn(async (key: string) => {
       if (!key.startsWith(actual.IMPORT_OBJECT_PREFIX)) throw new Error("outside prefix");
       objects.delete(key);
@@ -25,6 +26,7 @@ import {
   ImportUploadNotFoundError,
   previewImportUpload,
   sweepExpiredImportUploads,
+  sweepOrphanedImportObjects,
 } from "@/server/services/native-replay/historical-upload.service";
 import { mt5Text, syntheticMt5Export } from "@/domain/native-replay/testing/m1-fixtures";
 
@@ -48,6 +50,27 @@ async function browserPut(uploadId: string, bytes: Uint8Array) {
 }
 
 describe("direct-to-R2 import", () => {
+  it("an extensionless real-style MT5 export (XAUUSD.n) goes through presign → preview → import", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const name = "XAUUSD.n_M1_202606161656_202606161711";
+    const file = readFileSync(join(process.cwd(), "src/domain/native-replay/__fixtures__", name));
+    const userId = await user("xau");
+    const c = await createImportUpload(userId, { fileName: name, sizeBytes: file.byteLength });
+    await browserPut(c.uploadId, new Uint8Array(file));
+    expect((await previewImportUpload(userId, c.uploadId)).state).toBe("VALID");
+    const done = await completeImportUpload(userId, c.uploadId);
+    expect(done.ok && done.dataset).toMatchObject({ sourceSymbol: "XAUUSD.n", symbol: "XAUUSD", priceScale: 2, barCount: 16, originalFileName: name });
+  });
+
+  it("junk content under an MT5-looking name is refused at preview (content is authoritative)", async () => {
+    const userId = await user("junk");
+    const junk = new TextEncoder().encode("not market data at all\r\n");
+    const c = await createImportUpload(userId, { fileName: "XAUUSD.n_M1_202606161656_202609252354", sizeBytes: junk.byteLength });
+    await browserPut(c.uploadId, junk);
+    expect((await previewImportUpload(userId, c.uploadId)).state).toBe("INVALID");
+  });
+
   it("presign → browser PUT → preview → import → READY, and the source object is deleted", async () => {
     const userId = await user("happy");
     const created = await createImportUpload(userId, { fileName: NAME, sizeBytes: WEEK.byteLength });
@@ -95,16 +118,18 @@ describe("direct-to-R2 import", () => {
     expect(done.ok && done.dataset.sourceSymbol).toBe("EURUSD.a");
   });
 
-  it("the server controls size and type: oversize and non-MT5 names are refused before any URL exists", async () => {
+  it("the server controls size: oversize and empty files are refused before any URL exists", async () => {
     const userId = await user("limits");
     await expect(createImportUpload(userId, { fileName: NAME, sizeBytes: 151 * 1024 * 1024 })).rejects.toThrow(/larger than 150MB/);
-    await expect(createImportUpload(userId, { fileName: "chart.png", sizeBytes: 100 })).rejects.toThrow(/\.csv or \.txt/);
+    // Extensionless MT5 exports are accepted at upload; content decides validity.
+    const extensionless = await createImportUpload(userId, { fileName: "XAUUSD.n_M1_202606161656_202609252354", sizeBytes: 100 });
+    expect(extensionless.uploadUrl).toContain(`native-replay-imports/${userId}/`);
     await expect(createImportUpload(userId, { fileName: NAME, sizeBytes: 0 })).rejects.toThrow(/empty/);
     // A different size than announced (R2 rejects it too — the size is signed).
     const c = await createImportUpload(userId, { fileName: NAME, sizeBytes: 100 });
     await browserPut(c.uploadId, WEEK);
     await expect(previewImportUpload(userId, c.uploadId)).rejects.toThrow(/doesn't match/);
-    expect(await prisma.historicalImportUpload.count({ where: { userId, status: "PENDING" } })).toBe(1);
+    expect(await prisma.historicalImportUpload.count({ where: { userId, status: "PENDING" } })).toBe(2);
   });
 
   it("another user's upload doesn't exist for them; keys can't cross users", async () => {
@@ -132,5 +157,21 @@ describe("direct-to-R2 import", () => {
     expect(objects.has(unrelated)).toBe(true); // never touches anything else
     expect((await prisma.historicalImportUpload.findUniqueOrThrow({ where: { id: c.uploadId } })).status).toBe("EXPIRED");
     await expect(completeImportUpload(userId, c.uploadId)).rejects.toThrow(/already been processed/);
+  });
+
+  it("orphaned import objects (their upload rows gone, e.g. with a deleted user) are swept; live and media objects are not", async () => {
+    const userId = await user("orphans");
+    const c = await createImportUpload(userId, { fileName: NAME, sizeBytes: WEEK.byteLength });
+    const liveKey = await browserPut(c.uploadId, WEEK);
+    const orphan = "native-replay-imports/deleted-user/old-abandoned.csv";
+    const liveButOld = liveKey.replace(/[^/]+$/, "old-still-pending.csv");
+    objects.set(orphan, WEEK);
+    objects.set(liveButOld, WEEK);
+    await prisma.historicalImportUpload.update({ where: { id: c.uploadId }, data: { objectKey: liveButOld } });
+    objects.set("media/someone/old-photo.png", new Uint8Array([1]));
+    expect(await sweepOrphanedImportObjects({ force: true })).toBe(1);
+    expect(objects.has(orphan)).toBe(false);
+    expect(objects.has(liveButOld)).toBe(true); // still referenced by a PENDING upload
+    expect(objects.has("media/someone/old-photo.png")).toBe(true);
   });
 });

@@ -220,12 +220,11 @@ export function HistoricalDataPanel({
           there, and is deleted once imported. Timestamps are kept exactly as exported (broker/server time).
         </p>
         <div className="space-y-1.5">
-          <Label htmlFor="nr-file">File</Label>
+          <Label htmlFor="nr-file">MT5 Market Bars export (.csv, .txt or no extension)</Label>
           <Input
             id="nr-file"
             ref={fileRef}
             type="file"
-            accept=".csv,.txt,text/csv,text/plain"
             onChange={(e) => {
               setFile(e.target.files?.[0] ?? null);
               setReport(null);

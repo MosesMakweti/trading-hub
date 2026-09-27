@@ -1,10 +1,10 @@
 # Native Replay V2 — historical data & candle engine
 
-**Status: Prompts 1–3 complete** — MT5 M1 import (direct-to-R2), canonical
-storage, the timeframe aggregation engine with progressively forming
-candles, run↔dataset pinning, the run-wide authoritative replay clock, and
-the full-screen replay chart workspace. **Not built yet:** drawing tools,
-Long/Short Position, Convert to Trade Idea. Product direction: [BACKTESTING.md › Native Replay V2](./BACKTESTING.md#native-replay-v2-next-project).
+**Status: Prompts 1–4 complete** — MT5 M1 import (direct-to-R2, real
+extensionless exports), canonical storage, the timeframe aggregation engine
+with progressively forming candles, run↔dataset pinning, the run-wide
+authoritative replay clock, the full-screen replay chart, and the drawing /
+Long-Short Position toolkit feeding the existing Trade Idea workflow. Product direction: [BACKTESTING.md › Native Replay V2](./BACKTESTING.md#native-replay-v2-next-project).
 
 ```
 MT5 M1 CSV
@@ -58,7 +58,13 @@ MetaTrader 5 "Export Bars" (View → Symbols → Bars → M1 → Export Bars):
   `DATE`, `TICKVOL`/`TICK_VOLUME`, `VOL`/`VOLUME`, `SPREAD`); unknown columns
   are refused. Without one, positional; TICKVOL/VOL/SPREAD optional.
 - The symbol isn't in the file: read from MT5's default file name
-  `SYMBOL_M1_<from>_<to>.csv`, or entered by the trader.
+  `SYMBOL_TF_<from>_<to>` — which MT5 often writes WITHOUT an extension
+  (`XAUUSD.n_M1_202606161656_202609252354`) — or entered by the trader. The
+  name is parsed from the right (`_TF_<from>_<to>` plus an optional
+  `.csv`/`.txt`), so dotted broker symbols (`XAUUSD.n`, `US30.cash`) are never
+  mistaken for extensions. The name is only a hint: the upload accepts any
+  file name and the CONTENT is validated strictly (junk under an MT5-looking
+  name is refused).
 - Not supported: MT4 exports, semicolon/decimal-comma locales, other platforms.
 
 Canonical fields per bar: `minute`, `open`, `high`, `low`, `close`,
@@ -67,9 +73,12 @@ normal for FX/CFD), `spread?` (points).
 
 ## Symbol
 
-`sourceSymbol` keeps the broker name verbatim (`EURUSD.a`, `XAUUSDm`, `GOLD`);
-`symbol` is the instrument catalog's canonical symbol when it recognises the
-name (suffixes/aliases), else the upper-cased source. No other mapping.
+`sourceSymbol` keeps the broker name verbatim (`EURUSD.a`, `XAUUSDm`, `GOLD`,
+`XAUUSD.n`); `symbol` is the instrument catalog's canonical symbol when it
+recognises the name (suffixes/aliases). Failing that, ONE trailing `.xxx`
+account-tier suffix is stripped and accepted only if the root is a known
+instrument (`XAUUSD.n` → XAUUSD, `US30.cash` → US30); otherwise the
+upper-cased source. Nothing is invented.
 
 ## Time semantics — no timezone guessing
 
@@ -233,6 +242,8 @@ previewImportUploadAction                     → HEAD (size must equal the anno
 completeImportUploadAction                    → claim PENDING→PROCESSING (runs once), re-validate,
                                                 import → COMPLETED (datasetId) | FAILED; object deleted
 sweep (on each new upload)                    → PENDING/PROCESSING past expiresAt (24h) → object deleted, EXPIRED
+orphan sweep (hourly, piggy-backed)           → import objects past retention that no PENDING/PROCESSING row
+                                                references (e.g. rows removed with a deleted user) → deleted
 ```
 
 - The browser never gets credentials — only a URL valid for one key, one size,
@@ -426,8 +437,89 @@ only refetch history on timeframe change / pan, keeping H4+ history reads
 - `server/services/native-replay/historical-dataset.service.test.ts` — import lifecycle (preview, READY, INVALID, mid-write failure, crash sweep), DB backstops, ownership, service ≡ engine for every timeframe, cutoff enforcement, limits.
 - `server/services/native-replay/historical-upload.service.test.ts` — direct-upload lifecycle (presign, preview, import once, concurrent completes, INVALID cleanup, size/type limits, ownership, owned-prefix CHECK, sweep never touching other objects).
 - `domain/native-replay/chart-model.test.ts` — client model ≡ server engine at every cutoff (random batches, world time past the asset's last bar, all timeframes), M30 printing 09:00→09:30, duplicate steps, wire precision, timezone-independent labels.
+- `domain/native-replay/mt5-real-export.test.ts` — the real-export regression (extensionless name, dotted symbol, exact header, tabs, CRLF, VOL=0, spread) on a synthetic fixture.
+- `domain/native-replay/drawings/drawings.test.ts` — time↔logical across timeframes/future, ray/extended geometry, channel, Fibonacci, measure, long/short/multi-target maths, magnet no-lookahead, undo/redo, validation.
+- `server/services/native-replay/chart-drawing.service.test.ts` — CRUD in market coordinates, server validation, ownership (+ DB trigger), read-only runs, Position → existing createTrade/savePlan mapping, locked plan immutable after moving the drawing, link rules.
 - `server/services/native-replay/backtest-replay.service.test.ts` — world clock across assets (latest bar ≤ world time, GBPUSD 09:38 spike invisible at 09:37 in every timeframe, union timeline, late pins), history paging, pin compatibility/freeze/delete protection (service + DB), initial position, +1 over gaps, +N, +1 candle, seek rules, DB-refused rewind, M30 forming lifecycle, H4 at 09:37, M1…D1 synchronisation, lookahead attacks, date/asset independence, 10 concurrent steps, retried command ids, speed determinism, ownership, read-only runs.
 
-## Next: drawing and position tools (Prompt 4)
+## Chart drawings (ReplayChartDrawing)
 
-See the Prompt 3 stage report.
+**Model.** Every drawing lives in market coordinates — anchors are
+`{ time: wall-clock minute, price }` — never screen pixels, so it survives zoom,
+pan, resize, timeframe switches and reloads. Drawings belong to a Backtest Run
++ asset (not to a timeframe, live trading or Edge Review); an anchor at 09:17
+sits 17 minutes into the 09:00 H1 candle. Stored per drawing: type, anchors,
+style (colour/width/dash/opacity), type data (text, Fibonacci levels, position
+entry/stop/targets[]), locked, hidden, and an optional `linkedTradeId`. Ids are
+client-generated UUIDs so undoing a delete restores the same drawing. A DB
+trigger enforces same owner as the run and an asset of the run; the service
+verifies run ownership, asset and drawing membership on every call; completed
+/archived runs keep drawings visible but read-only.
+
+**Rendering.** One lightweight-charts series primitive draws every drawing on
+the chart canvas each frame (projected from market coordinates) and adds
+price-axis labels for horizontal lines/rays, price labels and the selected
+position's levels. Interaction lives in an imperative `DrawingController`
+outside React — React only hears selection/list changes — so drawing never
+re-renders the chart (0 chart commits in all measurements).
+
+**Coordinates.** time → fractional logical index (`timeToLogical`: bucket start
+= the candle, inside a bucket interpolated towards the next candle, before/after
+the data extrapolated one candle per timeframe length) → x by interpolating
+between whole-bar coordinates (the library's own conversions are whole-bar
+only: a fractional index returns 0). Price ↔ y via the series.
+
+**Tools.** Trend line, horizontal line, horizontal ray, vertical line, ray,
+extended line (geometric, clipped to the viewport — never fixed pixel lengths),
+rectangle, parallel channel (main line + offset point), text note, arrow, price
+label, measure (price change, %, MT5 points, pips only when the instrument
+defines them, time, bars), Fibonacci retracement (0 at B … 1 at A, default
+0/0.236/0.382/0.5/0.618/0.786/1, stored levels so custom sets need no rewrite),
+Long and Short Position.
+
+**Interaction.** Create (click-click, or drag; 3-click channel; 1-click tools),
+select, move (body), resize/edit (anchor, rectangle corner, position level and
+edge handles), duplicate (offset 3 bars), lock, hide (restore from the
+Drawings list), delete. Hit priority: handles of the selection, then lines,
+then filled interiors smallest first (a small rectangle inside a position box
+stays selectable). Undo/redo is a client-session history of create/move/resize
+/delete/style edits (inverse ops, persisted) — completely separate from the
+replay clock. Keys: Esc cancel (and leave the tool) / deselect, Del/Backspace
+delete, Ctrl/⌘+Z undo, Ctrl/⌘+Shift+Z redo, Ctrl/⌘+D duplicate, Alt+T/H/J/V/R/
+N/M/F/L/S tools — never while typing or inside the Session panel.
+
+**Magnet** snaps an anchor to the nearest open/high/low/close of the candle
+under the pointer within 14px. It only sees the chart's REVEALED candles: over
+the empty space right of the replay position there is no candle and nothing to
+snap to. Candle data is never altered.
+
+**Future space.** The view may scroll up to 40 empty bars past the replay
+position (clamped; no candles exist there) so positions and projections can be
+planned. Geometry extending there is drawing, not market data.
+
+**Long / Short Position.** `{ entry, stop, targets[] }` + a time span. Risk,
+per-target reward and R:R come from integer points at the dataset precision
+(exact: 7.20 / 3.00 = 2.4R). Invalid configurations (stop on the wrong side, a
+target not beyond entry) are flagged, not silently accepted. Distances show
+price, MT5 points and pips only when the instrument catalog defines a pip
+(XAUUSD: no pips). Multiple targets (up to 5); no account-risk sizing.
+
+**Use in Trade Idea.** A valid position opens the EXISTING Backtesting "Add
+trade" dialog (same form, same createTrade + confirmPlan/savePlan actions,
+wrapped in the run's BACKTEST workspace) pre-filled with asset, direction,
+entry, stop, TP1…TPn, the plan timeframe ("30m") and the execution time = the
+run's world time (never a future anchor time), on the simulation date. The
+trader reviews and saves; nothing is created before that. The drawing then
+records the new trade id (one-way: the server verifies the trade belongs to the
+same run and asset). Moving the drawing later never touches the trade: the
+plan's `TradePlanVersion` (locked once execution begins) and planned prices are
+unchanged — tested at service level and in the browser.
+
+**Performance** (browser, 1600×950, M5): canvas draw per frame median 0 ms (0
+drawings), 0.5 ms (25), 1.8 ms (100; p95 3 ms, max 3.8 ms) across pan, zoom,
+20x playback and dragging; timeframe switch ~100 ms at every count; 0 chart
+React commits.
+
+## Next: final integration & hardening (Prompt 5)
+
+See the Prompt 4 stage report.

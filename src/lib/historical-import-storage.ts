@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, NotFound, NoSuchKey, PutObjectCommand } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, NotFound, NoSuchKey, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import { getR2 } from "@/lib/r2";
@@ -64,4 +64,17 @@ export async function deleteImportObject(key: string): Promise<void> {
   assertImportKey(key);
   const { client, bucket } = getR2();
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+/** Import objects last modified before `before` (keys only), up to `max`. */
+export async function listStaleImportObjects(before: Date, max = 1000): Promise<string[]> {
+  const { client, bucket } = getR2();
+  const keys: string[] = [];
+  let token: string | undefined;
+  do {
+    const res = await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: IMPORT_OBJECT_PREFIX, ContinuationToken: token }));
+    for (const o of res.Contents ?? []) if (o.Key && o.LastModified && o.LastModified < before) keys.push(o.Key);
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token && keys.length < max);
+  return keys.slice(0, max);
 }

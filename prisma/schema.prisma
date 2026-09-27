@@ -3760,6 +3760,7 @@ model BacktestRun {
   // authoritative replay position per simulation date × asset.
   datasets        BacktestRunDataset[]
   replayPositions BacktestReplayPosition[]
+  chartDrawings   ReplayChartDrawing[]
 
   @@index([userId, status, updatedAt])
   @@index([strategyId])
@@ -3958,4 +3959,31 @@ model BacktestReplayPosition {
   updatedAt      DateTime    @updatedAt
 
   @@unique([backtestRunId, simulationDate])
+}
+
+/// A Native Replay chart drawing, owned by a Backtest Run + asset (not by a
+/// timeframe, not by live trading, not by Edge Review). Anchors are market
+/// coordinates — [{ time: wall-clock minute, price }] — never screen pixels.
+/// The id is client-generated (a UUID) so undo of a delete restores the same
+/// drawing. Trigger-checked: same user as the run, asset one of the run's.
+model ReplayChartDrawing {
+  id            String      @id
+  userId        String
+  backtestRunId String
+  backtestRun   BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+  assetSymbol   String
+  /// DrawingType (domain/native-replay/drawings/model.ts)
+  type          String
+  anchors       Json
+  style         Json
+  data          Json        @default("{}")
+  locked        Boolean     @default(false)
+  hidden        Boolean     @default(false)
+  /// The Trade Idea this position drawing was used to create — a one-way,
+  /// informational link (the drawing never updates the trade's plan).
+  linkedTradeId String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([backtestRunId, assetSymbol])
 }

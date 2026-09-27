@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import {
@@ -9,9 +10,7 @@ import {
   BarChart3,
   ChevronLeft,
   ChevronRight,
-  Crosshair,
   Loader2,
-  Magnet,
   PanelRightClose,
   PanelRightOpen,
   Pause,
@@ -23,7 +22,27 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { advanceReplayAction, getReplayCandlesAction, initializeReplayAction } from "@/actions/native-replay.actions";
+import {
+  advanceReplayAction,
+  deleteDrawingAction,
+  getReplayCandlesAction,
+  initializeReplayAction,
+  linkDrawingToTradeAction,
+  listDrawingsAction,
+  saveDrawingAction,
+} from "@/actions/native-replay.actions";
+import { lookupInstrument } from "@/domain/trade-plan/instrument-catalog";
+import { nominalMinutes } from "@/domain/native-replay/timeframes";
+import type { DrawingOp } from "@/domain/native-replay/drawings/history";
+import { TOOLS, type ChartDrawing, type DrawingType } from "@/domain/native-replay/drawings/model";
+import { positionToTradeIdea, type TradeIdeaPrefill } from "@/domain/native-replay/drawings/trade-idea";
+import { AddTradeDialog } from "@/components/today/add-trade-dialog";
+import { WorkspaceProvider } from "@/components/workspace/workspace-context";
+import type { SessionWindow } from "@/domain/schedule/session-countdown";
+import { DrawingController } from "./drawings/drawing-controller";
+import { DrawingToolbar } from "./drawings/drawing-toolbar";
+import { DrawingManager } from "./drawings/drawing-manager";
+import { SelectionToolbar } from "./drawings/selection-toolbar";
 import type { EngineCandle } from "@/domain/native-replay/candle-engine";
 import { applyRevealed, diffCandles, fromWire, wireToBars } from "@/domain/native-replay/chart-model";
 import { formatCrosshairTime, formatPrice, formatReplayTime, toChartTime } from "@/domain/native-replay/chart-time";
@@ -82,9 +101,16 @@ export interface ReplayWorkspaceProps {
   initialState: ReplayStateDTO;
   /** The existing Backtesting Session workflow for this date (server-rendered). */
   sessionPanel: React.ReactNode;
+  /** What the existing Trade Idea form needs (same data the Session passes it). */
+  tradeForm: {
+    accounts: { id: string; name: string; kind: string }[];
+    strategies: { id: string; name: string; version: number }[];
+    activeSessions: string[];
+    sessionWindows: SessionWindow[];
+  };
 }
 
-export function ReplayWorkspace({ run, dateKey, previousDateKey, nextDateKey, dayIndex, totalTradingDays, initialState, sessionPanel }: ReplayWorkspaceProps) {
+export function ReplayWorkspace({ run, dateKey, previousDateKey, nextDateKey, dayIndex, totalTradingDays, initialState, sessionPanel, tradeForm }: ReplayWorkspaceProps) {
   const { resolvedTheme } = useTheme();
   const prefsKey = `native-replay:view:${run.id}`;
 
@@ -123,6 +149,26 @@ export function ReplayWorkspace({ run, dateKey, previousDateKey, nextDateKey, da
   const loadSeq = useRef(0);
 
   const assetInfo = world.assets.find((a) => a.assetSymbol === asset) ?? null;
+
+  // ── Chart drawings (per run + asset; view objects, never market data) ─────
+  const router = useRouter();
+  const [tool, setTool] = useState<DrawingType | null>(null);
+  const [selected, setSelected] = useState<ChartDrawing | null>(null);
+  const [drawingList, setDrawingList] = useState<ChartDrawing[]>([]);
+  const [managerOpen, setManagerOpen] = useState(false);
+  const [tradeIdea, setTradeIdea] = useState<{ drawingId: string; prefill: TradeIdeaPrefill } | null>(null);
+  const [drawingsCtl] = useState(
+    () =>
+      new DrawingController({
+        onSelection: (d) => setSelected(d),
+        onToolChange: (t) => setTool(t),
+        onListChange: (list) => setDrawingList([...list]),
+      }),
+  );
+  const pipSize = (() => {
+    const spec = assetInfo?.dataset ? lookupInstrument(assetInfo.dataset.symbol) : null;
+    return spec?.pipSize ? Number(spec.pipSize) : null;
+  })();
   useEffect(() => countCommit("workspaceCommits"));
   const canMove = world.status === "ACTIVE" && !readOnly && !atDayEnd;
 
@@ -316,11 +362,41 @@ export function ReplayWorkspace({ run, dateKey, previousDateKey, nextDateKey, da
     else setWorld(res.state);
   }
 
-  // ── Keyboard: Space play/pause · → +1m · Shift+→ +1 candle · R return to replay ──
+  // ── Keyboard ─────────────────────────────────────────────────────────────
+  // Replay: Space play/pause · → +1m · Shift+→ +1 candle · R return to replay
+  // Drawings: Esc cancel/deselect · Del/Backspace delete · Ctrl/⌘+Z undo ·
+  // Ctrl/⌘+Shift+Z redo · Ctrl/⌘+D duplicate · Alt+letter tools
+  // Never while typing, and never inside the Session panel.
   useEffect(() => {
+    const toolKeys = new Map<string, DrawingType>(
+      (Object.keys(TOOLS) as DrawingType[]).filter((t) => TOOLS[t].shortcut).map((t) => [`Key${TOOLS[t].shortcut!.slice(-1)}`, t]),
+    );
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
-      if (e.key === " ") {
+      if (isTypingTarget(e.target)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.code === "KeyZ") {
+        e.preventDefault();
+        if (e.shiftKey) drawingsCtl.redo();
+        else drawingsCtl.undo();
+        return;
+      }
+      if (mod && e.code === "KeyD" && drawingsCtl.selected()) {
+        e.preventDefault();
+        drawingsCtl.duplicateSelected();
+        return;
+      }
+      if (e.altKey && !mod && toolKeys.has(e.code)) {
+        e.preventDefault();
+        if (!readOnly) drawingsCtl.setTool(toolKeys.get(e.code)!);
+        return;
+      }
+      if (mod || e.altKey) return;
+      if (e.key === "Escape") {
+        drawingsCtl.cancel();
+      } else if ((e.key === "Delete" || e.key === "Backspace") && drawingsCtl.selected()) {
+        e.preventDefault();
+        drawingsCtl.deleteSelected();
+      } else if (e.key === " ") {
         e.preventDefault();
         if (playingRef.current) pause();
         else if (canMove) void play();
@@ -333,7 +409,7 @@ export function ReplayWorkspace({ run, dateKey, previousDateKey, nextDateKey, da
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canMove, pause, play, run1]);
+  }, [canMove, pause, play, run1, drawingsCtl, readOnly]);
 
   useEffect(() => () => {
     playingRef.current = false;
@@ -366,7 +442,48 @@ export function ReplayWorkspace({ run, dateKey, previousDateKey, nextDateKey, da
 
   useEffect(() => {
     chartRef.current?.chart()?.applyOptions({ crosshair: { mode: magnet ? 1 : 0 } });
-  }, [magnet]);
+    drawingsCtl.setMagnet(magnet);
+  }, [magnet, drawingsCtl]);
+
+  // Drawing context follows the view.
+  const dark = resolvedTheme !== "light";
+  useEffect(() => {
+    drawingsCtl.setContext({ assetSymbol: asset, priceScale, pipSize, tfMinutes: nominalMinutes(timeframe), dark, readOnly });
+  }, [drawingsCtl, asset, priceScale, pipSize, timeframe, dark, readOnly]);
+
+  const reloadDrawings = useCallback(async (a: string) => {
+    const res = await listDrawingsAction({ runId: run.id, assetSymbol: a });
+    if (res.success && viewRef.current.asset === a) drawingsCtl.setDrawings(res.drawings);
+    else if (!res.success) toast.error(res.error);
+  }, [run.id, drawingsCtl]);
+
+  useEffect(() => {
+    if (!prefsLoaded || !asset) return;
+    void reloadDrawings(asset);
+  }, [prefsLoaded, asset, reloadDrawings]);
+
+  // Persist each drawing edit; on failure the server's copy wins.
+  useEffect(() => {
+    drawingsCtl.setCommitHandler((op: DrawingOp) => {
+      const a = viewRef.current.asset;
+      const task =
+        op.kind === "delete"
+          ? deleteDrawingAction({ runId: run.id, assetSymbol: a, drawingId: op.drawing.id })
+          : saveDrawingAction({ runId: run.id, drawing: stripLink(op.kind === "create" ? op.drawing : op.after) });
+      void task.then((res) => {
+        if (!res.success) {
+          toast.error(res.error);
+          void reloadDrawings(a);
+        }
+      });
+    });
+  }, [run.id, reloadDrawings, drawingsCtl]);
+
+  function useInTradeIdea() {
+    if (!selected || !position) return;
+    const prefill = positionToTradeIdea(selected, { timeframe, worldMinute: position.minute, priceScale });
+    if (prefill) setTradeIdea({ drawingId: selected.id, prefill });
+  }
 
   const shown = hover?.candle ?? latest;
   const shownPrev = hover ? hover.previousClose : previousClose;
@@ -468,15 +585,20 @@ export function ReplayWorkspace({ run, dateKey, previousDateKey, nextDateKey, da
       </header>
 
       <div className="relative flex min-h-0 flex-1">
-        {/* ── Left tool rail (drawing tools arrive with the chart tools stage) ── */}
-        <nav aria-label="Chart tools" className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-border py-2">
-          <button type="button" aria-pressed={!magnet} onClick={() => setMagnet(false)} title="Crosshair" aria-label="Crosshair" className={cn("inline-flex size-8 items-center justify-center rounded-md", !magnet ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}>
-            <Crosshair className="size-4" />
-          </button>
-          <button type="button" aria-pressed={magnet} onClick={() => setMagnet(true)} title="Magnet crosshair (snaps to OHLC)" aria-label="Magnet crosshair" className={cn("inline-flex size-8 items-center justify-center rounded-md", magnet ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}>
-            <Magnet className="size-4" />
-          </button>
-        </nav>
+        {/* ── Left tool rail: drawing tools (market-coordinate chart objects) ── */}
+        <DrawingToolbar
+          tool={tool}
+          onTool={(t) => drawingsCtl.setTool(t)}
+          magnet={magnet}
+          onMagnet={setMagnet}
+          readOnly={readOnly || world.status !== "ACTIVE" || !assetInfo?.dataset}
+          canUndo={drawingList.length > 0 || drawingsCtl.canUndo()}
+          onUndo={() => drawingsCtl.undo()}
+          onRedo={() => drawingsCtl.redo()}
+          managerOpen={managerOpen}
+          onManager={() => setManagerOpen((o) => !o)}
+          drawingCount={drawingList.length}
+        />
 
         {/* ── Chart ──────────────────────────────────────────────────────── */}
         <main className="relative min-w-0 flex-1" aria-label="Replay chart">
@@ -502,7 +624,42 @@ export function ReplayWorkspace({ run, dateKey, previousDateKey, nextDateKey, da
             </div>
           )}
 
-          <ReplayChart ref={chartRef} theme={resolvedTheme} priceScale={priceScale} showVolume={volume} onCrosshair={onCrosshair} onNearLeftEdge={onNearLeftEdge} onFollowChange={onFollowChange} />
+          <ReplayChart ref={chartRef} theme={resolvedTheme} priceScale={priceScale} showVolume={volume} onCrosshair={onCrosshair} onNearLeftEdge={onNearLeftEdge} onFollowChange={onFollowChange} drawings={drawingsCtl} />
+
+          {selected && !selected.hidden && (
+            <SelectionToolbar
+              drawing={selected}
+              priceScale={priceScale}
+              pipSize={pipSize}
+              readOnly={readOnly}
+              onChange={(mutate) => drawingsCtl.update(selected.id, mutate)}
+              onToggleLock={() => drawingsCtl.update(selected.id, (d) => void (d.locked = !d.locked), { allowLocked: true })}
+              onHide={() => {
+                drawingsCtl.update(selected.id, (d) => void (d.hidden = true), { allowLocked: true });
+                drawingsCtl.select(null);
+              }}
+              onDuplicate={() => drawingsCtl.duplicateSelected()}
+              onDelete={() => drawingsCtl.deleteSelected()}
+              onUseInTradeIdea={useInTradeIdea}
+            />
+          )}
+          {tool && (
+            <div className="pointer-events-none absolute left-1/2 top-9 z-30 -translate-x-1/2 rounded-md border border-border bg-card/95 px-2 py-1 text-xs text-muted-foreground shadow-sm" role="status">
+              {TOOLS[tool].label}: {TOOLS[tool].anchors === 1 ? "click to place" : TOOLS[tool].anchors === 3 ? "click or drag the line, then click the channel width" : "click twice, or drag"} · Esc to cancel
+            </div>
+          )}
+          {managerOpen && (
+            <DrawingManager
+              drawings={drawingList}
+              selectedId={selected?.id ?? null}
+              readOnly={readOnly}
+              onSelect={(id) => drawingsCtl.select(id)}
+              onToggleHidden={(id) => drawingsCtl.update(id, (d) => void (d.hidden = !d.hidden), { allowLocked: true })}
+              onToggleLock={(id) => drawingsCtl.update(id, (d) => void (d.locked = !d.locked), { allowLocked: true })}
+              onDelete={(id) => drawingsCtl.remove(id)}
+              onClose={() => setManagerOpen(false)}
+            />
+          )}
 
           {loading && (
             <div className="absolute right-3 top-2 z-10 flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
@@ -554,8 +711,34 @@ export function ReplayWorkspace({ run, dateKey, previousDateKey, nextDateKey, da
               : "No replay"}
         </p>
         {assetInfo?.latestBar && assetInfo.latestBar !== position?.time ? <span>· {asset} latest bar {assetInfo.latestBar.slice(11)}</span> : null}
-        <span className="ml-auto hidden md:inline">Space play/pause · → +1m · Shift+→ +1 candle · R return to replay</span>
+        <span className="ml-auto hidden md:inline">Space play/pause · → +1m · Shift+→ +1 candle · R return to replay · Esc / Del / Ctrl+Z drawings</span>
       </footer>
+
+      {/* Position → the EXISTING Backtesting Trade Idea form, pre-filled; the trader reviews and saves. */}
+      {tradeIdea && (
+        <WorkspaceProvider value={{ environment: "BACKTEST", runId: run.id }}>
+          <AddTradeDialog
+            dateKey={dateKey}
+            accounts={tradeForm.accounts}
+            strategies={tradeForm.strategies}
+            activeSessions={tradeForm.activeSessions}
+            sessionWindows={tradeForm.sessionWindows}
+            initialPlan={tradeIdea.prefill}
+            hideTrigger
+            open
+            onOpenChange={(open) => !open && setTradeIdea(null)}
+            onCreated={(tradeId) => {
+              const drawingId = tradeIdea.drawingId;
+              const a = viewRef.current.asset;
+              setTradeIdea(null);
+              void linkDrawingToTradeAction({ runId: run.id, assetSymbol: a, drawingId, tradeId }).then(() => reloadDrawings(a));
+              toast.success("Trade idea created from the position — it's in the Session's Trade Idea tab.");
+              setSessionOpen(true);
+              router.refresh();
+            }}
+          />
+        </WorkspaceProvider>
+      )}
     </div>
   );
 }
@@ -623,4 +806,11 @@ function EmptyState({
 
 function toMinute(dateKey: string): number {
   return parseWallClock(`${dateKey}T00:00`) ?? 0;
+}
+
+/** The link to a Trade Idea is set only by the server's link action. */
+function stripLink(d: ChartDrawing): Omit<ChartDrawing, "linkedTradeId"> {
+  const { linkedTradeId: _ignored, ...rest } = d;
+  void _ignored;
+  return rest;
 }

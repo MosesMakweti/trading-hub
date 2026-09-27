@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { TradeIdeaPrefill } from "@/domain/native-replay/drawings/trade-idea";
 import { Controller, useFieldArray, useForm, useWatch, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
@@ -142,6 +143,10 @@ const emptyDefaults: TradeFormValues = {
 
 interface TradeFormProps {
   dateKey: string;
+  /** Native Replay: a Long/Short Position drawing's levels and the replay
+   *  context, pre-filling this same form (the trader reviews and saves; the
+   *  normal createTrade + confirmPlan path runs). */
+  initialPlan?: TradeIdeaPrefill;
   mode: "create" | "edit";
   tradeId?: string;
   accounts: { id: string; name: string; kind: string }[];
@@ -205,6 +210,7 @@ export function TradeForm({
   initialStrategyId,
   initialSession,
   showAccountAllocation = true,
+  initialPlan,
 }: TradeFormProps) {
   const dayRef = useDayRef(dateKey);
   const router = useRouter();
@@ -228,6 +234,14 @@ export function TradeForm({
         selectedSession: initialSession ?? emptyDefaults.selectedSession,
         higherTimeframeBias: initialBias ?? emptyDefaults.higherTimeframeBias,
         biasConfidencePercent: initialBiasConfidence ?? emptyDefaults.biasConfidencePercent,
+        ...(initialPlan
+          ? {
+              assetSymbol: initialPlan.assetSymbol,
+              direction: initialPlan.direction,
+              executionMinutes: initialPlan.executionMinutes,
+              higherTimeframeBias: initialPlan.direction === "LONG" ? "BULLISH" : "BEARISH",
+            }
+          : {}),
       },
   });
 
@@ -299,10 +313,14 @@ export function TradeForm({
   // plan is confirmed later in the workspace. Reuses the same domain math
   // TradePlanSection uses — no parallel distance/R/validation logic.
   const watchedAsset = useWatch({ control, name: "assetSymbol" });
-  const [planTimeframe, setPlanTimeframe] = useState("");
-  const [planEntry, setPlanEntry] = useState("");
-  const [planStopLoss, setPlanStopLoss] = useState("");
-  const [planTargets, setPlanTargets] = useState<PlanTargetRow[]>([emptyPlanTarget(1)]);
+  const [planTimeframe, setPlanTimeframe] = useState(initialPlan?.timeframe ?? "");
+  const [planEntry, setPlanEntry] = useState(initialPlan?.entry ?? "");
+  const [planStopLoss, setPlanStopLoss] = useState(initialPlan?.stopLoss ?? "");
+  const [planTargets, setPlanTargets] = useState<PlanTargetRow[]>(() =>
+    initialPlan?.targets.length
+      ? initialPlan.targets.map((t) => ({ ...emptyPlanTarget(t.targetOrder), label: t.label, targetPrice: t.targetPrice }))
+      : [emptyPlanTarget(1)],
+  );
 
   // Before-Trade screenshots (Stage 5) — create-time fast path only; staged
   // locally until the trade actually exists (see pending-before-screenshot.tsx).
