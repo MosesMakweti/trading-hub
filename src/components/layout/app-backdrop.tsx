@@ -19,7 +19,9 @@
 // on both extremes — narrow/tall viewports (mobile) crop horizontally and
 // keep the anchor's right bias; wide/short viewports (ultrawide) crop
 // vertically and keep the anchor's top bias — without needing responsive
-// breakpoints. A second, blurred copy of the same image is masked to a soft
+// breakpoints. The whole scene is softly blurred (6px) and kept faint
+// (--backdrop-strength) so it reads as atmosphere, never competing with
+// content. A second, more strongly blurred copy of the same image is masked to a soft
 // ring around the edges (radial mask keeps the centre untouched), giving a
 // mild depth-of-field effect rather than blurring the whole scene. Both
 // images render at all times; only the theme's `dark:` class variant decides
@@ -29,12 +31,22 @@
 
 import Image from "next/image";
 
-const OBJECT_POSITION = "object-[88%_12%]";
+const OBJECT_POSITION = "object-center";
 
 export function AppBackdrop() {
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
       <div className="backdrop-drift-a absolute inset-0" style={{ opacity: "var(--backdrop-strength)" }}>
+        {/* Zoomed out ~50% and centred on the page; edges faded into the
+            background so there's no hard frame. A separate wrapper so it
+            never fights the drift transform. */}
+        <div
+          className="absolute inset-0 origin-center scale-50"
+          style={{
+            maskImage: "radial-gradient(ellipse 50% 50% at 50% 50%, black 72%, transparent 100%)",
+            WebkitMaskImage: "radial-gradient(ellipse 50% 50% at 50% 50%, black 72%, transparent 100%)",
+          }}
+        >
         <Image
           src="/backdrop/bull-light.webp"
           alt=""
@@ -42,7 +54,7 @@ export function AppBackdrop() {
           priority
           quality={90}
           sizes="100vw"
-          className={`object-cover ${OBJECT_POSITION} dark:hidden`}
+          className={`object-cover ${OBJECT_POSITION} blur-[6px] dark:hidden`}
         />
         <Image
           src="/backdrop/bull-dark.webp"
@@ -51,7 +63,7 @@ export function AppBackdrop() {
           priority
           quality={90}
           sizes="100vw"
-          className={`hidden object-cover ${OBJECT_POSITION} dark:block`}
+          className={`hidden object-cover ${OBJECT_POSITION} blur-[6px] dark:block`}
         />
 
         {/* Depth-of-field ring: same art, blurred, masked to the edges only. */}
@@ -76,6 +88,7 @@ export function AppBackdrop() {
             sizes="100vw"
             className={`hidden object-cover ${OBJECT_POSITION} blur-2xl dark:block`}
           />
+        </div>
         </div>
       </div>
 

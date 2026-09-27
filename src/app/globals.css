@@ -135,7 +135,7 @@
      foreground. */
   --backdrop-vignette: oklch(0.97 0.002 255 / 55%);
   --backdrop-glow: oklch(1 0 0 / 55%);
-  --backdrop-strength: 0.45;
+  --backdrop-strength: 0.22;
   /* Sidebar is a frosted panel lighter than the canvas; the active item is a raised
      white pill (bg-card + soft shadow, in the sidebar primitive) that lifts off it. */
   --sidebar: oklch(0.93 0.003 255);
@@ -220,7 +220,7 @@
      edge-to-edge with no empty glass regions to rest the eye on. */
   --backdrop-vignette: oklch(0 0 0 / 62%);
   --backdrop-glow: oklch(0.7 0.006 265 / 10%);
-  --backdrop-strength: 0.6;
+  --backdrop-strength: 0.3;
 }
 
 @layer base {
