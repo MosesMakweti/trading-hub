@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { localDateToKey } from "@/lib/date";
 import { deriveDayResultState } from "@/domain/trades/day-result-state";
 import { formatRR } from "@/components/journal/workspace/workspace-ui";
+import { dayTint } from "@/components/viz/tokens";
 
 interface DailyPerformance {
   executedTradeCount: number;
@@ -57,10 +58,11 @@ export function JournalDayButton({
         modifiers.today && "ring-1 ring-inset ring-primary/50",
         modifiers.outside && "text-muted-foreground opacity-40",
         !inRange && "pointer-events-none border-transparent text-muted-foreground/40",
-        state === "WIN" && "bg-success/10 hover:bg-success/15",
-        state === "LOSS" && "bg-danger/10 hover:bg-danger/15",
         className,
       )}
+      // Intensity follows |R| (full at ±3R, capped so the text stays readable) —
+      // the same diverging scale as the Analytics daily heatmap.
+      style={{ backgroundColor: state === "WIN" || state === "LOSS" ? dayTint(entry?.totalRealizedR, 3) : undefined, ...props.style }}
       onClick={() => router.push(`${hrefBase}/${dateKey}`)}
       {...props}
       disabled={!inRange || props.disabled}

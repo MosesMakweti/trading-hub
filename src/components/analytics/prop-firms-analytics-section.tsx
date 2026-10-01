@@ -1,7 +1,8 @@
 import { cn } from "@/lib/utils";
+import { RowBar } from "@/components/analytics/row-bar";
 import type { PropFirmAnalyticsSummary } from "@/server/services/prop-firms-analytics.service";
 
-const money = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const moneySigned = (n: number) => `${n >= 0 ? "+" : "−"}${money(Math.abs(n))}`;
 
 function SectionHeading({ title, hint }: { title: string; hint?: string }) {
@@ -26,6 +27,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "su
 
 function PerfTable({ title, rows }: { title: string; rows: { label: string; trades: number; netPnl: number; winRate: number | null; avgR: number | null }[] }) {
   if (rows.length === 0) return null;
+  const maxAbs = Math.max(...rows.map((r) => Math.abs(r.netPnl)), 1);
   return (
     <div className="glass space-y-3 rounded-2xl p-4">
       <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
@@ -45,10 +47,24 @@ function PerfTable({ title, rows }: { title: string; rows: { label: string; trad
               <tr key={r.label} className="border-b border-border/50 last:border-0">
                 <td className="py-2.5 pr-4 font-medium">{r.label}</td>
                 <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">{r.trades}</td>
-                <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">{r.winRate == null ? "—" : `${r.winRate.toFixed(0)}%`}</td>
+                <td className="py-2.5 pr-4">
+                  <RowBar percent={r.winRate} className="justify-end" />
+                </td>
                 <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">{r.avgR == null ? "—" : `${r.avgR.toFixed(2)}R`}</td>
-                <td className={cn("py-2.5 text-right font-medium tabular-nums", r.netPnl > 0 && "text-success", r.netPnl < 0 && "text-danger")}>
-                  {moneySigned(r.netPnl)}
+                <td className="py-2.5">
+                  <div className="flex items-center justify-end gap-2">
+                    {/* Diverging P&L bar on the table's shared scale (centre = $0). */}
+                    <div className="relative hidden h-1.5 w-16 rounded-full bg-muted sm:block" aria-hidden>
+                      <div className="absolute inset-y-[-2px] left-1/2 w-px bg-viz-axis" />
+                      <div
+                        className={cn("absolute inset-y-0", r.netPnl >= 0 ? "left-1/2 rounded-r-full bg-viz-profit" : "right-1/2 rounded-l-full bg-viz-loss")}
+                        style={{ width: `${(Math.abs(r.netPnl) / maxAbs) * 50}%` }}
+                      />
+                    </div>
+                    <span className={cn("w-20 text-right font-medium tabular-nums", r.netPnl > 0 && "text-success", r.netPnl < 0 && "text-danger")}>
+                      {moneySigned(r.netPnl)}
+                    </span>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -117,14 +133,22 @@ export function PropFirmsAnalyticsSection({ data }: { data: PropFirmAnalyticsSum
             </div>
           )}
           {data.ruleBreachFrequency.length > 0 && (
-            <div className="glass space-y-2 rounded-2xl p-4">
+            <div className="glass space-y-2.5 rounded-2xl p-4">
               <h3 className="text-sm font-medium text-muted-foreground">Rule breach frequency</h3>
-              {data.ruleBreachFrequency.map((r) => (
-                <div key={r.ruleKey} className="flex items-center justify-between text-xs">
-                  <span>{r.ruleKey.replace(/_/g, " ").toLowerCase()}</span>
-                  <span className="font-medium text-danger">{r.breachCount}</span>
-                </div>
-              ))}
+              {(() => {
+                const max = Math.max(...data.ruleBreachFrequency.map((r) => r.breachCount), 1);
+                return [...data.ruleBreachFrequency]
+                  .sort((a, b) => b.breachCount - a.breachCount)
+                  .map((r) => (
+                    <div key={r.ruleKey} className="grid grid-cols-[1fr_6rem_2rem] items-center gap-3 text-xs">
+                      <span className="truncate capitalize">{r.ruleKey.replace(/_/g, " ").toLowerCase()}</span>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+                        <div className="h-full rounded-full bg-viz-loss" style={{ width: `${(r.breachCount / max) * 100}%` }} />
+                      </div>
+                      <span className="text-right font-medium tabular-nums text-danger">{r.breachCount}</span>
+                    </div>
+                  ));
+              })()}
             </div>
           )}
         </div>

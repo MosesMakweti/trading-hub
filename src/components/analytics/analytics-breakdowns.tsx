@@ -1,7 +1,7 @@
-import { cn } from "@/lib/utils";
 import { KpiCard } from "@/components/analytics/kpi-card";
 import { ProgressRing } from "@/components/analytics/progress-ring";
 import { Card, GroupList } from "@/components/analytics/canonical-analytics-section";
+import { RDistributionCard, HoursCard } from "@/components/analytics/distribution-cards";
 import type { getAnalyticsData } from "@/server/services/analytics.service";
 import type { CanonicalAnalyticsSummary } from "@/server/services/analytics-canonical.service";
 
@@ -14,29 +14,6 @@ function SectionHeading({ title, hint }: { title: string; hint?: string }) {
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
       <h2 className="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
       {hint && <span className="text-xs text-muted-foreground/60">{hint}</span>}
-    </div>
-  );
-}
-
-function Histogram({ bars }: { bars: { label: string; count: number; tone: "success" | "danger" | "neutral" }[] }) {
-  const max = Math.max(1, ...bars.map((b) => b.count));
-  return (
-    <div className="flex h-32 items-end gap-1.5">
-      {bars.map((b) => (
-        <div key={b.label} className="flex flex-1 flex-col items-center gap-1">
-          <span className="text-[10px] text-muted-foreground tabular-nums">{b.count}</span>
-          <div className="flex w-full flex-1 items-end">
-            <div
-              className={cn(
-                "w-full rounded-t-sm",
-                b.tone === "danger" ? "bg-danger/70" : b.tone === "success" ? "bg-success/70" : "bg-chart-2",
-              )}
-              style={{ height: `${(b.count / max) * 100}%` }}
-            />
-          </div>
-          <span className="text-center text-[9px] leading-tight text-muted-foreground/60">{b.label}</span>
-        </div>
-      ))}
     </div>
   );
 }
@@ -115,28 +92,8 @@ export function AnalyticsBreakdowns({ trading, canonical }: { trading: TradingDa
             <KpiCard label="Consecutive Losses" value={String(c.overview.longestLossStreak)} tone="danger" />
           </div>
         </div>
-        <div className="glass space-y-2 rounded-2xl p-4">
-          <div className="text-xs font-medium text-muted-foreground">Realized R distribution</div>
-          <Histogram
-            bars={c.rDistribution.map((bucket) => ({
-              label: bucket.label,
-              count: bucket.count,
-              tone: bucket.max <= 0 ? "danger" : bucket.min >= 0 ? "success" : "neutral",
-            }))}
-          />
-        </div>
-        {b.hours.length > 0 && (
-          <div className="glass space-y-2 rounded-2xl p-4">
-            <h3 className="text-sm font-medium text-muted-foreground">Trades by hour of day</h3>
-            <Histogram
-              bars={b.hours.map((h) => ({
-                label: `${String(h.hour).padStart(2, "0")}h`,
-                count: h.trades,
-                tone: h.netPnl > 0 ? "success" : h.netPnl < 0 ? "danger" : "neutral",
-              }))}
-            />
-          </div>
-        )}
+        <RDistributionCard buckets={c.rDistribution} expectancy={c.overview.expectancy} />
+        {b.hours.length > 0 && <HoursCard hours={b.hours} />}
       </section>
     </div>
   );

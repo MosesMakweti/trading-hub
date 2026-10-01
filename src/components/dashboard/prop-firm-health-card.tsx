@@ -1,11 +1,11 @@
 import Link from "next/link";
 
 import { cn } from "@/lib/utils";
-import { RuleHealthBadge } from "@/components/prop-firms/rule-health-badge";
+import { RuleMeter } from "@/components/prop-firms/rule-health-badge";
 import type { PropFirmHealthSummary } from "@/server/services/dashboard.service";
 
 function currency(n: number) {
-  return n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
 export function PropFirmHealthCard({ summary }: { summary: PropFirmHealthSummary }) {
@@ -33,10 +33,12 @@ export function PropFirmHealthCard({ summary }: { summary: PropFirmHealthSummary
         </span>
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
-        {summary.targetRule && <RuleHealthBadge health={summary.targetRule} />}
-        {summary.drawdownRule && <RuleHealthBadge health={summary.drawdownRule} />}
-      </div>
+      {(summary.targetRule || summary.drawdownRule) && (
+        <div className="grid gap-2.5 sm:grid-cols-2">
+          {summary.targetRule && <RuleMeter health={summary.targetRule} />}
+          {summary.drawdownRule && <RuleMeter health={summary.drawdownRule} />}
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>

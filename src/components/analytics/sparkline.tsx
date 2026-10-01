@@ -7,7 +7,8 @@ type SparkTone = "auto" | "success" | "danger" | "brand" | "muted";
 function resolveColor(tone: SparkTone, values: number[]): string {
   if (tone === "success") return "var(--success)";
   if (tone === "danger") return "var(--danger)";
-  if (tone === "brand") return "var(--chart-1)";
+  // "brand" = the single magnitude data hue (identity slot 1).
+  if (tone === "brand") return "var(--viz-1)";
   if (tone === "muted") return "var(--muted-foreground)";
   // auto: green when the series ends at or above where it started, red otherwise
   const up = values.length < 2 || values[values.length - 1] >= values[0];
@@ -26,6 +27,7 @@ export function Sparkline({
   tone = "auto",
   fill = true,
   strokeWidth = 1.5,
+  endDot = false,
   className,
 }: {
   values: number[];
@@ -34,6 +36,8 @@ export function Sparkline({
   tone?: SparkTone;
   fill?: boolean;
   strokeWidth?: number;
+  /** Mark the latest value (KPI tiles). */
+  endDot?: boolean;
   className?: string;
 }) {
   const gradientId = useId();
@@ -55,17 +59,18 @@ export function Sparkline({
     return [x, y] as const;
   });
 
+  const last = points[points.length - 1];
   const line = points.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`).join(" ");
   const area = `${line} L${points[points.length - 1][0].toFixed(2)} ${height} L${points[0][0].toFixed(2)} ${height} Z`;
   const color = resolveColor(tone, values);
 
-  return (
+  const svg = (
     <svg
       viewBox={`0 0 ${width} ${height}`}
       width={width}
       height={height}
       preserveAspectRatio="none"
-      className={cn("overflow-visible", className)}
+      className={cn("overflow-visible", endDot ? "w-full" : className)}
       aria-hidden
     >
       {fill && (
@@ -88,6 +93,63 @@ export function Sparkline({
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"
       />
+    </svg>
+  );
+
+  if (!endDot) return svg;
+  // The SVG may be stretched (preserveAspectRatio="none"), which would squash a
+  // circle — so the end dot is an HTML overlay positioned by percentage.
+  return (
+    <span className={cn("relative block", className)}>
+      {svg}
+      <span
+        aria-hidden
+        className="absolute size-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full ring-[1.5px] ring-card"
+        style={{ left: `${(last[0] / width) * 100}%`, top: `${(last[1] / height) * 100}%`, background: color }}
+      />
+    </span>
+  );
+}
+
+/**
+ * SparkBars — per-period values (daily returns, daily R) as tiny diverging
+ * bars around a zero line: profit up, loss down. The right form for a series
+ * of independent values, where a connected line would imply continuity.
+ */
+export function SparkBars({
+  values,
+  width = 160,
+  height = 28,
+  className,
+}: {
+  values: number[];
+  width?: number;
+  height?: number;
+  className?: string;
+}) {
+  if (values.length === 0) return <div className={cn("h-7 w-24", className)} aria-hidden />;
+  const maxAbs = Math.max(...values.map((v) => Math.abs(v)), 1e-9);
+  const n = values.length;
+  const slot = width / n;
+  const bar = Math.max(1, Math.min(6, slot - 1));
+  const mid = height / 2;
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} preserveAspectRatio="none" className={className} aria-hidden>
+      <line x1={0} x2={width} y1={mid} y2={mid} stroke="var(--viz-axis)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+      {values.map((v, i) => {
+        const h = Math.max(v === 0 ? 0 : 1, (Math.abs(v) / maxAbs) * (mid - 1));
+        return (
+          <rect
+            key={i}
+            x={i * slot + (slot - bar) / 2}
+            y={v >= 0 ? mid - h : mid}
+            width={bar}
+            height={h}
+            rx={Math.min(1, bar / 2)}
+            fill={v > 0 ? "var(--viz-profit)" : v < 0 ? "var(--viz-loss)" : "var(--viz-neutral)"}
+          />
+        );
+      })}
     </svg>
   );
 }

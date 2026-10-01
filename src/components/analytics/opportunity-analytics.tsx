@@ -2,7 +2,8 @@ import { Target } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { KpiCard } from "@/components/analytics/kpi-card";
-import { Donut } from "@/components/analytics/donut";
+import { CompositionBar } from "@/components/viz/composition-bar";
+import { VIZ, tint } from "@/components/viz/tokens";
 import type {
   OpportunityCurvePoint,
   OpportunitySummary,
@@ -81,32 +82,30 @@ export function OpportunityAnalytics({
         />
       </div>
 
-      {/* The funnel: valid setups → executed vs missed. */}
-      <div className="glass grid grid-cols-1 items-center gap-4 rounded-2xl p-4 sm:grid-cols-[auto_1fr]">
-        <Donut
-          size={116}
-          stroke={14}
-          segments={[
-            { label: "Executed", value: s.executed, color: "var(--success)" },
-            { label: "Missed", value: s.missed, color: "var(--danger)" },
-          ]}
-        >
-          <span className="text-lg font-semibold tabular-nums">{pct(s.executionRatePercent)}</span>
-          <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Executed</span>
-        </Donut>
-
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <Stat label="Valid opportunities" value={String(s.validOpportunities)} />
-          <Stat label="Executed" value={String(s.executed)} tone="success" />
-          <Stat label="Missed" value={String(s.missed)} tone="danger" />
-          <Stat label="Missed winners" value={String(s.missedWins)} tone="danger" />
-          <Stat label="Missed losers avoided" value={String(s.missedLosses)} tone="success" />
-          <Stat
-            label="Undetermined"
-            value={String(s.missedUndetermined)}
-            hint="excluded from cost"
-          />
+      {/* The funnel: valid setups → executed vs missed → what the misses were. */}
+      <div className="glass space-y-4 rounded-2xl p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-sm font-medium text-muted-foreground">Opportunity funnel</h3>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {s.validOpportunities} valid setup{s.validOpportunities === 1 ? "" : "s"} · {pct(s.executionRatePercent)} taken
+          </span>
         </div>
+        <FunnelStage label="Valid setups" value={s.validOpportunities} of={s.validOpportunities} color={tint("var(--viz-1)", 45)} />
+        <FunnelStage label="Executed" value={s.executed} of={s.validOpportunities} color="var(--viz-1)" />
+        <FunnelStage label="Missed" value={s.missed} of={s.validOpportunities} color={tint("var(--viz-1)", 70)} />
+        {s.missed > 0 && (
+          <div className="space-y-1.5 border-t border-border pt-3">
+            <div className="text-[11px] font-medium text-muted-foreground">What the misses were</div>
+            <CompositionBar
+              unitLabel="setups"
+              parts={[
+                { key: "w", label: "Missed winners", value: s.missedWins, color: VIZ.loss, detail: "forgone R — avoidable" },
+                { key: "l", label: "Losers avoided", value: s.missedLosses, color: VIZ.profit, detail: "a miss that would have lost" },
+                { key: "u", label: "Undetermined", value: s.missedUndetermined, color: VIZ.neutral, detail: "excluded from cost" },
+              ]}
+            />
+          </div>
+        )}
       </div>
 
       {data.missReasons.totalMissed > 0 && <MissReasonsBlock agg={data.missReasons} />}
@@ -166,7 +165,7 @@ function MissReasonsBlock({ agg }: { agg: MissReasonAggregate }) {
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-muted">
               <div
-                className={cn("h-full rounded-full", r.disciplined ? "bg-success/50" : "bg-danger/60")}
+                className={cn("h-full rounded-full", r.disciplined ? "bg-viz-neutral" : "bg-viz-loss")}
                 style={{ width: `${Math.max(4, (r.missedCostR / maxCost) * 100)}%` }}
               />
             </div>
@@ -177,30 +176,18 @@ function MissReasonsBlock({ agg }: { agg: MissReasonAggregate }) {
   );
 }
 
-function Stat({
-  label,
-  value,
-  tone,
-  hint,
-}: {
-  label: string;
-  value: string;
-  tone?: "success" | "danger";
-  hint?: string;
-}) {
+function FunnelStage({ label, value, of, color }: { label: string; value: number; of: number; color: string }) {
+  const share = of > 0 ? (value / of) * 100 : 0;
   return (
-    <div className="rounded-xl border border-border bg-background/40 p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div
-        className={cn(
-          "mt-0.5 text-base font-semibold tabular-nums",
-          tone === "success" && "text-success",
-          tone === "danger" && "text-danger",
-        )}
-      >
-        {value}
+    <div className="grid grid-cols-[6.5rem_1fr_5.5rem] items-center gap-3 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <div className="h-3 overflow-hidden rounded-[4px] bg-muted/70" aria-hidden>
+        <div className="h-full rounded-[4px]" style={{ width: `${share}%`, background: color }} />
       </div>
-      {hint && <div className="text-[10px] text-muted-foreground/70">{hint}</div>}
+      <span className="text-right tabular-nums">
+        <span className="font-semibold text-foreground">{value}</span>
+        <span className="ml-1.5 text-muted-foreground">{of > 0 ? `${share.toFixed(0)}%` : "—"}</span>
+      </span>
     </div>
   );
 }

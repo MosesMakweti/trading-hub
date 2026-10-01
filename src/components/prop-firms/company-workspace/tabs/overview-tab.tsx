@@ -10,6 +10,7 @@ import {
   Target,
   TrendingUp,
 } from "lucide-react";
+import { VIZ, tint } from "@/components/viz/tokens";
 
 import { KpiCard } from "@/components/analytics/kpi-card";
 import { Donut, type DonutSegment } from "@/components/analytics/donut";
@@ -50,12 +51,13 @@ export function OverviewTab({ firm, metrics }: { firm: UserPropFirmDTO; metrics:
     return acc;
   }, {});
   const statusSegments: DonutSegment[] = [
-    { label: "Active", value: statusCounts.ACTIVE ?? 0, color: "var(--chart-1)" },
-    { label: "Funded", value: statusCounts.FUNDED ?? 0, color: "var(--success)" },
-    { label: "Passed", value: statusCounts.PASSED ?? 0, color: "var(--chart-3)" },
-    { label: "Failed", value: statusCounts.FAILED ?? 0, color: "var(--warning)" },
-    { label: "Breached", value: statusCounts.BREACHED ?? 0, color: "var(--danger)" },
-    { label: "Archived", value: statusCounts.ARCHIVED ?? 0, color: "var(--muted-foreground)" },
+    // Progress stages on one ordinal ramp; outcomes as status (always labelled).
+    { label: "Active", value: statusCounts.ACTIVE ?? 0, color: tint("var(--viz-1)", 55) },
+    { label: "Passed", value: statusCounts.PASSED ?? 0, color: "var(--viz-1)" },
+    { label: "Funded", value: statusCounts.FUNDED ?? 0, color: VIZ.profit },
+    { label: "Failed", value: statusCounts.FAILED ?? 0, color: VIZ.warning },
+    { label: "Breached", value: statusCounts.BREACHED ?? 0, color: VIZ.loss },
+    { label: "Archived", value: statusCounts.ARCHIVED ?? 0, color: VIZ.neutral },
   ].filter((s) => s.value > 0);
 
   if (firm.accounts.length === 0) {

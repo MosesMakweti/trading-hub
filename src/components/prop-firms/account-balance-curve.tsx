@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -14,7 +14,10 @@ import {
 
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CHART_AXIS_TICK } from "@/components/analytics/chart-theme";
+import { ChartCard, ChartStat, ChartStatRow } from "@/components/viz/chart-card";
+import { rechartsTooltip } from "@/components/viz/chart-tooltip";
+import { baselineOffset, niceTicks } from "@/components/viz/series";
+import { CHART, VIZ } from "@/components/viz/tokens";
 import {
   buildAccountBalanceSeries,
   downsampleBalancePoints,
@@ -78,9 +81,13 @@ const RANGES: { value: RangeKey; label: string; months: number | null }[] = [
   { value: "ALL", label: "All", months: null },
 ];
 
+// Pinned to en-US (like the rest of the app's money formatting): the runtime
+// default locale differs between the server and the viewer's browser, which
+// rendered "$54,432.00" on the server and "US$54,432.00" in an en-GB browser —
+// a hydration mismatch on every SSR'd figure.
 function makeFormatters(currency: string) {
-  const full = new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 });
-  const compact = new Intl.NumberFormat(undefined, {
+  const full = new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 2 });
+  const compact = new Intl.NumberFormat("en-US", {
     style: "currency",
     currency,
     notation: "compact",
@@ -98,15 +105,6 @@ function formatStamp(iso: string): string {
   const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   return `${date} · ${time}`;
-}
-
-function SummaryTile({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
-      <div className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{label}</div>
-      <div className={cn("mt-0.5 text-sm font-semibold tabular-nums", tone)}>{value}</div>
-    </div>
-  );
 }
 
 export function AccountBalanceCurve({
@@ -174,26 +172,57 @@ export function AccountBalanceCurve({
   const balances = rows.map((r) => r.balance);
   const min = balances.length ? Math.min(...balances) : 0;
   const max = balances.length ? Math.max(...balances) : 0;
-  const pad = Math.max((max - min) * 0.12, Math.abs(max) * 0.01, 1);
+  const pad = Math.max((max - min) * 0.08, Math.abs(max) * 0.005, 1);
+  const y = niceTicks(Math.min(min - pad, startingBalance), Math.max(max + pad, startingBalance), 5);
+  // Split colour at the starting balance — gradient offsets are relative to
+  // each path's own bounding box (line: its values; area: values + baseline).
+  const strokeOffset = baselineOffset(min, max, startingBalance);
+  const fillOffset = baselineOffset(Math.min(min, startingBalance), Math.max(max, startingBalance), startingBalance);
+  const vsStart = fullSeries.hasData ? fullSeries.currentBalance - startingBalance : 0;
+  const uid = useId().replace(/:/g, "");
+
+  const tooltip = rechartsTooltip<(typeof rows)[number]>((p) => ({
+    title: formatStamp(p.t),
+    subtitle: p.eventType !== "RANGE_OPENING" ? (EVENT_LABELS[p.eventType] ?? p.eventType) : "Opening balance in view",
+    rows: [
+      { key: "bal", label: "Balance", value: fmt.money(p.balance), color: p.balance < startingBalance ? VIZ.loss : VIZ.profit },
+      ...(p.eventType !== "RANGE_OPENING" && p.change !== 0
+        ? [{ key: "chg", label: "Change", value: fmt.signed(p.change), tone: p.change > 0 ? ("profit" as const) : ("loss" as const), mark: "none" as const }]
+        : []),
+      {
+        key: "vs",
+        label: "vs starting balance",
+        value: fmt.signed(p.balance - startingBalance),
+        tone: p.balance > startingBalance ? ("profit" as const) : p.balance < startingBalance ? ("loss" as const) : ("muted" as const),
+        mark: "none" as const,
+        separated: true,
+      },
+    ],
+    footer: p.reference || p.reason ? [p.reference && `Ref ${p.reference}`, p.reason].filter(Boolean).join(" · ") : undefined,
+  }));
 
   return (
-    <div className={cn("glass space-y-3 rounded-2xl p-4", className)}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-medium">{title}</h3>
-          <p className="text-xs text-muted-foreground">
-            {subtitle}
-            {fullSeries.hasData && (
-              <>
-                {" · "}
-                <span className="tabular-nums">{fmt.money(fullSeries.currentBalance)}</span>
-              </>
-            )}
-          </p>
-        </div>
-        {fullSeries.hasData && (
+    <ChartCard
+      title={title}
+      hint={subtitle}
+      className={className}
+      plotHeight={height}
+      headline={
+        fullSeries.hasData
+          ? {
+              value: fmt.money(fullSeries.currentBalance),
+              caption: (
+                <span className={cn("tabular-nums", vsStart > 0 ? "text-success" : vsStart < 0 ? "text-danger" : undefined)}>
+                  {fmt.signed(vsStart)} vs start
+                </span>
+              ),
+            }
+          : undefined
+      }
+      actions={
+        fullSeries.hasData && (
           <Tabs value={range} onValueChange={(v) => v && setRange(v as RangeKey)}>
-            <TabsList>
+            <TabsList aria-label="Balance range">
               {RANGES.map((r) => (
                 <TabsTrigger key={r.value} value={r.value}>
                   {r.label}
@@ -201,113 +230,98 @@ export function AccountBalanceCurve({
               ))}
             </TabsList>
           </Tabs>
-        )}
-      </div>
-
-      {showSummary && summary && fullSeries.hasData && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-          <SummaryTile label="Starting balance" value={fmt.money(summary.startingBalance)} />
-          <SummaryTile label="Current balance" value={fmt.money(summary.currentBalance)} />
-          <SummaryTile
-            label="Net trading P&L"
-            value={fmt.signed(summary.netTradingPnl)}
-            tone={summary.netTradingPnl > 0 ? "text-success" : summary.netTradingPnl < 0 ? "text-danger" : undefined}
+        )
+      }
+      empty={
+        !fullSeries.hasData || rows.length < 2
+          ? { title: "No imported ledger activity yet", hint: "The balance curve appears once this account has transactions." }
+          : null
+      }
+      footer={
+        showSummary &&
+        summary &&
+        fullSeries.hasData && (
+          <ChartStatRow>
+            <ChartStat label="Starting balance" value={fmt.money(summary.startingBalance)} />
+            <ChartStat label="Peak balance" value={fmt.money(summary.peakBalance)} />
+            <ChartStat
+              label="Net trading P&L"
+              value={fmt.signed(summary.netTradingPnl)}
+              tone={summary.netTradingPnl > 0 ? "profit" : summary.netTradingPnl < 0 ? "loss" : undefined}
+            />
+            <ChartStat
+              label="Max balance drawdown"
+              value={summary.maxBalanceDrawdown > 0 ? `−${fmt.money(summary.maxBalanceDrawdown)}` : fmt.money(0)}
+              hint={summary.maxBalanceDrawdownPercent != null && summary.maxBalanceDrawdown > 0 ? `${summary.maxBalanceDrawdownPercent.toFixed(1)}% from peak` : undefined}
+              tone={summary.maxBalanceDrawdown > 0 ? "loss" : undefined}
+            />
+            <ChartStat label="Total deposits" value={fmt.money(summary.totalDeposits)} />
+            <ChartStat label="Total withdrawals" value={fmt.money(summary.totalWithdrawals)} />
+            <ChartStat label="Fees paid" value={fmt.money(summary.totalFees)} />
+            <ChartStat label="Current balance" value={fmt.money(summary.currentBalance)} />
+          </ChartStatRow>
+        )
+      }
+    >
+      <ResponsiveContainer width="100%" height={height}>
+        <AreaChart data={rows} margin={{ ...CHART.margin, right: 20, top: 12 }}>
+          <defs>
+            <linearGradient id={`${uid}-stroke`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset={strokeOffset} stopColor={VIZ.profit} />
+              <stop offset={strokeOffset} stopColor={VIZ.loss} />
+            </linearGradient>
+            <linearGradient id={`${uid}-fill`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset={0} stopColor={VIZ.profit} stopOpacity={0.18} />
+              <stop offset={fillOffset} stopColor={VIZ.profit} stopOpacity={0.03} />
+              <stop offset={fillOffset} stopColor={VIZ.loss} stopOpacity={0.03} />
+              <stop offset={1} stopColor={VIZ.loss} stopOpacity={0.18} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid {...CHART.grid} />
+          <XAxis
+            dataKey="t"
+            tick={CHART.tick}
+            {...CHART.xAxis}
+            minTickGap={56}
+            tickFormatter={(d: string) => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
           />
-          <SummaryTile label="Peak balance" value={fmt.money(summary.peakBalance)} />
-          <SummaryTile label="Total deposits" value={fmt.money(summary.totalDeposits)} />
-          <SummaryTile label="Total withdrawals" value={fmt.money(summary.totalWithdrawals)} />
-          <SummaryTile
-            label="Max balance drawdown"
-            value={
-              summary.maxBalanceDrawdown > 0
-                ? `−${fmt.money(summary.maxBalanceDrawdown)}${
-                    summary.maxBalanceDrawdownPercent != null ? ` (${summary.maxBalanceDrawdownPercent.toFixed(1)}%)` : ""
-                  }`
-                : fmt.money(0)
-            }
-            tone={summary.maxBalanceDrawdown > 0 ? "text-danger" : undefined}
+          <YAxis
+            tick={CHART.tick}
+            {...CHART.yAxis}
+            width={64}
+            domain={y.domain}
+            ticks={y.ticks}
+            tickFormatter={(v: number) => fmt.axis(v)}
           />
-          <SummaryTile label="Fees paid" value={fmt.money(summary.totalFees)} />
-        </div>
-      )}
-
-      {!fullSeries.hasData || rows.length < 2 ? (
-        <p className="py-12 text-center text-sm text-muted-foreground">
-          No imported ledger activity yet — the balance curve appears once this account has transactions.
-        </p>
-      ) : (
-        <ResponsiveContainer width="100%" height={height}>
-          <AreaChart data={rows} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
-            <defs>
-              <linearGradient id="acctBalanceCurveFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.14} />
-                <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid stroke="var(--border)" strokeOpacity={0.5} vertical={false} />
-            <XAxis
-              dataKey="t"
-              tick={CHART_AXIS_TICK}
-              axisLine={{ stroke: "var(--border)" }}
-              tickLine={false}
-              minTickGap={56}
-              tickFormatter={(d: string) => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+          <ReferenceLine
+            y={startingBalance}
+            stroke={VIZ.axis}
+            label={{ value: "Start", position: "insideBottomLeft", fill: "var(--muted-foreground)", fontSize: 10 }}
+          />
+          {markersInView.map((m) => (
+            <ReferenceLine
+              key={`${m.at}-${m.label}`}
+              x={m.at}
+              stroke={VIZ.reference}
+              strokeOpacity={0.7}
+              strokeDasharray={CHART.referenceDash}
+              label={{ value: m.label, position: "insideTopRight", fill: "var(--muted-foreground)", fontSize: 10 }}
             />
-            <YAxis
-              tick={CHART_AXIS_TICK}
-              axisLine={false}
-              tickLine={false}
-              width={64}
-              domain={[min - pad, max + pad]}
-              tickFormatter={(v: number) => fmt.axis(v)}
-            />
-            {startingBalance >= min - pad && startingBalance <= max + pad && (
-              <ReferenceLine y={startingBalance} stroke="var(--border)" strokeDasharray="4 4" />
-            )}
-            {markersInView.map((m) => (
-              <ReferenceLine
-                key={`${m.at}-${m.label}`}
-                x={m.at}
-                stroke="var(--muted-foreground)"
-                strokeOpacity={0.5}
-                strokeDasharray="2 4"
-                label={{ value: m.label, position: "insideTopRight", fill: "var(--muted-foreground)", fontSize: 10 }}
-              />
-            ))}
-            <Tooltip
-              cursor={{ stroke: "var(--border)" }}
-              content={({ active, payload }) => {
-                if (!active || !payload?.length) return null;
-                const p = payload[0].payload as (typeof rows)[number];
-                return (
-                  <div className="rounded-lg border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-sm">
-                    <div className="font-medium">{formatStamp(p.t)}</div>
-                    <div className="mt-1 tabular-nums">Balance {fmt.money(p.balance)}</div>
-                    {p.eventType !== "RANGE_OPENING" && (
-                      <div className="tabular-nums text-muted-foreground">
-                        {EVENT_LABELS[p.eventType] ?? p.eventType}
-                        {p.change !== 0 && <> · {fmt.signed(p.change)}</>}
-                      </div>
-                    )}
-                    {p.reference && <div className="text-muted-foreground">Ref {p.reference}</div>}
-                    {p.reason && <div className="text-muted-foreground">{p.reason}</div>}
-                  </div>
-                );
-              }}
-            />
-            <Area
-              type="stepAfter"
-              dataKey="balance"
-              stroke="var(--chart-1)"
-              strokeWidth={1.5}
-              fill="url(#acctBalanceCurveFill)"
-              dot={false}
-              activeDot={{ r: 3 }}
-              isAnimationActive={false}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      )}
-    </div>
+          ))}
+          <Tooltip content={tooltip} cursor={CHART.cursor} isAnimationActive={false} />
+          <Area
+            type="stepAfter"
+            dataKey="balance"
+            baseValue={startingBalance}
+            stroke={`url(#${uid}-stroke)`}
+            strokeWidth={CHART.lineWidth}
+            fill={`url(#${uid}-fill)`}
+            dot={false}
+            activeDot={{ r: 4, stroke: VIZ.surface, strokeWidth: 2, fill: vsStart < 0 ? VIZ.loss : VIZ.profit }}
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </ChartCard>
   );
 }

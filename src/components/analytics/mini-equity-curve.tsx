@@ -1,7 +1,10 @@
-"use client";
+import { Sparkline } from "@/components/analytics/sparkline";
 
-import { Area, AreaChart, ResponsiveContainer } from "recharts";
-
+/** Compact balance trend for account cards. Rendered by the shared SVG
+ *  Sparkline (per-instance gradient ids, so several cards on one page each
+ *  keep their own profit/loss tint — the previous Recharts version shared one
+ *  hard-coded gradient id across every card). Green when the balance ends at
+ *  or above where it started, red otherwise. */
 export function MiniEquityCurve({
   points,
   className,
@@ -16,31 +19,9 @@ export function MiniEquityCurve({
       </div>
     );
   }
-
-  const isUp = points[points.length - 1].balance >= points[0].balance;
-  const color = isUp ? "var(--success)" : "var(--danger)";
-
   return (
     <div className={className}>
-      <ResponsiveContainer width="100%" height={48}>
-        <AreaChart data={points} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
-          <defs>
-            <linearGradient id="miniEquityFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={0.3} />
-              <stop offset="100%" stopColor={color} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <Area
-            type="monotone"
-            dataKey="balance"
-            stroke={color}
-            strokeWidth={1.5}
-            fill="url(#miniEquityFill)"
-            dot={false}
-            isAnimationActive={false}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+      <Sparkline values={points.map((p) => p.balance)} width={240} height={48} className="w-full" />
     </div>
   );
 }

@@ -1,18 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useMemo, useState } from "react";
+import { TrendingUp } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CHART_TOOLTIP_STYLE, CHART_AXIS_TICK } from "@/components/analytics/chart-theme";
+import { ChartCard, ChartStat, ChartStatRow } from "@/components/viz/chart-card";
+import { EquityInstrument, type EquityPoint } from "@/components/viz/equity-instrument";
+import { formatDateRange, formatValue, type ValueUnit } from "@/components/viz/format";
+import { annotateSeries } from "@/components/viz/series";
+import { polarityOf } from "@/components/viz/tokens";
 import type { EquityCurvePoint } from "@/domain/performance/rr";
 
 /** Analytics V2 §4 — ONE Equity Curve with R / $ / % switching, reusing the
@@ -23,21 +19,28 @@ import type { EquityCurvePoint } from "@/domain/performance/rr";
  *   - $: the Performance Account's running dollar balance, from the same
  *     per-trade series drawdown is computed from (analytics.service.ts).
  *   - %: the existing daily-return curve (compounding/additive sub-modes).
- */
+ *  Rendered by the shared EquityInstrument (baseline split, peak / max-DD
+ *  markers, per-step tooltip, synced underwater pane). */
 export function EquityCurveChart({
   data,
   rCurve = [],
   dollarCurve = [],
+  startingBalance,
+  drawdownPane = true,
 }: {
   /** % daily-return curve (existing compounding/additive modes). */
   data: EquityCurvePoint[];
   /** Cumulative realized R, chronological — canonical-aggregations.ts's cumulativeRCurve.
    *  Optional: callers without the canonical dataset in scope (Dashboard,
    *  Accounts) simply don't offer the R/$ tabs, keeping the plain % chart
-   *  they've always shown. */
-  rCurve?: { dateKey: string; cumulativeR: number }[];
+   *  they've always shown. `r` is the trade's own realized R when present. */
+  rCurve?: { dateKey: string; cumulativeR: number; r?: number }[];
   /** Running Performance Account balance, one point per settled trade. Optional, same reasoning. */
   dollarCurve?: { dateKey: string; balance: number }[];
+  /** The balance the $ curve starts from (its baseline). Defaults to the
+   *  first point's balance when not supplied. */
+  startingBalance?: number;
+  drawdownPane?: boolean;
 }) {
   const axes = [
     { key: "r" as const, label: "R", available: rCurve.length > 0 },
@@ -48,97 +51,107 @@ export function EquityCurveChart({
   const [axis, setAxis] = useState<"r" | "dollar" | "percent">(axes[0].key);
   const [percentMode, setPercentMode] = useState<"compounding" | "additive">("compounding");
 
-  const chartData =
-    axis === "r"
-      ? rCurve.map((d) => ({ date: d.dateKey, value: d.cumulativeR }))
-      : axis === "dollar"
-        ? dollarCurve.map((d) => ({ date: d.dateKey, value: d.balance }))
-        : data.map((d) => ({
-            date: d.dateKey,
-            value: percentMode === "compounding" ? d.cumulativeCompounding : d.cumulativeAdditive,
-          }));
+  const unit: ValueUnit = axis === "r" ? "r" : axis === "dollar" ? "money" : "percent";
+  const baseline = axis === "dollar" ? (startingBalance ?? dollarCurve[0]?.balance ?? 0) : 0;
 
-  const formatValue = (v: number) =>
-    axis === "r"
-      ? `${v >= 0 ? "+" : ""}${v.toFixed(2)}R`
-      : axis === "dollar"
-        ? v.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 })
-        : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const points: EquityPoint[] = useMemo(
+    () =>
+      axis === "r"
+        ? rCurve.map((d) => ({ x: d.dateKey, value: d.cumulativeR, stepValue: d.r }))
+        : axis === "dollar"
+          ? dollarCurve.map((d) => ({ x: d.dateKey, value: d.balance }))
+          : data.map((d) => ({
+              x: d.dateKey,
+              value: percentMode === "compounding" ? d.cumulativeCompounding : d.cumulativeAdditive,
+            })),
+    [axis, rCurve, dollarCurve, data, percentMode],
+  );
+
+  const summary = useMemo(() => annotateSeries(points, baseline).summary, [points, baseline]);
+  const lastFromPeak = summary ? Math.max(0, Math.max(summary.high.value, baseline) - summary.end) : 0;
+
+  const actions = (
+    <>
+      {axis === "percent" && (
+        <Tabs value={percentMode} onValueChange={(v) => setPercentMode(v as typeof percentMode)}>
+          <TabsList>
+            <TabsTrigger value="compounding">Compounding</TabsTrigger>
+            <TabsTrigger value="additive">Additive</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+      {axes.length > 1 && (
+        <Tabs value={axis} onValueChange={(v) => setAxis(v as typeof axis)}>
+          <TabsList aria-label="Equity unit">
+            {axes.map((a) => (
+              <TabsTrigger key={a.key} value={a.key}>
+                {a.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
+    </>
+  );
 
   return (
-    <div className="glass space-y-3 rounded-2xl p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-medium text-muted-foreground">Equity Curve</h3>
-        <div className="flex flex-wrap items-center gap-2">
-          {axis === "percent" && (
-            <Tabs value={percentMode} onValueChange={(v) => setPercentMode(v as typeof percentMode)}>
-              <TabsList>
-                <TabsTrigger value="compounding">Compounding</TabsTrigger>
-                <TabsTrigger value="additive">Additive</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-          {axes.length > 1 && (
-            <Tabs value={axis} onValueChange={(v) => setAxis(v as typeof axis)}>
-              <TabsList>
-                {axes.map((a) => (
-                  <TabsTrigger key={a.key} value={a.key}>
-                    {a.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          )}
-        </div>
-      </div>
-      {chartData.length < 2 ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">
-          {chartData.length === 0
-            ? "No settled trades in this range yet."
-            : "Just one settled trade so far — the curve needs at least two points."}
-        </p>
-      ) : (
-        <ResponsiveContainer width="100%" height={320}>
-          <AreaChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
-            <defs>
-              <linearGradient id="equityFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.25} />
-                <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis
-              dataKey="date"
-              tick={CHART_AXIS_TICK}
-              axisLine={{ stroke: "var(--border)" }}
-              tickLine={false}
-              minTickGap={40}
+    <ChartCard
+      title="Equity Curve"
+      icon={TrendingUp}
+      variant="primary"
+      actions={actions}
+      plotHeight={300}
+      headline={
+        summary && points.length >= 2
+          ? {
+              value: formatValue(summary.change, unit, { signed: true }),
+              tone: polarityOf(summary.change),
+              caption: `${formatDateRange(points[0].x, points[points.length - 1].x)} · ${points.length} ${axis === "percent" ? "days" : "trades"}`,
+            }
+          : undefined
+      }
+      empty={
+        points.length < 2
+          ? {
+              title: points.length === 0 ? "No settled trades in this range yet" : "One settled trade so far",
+              hint: points.length === 0 ? undefined : "The curve needs at least two points.",
+            }
+          : null
+      }
+      footer={
+        summary && (
+          <ChartStatRow>
+            <ChartStat
+              label={axis === "dollar" ? "Current balance" : "Current"}
+              value={formatValue(summary.end, unit, { signed: axis !== "dollar" })}
+              tone={axis === "dollar" ? polarityOf(summary.end - baseline) : polarityOf(summary.end)}
             />
-            <YAxis
-              tick={CHART_AXIS_TICK}
-              axisLine={false}
-              tickLine={false}
-              width={axis === "dollar" ? 56 : 44}
-              tickFormatter={(v: number) =>
-                axis === "r" ? `${v}R` : axis === "dollar" ? `${(v / 1000).toFixed(0)}k` : `${v.toFixed(0)}%`
-              }
+            <ChartStat label="Period high" value={formatValue(summary.high.value, unit, { signed: axis !== "dollar" })} />
+            <ChartStat
+              label="Max drawdown"
+              value={summary.maxDrawdown ? formatValue(-summary.maxDrawdown.amount, unit, { signed: true }) : "None"}
+              tone={summary.maxDrawdown ? "loss" : undefined}
+              hint="peak → trough in range"
             />
-            <Tooltip
-              contentStyle={CHART_TOOLTIP_STYLE}
-              formatter={(value) => [formatValue(Number(value)), axis === "r" ? "Cumulative R" : axis === "dollar" ? "Balance" : "Return"]}
+            <ChartStat
+              label="From peak now"
+              value={lastFromPeak > 0 ? formatValue(-lastFromPeak, unit, { signed: true }) : "At high"}
+              tone={lastFromPeak > 0 ? "loss" : "profit"}
+              hint={`${summary.ups} up · ${summary.downs} down`}
             />
-            <Area
-              type="monotone"
-              dataKey="value"
-              stroke="var(--chart-1)"
-              strokeWidth={2}
-              fill="url(#equityFill)"
-              dot={false}
-              activeDot={{ r: 4 }}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      )}
-    </div>
+          </ChartStatRow>
+        )
+      }
+    >
+      <EquityInstrument
+        points={points}
+        unit={unit}
+        baseline={baseline}
+        baselineLabel={axis === "dollar" ? "Start balance" : "Start"}
+        valueLabel={axis === "r" ? "Cumulative R" : axis === "dollar" ? "Balance" : "Return"}
+        stepLabel="Trade R"
+        drawdownPane={drawdownPane}
+      />
+    </ChartCard>
   );
 }

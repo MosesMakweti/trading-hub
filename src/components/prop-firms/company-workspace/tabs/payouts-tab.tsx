@@ -1,4 +1,5 @@
 import { PiggyBank } from "lucide-react";
+import { VIZ, tint } from "@/components/viz/tokens";
 
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -51,13 +52,15 @@ export function PayoutsTab({ firm }: { firm: UserPropFirmDTO }) {
     return acc;
   }, {});
   const statusSegments: DonutSegment[] = [
-    { label: "Paid", value: statusCounts.PAID ?? 0, color: "var(--success)" },
-    { label: "Approved", value: statusCounts.APPROVED ?? 0, color: "var(--chart-1)" },
-    { label: "Under review", value: statusCounts.UNDER_REVIEW ?? 0, color: "var(--warning)" },
-    { label: "Requested", value: statusCounts.REQUESTED ?? 0, color: "var(--chart-3)" },
-    { label: "Rejected", value: statusCounts.REJECTED ?? 0, color: "var(--danger)" },
-    { label: "Cancelled", value: statusCounts.CANCELLED ?? 0, color: "var(--muted-foreground)" },
-    { label: "Available", value: statusCounts.AVAILABLE ?? 0, color: "var(--chart-5)" },
+    // In-progress stages share one ordinal blue ramp (lighter = earlier);
+    // outcomes use polarity: paid = profit, rejected = loss, cancelled = neutral.
+    { label: "Paid", value: statusCounts.PAID ?? 0, color: VIZ.profit },
+    { label: "Approved", value: statusCounts.APPROVED ?? 0, color: "var(--viz-1)" },
+    { label: "Under review", value: statusCounts.UNDER_REVIEW ?? 0, color: tint("var(--viz-1)", 75) },
+    { label: "Requested", value: statusCounts.REQUESTED ?? 0, color: tint("var(--viz-1)", 55) },
+    { label: "Available", value: statusCounts.AVAILABLE ?? 0, color: tint("var(--viz-1)", 38) },
+    { label: "Rejected", value: statusCounts.REJECTED ?? 0, color: VIZ.loss },
+    { label: "Cancelled", value: statusCounts.CANCELLED ?? 0, color: VIZ.neutral },
   ].filter((s) => s.value > 0);
 
   return (

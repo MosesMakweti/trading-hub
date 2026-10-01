@@ -24,7 +24,7 @@ export function RowBar({
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <div className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full bg-chart-2", barClassName)} style={{ width: `${clamped}%` }} />
+        <div className={cn("h-full rounded-full bg-viz-1", barClassName)} style={{ width: `${clamped}%` }} />
       </div>
       <span className="text-xs text-muted-foreground tabular-nums">
         {label ?? (percent == null ? "—" : `${percent.toFixed(0)}%`)}

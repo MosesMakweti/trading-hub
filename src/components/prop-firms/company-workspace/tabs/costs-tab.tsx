@@ -1,4 +1,5 @@
 import { Flame } from "lucide-react";
+import { SERIES, VIZ } from "@/components/viz/tokens";
 
 import { EmptyState } from "@/components/shared/empty-state";
 import { Donut, type DonutSegment } from "@/components/analytics/donut";
@@ -29,10 +30,11 @@ export function CostsTab({ firm }: { firm: UserPropFirmDTO }) {
     otherCosts: firm.accounts.reduce((sum, a) => sum + (a.otherCosts ?? 0), 0),
   };
   const compositionSegments: DonutSegment[] = [
-    { label: "Purchase price", value: composition.purchasePrice, color: "var(--chart-1)" },
-    { label: "Reset fees", value: composition.resetFees, color: "var(--chart-2)" },
-    { label: "Activation fees", value: composition.activationFees, color: "var(--chart-3)" },
-    { label: "Other", value: composition.otherCosts, color: "var(--chart-4)" },
+    // Cost types are identities → identity slots in fixed order ("Other" neutral).
+    { label: "Purchase price", value: composition.purchasePrice, color: SERIES[0] },
+    { label: "Reset fees", value: composition.resetFees, color: SERIES[1] },
+    { label: "Activation fees", value: composition.activationFees, color: SERIES[2] },
+    { label: "Other", value: composition.otherCosts, color: VIZ.neutral },
   ].filter((s) => s.value > 0);
 
   return (

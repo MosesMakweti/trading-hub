@@ -1,6 +1,8 @@
 import { LineChart } from "lucide-react";
 
-import { cn } from "@/lib/utils";
+import { KpiCard } from "@/components/analytics/kpi-card";
+import { CompositionBar } from "@/components/viz/composition-bar";
+import { VIZ } from "@/components/viz/tokens";
 import type { StrategyPerformanceSummary } from "@/domain/performance/strategy-performance";
 
 function pct(n: number | null) {
@@ -8,34 +10,6 @@ function pct(n: number | null) {
 }
 function rr(n: number | null) {
   return n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-  sub,
-}: {
-  label: string;
-  value: string;
-  tone?: "success" | "danger";
-  sub?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-background/40 p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div
-        className={cn(
-          "mt-1 text-lg font-semibold tabular-nums",
-          tone === "success" && "text-success",
-          tone === "danger" && "text-danger",
-        )}
-      >
-        {value}
-      </div>
-      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
-    </div>
-  );
 }
 
 /**
@@ -66,6 +40,8 @@ export function StrategyPerformanceSection({
   const returnTone = (n: number | null): "success" | "danger" | undefined =>
     n == null ? undefined : n >= 0 ? "success" : "danger";
 
+  const other = Math.max(0, p.totalTrades - p.winningTrades - p.losingTrades);
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
@@ -74,35 +50,76 @@ export function StrategyPerformanceSection({
         R-multiple.
       </p>
 
+      <div className="glass grid gap-5 rounded-2xl p-4 lg:grid-cols-2">
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">Outcomes</div>
+          <CompositionBar
+            parts={[
+              { key: "w", label: "Wins", value: p.winningTrades, color: VIZ.profit },
+              { key: "l", label: "Losses", value: p.losingTrades, color: VIZ.loss },
+              { key: "o", label: "Breakeven / open", value: other, color: VIZ.neutral },
+            ]}
+          />
+        </div>
+        <RangeStrip worst={p.worstRR} best={p.bestRR} average={p.averageRR} />
+      </div>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <Stat
-          label="Win rate"
-          value={pct(p.winRate)}
-          sub={`${p.winningTrades}W · ${p.losingTrades}L`}
-        />
-        <Stat label="Avg R / trade" value={rr(p.averageRR)} tone={returnTone(p.averageRR)} />
-        <Stat label="Total realized R" value={rr(p.totalRR)} tone={returnTone(p.totalRR)} />
-        <Stat
+        <KpiCard label="Win rate" value={pct(p.winRate)} sublabel={`${p.winningTrades}W · ${p.losingTrades}L`} meter={{ value: p.winRate, reference: 50 }} />
+        <KpiCard label="Total realized R" value={rr(p.totalRR)} tone={returnTone(p.totalRR) ?? "neutral"} />
+        <KpiCard label="Avg R / trade" value={rr(p.averageRR)} tone={returnTone(p.averageRR) ?? "neutral"} />
+        <KpiCard label="Expectancy" value={rr(p.expectancy)} tone={returnTone(p.expectancy) ?? "neutral"} />
+        <KpiCard
           label="Profit factor"
           value={p.profitFactor == null ? "—" : p.profitFactor.toFixed(2)}
-          tone={p.profitFactor == null ? undefined : p.profitFactor >= 1 ? "success" : "danger"}
+          tone={p.profitFactor == null ? "neutral" : p.profitFactor >= 1 ? "success" : "danger"}
         />
-        <Stat label="Expectancy" value={rr(p.expectancy)} tone={returnTone(p.expectancy)} />
-        <Stat label="Best trade" value={rr(p.bestRR)} tone={returnTone(p.bestRR)} />
-        <Stat label="Worst trade" value={rr(p.worstRR)} tone={returnTone(p.worstRR)} />
-        <Stat
-          label="Streaks"
-          value={`${p.longestWinStreak}W`}
-          sub={`Longest loss ${p.longestLossStreak}L`}
-        />
-        <Stat
+        <KpiCard label="Streaks" value={`${p.longestWinStreak}W`} sublabel={`Longest loss ${p.longestLossStreak}L`} />
+        <KpiCard
           label="Avg psychology"
           value={p.averagePsychologyPercent == null ? "—" : `${p.averagePsychologyPercent.toFixed(0)}%`}
+          meter={{
+            value: p.averagePsychologyPercent,
+            tone: p.averagePsychologyPercent == null ? "brand" : p.averagePsychologyPercent >= 80 ? "success" : p.averagePsychologyPercent >= 60 ? "warning" : "danger",
+          }}
         />
-        <Stat
+        <KpiCard
           label="Avg adherence"
           value={p.averageAdherencePercent == null ? "—" : `${p.averageAdherencePercent.toFixed(0)}%`}
+          meter={{ value: p.averageAdherencePercent }}
         />
+      </div>
+    </div>
+  );
+}
+
+/** Worst → best trade on one zero axis, average R marked — the strategy's
+ *  outcome range at a glance (all three numbers are the summary's own). */
+function RangeStrip({ worst, best, average }: { worst: number | null; best: number | null; average: number | null }) {
+  const scale = Math.max(Math.abs(worst ?? 0), Math.abs(best ?? 0), 0.01);
+  const pos = (v: number) => 50 + (v / scale) * 50;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between text-xs">
+        <span className="font-medium text-muted-foreground">Trade range</span>
+        <span className="text-muted-foreground tabular-nums">avg {rr(average)}</span>
+      </div>
+      <div className="relative h-3 rounded-full bg-muted/70" aria-hidden>
+        {worst != null && worst < 0 && (
+          <div className="absolute inset-y-0 rounded-l-full bg-viz-loss/70" style={{ left: `${pos(worst)}%`, right: "50%" }} />
+        )}
+        {best != null && best > 0 && (
+          <div className="absolute inset-y-0 rounded-r-full bg-viz-profit/70" style={{ left: "50%", right: `${100 - pos(best)}%` }} />
+        )}
+        <div className="absolute inset-y-[-3px] left-1/2 w-px bg-viz-axis" />
+        {average != null && (
+          <div className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-2 ring-card" style={{ left: `${pos(average)}%` }} />
+        )}
+      </div>
+      <div className="flex justify-between text-[11px] tabular-nums">
+        <span className="text-danger">worst {rr(worst)}</span>
+        <span className="text-muted-foreground">0R</span>
+        <span className="text-success">best {rr(best)}</span>
       </div>
     </div>
   );

@@ -11,10 +11,13 @@ export const CATEGORY_LABEL: Record<LeakageCategory, string> = {
   OPPORTUNITY: "Opportunity",
 };
 
+// Categories are identities, not statuses: identity slots in their fixed
+// declared order, starting at slot 2 — slot 1 is the "Actual" equity line the
+// categories are drawn beside (docs/ANALYTICS_VISUALIZATION.md §2).
 export const LEAKAGE_TONE: Record<LeakageCategory, string> = {
-  EXECUTION: "var(--chart-1)",
-  BEHAVIORAL: "var(--warning)",
-  RISK: "var(--danger)",
-  STRATEGY_ADHERENCE: "var(--chart-2)",
-  OPPORTUNITY: "var(--chart-3)",
+  EXECUTION: "var(--viz-2)",
+  BEHAVIORAL: "var(--viz-3)",
+  RISK: "var(--viz-4)",
+  STRATEGY_ADHERENCE: "var(--viz-5)",
+  OPPORTUNITY: "var(--viz-6)",
 };

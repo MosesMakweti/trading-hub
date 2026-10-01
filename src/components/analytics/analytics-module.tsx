@@ -5,16 +5,17 @@ import { fmtR, fmtUsd, tone as rTone } from "@/lib/analytics-format";
 import { DateRangeFilter } from "@/components/analytics/date-range-filter";
 import { AnalyticsFilterBar } from "@/components/analytics/analytics-filter-bar";
 import { KpiCard } from "@/components/analytics/kpi-card";
-import { ProgressRing } from "@/components/analytics/progress-ring";
-import { Donut } from "@/components/analytics/donut";
+import { OutcomeProfile } from "@/components/analytics/outcome-profile";
 import { EquityCurveChart } from "@/components/analytics/equity-curve-chart";
 import { DrawdownChart } from "@/components/analytics/drawdown-chart";
+import { ChartCard, ChartStat, ChartStatRow } from "@/components/viz/chart-card";
+import { formatPct } from "@/components/viz/format";
 import { DiscrepancyAnalytics } from "@/components/analytics/discrepancy-analytics";
 import { OpportunityAnalytics } from "@/components/analytics/opportunity-analytics";
 import { AdherenceAnalytics } from "@/components/analytics/adherence-analytics";
 import { AnalyticsBreakdowns } from "@/components/analytics/analytics-breakdowns";
 import { PsychologyAnalytics } from "@/components/analytics/psychology-analytics";
-import { Heatmap, pnlHeatColor } from "@/components/analytics/heatmap";
+import { Heatmap } from "@/components/analytics/heatmap";
 import { PropFirmsAnalyticsSection } from "@/components/analytics/prop-firms-analytics-section";
 import { AnalyticsImprovementSection } from "@/components/analytics/analytics-improvement-section";
 import { Card, GroupList, BehaviourLists, SampleTag } from "@/components/analytics/canonical-analytics-section";
@@ -177,33 +178,19 @@ export function AnalyticsModule({
               <section id="section-overview" className="scroll-mt-24 space-y-3">
                 <SectionHeading title="Performance Overview" hint="Realized R primary — PnL secondary" icon={Activity} />
 
-                <div className="glass grid grid-cols-1 items-center gap-4 rounded-xl px-4 py-5 sm:grid-cols-3 sm:px-6">
-                  <ProgressRing value={c.overview.winRate} tone="brand" label="Win rate" />
-                  <div className="flex flex-col items-center justify-center gap-1 text-center">
-                    <span
-                      className={cn(
-                        "text-2xl font-semibold tabular-nums",
-                        rTone(c.overview.totalRealizedR) === "success" && "text-success",
-                        rTone(c.overview.totalRealizedR) === "danger" && "text-danger",
-                      )}
-                    >
-                      {fmtR(c.overview.totalRealizedR)}
-                    </span>
-                    <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Total Realized R</span>
-                  </div>
-                  <Donut
-                    size={96}
-                    stroke={12}
-                    segments={[
-                      { label: "Win", value: c.overview.winningTrades, color: "var(--success)" },
-                      { label: "Loss", value: c.overview.losingTrades, color: "var(--danger)" },
-                      { label: "BE", value: c.overview.breakevenTrades, color: "var(--muted-foreground)" },
-                    ]}
-                  >
-                    <span className="text-lg font-semibold tabular-nums">{c.overview.totalExecutedTrades}</span>
-                    <span className="text-[10px] tracking-wide text-muted-foreground uppercase">Trades</span>
-                  </Donut>
-                </div>
+                <OutcomeProfile
+                  winRate={c.overview.winRate}
+                  totalRealizedR={c.overview.totalRealizedR}
+                  winning={c.overview.winningTrades}
+                  losing={c.overview.losingTrades}
+                  breakeven={c.overview.breakevenTrades}
+                  pending={c.overview.pendingTrades}
+                  averageWinnerR={c.overview.averageWinnerR}
+                  averageLoserR={c.overview.averageLoserR}
+                  expectancy={c.overview.expectancy}
+                  bestTradeR={c.overview.bestTradeR}
+                  worstTradeR={c.overview.worstTradeR}
+                />
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                   <KpiCard
@@ -259,8 +246,9 @@ export function AnalyticsModule({
                   data={d.equityCurve}
                   rCurve={c.cumulativeRCurve}
                   dollarCurve={d.drawdownCurve}
+                  startingBalance={d.startingBalance}
                 />
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <MiniStat label="Starting balance" value={money(d.startingBalance)} />
                   <MiniStat label="Current balance" value={money(d.currentBalance)} />
                   <MiniStat
@@ -268,7 +256,6 @@ export function AnalyticsModule({
                     value={fmtR(c.overview.totalRealizedR)}
                     tone={c.overview.totalRealizedR > 0 ? "success" : c.overview.totalRealizedR < 0 ? "danger" : undefined}
                   />
-                  <MiniStat label="Recovery factor" value={ratio(d.recoveryFactor)} />
                 </div>
               </section>
             </StaggerItem>
@@ -281,23 +268,39 @@ export function AnalyticsModule({
                   hint="decline from the running peak — Performance Account only, never Prop Firm cashflows"
                   icon={Wallet}
                 />
-                <div className="glass rounded-2xl p-4">
+                <ChartCard
+                  title="Underwater"
+                  icon={Wallet}
+                  headline={{
+                    value: formatPct(-d.currentDrawdownPercent, 1),
+                    tone: d.currentDrawdownPercent > 0 ? "loss" : "profit",
+                    caption: d.currentDrawdownPercent > 0 ? `below peak now · ${money(d.currentDrawdownAmount)}` : "at the running peak",
+                  }}
+                  plotHeight={200}
+                  empty={
+                    d.drawdownCurve.length < 2
+                      ? { title: d.drawdownCurve.length === 0 ? "No settled trades in this range yet" : "One settled trade so far" }
+                      : null
+                  }
+                  footer={
+                    <ChartStatRow>
+                      <ChartStat
+                        label="Max drawdown"
+                        value={formatPct(-d.maxDrawdownPercent, 1)}
+                        tone={d.maxDrawdownPercent > 0 ? "loss" : undefined}
+                      />
+                      <ChartStat label="Max drawdown ($)" value={money(d.maxDrawdownAmount)} />
+                      <ChartStat
+                        label="Current drawdown"
+                        value={formatPct(-d.currentDrawdownPercent, 1)}
+                        tone={d.currentDrawdownPercent > 0 ? "loss" : undefined}
+                      />
+                      <ChartStat label="Recovery factor" value={ratio(d.recoveryFactor)} hint="net P&L ÷ max drawdown" />
+                    </ChartStatRow>
+                  }
+                >
                   <DrawdownChart curve={d.drawdownCurve} />
-                </div>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <MiniStat
-                    label="Max drawdown"
-                    value={`${d.maxDrawdownPercent.toFixed(1)}%`}
-                    tone={d.maxDrawdownPercent > 0 ? "danger" : undefined}
-                  />
-                  <MiniStat label="Max drawdown ($)" value={money(d.maxDrawdownAmount)} />
-                  <MiniStat
-                    label="Current drawdown"
-                    value={`${d.currentDrawdownPercent.toFixed(1)}%`}
-                    tone={d.currentDrawdownPercent > 0 ? "danger" : undefined}
-                  />
-                  <MiniStat label="Current drawdown ($)" value={money(d.currentDrawdownAmount)} />
-                </div>
+                </ChartCard>
               </section>
             </StaggerItem>
 
@@ -469,7 +472,7 @@ export function AnalyticsModule({
                       value: p.percent,
                       label: `${p.dateKey}: ${p.percent >= 0 ? "+" : ""}${p.percent.toFixed(2)}%`,
                     }))}
-                    getColor={pnlHeatColor}
+                    scale="pnl"
                   />
                 </div>
               </section>

@@ -24,6 +24,20 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  /* Data-visualization roles (see docs/ANALYTICS_VISUALIZATION.md §2) */
+  --color-viz-1: var(--viz-1);
+  --color-viz-2: var(--viz-2);
+  --color-viz-3: var(--viz-3);
+  --color-viz-4: var(--viz-4);
+  --color-viz-5: var(--viz-5);
+  --color-viz-6: var(--viz-6);
+  --color-viz-profit: var(--viz-profit);
+  --color-viz-loss: var(--viz-loss);
+  --color-viz-neutral: var(--viz-neutral);
+  --color-viz-warning: var(--viz-warning);
+  --color-viz-reference: var(--viz-reference);
+  --color-viz-grid: var(--viz-grid);
+  --color-viz-axis: var(--viz-axis);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -121,6 +135,27 @@
   --chart-3: oklch(0.44 0.01 255);
   --chart-4: oklch(0.55 0.2 25);
   --chart-5: oklch(0.52 0.12 158);
+  /* Data-visualization roles — chart MARKS only (lines, bars, fills, swatches),
+     never text or UI accents; the chrome stays monochrome. Categorical slots are
+     the validated set in docs/ANALYTICS_VISUALIZATION.md §2 (checked against the
+     card surface with the dataviz validator — re-run it, don't tweak by eye).
+     Hues avoid the reserved profit/loss/warning families. */
+  --viz-1: #0256a9; /* blue */
+  --viz-2: #009cba; /* cyan */
+  --viz-3: #643f9f; /* violet */
+  --viz-4: #00948e; /* teal */
+  --viz-5: #933800; /* orange */
+  --viz-6: #b94f87; /* magenta */
+  --viz-profit: var(--success);
+  --viz-loss: var(--danger);
+  --viz-neutral: oklch(0.62 0.012 255);
+  --viz-warning: var(--warning);
+  /* Benchmarks / expected / targets / limits — always drawn dashed. */
+  --viz-reference: oklch(0.5 0.012 255);
+  /* Solid hairlines, one step off the surface (never dashed). */
+  --viz-grid: oklch(0.17 0.02 255 / 7%);
+  --viz-axis: oklch(0.17 0.02 255 / 18%);
+  --viz-crosshair: oklch(0.17 0.02 255 / 28%);
   /* Sharp, institutional rounding — deliberately restrained (cards land ~10px at 2xl). */
   --radius: 0.5rem;
   /* Matte canvas: no colored wash on light (kept flat + neutral). */
@@ -191,6 +226,22 @@
   --chart-3: oklch(0.5 0.008 265);
   --chart-4: oklch(0.66 0.19 25);
   --chart-5: oklch(0.72 0.13 158);
+  /* Data-visualization roles — the same six hues stepped for the dark card
+     surface (validated separately; see the light block). */
+  --viz-1: #2769b7;
+  --viz-2: #009eba;
+  --viz-3: #7453ae;
+  --viz-4: #00a39c;
+  --viz-5: #be6517;
+  --viz-6: #c66295;
+  --viz-profit: var(--success);
+  --viz-loss: var(--danger);
+  --viz-neutral: oklch(0.55 0.008 265);
+  --viz-warning: var(--warning);
+  --viz-reference: oklch(0.66 0.008 265);
+  --viz-grid: oklch(1 0 0 / 6%);
+  --viz-axis: oklch(1 0 0 / 14%);
+  --viz-crosshair: oklch(1 0 0 / 24%);
   --sidebar: oklch(0.125 0.003 265);
   --sidebar-foreground: oklch(0.965 0.003 265);
   --sidebar-primary: oklch(0.93 0.003 265);

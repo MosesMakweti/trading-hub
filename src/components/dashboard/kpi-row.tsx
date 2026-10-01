@@ -2,7 +2,7 @@ import { KpiCard } from "@/components/analytics/kpi-card";
 import { directionOf } from "@/components/analytics/delta-chip";
 
 function currency(n: number) {
-  return n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
 function signedCurrency(n: number) {
@@ -46,7 +46,8 @@ export function KpiRow({
         value={signedCurrency(t.netPnl)}
         tone={t.netPnl >= 0 ? "success" : "danger"}
         delta={delta(t.netPnl, p.netPnl, signedCurrency)}
-        spark={t.dailyPercents.map((d) => d.percent)}
+        deltaCaption="vs prev. period"
+        sparkBars={t.dailyPercents.map((d) => d.percent)}
       />
       <KpiCard
         label="Expectancy"
@@ -64,18 +65,23 @@ export function KpiRow({
         label="Win Rate"
         value={t.winRate == null ? "—" : `${t.winRate.toFixed(0)}%`}
         delta={delta(t.winRate, p.winRate, (n) => `${n >= 0 ? "+" : ""}${n.toFixed(0)}%`)}
+        meter={{ value: t.winRate, reference: 50 }}
         spark={t.winRateSeries}
+        sparkTone="brand"
       />
       <KpiCard
         label="Max Drawdown"
         value={`${t.maxDrawdownPercent.toFixed(1)}%`}
         tone={t.maxDrawdownPercent > 0 ? "danger" : "neutral"}
         delta={delta(t.maxDrawdownPercent, p.maxDrawdownPercent, (n) => `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`, true)}
+        spark={t.drawdownCurve.some((d) => d.drawdownPercent > 0) ? t.drawdownCurve.map((d) => -d.drawdownPercent) : undefined}
+        sparkTone="danger"
       />
       <KpiCard
         label="Strategy Adherence"
         value={t.ruleAdherenceAverage == null ? "—" : `${t.ruleAdherenceAverage.toFixed(0)}%`}
         delta={delta(t.ruleAdherenceAverage, p.ruleAdherenceAverage, (n) => `${n >= 0 ? "+" : ""}${n.toFixed(0)}%`)}
+        meter={{ value: t.ruleAdherenceAverage }}
       />
       <KpiCard
         label="Avoidable Discrepancy"
@@ -87,6 +93,8 @@ export function KpiRow({
           (n) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`,
           true,
         )}
+        spark={t.counterfactual.curve.some((c) => c.avoidableGap > 0) ? t.counterfactual.curve.map((c) => -c.avoidableGap) : undefined}
+        sparkTone="danger"
       />
     </div>
   );
@@ -101,5 +109,6 @@ interface KpiTradingData {
   maxDrawdownPercent: number;
   ruleAdherenceAverage: number | null;
   dailyPercents: { dateKey: string; percent: number }[];
-  counterfactual: { summary: { totalAvoidableGapR: number } };
+  drawdownCurve: { drawdownPercent: number }[];
+  counterfactual: { summary: { totalAvoidableGapR: number }; curve: { avoidableGap: number }[] };
 }

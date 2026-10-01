@@ -6,8 +6,8 @@ import {
   Area,
   CartesianGrid,
   ComposedChart,
-  Legend,
   Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -16,51 +16,40 @@ import {
 
 import type { CounterfactualPoint, LeakageEvent } from "@/domain/analytics/counterfactual-engine";
 import { CATEGORY_LABEL, LEAKAGE_TONE } from "@/components/analytics/leakage-meta";
-import { CHART_AXIS_TICK } from "@/components/analytics/chart-theme";
+import { ChartLegend } from "@/components/viz/chart-legend";
+import { rechartsTooltip } from "@/components/viz/chart-tooltip";
+import { EmptyPlot } from "@/components/viz/chart-card";
+import { formatDateLong, formatR, formatTick } from "@/components/viz/format";
+import { niceTicks } from "@/components/viz/series";
+import { CHART, SERIES, VIZ } from "@/components/viz/tokens";
 
-const R = (n: number, sign = false) => `${sign && n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
+const R = (n: number, sign = false) => formatR(n, 2, sign);
 
-function GapTooltip({
-  active,
-  payload,
-}: {
-  active?: boolean;
-  payload?: { payload: ChartPoint }[];
-}) {
-  if (!active || !payload?.length) return null;
-  const p = payload[0].payload;
-  return (
-    <div className="max-w-56 rounded-lg border border-border bg-popover p-2.5 text-xs text-popover-foreground shadow-elevated">
-      <div className="mb-1 font-medium">
-        {p.kind === "MISSED" ? "Missed setup" : `Trade #${p.sequence}`}
-      </div>
-      <div className="space-y-0.5 tabular-nums">
-        <Row k="Actual" v={R(p.actualEquity, true)} />
-        <Row k="Process-perfect" v={R(p.processPerfectEquity, true)} />
-        <Row k="Avoidable so far" v={R(p.avoidableGap)} />
-      </div>
-      {p.leakages.length > 0 && (
-        <div className="mt-1.5 border-t border-border pt-1.5 text-[11px] text-muted-foreground">
-          {p.leakages.map((l, i) => (
-            <div key={i} className="flex justify-between gap-3">
-              <span>{l.label}</span>
-              <span>{l.rImpact == null ? "flagged" : R(l.rImpact)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+const ACTUAL = SERIES[0];
 
-function Row({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex justify-between gap-4">
-      <span className="text-muted-foreground">{k}</span>
-      <span>{v}</span>
-    </div>
-  );
-}
+const tooltip = rechartsTooltip<ChartPoint>((p) => {
+  const gap = p.processPerfectEquity - p.actualEquity;
+  return {
+    title: p.kind === "MISSED" ? `Missed setup · #${p.sequence}` : `Trade #${p.sequence}`,
+    subtitle: formatDateLong(p.dateKey),
+    rows: [
+      { key: "a", label: "Actual", value: R(p.actualEquity, true), color: ACTUAL },
+      { key: "p", label: "Process-perfect", value: R(p.processPerfectEquity, true), color: VIZ.reference, mark: "dash" },
+      { key: "g", label: "Gap here", value: R(-gap, true), tone: gap > 0.005 ? "loss" : gap < -0.005 ? "profit" : "muted", mark: "none", separated: true },
+      { key: "s", label: "This event avoidable", value: p.stepAvoidableR > 0 ? R(-p.stepAvoidableR, true) : "none", tone: p.stepAvoidableR > 0 ? "loss" : "muted", mark: "none" },
+      { key: "c", label: "Avoidable so far", value: R(-p.avoidableGap, true), tone: p.avoidableGap > 0 ? "loss" : "muted", mark: "none" },
+      ...p.leakages.map((l, i) => ({
+        key: `l${i}`,
+        label: l.label,
+        value: l.rImpact == null ? "flagged" : R(l.rImpact),
+        color: LEAKAGE_TONE[l.category],
+        mark: "swatch" as const,
+        separated: i === 0,
+      })),
+    ],
+    footer: p.kind === "EXECUTED" ? "Click to inspect this trade" : undefined,
+  };
+});
 
 interface ChartPoint extends CounterfactualPoint {
   // Band shaded ONLY where the disciplined line is above actual (recoverable edge).
@@ -84,78 +73,84 @@ export function CounterfactualGapChart({
   const [selected, setSelected] = useState<ChartPoint | null>(null);
 
   if (curve.length === 0) {
-    return (
-      <p className="py-16 text-center text-sm text-muted-foreground">
-        No trades or valid opportunities in this range yet.
-      </p>
-    );
+    return <EmptyPlot height={height} title="No trades or valid opportunities in this range yet" />;
   }
 
   const data: ChartPoint[] = curve.map((p) => ({
     ...p,
     avoidBand: [p.actualEquity, Math.max(p.actualEquity, p.processPerfectEquity)],
   }));
+  const y = niceTicks(
+    Math.min(0, ...data.map((p) => Math.min(p.actualEquity, p.processPerfectEquity))),
+    Math.max(0, ...data.map((p) => Math.max(p.actualEquity, p.processPerfectEquity))),
+    5,
+  );
+  const last = data[data.length - 1];
 
   return (
     <div className="space-y-2">
+      <ChartLegend
+        items={[
+          { key: "a", label: "Actual", color: ACTUAL, mark: "line", value: R(last.actualEquity, true) },
+          { key: "p", label: "Process-perfect", color: VIZ.reference, mark: "dash", value: R(last.processPerfectEquity, true) },
+          { key: "g", label: "Avoidable gap", color: "color-mix(in oklch, var(--viz-loss) 22%, var(--card))", mark: "swatch", value: R(-last.avoidableGap, true) },
+        ]}
+      />
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart
           data={data}
-          margin={{ left: 0, right: 8, top: 8, bottom: 0 }}
+          margin={{ ...CHART.margin, right: 16 }}
           onClick={(e) => {
             const idx = (e as { activeTooltipIndex?: number | null })?.activeTooltipIndex;
             if (idx != null && idx >= 0 && idx < data.length) setSelected(data[idx]);
           }}
         >
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-          <XAxis
-            dataKey="sequence"
-            tick={CHART_AXIS_TICK}
-            axisLine={{ stroke: "var(--border)" }}
-            tickLine={false}
-            tickFormatter={(v: number) => `#${v}`}
-            minTickGap={28}
-          />
-          <YAxis
-            tick={CHART_AXIS_TICK}
-            axisLine={false}
-            tickLine={false}
-            width={40}
-            tickFormatter={(v: number) => `${v.toFixed(0)}R`}
-          />
-          <Tooltip content={<GapTooltip />} />
-          <Legend iconType="plainline" wrapperStyle={{ fontSize: 11, color: "var(--muted-foreground)" }} />
+          <CartesianGrid {...CHART.grid} />
+          <XAxis dataKey="sequence" tick={CHART.tick} {...CHART.xAxis} tickFormatter={(v: number) => `#${v}`} minTickGap={28} />
+          <YAxis tick={CHART.tick} {...CHART.yAxis} width={44} domain={y.domain} ticks={y.ticks} tickFormatter={(v: number) => formatTick(v, "r")} />
+          <ReferenceLine y={0} stroke={VIZ.axis} />
+          <Tooltip content={tooltip} cursor={CHART.cursor} isAnimationActive={false} />
           <Area
             dataKey="avoidBand"
             name="Avoidable gap"
             stroke="none"
-            fill="var(--chart-4)"
-            fillOpacity={0.14}
+            fill={VIZ.loss}
+            fillOpacity={0.12}
             activeDot={false}
-            legendType="none"
             isAnimationActive={false}
           />
           <Line
-            type="monotone"
+            type="linear"
             dataKey="processPerfectEquity"
             name="Process-perfect"
-            stroke="var(--chart-2)"
-            strokeWidth={2}
-            strokeDasharray="5 4"
+            stroke={VIZ.reference}
+            strokeWidth={1.5}
+            strokeDasharray={CHART.referenceDash}
             dot={false}
-            activeDot={{ r: 4 }}
+            activeDot={{ r: 3, stroke: VIZ.surface, strokeWidth: 2, fill: VIZ.reference }}
+            animationDuration={CHART.animationMs}
           />
           <Line
-            type="monotone"
+            type="linear"
             dataKey="actualEquity"
             name="Actual"
-            stroke="var(--chart-1)"
-            strokeWidth={2}
-            dot={{ r: 2.5, fill: "var(--chart-1)", cursor: "pointer" }}
-            activeDot={{ r: 5, cursor: "pointer" }}
+            stroke={ACTUAL}
+            strokeWidth={CHART.lineWidth}
+            dot={(props: { cx?: number; cy?: number; index?: number }) => {
+              const p = props.index != null ? data[props.index] : undefined;
+              if (!p || props.cx == null || props.cy == null || data.length > 60) return <g key={`d-${props.index}`} />;
+              return p.kind === "MISSED" ? (
+                <circle key={`d-${props.index}`} cx={props.cx} cy={props.cy} r={3} fill={VIZ.surface} stroke={ACTUAL} strokeWidth={1.5} />
+              ) : (
+                <circle key={`d-${props.index}`} cx={props.cx} cy={props.cy} r={2.5} fill={ACTUAL} />
+              );
+            }}
+            activeDot={{ r: 5, stroke: VIZ.surface, strokeWidth: 2, fill: ACTUAL, cursor: "pointer" }}
+            animationDuration={CHART.animationMs}
           />
         </ComposedChart>
       </ResponsiveContainer>
+      <p className="text-[11px] text-muted-foreground/70">Filled dots are trades taken · hollow dots are missed valid setups · click a point to inspect it.</p>
 
       {selected && (
         <div className="rounded-xl border border-border bg-background/40 p-3 text-xs">

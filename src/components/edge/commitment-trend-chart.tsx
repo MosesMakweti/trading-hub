@@ -2,7 +2,9 @@
 
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE } from "@/components/analytics/chart-theme";
+import { EmptyPlot } from "@/components/viz/chart-card";
+import { rechartsTooltip } from "@/components/viz/chart-tooltip";
+import { CHART, VIZ } from "@/components/viz/tokens";
 import { formatDateKeyShort } from "@/lib/date";
 import type { CommitmentLineageSegmentDTO } from "@/types/edge-improvements";
 
@@ -26,31 +28,37 @@ export function CommitmentTrendChart({ segments }: { segments: CommitmentLineage
 
   const hasAnyData = data.some((d) => d.percent != null);
   if (!hasAnyData) {
-    return <p className="py-8 text-center text-xs text-muted-foreground/60 italic">No applicable observations in any period yet.</p>;
+    return <EmptyPlot height={180} title="No applicable observations in any period yet" />;
   }
+
+  const tooltip = rechartsTooltip<(typeof data)[number]>((p) => ({
+    title: p.key,
+    rows:
+      p.percent == null
+        ? [{ key: "n", label: "Adherence", value: "no applicable observations", tone: "muted", mark: "none" }]
+        : [
+            { key: "p", label: "Adherence", value: `${p.percent}%`, color: "var(--viz-1)" },
+            { key: "f", label: "Followed", value: `${p.followed} of ${p.applicable}`, mark: "none" },
+            { key: "b", label: "Breached", value: String(p.breached), tone: p.breached > 0 ? "loss" : "muted", mark: "none" },
+          ],
+  }));
 
   return (
     <ResponsiveContainer width="100%" height={180}>
       <LineChart data={data} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-        <XAxis dataKey="key" tick={CHART_AXIS_TICK} axisLine={{ stroke: "var(--border)" }} tickLine={false} />
-        <YAxis domain={[0, 100]} tick={CHART_AXIS_TICK} axisLine={false} tickLine={false} width={32} tickFormatter={(v: number) => `${v}%`} />
-        <Tooltip
-          contentStyle={CHART_TOOLTIP_STYLE}
-          formatter={(_value, _name, item) => {
-            const p = item.payload as (typeof data)[number];
-            if (p.percent == null) return ["no data", "Adherence"];
-            return [`${p.percent}% (${p.followed}/${p.applicable} followed)`, "Adherence"];
-          }}
-        />
+        <CartesianGrid {...CHART.grid} />
+        <XAxis dataKey="key" tick={CHART.tick} {...CHART.xAxis} />
+        <YAxis domain={[0, 100]} ticks={[0, 50, 100]} tick={CHART.tick} {...CHART.yAxis} width={36} tickFormatter={(v: number) => `${v}%`} />
+        <Tooltip content={tooltip} cursor={CHART.cursor} isAnimationActive={false} />
         <Line
-          type="monotone"
+          type="linear"
           dataKey="percent"
-          stroke="var(--chart-1)"
-          strokeWidth={2}
-          dot={{ r: 3, fill: "var(--chart-1)" }}
-          activeDot={{ r: 5 }}
+          stroke="var(--viz-1)"
+          strokeWidth={CHART.lineWidth}
+          dot={{ r: 3.5, fill: "var(--viz-1)", stroke: VIZ.surface, strokeWidth: 2 }}
+          activeDot={{ r: 5, fill: "var(--viz-1)", stroke: VIZ.surface, strokeWidth: 2 }}
           connectNulls={false}
+          animationDuration={CHART.animationMs}
         />
       </LineChart>
     </ResponsiveContainer>

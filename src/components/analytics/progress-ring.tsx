@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 type RingTone = "brand" | "success" | "danger" | "warning" | "muted";
 
 const TONE_COLOR: Record<RingTone, string> = {
-  brand: "var(--chart-1)",
+  brand: "var(--viz-1)",
   success: "var(--success)",
   danger: "var(--danger)",
   warning: "var(--warning)",

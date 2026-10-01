@@ -1,8 +1,13 @@
 "use client";
 
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { CHART_AXIS_TICK, CHART_TOOLTIP_STYLE } from "@/components/analytics/chart-theme";
+import { ChartCard } from "@/components/viz/chart-card";
+import { ChartLegend } from "@/components/viz/chart-legend";
+import { rechartsTooltip } from "@/components/viz/chart-tooltip";
+import { daySpan, formatDateLong, formatDateTick, formatR, formatTick } from "@/components/viz/format";
+import { niceTicks, timeTickIndices } from "@/components/viz/series";
+import { CHART, SERIES, VIZ } from "@/components/viz/tokens";
 import type { CumulativeRComparison } from "@/domain/replay-comparison/types";
 
 /** Forward-fills both series onto the union of their dates so two curves
@@ -30,48 +35,69 @@ function mergeCurves(comparison: CumulativeRComparison): { date: string; actual:
 
 /**
  * "Actual vs Replay — Cumulative R" (Stage 15.2 §8). Both series start at 0.
+ * Drawn as steps: the merge forward-fills each series between its own
+ * updates, so a step (not a slope) is the honest shape between points.
  * Deliberately no shaded "gap" area by default — the space between the two
  * lines is the Outcome Gap, not a discrepancy; the trader can read it
  * directly from the two lines without an implied verdict.
  */
-export function EdgeCumulativeRChart({ comparison }: { comparison: CumulativeRComparison }) {
-  const data = mergeCurves(comparison);
+const ACTUAL = SERIES[0];
+const REPLAY = SERIES[1];
 
-  if (data.length < 2) {
-    return (
-      <div className="glass rounded-2xl p-4">
-        <h3 className="mb-2 text-sm font-semibold">Actual vs Replay — Cumulative R</h3>
-        <p className="py-10 text-center text-sm text-muted-foreground">Not enough finalized trades yet on either side.</p>
-      </div>
-    );
-  }
+export function EdgeCumulativeRChart({ comparison }: { comparison: CumulativeRComparison }) {
+  const data = mergeCurves(comparison).map((d, index) => ({ ...d, index }));
+  const last = data[data.length - 1];
+  const span = data.length > 1 ? daySpan(data[0].date, last.date) : 0;
+  const ticks = timeTickIndices(data.map((d) => d.date));
+  const y = niceTicks(Math.min(0, ...data.flatMap((d) => [d.actual, d.replay])), Math.max(0, ...data.flatMap((d) => [d.actual, d.replay])), 5);
+
+  const tooltip = rechartsTooltip<(typeof data)[number]>((d) => ({
+    title: formatDateLong(d.date),
+    rows: [
+      { key: "a", label: "Actual", value: formatR(d.actual), color: ACTUAL },
+      { key: "r", label: "Replay", value: formatR(d.replay), color: REPLAY },
+      // Neutral ink on purpose: the Outcome Gap is not a verdict.
+      { key: "g", label: "Outcome gap (actual − replay)", value: formatR(d.actual - d.replay), tone: "muted", mark: "none", separated: true },
+    ],
+  }));
 
   return (
-    <div className="glass space-y-2 rounded-2xl p-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">Actual vs Replay — Cumulative R</h3>
-        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-0.5 w-3 rounded" style={{ background: "var(--chart-1)" }} /> Actual
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-0.5 w-3 rounded" style={{ background: "var(--chart-2)" }} /> Replay
-          </span>
-        </div>
-      </div>
+    <ChartCard
+      title="Actual vs Replay — Cumulative R"
+      plotHeight={240}
+      empty={data.length < 2 ? { title: "Not enough finalized trades yet on either side" } : null}
+      legend={
+        last && (
+          <ChartLegend
+            items={[
+              { key: "a", label: "Actual", color: ACTUAL, mark: "line", value: formatR(last.actual) },
+              { key: "r", label: "Replay", color: REPLAY, mark: "line", value: formatR(last.replay) },
+            ]}
+          />
+        )
+      }
+      footer={<p className="text-[11px] text-muted-foreground/70 italic">The space between the two lines is the Outcome Gap — not a discrepancy on its own.</p>}
+    >
       <ResponsiveContainer width="100%" height={240}>
-        <LineChart data={data} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-          <XAxis dataKey="date" tick={CHART_AXIS_TICK} axisLine={{ stroke: "var(--border)" }} tickLine={false} minTickGap={40} />
-          <YAxis tick={CHART_AXIS_TICK} axisLine={false} tickLine={false} width={44} tickFormatter={(v: number) => `${v.toFixed(0)}R`} />
-          <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={(value, name) => [`${Number(value).toFixed(2)}R`, name]} />
-          <Line type="monotone" dataKey="actual" name="Actual" stroke="var(--chart-1)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-          <Line type="monotone" dataKey="replay" name="Replay" stroke="var(--chart-2)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+        <LineChart data={data} margin={{ ...CHART.margin, right: 20 }}>
+          <CartesianGrid {...CHART.grid} />
+          <XAxis
+            dataKey="index"
+            type="number"
+            domain={[0, Math.max(0, data.length - 1)]}
+            ticks={ticks}
+            interval="preserveStartEnd"
+            tickFormatter={(i: number) => (data[i] ? formatDateTick(data[i].date, span) : "")}
+            tick={CHART.tick}
+            {...CHART.xAxis}
+          />
+          <YAxis tick={CHART.tick} {...CHART.yAxis} width={44} domain={y.domain} ticks={y.ticks} tickFormatter={(v: number) => formatTick(v, "r")} />
+          <ReferenceLine y={0} stroke={VIZ.axis} />
+          <Tooltip content={tooltip} cursor={CHART.cursor} isAnimationActive={false} />
+          <Line type="stepAfter" dataKey="replay" name="Replay" stroke={REPLAY} strokeWidth={CHART.lineWidth} dot={false} activeDot={{ r: 4, fill: REPLAY, stroke: VIZ.surface, strokeWidth: 2 }} animationDuration={CHART.animationMs} />
+          <Line type="stepAfter" dataKey="actual" name="Actual" stroke={ACTUAL} strokeWidth={CHART.lineWidth} dot={false} activeDot={{ r: 4, fill: ACTUAL, stroke: VIZ.surface, strokeWidth: 2 }} animationDuration={CHART.animationMs} />
         </LineChart>
       </ResponsiveContainer>
-      <p className="text-[11px] text-muted-foreground/60 italic">
-        The space between the two lines is the Outcome Gap — not a discrepancy on its own.
-      </p>
-    </div>
+    </ChartCard>
   );
 }

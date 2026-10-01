@@ -105,11 +105,13 @@ hues. `chart-1`, links, and `brand` are all neutral graphite — never blue.
 | `glass` / `glass-border` | opaque `.glass`/`.glass-strong` surface + its edge (mirrors `card`/`border`) | see §7 |
 | `brand` / `brand-from` / `brand-to` | **neutral graphite** (decorative chips/nodes only) | `~0.34 0.006 265` |
 | `sidebar*` | nav surface family | deepest surface |
-| `chart-1…5` | data series (neutral + semantic) | see §10 |
+| `chart-1…5` | legacy neutral series (being replaced by `viz-*`) | see §10 |
+| `viz-1…6`, `viz-profit/loss/neutral/warning/reference/grid/axis` | data-visualization roles (marks only) | see §10 |
 
 > **Monochrome rule:** the UI is graphite/white/gray. Never introduce blue/purple/pink/neon as an
-> accent. The only colors are the reserved semantic set (§3.2) and the muted tag hues (§4). `primary`
-> and `brand` are neutral — a colored primary is a regression.
+> accent. The only colors are the reserved semantic set (§3.2), the muted tag hues (§4), and the
+> validated **data-visualization hues** (`--viz-1…6`, §10) — which colour chart marks only, never text,
+> buttons or chrome. `primary` and `brand` are neutral — a colored primary is a regression.
 
 ### 3.2 PnL & status color — the most important rule
 
@@ -306,21 +308,37 @@ level of motion onto a work surface.
 
 ## 10. Chart styling
 
-All charts must look like one application (Recharts is the house library).
+All charts must look like one application. The full spec — audit, validated
+palette, primitives and phase status — lives in
+[`ANALYTICS_VISUALIZATION.md`](./ANALYTICS_VISUALIZATION.md); this is the
+summary every page must follow.
 
-- **Series colors:** `--chart-1…5` — a **neutral, monochrome-first** ramp: `chart-1` graphite ink
-  (the primary series), `chart-2`/`chart-3` mid/dark grays, and `chart-4`/`chart-5` the semantic
-  **danger**/**success** for anything win/loss. Assigned in fixed order, never cycled/recolored per
-  filter. For **P&L/equity**, use `success`/`danger` (up/down); Expected vs Actual = graphite
-  (`chart-1`) vs a lighter gray or dashed, never two hues.
-- **One axis** — never dual-y. Two measures of different scale → two charts or index to a common
-  base.
-- **Recessive frame:** faint gridlines (`border` at low opacity), muted axis labels, no chart
-  border box. The data is the ink.
-- **Numbers:** axis ticks, tooltips, and legends use `tabular-nums`.
-- **Always** a tooltip (crosshair on line/area); a legend when ≥ 2 series; never rely on color
-  alone (direct labels / patterns for the CVD case). Reserve height and show an empty state
-  ("no trades this period") rather than a blank canvas.
+- **One kit.** Build charts from `src/components/viz/` (`ChartCard`,
+  `ChartTooltip`/`TooltipCard`, `ChartLegend`, tokens, formatters, series
+  helpers) on Recharts. Never hand-style a chart's tooltip, grid or axes.
+- **Colour by job, data marks only.** Polarity (`--viz-profit`/`--viz-loss`/
+  `--viz-neutral`) for money, R and returns; `--viz-warning` for status;
+  `--viz-1…6` (blue, cyan, violet, teal, orange, magenta) for **identity** —
+  strategies, sessions, datasets, comparison series; `--viz-reference`
+  (dashed) for expected/targets/limits/averages. These hues are validated for
+  CVD and contrast against the card surface in both themes — never edit them
+  by eye. They colour **marks only** (lines, bars, fills, swatches): text,
+  buttons and UI accents stay monochrome (§3).
+- **Identity is stable.** Assign slots with `identityColorMap(allKeys)` over
+  the full entity list, never by rank, so filtering never repaints survivors.
+  Past six identities, fold into "Other" (neutral).
+- **One axis** — never dual-y. Two measures of different scale → two charts
+  (optionally `syncId`-linked), small multiples, or index to a common base.
+- **Recessive frame:** solid 1px gridlines (`--viz-grid`, never dashed),
+  muted axis labels, no chart border box. Dashes mean *reference*, nothing else.
+- **Marks:** 2px lines; bars ≤ 24px with a 4px rounded data end; area washes
+  ≈ 10–20%; end-dots ≥ 8px with a 2px surface ring.
+- **Numbers:** ticks and tooltips `tabular-nums`; signed values carry `+`/`−`
+  (true minus) as well as polarity colour.
+- **Always** a tooltip (crosshair on line/area, per-mark on bars/cells) that
+  says what changed and by how much; a legend for ≥ 2 series; empty and loading
+  states that reserve the plot height (`ChartCard`). Refetch holds the previous
+  frame at reduced opacity.
 
 ---
 

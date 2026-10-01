@@ -2,6 +2,8 @@ import { cn } from "@/lib/utils";
 import { TAG_STYLES } from "@/components/ui/tag";
 import { formatRR, formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
 import type { DayCloseSummaryDTO } from "@/server/services/close-day.service";
+import { CompositionBar } from "@/components/viz/composition-bar";
+import { VIZ, tint } from "@/components/viz/tokens";
 
 /**
  * Shared presentational widgets for a day's compact performance summary —
@@ -40,7 +42,18 @@ function Stat({
 /** `showPnl=false` in a backtest — simulated days are R-only (no Performance Account money). */
 export function DaySummaryGrid({ summary, showPnl = true }: { summary: DayCloseSummaryDTO; showPnl?: boolean }) {
   return (
-    <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-background/40 p-3 sm:grid-cols-4">
+    <div className="space-y-3 rounded-xl border border-border bg-background/40 p-3">
+      {summary.tradeCount > 0 && (
+        <CompositionBar
+          height={8}
+          parts={[
+            { key: "s", label: "Settled", value: summary.settledCount, color: "var(--viz-1)" },
+            { key: "p", label: "Pending", value: summary.pendingCount, color: tint("var(--viz-1)", 40), detail: "outcome not yet calculable" },
+            { key: "c", label: "Cancelled", value: summary.cancelledCount, color: VIZ.neutral },
+          ]}
+        />
+      )}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <Stat label="Trades recorded" value={String(summary.tradeCount)} />
       <Stat label="Settled" value={String(summary.settledCount)} />
       {/* Today V2 Final Phase §11 — "Pending" always means outcome-not-yet-
@@ -73,6 +86,7 @@ export function DaySummaryGrid({ summary, showPnl = true }: { summary: DayCloseS
         label="Avg. psychology"
         value={summary.averagePsychologyPercent == null ? "—" : `${summary.averagePsychologyPercent.toFixed(0)}%`}
       />
+      </div>
     </div>
   );
 }

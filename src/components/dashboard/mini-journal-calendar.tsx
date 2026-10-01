@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { localDateToKey } from "@/lib/date";
 import { calendarColorForPercent } from "@/domain/performance/rr";
+import { dayTint } from "@/components/viz/tokens";
 
 interface DailyPnl {
   dateKey: string;
@@ -38,10 +39,11 @@ function MiniDayButton({
         "aspect-square size-auto w-full border border-foreground/10 text-xs font-normal tabular-nums transition-colors hover:border-foreground/25",
         modifiers.today && "ring-1 ring-inset ring-primary/50",
         modifiers.outside && "text-muted-foreground opacity-30",
-        pnl && pnl.tradeCount > 0 && color === "green" && "bg-success/10 hover:bg-success/15",
-        pnl && pnl.tradeCount > 0 && color === "red" && "bg-danger/10 hover:bg-danger/15",
         className,
       )}
+      // Intensity follows the day's % return (full at ±3%), capped for legibility.
+      style={{ backgroundColor: pnl && pnl.tradeCount > 0 && color !== "gray" ? dayTint(pnl.percent, 3) : undefined, ...props.style }}
+      title={pnl && pnl.tradeCount > 0 ? `${pnl.percent >= 0 ? "+" : "\u2212"}${Math.abs(pnl.percent).toFixed(2)}% · ${pnl.tradeCount} trade${pnl.tradeCount === 1 ? "" : "s"}` : undefined}
       onClick={() => router.push(`/journal/${dateKey}`)}
       {...props}
     >

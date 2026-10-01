@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { KpiCard } from "@/components/analytics/kpi-card";
 import { PsychologyTrendChart } from "@/components/analytics/psychology-trend-chart";
 import { BreakdownList } from "@/components/analytics/breakdown-list";
-import { Heatmap, psychologyHeatColor } from "@/components/analytics/heatmap";
+import { Heatmap } from "@/components/analytics/heatmap";
 import type { getAnalyticsData } from "@/server/services/analytics.service";
 
 type PsychologyData = Awaited<ReturnType<typeof getAnalyticsData>>["psychology"];
@@ -58,7 +58,7 @@ export function PsychologyAnalytics({ data }: { data: PsychologyData }) {
             value: p.averagePercent,
             label: `${p.key}: ${p.averagePercent.toFixed(0)}%`,
           }))}
-          getColor={psychologyHeatColor}
+          scale="psychology"
         />
       </div>
 

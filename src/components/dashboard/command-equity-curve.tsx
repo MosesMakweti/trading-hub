@@ -1,18 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  Area,
-  ComposedChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { TrendingUp } from "lucide-react";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ChartCard, ChartStat, ChartStatRow } from "@/components/viz/chart-card";
+import { ChartLegend } from "@/components/viz/chart-legend";
+import { EquityInstrument, type EquityPoint } from "@/components/viz/equity-instrument";
+import { formatDateRange, formatValue, type ValueUnit } from "@/components/viz/format";
+import { annotateSeries } from "@/components/viz/series";
+import { polarityOf, VIZ } from "@/components/viz/tokens";
 import type { EquityCurvePoint } from "@/domain/performance/rr";
 
 export interface ExpectedVsActualPoint {
@@ -30,23 +27,6 @@ const MODE_LABEL: Record<Mode, string> = {
   comparison: "Expected vs Actual",
 };
 
-/** Adds a `peak` running-maximum and `underwater` (peak − value, ≥ 0) column to
- *  a value series — `underwater`, stacked on top of `value` in the chart, is
- *  the standard recharts "band between two lines" technique for drawdown
- *  shading: it visually fills the gap between the equity line and its own
- *  running peak, and collapses to nothing at a new high. */
-function withDrawdown<T extends { value: number }>(points: T[]) {
-  let peak = points.length > 0 ? points[0].value : 0;
-  return points.map((p) => {
-    if (p.value > peak) peak = p.value;
-    return { ...p, peak, underwater: Math.max(0, peak - p.value) };
-  });
-}
-
-function currency(n: number) {
-  return n.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-}
-
 /**
  * Command-center equity curve: %/R/$ value modes (all three derived from the
  * SAME real Performance-Account $ P&L pipeline `analytics.service.ts` already
@@ -54,8 +34,8 @@ function currency(n: number) {
  * how Expectancy/Profit-Factor are already labeled elsewhere, not a second,
  * separately-computed R-multiple system) plus an Expected-vs-Actual R
  * comparison mode built from each trade's real `expectedRR`/`actualRR`.
- * Deliberately a separate component from `analytics/equity-curve-chart.tsx`
- * (kept untouched — 4 other pages depend on its plain `{ data }` contract).
+ * Rendered by the shared EquityInstrument — the series mapping below is
+ * unchanged; only the presentation moved to the viz kit.
  */
 export function CommandEquityCurve({
   data,
@@ -67,10 +47,15 @@ export function CommandEquityCurve({
   expectedVsActual: ExpectedVsActualPoint[];
 }) {
   const [mode, setMode] = useState<Mode>("percent");
+  const isComparison = mode === "comparison";
 
-  const valueChartData = useMemo(() => {
-    const points = data.map((d) => ({
-      date: d.dateKey,
+  const unit: ValueUnit = mode === "dollar" ? "money" : mode === "percent" ? "percent" : "r";
+  const baseline = mode === "dollar" ? startingBalance : 0;
+
+  const points: EquityPoint[] = useMemo(() => {
+    if (isComparison) return expectedVsActual.map((p) => ({ x: p.dateKey, value: p.cumulativeActualR }));
+    return data.map((d) => ({
+      x: d.dateKey,
       value:
         mode === "dollar"
           ? startingBalance * (1 + d.cumulativeCompounding / 100)
@@ -78,36 +63,25 @@ export function CommandEquityCurve({
             ? d.cumulativeAdditive
             : d.cumulativeCompounding,
     }));
-    return withDrawdown(points);
-  }, [data, mode, startingBalance]);
+  }, [data, mode, startingBalance, expectedVsActual, isComparison]);
 
-  const comparisonChartData = useMemo(
-    () =>
-      expectedVsActual.map((p) => ({
-        date: p.dateKey,
-        expected: p.cumulativeExpectedR,
-        actual: p.cumulativeActualR,
-      })),
-    [expectedVsActual],
+  const reference = useMemo(
+    () => (isComparison ? { label: "Expected R", values: expectedVsActual.map((p) => p.cumulativeExpectedR) } : undefined),
+    [isComparison, expectedVsActual],
   );
 
-  const valueFormatter = (v: number) =>
-    mode === "dollar" ? currency(v) : mode === "r" ? `${v.toFixed(2)}R` : `${v.toFixed(1)}%`;
-
-  const isComparison = mode === "comparison";
-  // Explicit record type: the two branches have different shapes, and recharts
-  // infers a single ChartData type from whichever branch it sees first.
-  const chartData: Record<string, string | number>[] = isComparison ? comparisonChartData : valueChartData;
-  // A single point can't draw a curve and collapses the Y axis to repeated
-  // "0.0%" ticks — treat <2 points as empty.
-  const isEmpty = chartData.length < 2;
+  const summary = useMemo(() => annotateSeries(points, baseline).summary, [points, baseline]);
+  const isEmpty = points.length < 2;
+  const lastExpected = isComparison ? expectedVsActual[expectedVsActual.length - 1]?.cumulativeExpectedR : undefined;
 
   return (
-    <div className="glass space-y-3 rounded-xl p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-medium text-muted-foreground">Equity Curve</h3>
+    <ChartCard
+      title="Equity Curve"
+      icon={TrendingUp}
+      plotHeight={280}
+      actions={
         <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
-          <TabsList>
+          <TabsList aria-label="Equity mode">
             {(["percent", "r", "dollar", "comparison"] as const).map((m) => (
               <TabsTrigger key={m} value={m}>
                 {MODE_LABEL[m]}
@@ -115,115 +89,73 @@ export function CommandEquityCurve({
             ))}
           </TabsList>
         </Tabs>
-      </div>
-
-      {isEmpty ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">
-          {isComparison
-            ? "No planned trades with a confirmed plan in this range yet."
-            : "No closed trades in this range yet."}
-        </p>
-      ) : (
-        <ResponsiveContainer width="100%" height={280}>
-          <ComposedChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
-            <defs>
-              <linearGradient id="commandEquityFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.25} />
-                <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis
-              dataKey="date"
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-              axisLine={{ stroke: "var(--border)" }}
-              tickLine={false}
-              minTickGap={40}
-            />
-            <YAxis
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-              width={isComparison ? 40 : 52}
-              tickFormatter={(v: number) => (isComparison ? `${v.toFixed(0)}R` : valueFormatter(v))}
-            />
-            <Tooltip
-              contentStyle={{
-                background: "var(--popover)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                fontSize: 12,
-                color: "var(--popover-foreground)",
-              }}
-              formatter={(value, name) => {
-                if (isComparison) return [`${Number(value).toFixed(2)}R`, name === "expected" ? "Expected" : "Actual"];
-                if (name === "underwater") return [valueFormatter(Number(value)), "Drawdown"];
-                if (name === "value") return [valueFormatter(Number(value)), "Equity"];
-                return [String(value), String(name)];
-              }}
-            />
-            {isComparison ? (
+      }
+      headline={
+        summary && !isEmpty
+          ? {
+              value: formatValue(summary.change, unit, { signed: true }),
+              tone: polarityOf(summary.change),
+              caption: formatDateRange(points[0].x, points[points.length - 1].x),
+            }
+          : undefined
+      }
+      legend={
+        isComparison ? (
+          <ChartLegend
+            items={[
+              { key: "actual", label: "Actual R", color: summary && summary.end < 0 ? VIZ.loss : VIZ.profit, mark: "line" },
+              { key: "expected", label: "Expected R", color: VIZ.reference, mark: "dash" },
+            ]}
+          />
+        ) : undefined
+      }
+      empty={
+        isEmpty
+          ? {
+              title: isComparison
+                ? "No planned trades with a confirmed plan in this range yet"
+                : "No closed trades in this range yet",
+            }
+          : null
+      }
+      footer={
+        summary && (
+          <ChartStatRow cols={3}>
+            {isComparison && lastExpected != null ? (
               <>
-                <Area
-                  type="monotone"
-                  dataKey="expected"
-                  name="expected"
-                  stroke="var(--muted-foreground)"
-                  strokeDasharray="4 3"
-                  strokeWidth={1.5}
-                  fill="none"
-                  dot={false}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="actual"
-                  name="actual"
-                  stroke="var(--chart-1)"
-                  strokeWidth={2}
-                  fill="url(#commandEquityFill)"
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-                <Legend
-                  verticalAlign="top"
-                  height={24}
-                  iconType="plainline"
-                  formatter={(value) => (
-                    <span className="text-xs text-muted-foreground">
-                      {value === "expected" ? "Expected R" : "Actual R"}
-                    </span>
-                  )}
+                <ChartStat label="Actual" value={formatValue(summary.end, "r", { signed: true })} tone={polarityOf(summary.end)} />
+                <ChartStat label="Expected" value={formatValue(lastExpected, "r", { signed: true })} />
+                <ChartStat
+                  label="Gap"
+                  value={formatValue(summary.end - lastExpected, "r", { signed: true })}
+                  tone={polarityOf(summary.end - lastExpected)}
+                  hint="actual − expected"
                 />
               </>
             ) : (
               <>
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  name="value"
-                  stackId="equity"
-                  stroke="var(--chart-1)"
-                  strokeWidth={2}
-                  fill="url(#commandEquityFill)"
-                  dot={{ r: 1.5, fill: "var(--chart-1)", strokeWidth: 0 }}
-                  activeDot={{ r: 4 }}
+                <ChartStat label="Period high" value={formatValue(summary.high.value, unit, { signed: unit !== "money" })} />
+                <ChartStat
+                  label="Max drawdown"
+                  value={summary.maxDrawdown ? formatValue(-summary.maxDrawdown.amount, unit, { signed: true }) : "None"}
+                  tone={summary.maxDrawdown ? "loss" : undefined}
                 />
-                <Area
-                  type="monotone"
-                  dataKey="underwater"
-                  name="underwater"
-                  stackId="equity"
-                  stroke="none"
-                  fill="var(--danger)"
-                  fillOpacity={0.12}
-                  dot={false}
-                  legendType="none"
-                />
+                <ChartStat label="Up / down" value={`${summary.ups} / ${summary.downs}`} hint={mode === "percent" || mode === "r" || mode === "dollar" ? "days" : undefined} />
               </>
             )}
-          </ComposedChart>
-        </ResponsiveContainer>
-      )}
-    </div>
+          </ChartStatRow>
+        )
+      }
+    >
+      <EquityInstrument
+        points={points}
+        unit={unit}
+        baseline={baseline}
+        baselineLabel={mode === "dollar" ? "Start balance" : "Start"}
+        valueLabel={isComparison ? "Actual R" : mode === "dollar" ? "Balance" : mode === "r" ? "Cumulative R" : "Return"}
+        reference={reference}
+        height={260}
+      />
+    </ChartCard>
   );
 }

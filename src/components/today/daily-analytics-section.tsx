@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/shared/empty-state";
 import { KpiCard } from "@/components/analytics/kpi-card";
+import { CompositionBar } from "@/components/viz/composition-bar";
+import { VIZ } from "@/components/viz/tokens";
 import { SaveDot } from "@/components/today/today-ui";
 import { formatSignedCurrency } from "@/components/journal/workspace/workspace-ui";
 import { DayBehaviourRecap, DaySummaryGrid } from "@/components/journal/day-summary-widgets";
@@ -99,7 +101,7 @@ export function DailyAnalyticsSection({
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <KpiCard label="Trades" value={String(a.totalTrades)} sublabel={`${a.winningTrades}W · ${a.losingTrades}L`} />
-        <KpiCard label="Win rate" value={pct(a.winRate)} />
+        <KpiCard label="Win rate" value={pct(a.winRate)} meter={{ value: a.winRate, reference: 50 }} />
         <KpiCard label="Net PnL" value={formatSignedCurrency(a.netPnl)} tone={tone(a.netPnl)} />
         <KpiCard label="Total realized R" value={rr(a.totalRR)} tone={tone(a.totalRR)} />
         <KpiCard label="Avg R / trade" value={rr(a.averageRR)} tone={tone(a.averageRR)} />
@@ -111,10 +113,26 @@ export function DailyAnalyticsSection({
         <KpiCard
           label="Avg psychology"
           value={a.averagePsychologyPercent == null ? "—" : `${a.averagePsychologyPercent.toFixed(0)}%`}
+          meter={{
+            value: a.averagePsychologyPercent,
+            tone: a.averagePsychologyPercent == null ? "brand" : a.averagePsychologyPercent >= 80 ? "success" : a.averagePsychologyPercent >= 60 ? "warning" : "danger",
+          }}
         />
         <KpiCard
           label="Avg adherence"
           value={a.averageAdherencePercent == null ? "—" : `${a.averageAdherencePercent.toFixed(0)}%`}
+          meter={{ value: a.averageAdherencePercent }}
+        />
+      </div>
+
+      <div className="glass space-y-2 rounded-xl p-4">
+        <div className="text-xs font-medium text-muted-foreground">Today&apos;s outcomes</div>
+        <CompositionBar
+          parts={[
+            { key: "w", label: "Wins", value: a.winningTrades, color: VIZ.profit },
+            { key: "l", label: "Losses", value: a.losingTrades, color: VIZ.loss },
+            { key: "o", label: "Breakeven / open", value: Math.max(0, a.totalTrades - a.winningTrades - a.losingTrades), color: VIZ.neutral },
+          ]}
         />
       </div>
 
