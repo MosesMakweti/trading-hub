@@ -125,17 +125,6 @@
   --radius: 0.5rem;
   /* Matte canvas: no colored wash on light (kept flat + neutral). */
   --app-canvas-glow: transparent;
-  /* Photo backdrop (decorative, behind the whole app) — a dedicated light-theme
-     low-poly bull image (see `AppBackdrop`; dark mode swaps in its own
-     image, not a filtered copy of this one). The vignette fades toward the
-     near-white canvas so it recedes behind content instead of fighting
-     light-mode text. Strength is lower than the old candlestick art's was —
-     the bull's wireframe reaches edge-to-edge with no empty glass regions, so
-     it needs a lighter touch to stay in the background rather than the
-     foreground. */
-  --backdrop-vignette: oklch(0.97 0.002 255 / 55%);
-  --backdrop-glow: oklch(1 0 0 / 55%);
-  --backdrop-strength: 0.22;
   /* Sidebar is a frosted panel lighter than the canvas; the active item is a raised
      white pill (bg-card + soft shadow, in the sidebar primitive) that lifts off it. */
   --sidebar: oklch(0.93 0.003 255);
@@ -213,14 +202,6 @@
 
   /* Matte canvas: a barely-there top light for depth — neutral, not colored. */
   --app-canvas-glow: oklch(1 0 0 / 2.5%);
-  /* Photo backdrop — the dedicated dark-theme low-poly bull image; the
-     vignette deepens the edges to black for the cinematic,
-     institutional-terminal feel. Strength is dialed back from the old
-     candlestick art (0.9) since this artwork's wireframe reaches
-     edge-to-edge with no empty glass regions to rest the eye on. */
-  --backdrop-vignette: oklch(0 0 0 / 62%);
-  --backdrop-glow: oklch(0.7 0.006 265 / 10%);
-  --backdrop-strength: 0.3;
 }
 
 @layer base {
@@ -387,25 +368,6 @@
   .animate-pulse-glow {
     animation: pulse-glow 2.4s ease-in-out infinite;
   }
-
-  /* AppBackdrop drift — each depth plane drifts at a different, very slow
-     pace so the artwork feels alive without ever pulling focus (GPU transform only). */
-  .backdrop-drift-a { animation: backdrop-drift-a 80s ease-in-out infinite alternate; will-change: transform; }
-  .backdrop-drift-b { animation: backdrop-drift-b 110s ease-in-out infinite alternate; will-change: transform; }
-  .backdrop-drift-c { animation: backdrop-drift-c 64s ease-in-out infinite alternate; will-change: transform; }
-}
-
-@keyframes backdrop-drift-a {
-  from { transform: translate3d(0, 0, 0) scale(1.01); }
-  to { transform: translate3d(-1.8%, 1.1%, 0) scale(1.03); }
-}
-@keyframes backdrop-drift-b {
-  from { transform: translate3d(0, 0, 0) scale(1.01); }
-  to { transform: translate3d(2%, -1%, 0) scale(1.035); }
-}
-@keyframes backdrop-drift-c {
-  from { transform: translate3d(0, 0, 0) scale(1.02); }
-  to { transform: translate3d(-1.3%, -1.6%, 0) scale(1.045); }
 }
 
 @keyframes aurora-drift {
@@ -446,10 +408,7 @@
 @media (prefers-reduced-motion: reduce) {
   .aurora-orb,
   .animate-gradient-pan,
-  .animate-pulse-glow,
-  .backdrop-drift-a,
-  .backdrop-drift-b,
-  .backdrop-drift-c {
+  .animate-pulse-glow {
     animation: none !important;
   }
 }

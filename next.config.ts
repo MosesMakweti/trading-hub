@@ -3,8 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   images: {
     // Next 16 requires opting every serve quality into an allowlist (default
-    // is [75] only) — 90 lets the full-viewport backdrop photos (AppBackdrop)
-    // serve near-source fidelity instead of being clamped to 75.
+    // is [75] only). (AppBackdrop doesn't go through the optimizer — it serves
+    // its own lossless renditions from /backdrop/.)
     qualities: [75, 90],
   },
   // Extension private-beta ZIPs (public/downloads/, see
@@ -12,6 +12,13 @@ const nextConfig: NextConfig = {
   // content-sniffed, kept out of search indexes.
   async headers() {
     return [
+      {
+        // AppBackdrop renditions (scripts/generate-backdrop.mjs): static, a
+        // few hundred KB each — cache for a week, revalidate in the
+        // background after that (names aren't content-hashed).
+        source: "/backdrop/:file*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=604800, stale-while-revalidate=86400" }],
+      },
       {
         source: "/downloads/:file*.zip",
         headers: [

@@ -10,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <>
-      {/* Decorative floating-market layer behind the whole app (see AppBackdrop). */}
+      {/* Decorative studio-spotlight layer behind the whole app (see AppBackdrop). */}
       <AppBackdrop />
       <SidebarProvider>
         <AppSidebar />
