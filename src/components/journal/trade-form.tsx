@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { TradeIdeaPrefill } from "@/domain/native-replay/drawings/trade-idea";
 import { Controller, useFieldArray, useForm, useWatch, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -22,11 +22,11 @@ import {
 } from "@/components/ui/select";
 import { TradeAccountRow } from "@/components/journal/trade-account-row";
 import { StrategyTagSelect } from "@/components/journal/strategy-tag-select";
+import { useStrategyScopedSelections } from "@/components/journal/use-strategy-scoped-selections";
 import { AdherenceMeter } from "@/components/journal/adherence-score";
 import { SetupScoreCard } from "@/components/journal/setup-score-card";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 import { scoreSetup } from "@/domain/trades/setup-score";
-import { PsychologyQuestionnaire } from "@/components/journal/psychology-questionnaire";
 import { StrategyReferencePanel } from "@/components/journal/strategy-reference-panel";
 import { TradeSetupValidationSection, DailyBiasBadge } from "@/components/journal/trade-setup-validation";
 import { PreTradeMood } from "@/components/journal/pre-trade-mood";
@@ -72,7 +72,6 @@ const FIELD_LABELS: Record<string, string> = {
   executionMinutes: "Execution time",
   biasConfidencePercent: "Bias confidence %",
   allocations: "Participating accounts",
-  psychologyAnswers: "Post-trade questionnaire",
 };
 
 /** Flatten react-hook-form's nested `errors` into a display list. Repeated
@@ -399,63 +398,15 @@ export function TradeForm({
     };
   }, [selectedStrategyId]);
 
-  // When the strategy changes, clear every selection that belongs to exactly
-  // one strategy, so nothing from the previous strategy's checklist can
-  // carry over (Today V2 T3 — this now also matters for an INHERITED
-  // default strategy the trader then changes, not just a manual switch).
-  // Confluences/execution confirmations are strategy-scoped exactly like
-  // entry model/setup type; previously only those two were cleared here,
-  // leaving stale confluence/execution names silently attached to the new
-  // strategy. Skip the very first run so an edit-mode trade (or a create
-  // that started with an inherited default strategy) keeps its existing
-  // selections on load rather than wiping them the instant the form mounts.
-  const strategyInitialised = useRef(false);
-  useEffect(() => {
-    if (!strategyInitialised.current) {
-      strategyInitialised.current = true;
-      return;
-    }
-    setValue("selectedEntryModel", null);
-    setValue("setupTypeId", null);
-    setValue("selectedSetupConditions", []);
-    setValue("setupOverrideReason", null);
-    setValue("setupOverrideNote", null);
-    setValue("selectedConfluences", [], { shouldDirty: true, shouldValidate: true });
-    setValue("selectedExecution", [], { shouldDirty: true, shouldValidate: true });
-  }, [selectedStrategyId, setValue]);
-
-  // When the trader flips direction, drop any selected confluences that no longer
-  // apply (e.g. bullish-only picks left over after switching to Short) and tell
-  // them what was removed — silent removal would look like lost data. BOTH picks
-  // and confluences with no applicability are always kept. Skips the first run so
-  // an edit-mode trade keeps its saved selection on load.
-  const directionInitialised = useRef(false);
-  useEffect(() => {
-    if (!directionInitialised.current) {
-      directionInitialised.current = true;
-      return;
-    }
-    const confluences = strategyReference?.confluences;
-    if (!confluences || confluences.length === 0) return;
-    const applicability = new Map(
-      confluences.map((c) => [c.name.toLowerCase(), c.directionApplicability ?? "BOTH"]),
-    );
-    const current = (getValues("selectedConfluences") ?? []) as string[];
-    const kept = current.filter((n) => {
-      const a = applicability.get(n.toLowerCase());
-      // Unknown name (not in this strategy) → leave it be; scoring ignores it.
-      if (a == null) return true;
-      return a === "BOTH" || (watchedDirection === "LONG" ? a === "BULLISH" : a === "BEARISH");
-    });
-    if (kept.length === current.length) return;
-    const removed = current.length - kept.length;
-    setValue("selectedConfluences", kept, { shouldDirty: true, shouldValidate: true });
-    toast.info(
-      `${removed} ${watchedDirection === "LONG" ? "bearish" : "bullish"}-only ${
-        removed === 1 ? "confluence was" : "confluences were"
-      } removed because this trade is now ${watchedDirection === "LONG" ? "Long" : "Short"}.`,
-    );
-  }, [watchedDirection, strategyReference, getValues, setValue]);
+  // Strategy-scoped selection protections (strategy change clears; direction
+  // flip drops ineligible confluences) — shared with Today V3's Quick Idea.
+  useStrategyScopedSelections({
+    strategyId: selectedStrategyId,
+    direction: watchedDirection,
+    strategyReference,
+    setValue,
+    getValues,
+  });
 
   function isAccountSelected(accountId: string) {
     return fields.some((f) => f.tradingAccountId === accountId);
@@ -1103,7 +1054,7 @@ export function TradeForm({
 
       {/* Phase 3 — Trade Review: what I learned. Only shown when editing an
           existing trade — a new trade is logged as an idea, and its review +
-          Honest Questionnaire are filled later in the Trade Review tab. */}
+          reflections are filled later in the Trade Review tab. */}
       {mode === "edit" && (
       <>
       <div className="space-y-1 pt-2">
@@ -1171,16 +1122,6 @@ export function TradeForm({
             />
           </div>
         </div>
-      </section>
-
-      <section className="glass space-y-3 rounded-2xl p-4" data-field="psychologyAnswers">
-        <h2 className="text-sm font-medium text-muted-foreground">
-          Post-Trade Honest Questionnaire
-        </h2>
-        <PsychologyQuestionnaire control={control} />
-        {errors.psychologyAnswers && (
-          <p className="text-xs text-danger">Please answer every question above.</p>
-        )}
       </section>
       </>
       )}

@@ -168,6 +168,36 @@ export async function addDirectionalEvidenceItem(day: WorkspaceDayRef, input: un
   });
 }
 
+type SuggestEvidenceResult =
+  | { success: true; items: DirectionalEvidenceItemDTO[]; directionalSourceCount: number }
+  | { success: false; error: string };
+
+/** Today V3 — "Suggest from strategy": unchecked candidates from the active strategy's confluences. */
+export async function suggestDirectionalEvidence(
+  day: WorkspaceDayRef,
+  dailyAssetAnalysisId: string,
+): Promise<SuggestEvidenceResult> {
+  const user = await requireUser();
+  return runInDayScope(user.id, day, "write", async (dateKey) => {
+    const blocked = await dayEditableGuard(user.id, dateKey);
+    if (blocked) return blocked;
+    if (typeof dailyAssetAnalysisId !== "string" || dailyAssetAnalysisId === "") {
+      return { success: false, error: "Invalid asset analysis." };
+    }
+
+    try {
+      const { created, directionalSourceCount } = await dailyAssetAnalysisService.suggestDirectionalEvidenceFromStrategy(
+        user.id,
+        dailyAssetAnalysisId,
+      );
+      revalidatePath("/today");
+      return { success: true, items: created, directionalSourceCount };
+    } catch (error) {
+      return { success: false, error: errorMessage(error, "Failed to suggest evidence.") };
+    }
+  });
+}
+
 export async function updateDirectionalEvidenceItem(
   dateKey: string,
   id: string,

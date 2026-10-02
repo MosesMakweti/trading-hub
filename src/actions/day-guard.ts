@@ -40,9 +40,28 @@ export async function tradeExecutionEditableGuard(
 
   const trade = await prisma.trade.findFirst({
     where: { id: tradeId, userId },
-    select: { reviewLifecycleStatus: true },
+    select: {
+      reviewLifecycleStatus: true,
+      actualEntry: true,
+      actualRR: true,
+      performanceRiskSnapshot: { select: { settledAt: true } },
+    },
   });
   if (trade?.reviewLifecycleStatus === "PARTIALLY_CLOSED" || trade?.reviewLifecycleStatus === "STILL_HOLDING") {
+    return null;
+  }
+  // Today V3 (Phase 2) — an entered position that is still open (no closed
+  // result, Performance not settled, not marked fully closed/cancelled) must
+  // stay manageable after its day archives, even if the trader never set a
+  // review status: managing/closing an existing position is never locked.
+  if (
+    trade &&
+    trade.actualEntry != null &&
+    trade.actualRR == null &&
+    trade.performanceRiskSnapshot?.settledAt == null &&
+    trade.reviewLifecycleStatus !== "FULLY_CLOSED" &&
+    trade.reviewLifecycleStatus !== "CANCELLED_NEVER_TRIGGERED"
+  ) {
     return null;
   }
   return blocked;

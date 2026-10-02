@@ -30,7 +30,6 @@ export function PerformanceAccountRow({ dateKey, tradeId }: { dateKey: string; t
   const editable = useWorkspaceEditable();
   const [context, setContext] = useState<PerformanceRiskContext | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [riskInput, setRiskInput] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -39,7 +38,6 @@ export function PerformanceAccountRow({ dateKey, tradeId }: { dateKey: string; t
       if (!active) return;
       if (result.success) {
         setContext(result.data);
-        setRiskInput(String(result.data.riskPercent));
       } else {
         setLoadFailed(true);
       }
@@ -48,28 +46,6 @@ export function PerformanceAccountRow({ dateKey, tradeId }: { dateKey: string; t
       active = false;
     };
   }, [tradeId]);
-
-  const saveState = useDebouncedAutosave({
-    value: riskInput,
-    serialize: (v) => v.trim(),
-    save: async (v) => {
-      const parsed = Number(v.trim());
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        return { success: false, error: "Risk % must be greater than zero." };
-      }
-      const result = await updatePerformanceRiskOverrideAction(dateKey, tradeId, parsed);
-      if (result.success) {
-        // riskAmount depends on riskPercent — refresh the derived value
-        // rather than computing a second copy of that math here.
-        const refreshed = await getPerformanceRiskContextAction(tradeId);
-        if (refreshed.success) setContext(refreshed.data);
-      }
-      return result;
-    },
-    onError: (m) => {
-      if (m) toast.error(m);
-    },
-  });
 
   const riskAmountDisplay = loadFailed
     ? "Unavailable"
@@ -95,22 +71,13 @@ export function PerformanceAccountRow({ dateKey, tradeId }: { dateKey: string; t
               {context.riskPercent}%
               <Lock className="size-3 text-muted-foreground" aria-label="Locked — trade already has an actual entry" />
             </div>
-          ) : editable ? (
-            <div className="flex items-center gap-1">
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                className="h-7 w-16 text-right text-sm tabular-nums"
-                value={riskInput}
-                onChange={(e) => setRiskInput(e.target.value)}
-                disabled={context == null}
-                aria-label="Performance Account risk percent"
-              />
-              <span className="text-xs text-muted-foreground">%</span>
-              {saveState === "saving" && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-              {saveState === "saved" && <Check className="size-3.5 text-success" />}
-            </div>
+          ) : editable && context ? (
+            <RiskOverrideInput
+              dateKey={dateKey}
+              tradeId={tradeId}
+              initialRiskPercent={context.riskPercent}
+              onContext={setContext}
+            />
           ) : (
             <div className={cn("text-sm tabular-nums", context == null && "text-muted-foreground")}>
               {context ? `${context.riskPercent}%` : "—"}
@@ -124,6 +91,65 @@ export function PerformanceAccountRow({ dateKey, tradeId }: { dateKey: string; t
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The pre-execution risk override input. Mounted only once the risk context
+ * has loaded, so the autosave's baseline IS the loaded value: loading the
+ * account default is not an edit, and is never written back as a per-trade
+ * override (previously the load itself triggered a save — silently turning
+ * the default into an override, or a "locked" error toast on executed trades).
+ */
+function RiskOverrideInput({
+  dateKey,
+  tradeId,
+  initialRiskPercent,
+  onContext,
+}: {
+  dateKey: string;
+  tradeId: string;
+  initialRiskPercent: number;
+  onContext: (context: PerformanceRiskContext) => void;
+}) {
+  const [riskInput, setRiskInput] = useState(String(initialRiskPercent));
+  const saveState = useDebouncedAutosave({
+    value: riskInput,
+    serialize: (v) => v.trim(),
+    save: async (v) => {
+      const parsed = Number(v.trim());
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return { success: false, error: "Risk % must be greater than zero." };
+      }
+      const result = await updatePerformanceRiskOverrideAction(dateKey, tradeId, parsed);
+      if (result.success) {
+        // riskAmount depends on riskPercent — refresh the derived value
+        // rather than computing a second copy of that math here.
+        const refreshed = await getPerformanceRiskContextAction(tradeId);
+        if (refreshed.success) onContext(refreshed.data);
+      }
+      return result;
+    },
+    onError: (m) => {
+      if (m) toast.error(m);
+    },
+  });
+
+  return (
+    <div className="flex items-center gap-1">
+      <Input
+        type="number"
+        step="0.01"
+        min="0"
+        className="h-7 w-16 text-right text-sm tabular-nums"
+        value={riskInput}
+        onChange={(e) => setRiskInput(e.target.value)}
+        aria-label="Performance Account risk percent"
+      />
+      <span className="text-xs text-muted-foreground">%</span>
+      {saveState === "saving" && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+      {saveState === "saved" && <Check className="size-3.5 text-success" />}
     </div>
   );
 }

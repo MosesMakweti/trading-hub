@@ -3,6 +3,7 @@ import { Prisma, type DailyAssetAnalysis, type DirectionalEvidenceItem } from "@
 import { prisma } from "@/server/db";
 import { getOrCreateTradingDay, getTradingDay } from "@/server/services/trading-day.service";
 import { summarizeDirectionalEvidence } from "@/domain/today/directional-evidence";
+import { buildEvidenceCandidates } from "@/domain/today/evidence-suggestions";
 import type {
   DailyAssetAnalysisUpdateInput,
   DirectionalEvidenceItemUpdateInput,
@@ -227,6 +228,72 @@ export async function addDirectionalEvidenceItem(
     },
   });
   return toEvidenceItemDTO(item);
+}
+
+/**
+ * Today V3 (Phase 1) — "Suggest from strategy". Inserts the analysis's active
+ * strategy's direction-specific CONFLUENCE items as UNCHECKED evidence rows:
+ * candidates the strategy says to look for, never observations. The trader
+ * ticks what is actually present. BOTH-direction confluences and anything
+ * already on the card are skipped (domain/today/evidence-suggestions.ts), so
+ * running it again adds nothing new. Returns the rows it created, plus how
+ * many direction-specific confluences the strategy has (so the UI can tell
+ * "already listed" from "this strategy has none to suggest").
+ */
+export async function suggestDirectionalEvidenceFromStrategy(
+  userId: string,
+  dailyAssetAnalysisId: string,
+): Promise<{ created: DirectionalEvidenceItemDTO[]; directionalSourceCount: number }> {
+  const analysis = await prisma.dailyAssetAnalysis.findFirst({
+    where: { id: dailyAssetAnalysisId, userId, deletedAt: null },
+    select: { id: true, activeStrategyId: true },
+  });
+  if (!analysis) throw new Error("Asset analysis not found.");
+  if (!analysis.activeStrategyId) throw new Error("Pick an active strategy for this asset first.");
+
+  const [confluences, existing] = await Promise.all([
+    prisma.strategyChecklistItem.findMany({
+      where: {
+        userId,
+        strategyId: analysis.activeStrategyId,
+        strategy: { deletedAt: null },
+        kind: "CONFLUENCE",
+        enabled: true,
+        deletedAt: null,
+      },
+      orderBy: { sortOrder: "asc" },
+      select: { name: true, directionApplicability: true },
+    }),
+    prisma.directionalEvidenceItem.findMany({
+      where: { dailyAssetAnalysisId },
+      orderBy: { sortOrder: "asc" },
+      select: { label: true, direction: true, sortOrder: true },
+    }),
+  ]);
+
+  const candidates = buildEvidenceCandidates(
+    confluences,
+    existing.map((e) => ({ label: e.label, direction: e.direction as "BULLISH" | "BEARISH" })),
+  );
+  const directionalSourceCount = confluences.filter((c) => c.directionApplicability !== "BOTH").length;
+  if (candidates.length === 0) return { created: [], directionalSourceCount };
+
+  const startOrder = existing.reduce((max, e) => Math.max(max, e.sortOrder), -1) + 1;
+  const created = await prisma.$transaction(
+    candidates.map((c, i) =>
+      prisma.directionalEvidenceItem.create({
+        data: {
+          userId,
+          dailyAssetAnalysisId,
+          label: c.label,
+          direction: c.direction,
+          checked: false,
+          sortOrder: startOrder + i,
+        },
+      }),
+    ),
+  );
+  return { created: created.map(toEvidenceItemDTO), directionalSourceCount };
 }
 
 export async function updateDirectionalEvidenceItem(

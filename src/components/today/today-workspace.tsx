@@ -6,9 +6,7 @@ import { toast } from "sonner";
 import type { LucideIcon } from "lucide-react";
 import {
   BookOpenCheck,
-  CandlestickChart,
   ClipboardCheck,
-  Compass,
   FlagOff,
   Lightbulb,
   ListChecks,
@@ -27,7 +25,6 @@ import { Button } from "@/components/ui/button";
 import { reopenDay } from "@/actions/today.actions";
 import { CloseDayDialog } from "@/components/today/close-day-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { EmptyState } from "@/components/shared/empty-state";
 import {
   PreSessionRoutineSection,
   type DayRoutineDTO,
@@ -35,15 +32,10 @@ import {
 import { allMandatoryComplete } from "@/domain/today/routine-snapshot";
 import { DailyMarketPlanSection } from "@/components/today/daily-market-plan-section";
 import { DailyAnalyticsSection } from "@/components/today/daily-analytics-section";
-import { TodayTradeBar } from "@/components/today/today-trade-bar";
 import { TodayFocusFromReview } from "@/components/today/today-focus-from-review";
-import { AddTradeDialog } from "@/components/today/add-trade-dialog";
-import { OpportunitiesSection } from "@/components/journal/opportunity/opportunities-section";
+import { TodayTradeTabs } from "@/components/today/today-trade-tabs";
 import type { LinkableTrade } from "@/components/journal/opportunity/opportunity-card";
 import type { OpportunityListItemDTO } from "@/types/opportunity";
-import { TradeIdeaSection } from "@/components/journal/workspace/trade-idea-section";
-import { TradeExecutionSection } from "@/components/journal/workspace/trade-execution-section";
-import { TradeReviewSection } from "@/components/journal/workspace/trade-review-section";
 import {
   WorkflowProgress,
   WORKFLOW_STEP_META,
@@ -162,7 +154,6 @@ export function TodayWorkspace({
     focusedId && trades.some((t) => t.id === focusedId)
       ? focusedId
       : (trades[trades.length - 1]?.id ?? null);
-  const focusedTrade = trades.find((t) => t.id === effectiveFocusedId) ?? null;
 
   const isArchived = day.status === "ARCHIVED";
   const [archiving, startArchive] = useTransition();
@@ -182,85 +173,23 @@ export function TodayWorkspace({
   // Workspace sections for it — create/continue today's trades in-context.
   function tradeTab(section: "idea" | "execution" | "review") {
     return (
-      <div className="space-y-4">
-        <TodayTradeBar
-          trades={trades}
-          focusedId={effectiveFocusedId}
-          onFocus={setFocusedId}
-          todayKey={day.dateKey}
-          accounts={tradeFormAccounts}
-          strategies={tradeFormStrategies}
-          activeSessions={todaysPlan.activeSessions}
-          sessionWindows={sessionWindows}
-        />
-        {focusedTrade ? (
-          // key = tradeId: remount the whole section when the focused trade
-          // changes, so every field's local state re-seeds from *this* trade's
-          // data. Without it, React reuses the field instances across trades and
-          // their useState carries the previous trade's values over.
-          <div key={focusedTrade.id}>
-            {section === "idea" ? (
-              <TradeIdeaSection
-                trade={focusedTrade}
-                propFirmAccounts={propFirmAccounts}
-                executions={executionsByTradeId[focusedTrade.id] ?? []}
-                dailyMarketContext={
-                  (() => {
-                    const a = dailyAssetAnalyses.find((x) => x.assetSymbol === focusedTrade.assetSymbol);
-                    return a ? { finalBias: a.finalBias, evidenceSummary: a.evidenceSummary } : null;
-                  })()
-                }
-              />
-            ) : section === "execution" ? (
-              <TradeExecutionSection trade={focusedTrade} />
-            ) : (
-              <TradeReviewSection trade={focusedTrade} />
-            )}
-          </div>
-        ) : section === "idea" && dailyAssetAnalyses.length > 0 ? (
-          // Analysis is done and there's nothing to do until the market presents
-          // a setup — a presentational state only (no workflow-state column).
-          <EmptyState
-            icon={Compass}
-            title="Waiting for setup"
-            description="Your asset analysis is complete. There's nothing to do until the market presents one of your setups — add a trade idea the moment it does."
-            action={
-              <AddTradeDialog
-                dateKey={day.dateKey}
-                accounts={tradeFormAccounts}
-                strategies={tradeFormStrategies}
-                activeSessions={todaysPlan.activeSessions}
-                sessionWindows={sessionWindows}
-              />
-            }
-          />
-        ) : (
-          <EmptyState
-            icon={CandlestickChart}
-            title="No trades logged today yet"
-            description="Add a trade to plan it, record how it played out, and review it — all in today's flow."
-            action={
-              <AddTradeDialog
-                dateKey={day.dateKey}
-                accounts={tradeFormAccounts}
-                strategies={tradeFormStrategies}
-                activeSessions={todaysPlan.activeSessions}
-                sessionWindows={sessionWindows}
-              />
-            }
-          />
-        )}
-
-        {section === "idea" && (
-          <OpportunitiesSection
-            dateKey={day.dateKey}
-            opportunities={opportunities}
-            strategies={tradeFormStrategies}
-            linkableTrades={linkableTrades}
-            editable={!isArchived}
-          />
-        )}
-      </div>
+      <TodayTradeTabs
+        section={section}
+        dateKey={day.dateKey}
+        trades={trades}
+        focusedId={effectiveFocusedId}
+        onFocus={setFocusedId}
+        accounts={tradeFormAccounts}
+        strategies={tradeFormStrategies}
+        activeSessions={todaysPlan.activeSessions}
+        sessionWindows={sessionWindows}
+        propFirmAccounts={propFirmAccounts}
+        executionsByTradeId={executionsByTradeId}
+        dailyAssetAnalyses={dailyAssetAnalyses}
+        opportunities={opportunities}
+        linkableTrades={linkableTrades}
+        isArchived={isArchived}
+      />
     );
   }
   const statusByKey = new Map(stepStatuses.map((s) => [s.key, s.status]));

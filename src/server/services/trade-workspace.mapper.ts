@@ -49,6 +49,7 @@ export function toTradeWorkspaceDTO(trade: TradeWithWorkspaceRelations): TradeWo
       targetOrder: pt.targetOrder,
       label: pt.label,
       targetPrice: pt.targetPrice.toNumber(),
+      plannedClosePercent: pt.plannedClosePercent ? pt.plannedClosePercent.toNumber() : null,
     })),
     entryModelName: trade.selectedEntryModel,
     // Only link to the strategy while it still exists (not soft-deleted); the

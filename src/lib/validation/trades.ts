@@ -181,6 +181,10 @@ export const tradeWorkspaceSectionSchema = z
     actualEntry: workspacePrice,
     actualExit: workspacePrice,
     actualStopLoss: workspacePrice,
+    // Today V3 (Phase 2) — the real Entry Time (minutes since midnight),
+    // written with/after the first actual entry; replaces the provisional
+    // creation-time value. Never re-derives an already-frozen risk snapshot.
+    executionMinutes: z.coerce.number().int().min(0).max(1439),
     executionNotes: workspaceNote,
     whatWentWell: workspaceNote,
     whatWentWrong: workspaceNote,

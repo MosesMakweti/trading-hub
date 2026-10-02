@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { ChevronDown, ChevronUp, Info, Plus, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Info, Loader2, Plus, Sparkles, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   addDirectionalEvidenceItem,
   deleteDirectionalEvidenceItem,
+  suggestDirectionalEvidence,
   updateDirectionalEvidenceItem,
 } from "@/actions/daily-asset-analysis.actions";
 import {
@@ -113,11 +114,18 @@ export function DirectionalEvidencePanel({
   dailyAssetAnalysisId,
   items,
   finalBias,
+  variant = "v2",
+  activeStrategyId = null,
 }: {
   dateKey: string;
   dailyAssetAnalysisId: string;
   items: DirectionalEvidenceItemDTO[];
   finalBias: FinalBias | null;
+  /** Today V3 adds "Suggest from strategy" and evidence-first wording; the
+   *  Backtesting Session keeps the V2 panel unchanged. */
+  variant?: "v2" | "v3";
+  /** Today V3 — the asset's active strategy, the source of suggestions. */
+  activeStrategyId?: string | null;
 }) {
   const dayRef = useDayRef(dateKey);
   const [localItems, setLocalItems] = useState(items);
@@ -125,6 +133,32 @@ export function DirectionalEvidencePanel({
   const [newLabel, setNewLabel] = useState("");
   const [newDirection, setNewDirection] = useState<EvidenceDirection>("BULLISH");
   const [adding, startAdd] = useTransition();
+  const [suggesting, startSuggest] = useTransition();
+
+  // Today V3 — candidates the strategy says to look for, inserted UNCHECKED
+  // (server-side). The trader ticks what is actually on the chart.
+  function suggestFromStrategy() {
+    startSuggest(async () => {
+      const r = await suggestDirectionalEvidence(dayRef, dailyAssetAnalysisId);
+      if (!r.success) {
+        toast.error(r.error);
+        return;
+      }
+      setExpanded(true);
+      if (r.items.length === 0) {
+        toast.info(
+          r.directionalSourceCount === 0
+            ? "This strategy has no bullish- or bearish-only confluences to suggest. Direction-neutral ones aren't used as evidence."
+            : "Nothing new to suggest — every directional confluence is already listed.",
+        );
+        return;
+      }
+      setLocalItems((prev) => [...prev, ...r.items]);
+      toast.success(
+        `Added ${r.items.length} candidate${r.items.length === 1 ? "" : "s"} from your strategy, unchecked. Tick only what's present on the chart.`,
+      );
+    });
+  }
 
   const summary = summarizeDirectionalEvidence(localItems);
   const agreement = compareSuggestedToFinalBias(summary.suggestedBias, finalBias ?? null);
@@ -220,11 +254,39 @@ export function DirectionalEvidencePanel({
             </Button>
           </div>
 
-          {summary.suggestedBias && (
-            <p className="text-xs text-muted-foreground">
-              Suggested bias: <span className="font-semibold text-foreground">{summary.suggestedBias}</span>
-            </p>
+          {variant === "v3" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-xs"
+                onClick={suggestFromStrategy}
+                disabled={suggesting || !activeStrategyId}
+              >
+                {suggesting ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                Suggest from strategy
+              </Button>
+              <span className="text-[11px] text-muted-foreground">
+                {activeStrategyId
+                  ? "Adds your strategy's directional confluences unchecked — candidates, not observations."
+                  : "Pick an active strategy below to get suggestions."}
+              </span>
+            </div>
           )}
+
+          {summary.suggestedBias &&
+            (variant === "v3" ? (
+              <p className="text-xs text-muted-foreground">
+                Evidence leans{" "}
+                <span className="font-semibold text-foreground">{summary.suggestedBias === "LONG" ? "Long" : "Short"}</span>
+                {" "}— your final bias is still your call.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Suggested bias: <span className="font-semibold text-foreground">{summary.suggestedBias}</span>
+              </p>
+            ))}
           {agreement === "CONFLICT" && (
             <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <Info className="mt-0.5 size-3.5 shrink-0" />

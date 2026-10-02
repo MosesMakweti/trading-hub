@@ -29,7 +29,7 @@ const ACCOUNT_KIND_LABEL: Record<string, string> = {
  *  always-visible in Execution (never buried behind the other, secondary
  *  real-account details — §11). Reuses the exact frozen snapshot fields
  *  (never a second calculation); "Pending" until settled, never a fake $0. */
-function PerformanceExecutionCard({ trade }: { trade: TradeWorkspaceDTO }) {
+export function PerformanceExecutionCard({ trade }: { trade: TradeWorkspaceDTO }) {
   const risk = trade.performanceRisk;
   if (!risk) return null; // still just an idea — no actual entry has locked a snapshot yet
 
@@ -93,7 +93,7 @@ function PerformanceExecutionCard({ trade }: { trade: TradeWorkspaceDTO }) {
  *  begins — closing the "entered the stop much later" ambiguity through
  *  interaction design, not a stop-event system (never required when a
  *  trustworthy plan exists to inherit from instead). */
-function StopLossField({ trade }: { trade: TradeWorkspaceDTO }) {
+export function StopLossField({ trade }: { trade: TradeWorkspaceDTO }) {
   const initialStop = trade.performanceRisk?.initialStop ?? null;
 
   if (initialStop == null) {

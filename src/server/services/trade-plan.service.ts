@@ -139,6 +139,21 @@ export async function attachPlanScreenshotFromExisting(userId: string, tradeId: 
   return attachPlanScreenshot(userId, tradeId, attachment.mediaId);
 }
 
+/** Today V3 — "Use asset chart": attaches one of today's asset-analysis
+ *  chart screenshots as the trade's plan screenshot. Reuses the SAME
+ *  MediaAsset (no copy of the raw file); the chart stays attached to its
+ *  analysis. Refused once the plan is locked (revise the plan instead). */
+export async function attachPlanScreenshotFromAssetChart(userId: string, tradeId: string, mediaAttachmentId: string) {
+  const attachment = await prisma.mediaAttachment.findFirst({
+    where: { id: mediaAttachmentId, ownerType: "DAILY_ASSET_ANALYSIS", category: "CHART", media: { userId } },
+    select: { mediaId: true },
+  });
+  if (!attachment) throw new Error("Chart not found or access denied.");
+  const locked = await prisma.tradePlanVersion.findFirst({ where: { tradeId, locked: true }, select: { id: true } });
+  if (locked) throw new Error("The plan is locked — revise it to change its screenshot.");
+  return attachPlanScreenshot(userId, tradeId, attachment.mediaId);
+}
+
 /** Removes the plan screenshot wrapper before confirmation (spec §1). The
  *  underlying image file/attachment is untouched — only the plan-specific
  *  wrapper (and its recognition/annotation data) goes away. */

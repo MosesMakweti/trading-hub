@@ -109,3 +109,31 @@ export interface TodaysPlanDTO {
   newsNotes: unknown; // Tiptap JSON or null
   dailyFundamentalOutlook: unknown; // Tiptap JSON or null
 }
+
+/** Today V3 — one of today's active strategies as "Today's Rules" sees it:
+ *  Strategy Lab's own limits, sessions and management rules, read-only. */
+export interface TodaysRulesStrategyDTO {
+  id: string;
+  name: string;
+  sessions: string[];
+  maxDailyRiskPercent: number | null;
+  maxTradesPerDay: number | null;
+  /** Per-trade risk cap (StrategyTradeManagement.maxRiskPercent). */
+  maxRiskPercent: number | null;
+  management: {
+    partialTakeProfits: { trigger: string | null; percentToClose: number | null; reason: string | null }[];
+    initialStopPlacement: string | null;
+    breakEven: string | null;
+    trailing: string | null;
+    scalingIn: string | null;
+    scalingOut: string | null;
+    maxHoldingTime: string | null;
+    customRules: string[];
+  };
+}
+
+/** Today V3 — source data for suggested day limits (never stored as such). */
+export interface TodaysRulesDTO {
+  strategies: TodaysRulesStrategyDTO[];
+  performance: { defaultRiskPercent: number; maxRiskPercent: number | null };
+}

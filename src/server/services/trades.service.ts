@@ -57,7 +57,7 @@ export async function getTradeFormOptions(userId: string) {
   };
 }
 
-const tradeInclude = {
+export const tradeInclude = {
   // Live reference for linking only. The nested include is NOT soft-delete
   // filtered (the extension only guards top-level queries), so `deletedAt` is
   // selected too — a soft-deleted strategy must not render a live link. The

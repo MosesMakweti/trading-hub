@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronDown, ChevronUp, LineChart, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, LineChart, Loader2, Lock, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -91,6 +91,9 @@ export function TodayAssetsSection({
   tradeFormAccounts,
   activeSessions,
   sessionWindows,
+  variant = "v2",
+  tradeCreationLocked = false,
+  onStartIdea,
 }: {
   dateKey: string;
   analyses: DailyAssetAnalysisDTO[];
@@ -101,6 +104,13 @@ export function TodayAssetsSection({
   tradeFormAccounts: { id: string; name: string; kind: string }[];
   activeSessions: string[];
   sessionWindows: SessionWindow[];
+  /** Today V3 regroups each card (Read / Areas / Evidence / Decision / More)
+   *  and adds strategy evidence suggestions; Backtesting keeps V2. */
+  variant?: "v2" | "v3";
+  /** Today V3 — Plan is open before readiness, but starting a trade isn't. */
+  tradeCreationLocked?: boolean;
+  /** Today V3 — "Start trade idea" opens the Quick Trade Idea for this asset. */
+  onStartIdea?: (analysis: DailyAssetAnalysisDTO) => void;
 }) {
   const dayRef = useDayRef(dateKey);
   const router = useRouter();
@@ -203,6 +213,9 @@ export function TodayAssetsSection({
               tradeFormAccounts={tradeFormAccounts}
               activeSessions={activeSessions}
               sessionWindows={sessionWindows}
+              variant={variant}
+              tradeCreationLocked={tradeCreationLocked}
+              onStartIdea={onStartIdea}
             />
           ))}
         </div>
@@ -232,6 +245,9 @@ function AssetAnalysisCard({
   tradeFormAccounts,
   activeSessions,
   sessionWindows,
+  variant,
+  tradeCreationLocked,
+  onStartIdea,
 }: {
   dateKey: string;
   analysis: DailyAssetAnalysisDTO;
@@ -242,7 +258,11 @@ function AssetAnalysisCard({
   tradeFormAccounts: { id: string; name: string; kind: string }[];
   activeSessions: string[];
   sessionWindows: SessionWindow[];
+  variant: "v2" | "v3";
+  tradeCreationLocked: boolean;
+  onStartIdea?: (analysis: DailyAssetAnalysisDTO) => void;
 }) {
+  const router = useRouter();
   const [htfBias, setHtfBias] = useState<DayBias | null>(analysis.htfBias);
   const [sessionBias, setSessionBias] = useState<DayBias | null>(analysis.sessionBias);
   const [fundamentalBias, setFundamentalBias] = useState<DayBias | null>(analysis.fundamentalBias);
@@ -260,6 +280,220 @@ function AssetAnalysisCard({
 
   const symbolStyle = TAG_STYLES[colorForName(analysis.assetSymbol)];
   const finalBadge = FINAL_BIASES.find((f) => f.value === finalBias);
+  const isV3 = variant === "v3";
+  const strategyName = strategies.find((s) => s.id === activeStrategyId)?.name ?? null;
+  const evidence = analysis.evidenceSummary;
+
+  const actionsRow = (
+    <div className="flex items-center justify-between">
+      {/* Today V2 (T3) — launched FROM this asset's plan, so the new
+          Trade Idea starts pre-filled with this asset's own bias,
+          active strategy, and the day's session — see
+          add-trade-dialog.tsx's own doc comment for the split between
+          this and the generic "Add trade" entry points. Today V3 gates it
+          on readiness: Plan is open before the routine, trading isn't. */}
+      {tradeCreationLocked ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          disabled
+          title="Confirm readiness in Prepare before starting a trade idea"
+        >
+          <Lock className="size-3.5" />
+          Start trade idea
+        </Button>
+      ) : onStartIdea ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          // Current (unsaved-to-props) card values so the idea inherits what's on screen.
+          onClick={() => onStartIdea({ ...analysis, finalBias, activeStrategyId, htfBias })}
+        >
+          <Sparkles className="size-3.5" />
+          Start trade idea
+        </Button>
+      ) : (
+        <AddTradeDialog
+          dateKey={dateKey}
+          accounts={tradeFormAccounts}
+          strategies={strategies}
+          initialAssetSymbol={analysis.assetSymbol}
+          initialStrategyId={activeStrategyId ?? undefined}
+          finalBias={finalBias}
+          activeSessions={activeSessions}
+          sessionWindows={sessionWindows}
+          trigger={
+            <Button type="button" size="sm" variant="outline" className="gap-1.5">
+              <Sparkles className="size-3.5" />
+              Start trade idea
+            </Button>
+          }
+        />
+      )}
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="gap-1.5 text-destructive hover:text-destructive"
+        onClick={onDelete}
+      >
+        <Trash2 className="size-3.5" />
+        Remove
+      </Button>
+    </div>
+  );
+
+  /* Areas of Interest — the ONE place these live (Stage 11 §4). */
+  const areasBlock = (
+    <div>
+      <p className="mb-1.5 text-xs font-medium text-muted-foreground uppercase">Key areas of interest</p>
+      <RichTextEditor
+        initialContent={analysis.keyLevels}
+        placeholder="Major support/resistance, supply/demand, liquidity, previous highs/lows, imbalance/FVG, session highs/lows, custom levels…"
+        onSave={(content) => save({ keyLevels: content })}
+      />
+    </div>
+  );
+
+  const structureField = (
+    <div>
+      <p className="mb-1.5 text-xs text-muted-foreground">Market structure</p>
+      <RichTextEditor
+        initialContent={analysis.marketStructure}
+        placeholder="Range, trend, key structure breaks…"
+        onSave={(content) => save({ marketStructure: content })}
+      />
+    </div>
+  );
+
+  const technicalBiases = (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <BiasRow
+        label="HTF bias"
+        options={MARKET_BIASES}
+        value={htfBias}
+        onChange={(v) => {
+          setHtfBias(v);
+          void save({ htfBias: v });
+        }}
+      />
+      <BiasRow
+        label="Session bias"
+        options={MARKET_BIASES}
+        value={sessionBias}
+        onChange={(v) => {
+          setSessionBias(v);
+          void save({ sessionBias: v });
+        }}
+      />
+    </div>
+  );
+
+  const fundamentalBiasRow = (
+    <BiasRow
+      label="This asset's fundamental bias"
+      options={MARKET_BIASES}
+      value={fundamentalBias}
+      onChange={(v) => {
+        setFundamentalBias(v);
+        void save({ fundamentalBias: v });
+      }}
+    />
+  );
+
+  const fundamentalNotesField = (
+    <div>
+      <p className="mb-1.5 text-xs text-muted-foreground">Asset-specific fundamentals</p>
+      <RichTextEditor
+        initialContent={analysis.fundamentalNotes}
+        placeholder="e.g. USD strength, yields, geopolitical risk, gold-specific catalysts…"
+        onSave={(content) => save({ fundamentalNotes: content })}
+      />
+    </div>
+  );
+
+  /* Directional Evidence — optional (Stage 11 §7-13) */
+  const evidenceBlock = (
+    <DirectionalEvidencePanel
+      dateKey={dateKey}
+      dailyAssetAnalysisId={analysis.id}
+      items={analysis.evidenceItems}
+      finalBias={finalBias}
+      variant={variant}
+      activeStrategyId={activeStrategyId}
+    />
+  );
+
+  // Final bias is a HUMAN decision: an explicit click, never derived from the
+  // reads or the evidence above (which may only "lean").
+  const finalBiasRow = (
+    <BiasRow
+      label="Final trading bias — not derived from the above"
+      options={FINAL_BIASES}
+      value={finalBias}
+      onChange={(v) => {
+        setFinalBias(v);
+        void save({ finalBias: v }).then((r) => {
+          // Today V3 — Plan set reads which assets still lack a final bias.
+          if (isV3 && r.success) router.refresh();
+        });
+      }}
+    />
+  );
+
+  const strategySelect = (
+    <div>
+      <p className="mb-1.5 text-xs text-muted-foreground">
+        Active strategy — the default for a new Trade Idea on this asset today
+      </p>
+      <Select
+        items={{ "": "No default strategy", ...Object.fromEntries(strategies.map((s) => [s.id, s.name])) }}
+        value={activeStrategyId ?? ""}
+        onValueChange={(v) => {
+          const next = v || null;
+          setActiveStrategyId(next);
+          void save({ activeStrategyId: next }).then((r) => {
+            // Today V3 — today's strategies drive the suggested day limits.
+            if (isV3 && r.success) router.refresh();
+          });
+        }}
+      >
+        <SelectTrigger className="h-9 w-full max-w-72">
+          <SelectValue placeholder="No default strategy" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">No default strategy</SelectItem>
+          {strategies.map((s) => (
+            <SelectItem key={s.id} value={s.id}>
+              {s.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+
+  const notesField = (
+    <div>
+      <p className="mb-1.5 text-xs text-muted-foreground">Notes</p>
+      <RichTextEditor
+        initialContent={analysis.notes}
+        placeholder="Anything else worth remembering about this asset today…"
+        onSave={(content) => save({ notes: content })}
+      />
+    </div>
+  );
+
+  const screenshotsField = (
+    <div>
+      <p className="mb-1.5 text-xs text-muted-foreground">Chart screenshots</p>
+      <ImageAttachments ownerType="DAILY_ASSET_ANALYSIS" ownerId={analysis.id} category="CHART" requireTimeframe />
+    </div>
+  );
 
   return (
     <div className="glass overflow-hidden rounded-2xl">
@@ -268,7 +502,7 @@ function AssetAnalysisCard({
         onClick={onToggle}
         className="flex w-full items-center justify-between gap-2 p-3.5 text-left"
       >
-        <div className="flex items-center gap-2">
+        <div className={cn("flex items-center gap-2", isV3 && "min-w-0 flex-wrap")}>
           <span
             className={cn(
               "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs",
@@ -278,6 +512,17 @@ function AssetAnalysisCard({
             <span className={cn("size-1.5 shrink-0 rounded-full", symbolStyle.dot)} />
             {analysis.assetSymbol}
           </span>
+          {isV3 && strategyName && <span className="truncate text-xs text-muted-foreground">{strategyName}</span>}
+          {isV3 && (evidence.bullishCount > 0 || evidence.bearishCount > 0) && (
+            <span className="font-mono text-[11px] text-muted-foreground tabular-nums" title="Checked evidence: bullish / bearish">
+              ▲{evidence.bullishCount} ▼{evidence.bearishCount}
+            </span>
+          )}
+          {isV3 && !finalBadge && (
+            <span className="rounded-md border border-dashed border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+              No final bias
+            </span>
+          )}
           {finalBadge && (
             <span
               className={cn(
@@ -287,7 +532,7 @@ function AssetAnalysisCard({
                 finalBadge.value === "NEUTRAL" && "bg-secondary text-secondary-foreground",
               )}
             >
-              {finalBadge.label}
+              {isV3 ? `Final: ${finalBadge.label}` : finalBadge.label}
             </span>
           )}
         </div>
@@ -301,175 +546,69 @@ function AssetAnalysisCard({
         </div>
       </button>
 
-      {expanded && (
-        <div className="space-y-4 border-t border-border/60 p-3.5">
-          <div className="flex items-center justify-between">
-            {/* Today V2 (T3) — launched FROM this asset's plan, so the new
-                Trade Idea starts pre-filled with this asset's own bias,
-                active strategy, and the day's session — see
-                add-trade-dialog.tsx's own doc comment for the split between
-                this and the generic "Add trade" entry points. */}
-            <AddTradeDialog
-              dateKey={dateKey}
-              accounts={tradeFormAccounts}
-              strategies={strategies}
-              initialAssetSymbol={analysis.assetSymbol}
-              initialStrategyId={activeStrategyId ?? undefined}
-              finalBias={finalBias}
-              activeSessions={activeSessions}
-              sessionWindows={sessionWindows}
-              trigger={
-                <Button type="button" size="sm" variant="outline" className="gap-1.5">
-                  <Sparkles className="size-3.5" />
-                  Start trade idea
-                </Button>
-              }
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 text-destructive hover:text-destructive"
-              onClick={onDelete}
-            >
-              <Trash2 className="size-3.5" />
-              Remove
-            </Button>
+      {expanded &&
+        (isV3 ? (
+          <div className="space-y-5 border-t border-border/60 p-3.5">
+            {actionsRow}
+            <AnalysisGroup label="Read">
+              {structureField}
+              {technicalBiases}
+              {fundamentalBiasRow}
+              {fundamentalNotesField}
+            </AnalysisGroup>
+            <AnalysisGroup label="Areas">{areasBlock}</AnalysisGroup>
+            <AnalysisGroup label="Evidence">{evidenceBlock}</AnalysisGroup>
+            <AnalysisGroup label="Decision">
+              {finalBiasRow}
+              {strategySelect}
+            </AnalysisGroup>
+            <AnalysisGroup label="More">
+              {notesField}
+              {screenshotsField}
+            </AnalysisGroup>
           </div>
+        ) : (
+          <div className="space-y-4 border-t border-border/60 p-3.5">
+            {actionsRow}
+            {areasBlock}
 
-          {/* Areas of Interest — the ONE place these live (Stage 11 §4). */}
-          <div>
-            <p className="mb-1.5 text-xs font-medium text-muted-foreground uppercase">Key areas of interest</p>
-            <RichTextEditor
-              initialContent={analysis.keyLevels}
-              placeholder="Major support/resistance, supply/demand, liquidity, previous highs/lows, imbalance/FVG, session highs/lows, custom levels…"
-              onSave={(content) => save({ keyLevels: content })}
-            />
-          </div>
-
-          {/* Technical */}
-          <div className="space-y-3">
-            <p className="text-xs font-medium text-muted-foreground uppercase">Technical</p>
-            <div>
-              <p className="mb-1.5 text-xs text-muted-foreground">Market structure</p>
-              <RichTextEditor
-                initialContent={analysis.marketStructure}
-                placeholder="Range, trend, key structure breaks…"
-                onSave={(content) => save({ marketStructure: content })}
-              />
+            {/* Technical */}
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Technical</p>
+              {structureField}
+              {technicalBiases}
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <BiasRow
-                label="HTF bias"
-                options={MARKET_BIASES}
-                value={htfBias}
-                onChange={(v) => {
-                  setHtfBias(v);
-                  void save({ htfBias: v });
-                }}
-              />
-              <BiasRow
-                label="Session bias"
-                options={MARKET_BIASES}
-                value={sessionBias}
-                onChange={(v) => {
-                  setSessionBias(v);
-                  void save({ sessionBias: v });
-                }}
-              />
+
+            {/* Fundamental */}
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Fundamental</p>
+              {fundamentalBiasRow}
+              {fundamentalNotesField}
             </div>
-          </div>
 
-          {/* Fundamental */}
-          <div className="space-y-3">
-            <p className="text-xs font-medium text-muted-foreground uppercase">Fundamental</p>
-            <BiasRow
-              label="This asset's fundamental bias"
-              options={MARKET_BIASES}
-              value={fundamentalBias}
-              onChange={(v) => {
-                setFundamentalBias(v);
-                void save({ fundamentalBias: v });
-              }}
-            />
-            <div>
-              <p className="mb-1.5 text-xs text-muted-foreground">Asset-specific fundamentals</p>
-              <RichTextEditor
-                initialContent={analysis.fundamentalNotes}
-                placeholder="e.g. USD strength, yields, geopolitical risk, gold-specific catalysts…"
-                onSave={(content) => save({ fundamentalNotes: content })}
-              />
+            {evidenceBlock}
+
+            {/* Conclusion */}
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-muted-foreground uppercase">Conclusion</p>
+              {finalBiasRow}
+              {strategySelect}
             </div>
-          </div>
 
-          {/* Directional Evidence — optional (Stage 11 §7-13) */}
-          <DirectionalEvidencePanel
-            dateKey={dateKey}
-            dailyAssetAnalysisId={analysis.id}
-            items={analysis.evidenceItems}
-            finalBias={finalBias}
-          />
-
-          {/* Conclusion */}
-          <div className="space-y-3">
-            <p className="text-xs font-medium text-muted-foreground uppercase">Conclusion</p>
-            <BiasRow
-              label="Final trading bias — not derived from the above"
-              options={FINAL_BIASES}
-              value={finalBias}
-              onChange={(v) => {
-                setFinalBias(v);
-                void save({ finalBias: v });
-              }}
-            />
-            <div>
-              <p className="mb-1.5 text-xs text-muted-foreground">
-                Active strategy — the default for a new Trade Idea on this asset today
-              </p>
-              <Select
-                items={{ "": "No default strategy", ...Object.fromEntries(strategies.map((s) => [s.id, s.name])) }}
-                value={activeStrategyId ?? ""}
-                onValueChange={(v) => {
-                  const next = v || null;
-                  setActiveStrategyId(next);
-                  void save({ activeStrategyId: next });
-                }}
-              >
-                <SelectTrigger className="h-9 w-full max-w-72">
-                  <SelectValue placeholder="No default strategy" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">No default strategy</SelectItem>
-                  {strategies.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {notesField}
+            {screenshotsField}
           </div>
-
-          <div>
-            <p className="mb-1.5 text-xs text-muted-foreground">Notes</p>
-            <RichTextEditor
-              initialContent={analysis.notes}
-              placeholder="Anything else worth remembering about this asset today…"
-              onSave={(content) => save({ notes: content })}
-            />
-          </div>
-
-          <div>
-            <p className="mb-1.5 text-xs text-muted-foreground">Chart screenshots</p>
-            <ImageAttachments
-              ownerType="DAILY_ASSET_ANALYSIS"
-              ownerId={analysis.id}
-              category="CHART"
-              requireTimeframe
-            />
-          </div>
-        </div>
-      )}
+        ))}
     </div>
+  );
+}
+
+/** Today V3 — one labelled group inside an asset card (Read / Areas / Evidence / Decision / More). */
+function AnalysisGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section className="grid gap-3 border-l border-border pl-3 sm:grid-cols-[88px_minmax(0,1fr)] sm:border-l-0 sm:pl-0">
+      <h4 className="font-mono text-[11px] font-medium tracking-wider text-muted-foreground uppercase sm:pt-1">{label}</h4>
+      <div className="min-w-0 space-y-3">{children}</div>
+    </section>
   );
 }

@@ -25,7 +25,9 @@ import { listStrategySessionWindows } from "@/server/services/strategy-sot.servi
 import { runInBacktestRun } from "@/server/services/backtest-run.service";
 import { LIVE_SCOPE, runLive } from "@/server/workspace/scope";
 import { assertDatabaseSeesScope } from "@/server/workspace/scope-tripwire";
-import type { DailyAnalyticsDTO } from "@/types/today";
+import { getTodaysRules } from "@/server/services/today-rules.service";
+import { getTradeLifecycleFacts, listCarriedOpenTrades } from "@/server/services/today-trade.service";
+import type { DailyAnalyticsDTO, TodaysRulesDTO } from "@/types/today";
 import type { AdherenceResultDTO, AdherenceTrend, EdgeReviewCommitmentDailyStatus, TodayCommitmentsDTO } from "@/types/edge-improvements";
 import type { ExecutionDTO } from "@/types/prop-firms";
 
@@ -90,16 +92,30 @@ async function load(userId: string, dateKey: string, isLive: boolean) {
   const commitmentDailyStates: Record<string, EdgeReviewCommitmentDailyStatus> = Object.fromEntries(dailyStatesMap);
   const commitmentAdherence: Record<string, { current: AdherenceResultDTO; trend: AdherenceTrend }> = Object.fromEntries(adherenceSummaries);
 
-  const executionsRaw = isLive ? await listExecutionsForTrades(userId, trades.map((t) => t.id)) : [];
+  // Today V3 (Phase 2) — LIVE positions entered on an earlier day that are
+  // still open ("carried"), plus the per-trade lifecycle facts the V3 trade
+  // list derives state from. Scoped like everything else here, so a
+  // Backtesting position can never surface on live Today.
+  const carriedRaw = isLive ? await listCarriedOpenTrades(userId, dateKey) : [];
+  const lifecycleFacts = isLive
+    ? await getTradeLifecycleFacts(userId, [...trades, ...carriedRaw].map((t) => t.id))
+    : {};
+
+  const executionsRaw = isLive ? await listExecutionsForTrades(userId, [...trades, ...carriedRaw].map((t) => t.id)) : [];
   const executionsByTradeId: Record<string, ExecutionDTO[]> = {};
   for (const row of executionsRaw) {
     const dto = toExecutionDTO(row);
     (executionsByTradeId[dto.tradeId] ??= []).push(dto);
   }
 
-  // Refinement inside a run: the most recent EARLIER simulated day that left a reflection.
+  // The most recent EARLIER day that left a reflection. TradingDay is a
+  // workspace-scoped root model (server/workspace/prisma-scope.ts), so in a
+  // backtest this only sees the run's own simulated days, and LIVE only sees
+  // live days (backtestRunId = null) — a simulated day can never leak into
+  // Today. Today V3 shows it as "From your last session"; the V2 workspace
+  // still renders it for backtests only.
   let carryForward: CarryForwardDTO | null = null;
-  if (!isLive) {
+  {
     const previous = await prisma.tradingDay.findFirst({
       where: {
         userId,
@@ -118,6 +134,17 @@ async function load(userId: string, dateKey: string, isLive: boolean) {
       };
     }
   }
+
+  // Today V3 — Strategy Lab / Performance Account sources for "Today's
+  // Rules" (suggested limits, sessions, management reference). LIVE only:
+  // the Backtesting Session keeps the V2 workspace, which never reads it.
+  const todaysRules: TodaysRulesDTO | null = isLive
+    ? await getTodaysRules(
+        userId,
+        // Via the DTO so a soft-deleted strategy never contributes limits.
+        assetAnalyses.map((a) => toDailyAssetAnalysisDTO(a).activeStrategyId).filter((id): id is string => id != null),
+      )
+    : null;
 
   const dailyAnalytics: DailyAnalyticsDTO = { ...dailyPerf, analyzed: day.analyzedAt != null };
 
@@ -154,6 +181,9 @@ async function load(userId: string, dateKey: string, isLive: boolean) {
       .filter((t) => t.opportunityId == null)
       .map((t) => ({ id: t.id, tradeNumber: t.tradeNumber, assetSymbol: t.assetSymbol, direction: t.direction })),
     carryForward,
+    todaysRules,
+    carriedTrades: carriedRaw.map(toTradeWorkspaceDTO),
+    lifecycleFacts,
   };
 }
 

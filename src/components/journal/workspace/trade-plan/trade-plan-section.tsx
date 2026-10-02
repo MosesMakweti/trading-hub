@@ -26,6 +26,7 @@ import {
   runRecognitionAction,
   upsertPlanAnnotationAction,
 } from "@/actions/trade-plan.actions";
+import { attachAssetChartToPlanAction } from "@/actions/today-v3.actions";
 import { loadMediaAction } from "@/actions/media.actions";
 import type { MediaItemDTO } from "@/server/services/media.service";
 import type { PlanVersionDTO, PlanWorkspaceDTO } from "@/types/trade-plan";
@@ -74,11 +75,25 @@ export function TradePlanSection({
   assetSymbol,
   initialDirection,
   tradeUpdatedAt,
+  directionMode = "select",
+  suggestedTargets,
+  assetCharts,
+  timeframeSuggestions,
 }: {
   dateKey: string;
   tradeId: string;
   assetSymbol: string;
   initialDirection: DirectionLike;
+  /** Today V3: "fixed" — the plan uses the trade's ONE canonical direction
+   *  (edited in the Idea stage) instead of a second selector. */
+  directionMode?: "select" | "fixed";
+  /** Today V3: Strategy Lab partial TPs as suggested target rows for a NEW
+   *  plan (prices blank). Never applied over an existing plan. */
+  suggestedTargets?: { label: string; plannedClosePercent: number | null; managementInstruction: string | null }[];
+  /** Today V3: today's asset-analysis charts, attachable as the plan screenshot. */
+  assetCharts?: { id: string; label: string }[];
+  /** Today V3: the strategy's timeframes, offered as timeframe suggestions. */
+  timeframeSuggestions?: string[];
   /** The trade's own `updatedAt`, re-read from the server on every
    *  `router.refresh()` (e.g. saving "Actual entry" in Trade Execution).
    *  This component otherwise has no way to know a sibling field's save
@@ -99,11 +114,25 @@ export function TradePlanSection({
   const [activeLineId, setActiveLineId] = useState<string | null>(null);
   const [draggedY, setDraggedY] = useState<Record<string, number>>({});
 
-  const [direction, setDirection] = useState<DirectionLike>(initialDirection);
+  const [selectedDirection, setDirection] = useState<DirectionLike>(initialDirection);
+  // Fixed mode: always the trade's own canonical direction (Today V3).
+  const direction: DirectionLike = directionMode === "fixed" ? initialDirection : selectedDirection;
   const [timeframe, setTimeframe] = useState("");
   const [entry, setEntry] = useState("");
   const [stopLoss, setStopLoss] = useState("");
-  const [targets, setTargets] = useState<TargetRow[]>([emptyTarget(1)]);
+  const [targets, setTargets] = useState<TargetRow[]>(() =>
+    suggestedTargets && suggestedTargets.length > 0
+      ? suggestedTargets.map((t, i) => ({
+          ...emptyTarget(i + 1),
+          label: t.label,
+          plannedClosePercent: t.plannedClosePercent != null ? String(t.plannedClosePercent) : "",
+          managementInstruction: t.managementInstruction ?? "",
+        }))
+      : [emptyTarget(1)],
+  );
+  const [usingSuggestions, setUsingSuggestions] = useState((suggestedTargets?.length ?? 0) > 0);
+  const [attachingChart, setAttachingChart] = useState(false);
+
   const [editReason, setEditReason] = useState("");
 
   async function refresh() {
@@ -122,12 +151,13 @@ export function TradePlanSection({
   function hydrateFormFromPlan(data: PlanWorkspaceDTO) {
     const latestVersion = data.versions[0];
     if (latestVersion) {
-      setDirection((latestVersion.direction as DirectionLike) ?? "LONG");
+      if (directionMode !== "fixed") setDirection((latestVersion.direction as DirectionLike) ?? "LONG");
       setTimeframe(latestVersion.timeframe ?? "");
       setEntry(latestVersion.entry != null ? String(latestVersion.entry) : "");
       setStopLoss(latestVersion.stopLoss != null ? String(latestVersion.stopLoss) : "");
     }
     if (data.targets.length > 0) {
+      setUsingSuggestions(false);
       setTargets(
         data.targets.map((t) => ({
           key: t.id,
@@ -370,6 +400,30 @@ export function TradePlanSection({
       {!screenshot && editable && !hasConfirmedPlan && (
         <>
           <PlanScreenshotDropzone dateKey={dateKey} tradeId={tradeId} existingBeforeImages={beforeImages} onAttached={refresh} />
+          {assetCharts && assetCharts.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-muted-foreground">Or use today&apos;s asset chart:</span>
+              {assetCharts.map((c) => (
+                <Button
+                  key={c.id}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  disabled={attachingChart}
+                  onClick={async () => {
+                    setAttachingChart(true);
+                    const r = await attachAssetChartToPlanAction(dateKey, tradeId, c.id);
+                    setAttachingChart(false);
+                    if (!r.success) toast.error(r.error);
+                    else await refresh();
+                  }}
+                >
+                  {c.label}
+                </Button>
+              ))}
+            </div>
+          )}
           <div className="text-center">
             <Button type="button" variant="ghost" size="sm" onClick={() => setForceEdit(true)}>
               Skip — plan without a screenshot
@@ -416,17 +470,35 @@ export function TradePlanSection({
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="space-y-1">
               <label className="text-[11px] text-muted-foreground">Direction</label>
-              <Select items={{ LONG: "Long", SHORT: "Short" }} value={direction} onValueChange={(v) => v && setDirection(v as DirectionLike)}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="LONG">Long</SelectItem>
-                  <SelectItem value="SHORT">Short</SelectItem>
-                </SelectContent>
-              </Select>
+              {directionMode === "fixed" ? (
+                <div className="flex h-8 items-center text-sm font-medium" title="Set in the Idea stage">
+                  {direction === "LONG" ? "Long" : "Short"}
+                </div>
+              ) : (
+                <Select items={{ LONG: "Long", SHORT: "Short" }} value={direction} onValueChange={(v) => v && setDirection(v as DirectionLike)}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="LONG">Long</SelectItem>
+                    <SelectItem value="SHORT">Short</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-1">
               <label className="text-[11px] text-muted-foreground">Timeframe</label>
-              <Input placeholder="15m" value={timeframe} onChange={(e) => setTimeframe(e.target.value)} />
+              <Input
+                placeholder="15m"
+                value={timeframe}
+                onChange={(e) => setTimeframe(e.target.value)}
+                list={timeframeSuggestions && timeframeSuggestions.length > 0 ? `tf-${tradeId}` : undefined}
+              />
+              {timeframeSuggestions && timeframeSuggestions.length > 0 && (
+                <datalist id={`tf-${tradeId}`}>
+                  {timeframeSuggestions.map((t) => (
+                    <option key={t} value={t} />
+                  ))}
+                </datalist>
+              )}
             </div>
             <div className="space-y-1">
               <label className="text-[11px] text-muted-foreground">Planned entry</label>
@@ -450,6 +522,12 @@ export function TradePlanSection({
               <span className="text-xs font-medium text-muted-foreground">Profit targets</span>
               <Button type="button" variant="outline" size="sm" onClick={addTarget}>Add target</Button>
             </div>
+            {usingSuggestions && !hasConfirmedPlan && (
+              <p className="text-[11px] text-muted-foreground">
+                Close % and instructions suggested from your strategy&apos;s partial take-profits — prices are yours.
+                Nothing is saved until you confirm the plan.
+              </p>
+            )}
             {targets.map((t) => {
               const r = targetRs.find((x) => x.targetOrder === t.targetOrder);
               const dist = entryNum != null && t.targetPrice.trim() !== "" ? computeDistance(entryNum, Number(t.targetPrice), spec) : null;

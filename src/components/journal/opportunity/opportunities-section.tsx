@@ -28,12 +28,15 @@ export function OpportunitiesSection({
   strategies,
   linkableTrades,
   editable,
+  onTake,
 }: {
   dateKey: string;
   opportunities: OpportunityListItemDTO[];
   strategies: StrategyOption[];
   linkableTrades: LinkableTrade[];
   editable: boolean;
+  /** Today V3: route "Take" to the Quick Trade Idea. */
+  onTake?: (opportunity: OpportunityListItemDTO) => void;
 }) {
   const [spotting, setSpotting] = useState(false);
 
@@ -91,6 +94,7 @@ export function OpportunitiesSection({
                 linkableTrades={linkableTrades}
                 editable={editable}
                 strategies={strategies}
+                onTake={onTake}
               />
             </StaggerItem>
           ))}

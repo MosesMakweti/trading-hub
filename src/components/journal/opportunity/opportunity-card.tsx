@@ -71,6 +71,7 @@ export function OpportunityCard({
   linkableTrades,
   editable,
   strategies = [],
+  onTake,
 }: {
   dateKey: string;
   opportunity: OpportunityListItemDTO;
@@ -78,6 +79,9 @@ export function OpportunityCard({
   editable: boolean;
   /** For the in-Session "Log trade" dialog (Backtesting). */
   strategies?: { id: string; name: string; version: number }[];
+  /** Today V3 (live): take the setup through the Quick Trade Idea instead of
+   *  the Journal's full trade form. */
+  onTake?: (opportunity: OpportunityListItemDTO) => void;
 }) {
   const [panel, setPanel] = useState<"none" | "miss" | "link">("none");
   const [linkTradeId, setLinkTradeId] = useState("");
@@ -256,7 +260,13 @@ export function OpportunityCard({
               }
             />
           )}
-          {!isBacktest && (
+          {!isBacktest && onTake && (
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => onTake(o)}>
+              <CandlestickChart className="size-3.5" />
+              Take
+            </Button>
+          )}
+          {!isBacktest && !onTake && (
             <Button
               variant="outline"
               size="sm"

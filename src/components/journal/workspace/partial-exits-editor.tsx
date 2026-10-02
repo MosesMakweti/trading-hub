@@ -44,7 +44,21 @@ function emptyDraft(dateKey: string, isBacktest: boolean): DraftRow {
  * server-side (see the service), so realized R / Performance PnL recompute
  * automatically — never entered manually here.
  */
-export function PartialExitsEditor({ dateKey, tradeId }: { dateKey: string; tradeId: string }) {
+export function PartialExitsEditor({
+  dateKey,
+  tradeId,
+  quickFills,
+  title = "Actual partial exits",
+  emptyHint = "No partial exits recorded — a single Actual exit above is treated as one 100% exit.",
+}: {
+  dateKey: string;
+  tradeId: string;
+  /** Today V3: one-click DRAFT prefills from the plan's targets ("Hit TP1").
+   *  They only fill the draft — nothing is recorded until "Save exit". */
+  quickFills?: { label: string; price: number; percent: number | null }[];
+  title?: string;
+  emptyHint?: string;
+}) {
   const editable = useWorkspaceEditable();
   const { isBacktest } = useWorkspace();
   const router = useRouter();
@@ -115,14 +129,12 @@ export function PartialExitsEditor({ dateKey, tradeId }: { dateKey: string; trad
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">Actual partial exits</span>
+        <span className="text-xs font-medium text-muted-foreground">{title}</span>
         <span className="text-xs text-muted-foreground/70 tabular-nums">{totalPercent.toFixed(0)}% closed</span>
       </div>
 
       {exits.length === 0 && draft == null && (
-        <p className="text-xs text-muted-foreground/60 italic">
-          No partial exits recorded — a single Actual exit above is treated as one 100% exit.
-        </p>
+        <p className="text-xs text-muted-foreground/60 italic">{emptyHint}</p>
       )}
 
       <div className="space-y-1.5">
@@ -160,10 +172,43 @@ export function PartialExitsEditor({ dateKey, tradeId }: { dateKey: string; trad
       </div>
 
       {editable && draft == null && (
-        <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setDraft(emptyDraft(dateKey, isBacktest))}>
-          <Plus className="size-3.5" />
-          Add exit
-        </Button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setDraft(emptyDraft(dateKey, isBacktest))}>
+            <Plus className="size-3.5" />
+            Add exit
+          </Button>
+          {quickFills?.map((q) => (
+            <Button
+              key={q.label}
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() =>
+                setDraft({
+                  ...emptyDraft(dateKey, isBacktest),
+                  exitPrice: String(q.price),
+                  percentClosed: q.percent != null ? String(q.percent) : "",
+                })
+              }
+            >
+              Hit {q.label}
+            </Button>
+          ))}
+          {quickFills && totalPercent > 0 && totalPercent < 100 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() =>
+                setDraft({ ...emptyDraft(dateKey, isBacktest), percentClosed: String(Math.round((100 - totalPercent) * 100) / 100) })
+              }
+            >
+              Close remaining {Math.round((100 - totalPercent) * 100) / 100}%
+            </Button>
+          )}
+        </div>
       )}
 
       {editable && draft != null && (

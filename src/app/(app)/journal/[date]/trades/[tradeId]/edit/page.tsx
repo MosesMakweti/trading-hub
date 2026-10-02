@@ -8,6 +8,7 @@ import { isValidDateKey, formatDateKeyLong } from "@/lib/date";
 import { Button } from "@/components/ui/button";
 import { TradeForm } from "@/components/journal/trade-form";
 import type { TradeFormValues } from "@/lib/validation/trades";
+import { tradeToFormValues } from "@/server/services/trade-input.mapper";
 
 export default async function EditTradePage({
   params,
@@ -40,48 +41,9 @@ export default async function EditTradePage({
     });
   }
 
-  const performanceAllocation = trade.allocations.find(
-    (a) => a.tradingAccount.kind === "PERFORMANCE",
-  );
-  const participatingAllocations = trade.allocations.filter(
-    (a) => a.tradingAccount.kind !== "PERFORMANCE",
-  );
-
-  const defaultValues: TradeFormValues = {
-    // SOT: market + session come from the strategy; prefer the frozen values on the
-    // trade, falling back to the legacy Asset/Session FKs for pre-SOT trades.
-    strategyId: trade.strategyId ?? "",
-    assetSymbol: trade.assetSymbol,
-    executionMinutes: trade.executionMinutes,
-    direction: trade.direction,
-    higherTimeframeBias: trade.higherTimeframeBias,
-    biasConfidencePercent: trade.biasConfidencePercent,
-    selectedSession: trade.selectedSession ?? null,
-    expectedRR: trade.expectedRR ? trade.expectedRR.toNumber() : null,
-    actualRR: trade.actualRR ? trade.actualRR.toNumber() : null,
-    performanceRiskPercentOverride: performanceAllocation ? performanceAllocation.riskValue.toNumber() : null,
-    psychPreTradeMindset: trade.psychPreTradeMindset,
-    psychPostTradeReflection: trade.psychPostTradeReflection,
-    psychLessonsLearned: trade.psychLessonsLearned,
-    psychWhatToWorkOn: trade.psychWhatToWorkOn,
-    allocations: participatingAllocations.map((a) => ({
-      tradingAccountId: a.tradingAccountId,
-      riskInputType: a.riskInputType,
-      riskValue: a.riskValue.toNumber(),
-      // Non-Performance allocations are always trader-entered — 0 is a safe
-      // fallback (this list already excludes the Performance allocation,
-      // which is the only kind Stage C's null semantics apply to).
-      closingPnlGross: a.closingPnlGross?.toNumber() ?? 0,
-      closingPnlNet: a.closingPnlNet?.toNumber() ?? 0,
-    })),
-    // SOT: selections are stored by name (from the chosen strategy). Old trades
-    // predating the strategy-scoped model have no names yet — start empty; the
-    // trader re-picks from the strategy's live confluences/execution on edit.
-    selectedConfluences: (trade.selectedConfluences as string[] | null) ?? [],
-    selectedExecution: (trade.selectedExecution as string[] | null) ?? [],
-    selectedEntryModel: trade.selectedEntryModel,
-    psychologyAnswers: (trade.psychology?.answers as Record<string, string | number>) ?? {},
-  };
+  // Shared mapper — carries every persisted field updateTrade rewrites (incl.
+  // Setup Validation + pre-trade mood), so saving here never clears them.
+  const defaultValues: TradeFormValues = tradeToFormValues(trade);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">

@@ -17,6 +17,8 @@ export interface PlannedTargetDTO {
   targetOrder: number;
   label: string;
   targetPrice: number;
+  /** Today V3 — the planned close % (prefills "Hit TP1" exits). */
+  plannedClosePercent?: number | null;
 }
 
 /** Per-trade discrepancy breakdown (Counterfactual model). A correctly-executed

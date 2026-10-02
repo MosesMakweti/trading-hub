@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -32,9 +32,17 @@ export function PreSessionRoutineSection({
   dateKey,
   routine,
   onReadyChange,
+  onMandatoryRemainingChange,
+  variant = "v2",
 }: {
   dateKey: string;
   routine: DayRoutineDTO;
+  /** Today V3: the routine gates TRADING (Plan stays open), so the gate copy
+   *  and the ready state read differently. Backtesting keeps V2. */
+  variant?: "v2" | "v3";
+  /** Today V3 — keeps the status strip's "N mandatory items left" live as
+   *  boxes are ticked (they autosave without refreshing the page). */
+  onMandatoryRemainingChange?: (remaining: number) => void;
   /** Fired whenever readiness is toggled: `true` = confirmed (parent advances
    *  to Today's Plan), `false` = reopened (parent re-locks). */
   onReadyChange?: (ready: boolean) => void;
@@ -65,6 +73,9 @@ export function PreSessionRoutineSection({
   const optional = optionalProgress(snapshot);
   const mandatoryDone = allMandatoryComplete(snapshot);
   const mandatoryRemaining = mandatory.total - mandatory.completed;
+  useEffect(() => {
+    onMandatoryRemainingChange?.(mandatoryRemaining);
+  }, [mandatoryRemaining, onMandatoryRemainingChange]);
   // Effective readiness: the confirmation only holds while every mandatory item is
   // still complete (e.g. a newly-added required item re-locks the day). The server
   // enforces the same rule when setting readiness.
@@ -132,9 +143,16 @@ export function PreSessionRoutineSection({
                 mandatory.total > 0 && mandatoryDone ? "text-success" : "text-muted-foreground",
               )}
             >
-              {mandatory.total > 0
-                ? `Mandatory ${mandatory.completed}/${mandatory.total} · ${gatePercent}%`
-                : `${progress.completed}/${progress.total} · ${progress.percent}%`}
+              {variant === "v3"
+                ? [
+                    mandatory.total > 0 ? `Mandatory ${mandatory.completed}/${mandatory.total}` : null,
+                    optional.total > 0 ? `Optional ${optional.completed}/${optional.total}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "No items"
+                : mandatory.total > 0
+                  ? `Mandatory ${mandatory.completed}/${mandatory.total} · ${gatePercent}%`
+                  : `${progress.completed}/${progress.total} · ${progress.percent}%`}
             </span>
             <Button
               variant="ghost"
@@ -251,7 +269,16 @@ export function PreSessionRoutineSection({
       )}
 
       {/* Readiness gate */}
-      {isReady ? (
+      {variant === "v3" ? (
+        <ReadinessGateV3
+          isReady={isReady}
+          readyAt={readyAt}
+          mandatoryDone={mandatoryDone}
+          mandatoryRemaining={mandatoryRemaining}
+          isPending={isPending}
+          onToggle={toggleReady}
+        />
+      ) : isReady ? (
         <div className="glass flex flex-wrap items-center justify-between gap-3 rounded-2xl border-success/30 bg-success/5 p-4">
           <div className="flex items-center gap-2.5">
             <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl bg-success/15 text-success">
@@ -299,6 +326,64 @@ export function PreSessionRoutineSection({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Today V3 — the readiness gate: confirming unlocks TRADING (Plan is
+ *  always open). Same toggleReady path, same server-side gate. */
+function ReadinessGateV3({
+  isReady,
+  readyAt,
+  mandatoryDone,
+  mandatoryRemaining,
+  isPending,
+  onToggle,
+}: {
+  isReady: boolean;
+  readyAt: string | null;
+  mandatoryDone: boolean;
+  mandatoryRemaining: number;
+  isPending: boolean;
+  onToggle: () => void;
+}) {
+  if (isReady) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-success/30 bg-success/5 px-4 py-3">
+        <p className="flex items-center gap-2 text-sm">
+          <CircleCheck className="size-4 text-success" />
+          <span className="font-medium">Ready to trade</span>
+          {readyAt && (
+            <span className="font-mono text-xs text-muted-foreground tabular-nums" suppressHydrationWarning>
+              since {new Date(readyAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </p>
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={onToggle} disabled={isPending}>
+          <RotateCcw className="size-3.5" />
+          Reopen
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
+      <p className={cn("flex items-center gap-2 text-sm", mandatoryDone ? "text-success" : "text-muted-foreground")}>
+        {mandatoryDone ? <CircleCheck className="size-4" /> : <Lock className="size-4" />}
+        {mandatoryDone
+          ? "All mandatory items done"
+          : `${mandatoryRemaining} mandatory item${mandatoryRemaining === 1 ? "" : "s"} left — trading stays locked; Plan is open.`}
+      </p>
+      <Button
+        type="button"
+        onClick={onToggle}
+        disabled={isPending || !mandatoryDone}
+        title={mandatoryDone ? undefined : "Complete every mandatory routine item first"}
+        className="gap-1.5"
+      >
+        {mandatoryDone ? <Sparkles className="size-4" /> : <Lock className="size-4" />}
+        I&apos;m ready to trade
+      </Button>
     </div>
   );
 }

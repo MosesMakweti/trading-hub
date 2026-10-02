@@ -782,6 +782,17 @@ model Trade {
   // blocks the trade; null when no analysis existed for that asset/day.
   dailyBiasSnapshot       String?
 
+  // Today V3 (Phase 2) — daily-limit accountability. Set when the trader
+  // took this trade knowing it would exceed today's CONFIRMED max trades
+  // and/or daily risk (TradingDay.maxTradesPerDay / riskBudgetPercent):
+  // the reason they gave, and the limit/usage facts at that moment
+  // ({ kinds, maxTrades, executedCount, riskLimitPercent, riskUsedPercent,
+  // projectedRiskPercent, at }). Soft limits are never blocked — this is the
+  // record. Null = no override was needed. Distinct from overrideReason
+  // above, which is the Setup Validation shield's own override.
+  limitOverrideReason  String?
+  limitOverrideContext Json?
+
   // Trade Opportunity architecture: the valid setup this executed trade came from
   // (when logged via the opportunity flow). Optional — trades logged directly have
   // no opportunity. @unique enforces one executed trade per opportunity (no

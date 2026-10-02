@@ -24,6 +24,7 @@ export function TodayTradeBar({
   strategies,
   activeSessions,
   sessionWindows,
+  allowCreate = true,
 }: {
   trades: TradeWorkspaceDTO[];
   focusedId: string | null;
@@ -35,6 +36,8 @@ export function TodayTradeBar({
   // so it only gets the day-level session default, never asset/strategy/bias.
   activeSessions?: string[];
   sessionWindows?: SessionWindow[];
+  /** Today V3 — false until readiness is confirmed (hides "Add trade"). */
+  allowCreate?: boolean;
 }) {
   const { isBacktest } = useWorkspace();
   return (
@@ -78,13 +81,15 @@ export function TodayTradeBar({
             Open
           </Button>
         )}
-        <AddTradeDialog
-          dateKey={todayKey}
-          accounts={accounts}
-          strategies={strategies}
-          activeSessions={activeSessions}
-          sessionWindows={sessionWindows}
-        />
+        {allowCreate && (
+          <AddTradeDialog
+            dateKey={todayKey}
+            accounts={accounts}
+            strategies={strategies}
+            activeSessions={activeSessions}
+            sessionWindows={sessionWindows}
+          />
+        )}
       </div>
     </div>
   );
