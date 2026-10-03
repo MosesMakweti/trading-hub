@@ -27,8 +27,6 @@ export type ReviewState =
 export interface ReviewAnswersFacts {
   tradeIntent: string | null;
   adherenceAnswers: Record<string, boolean>;
-  /** A scored questionnaire row exists (all 8 canonical keys answered). */
-  psychologyComplete: boolean;
   wouldTakeAgain: boolean | null;
 }
 
@@ -44,7 +42,6 @@ export function missingReviewRequirements(a: ReviewAnswersFacts): ReviewRequirem
   for (const q of ADHERENCE_QUESTIONS) {
     if (typeof a.adherenceAnswers[q.key] !== "boolean") missing.push({ key: `adherence.${q.key}`, label: q.prompt });
   }
-  if (!a.psychologyComplete) missing.push({ key: "psychology", label: "Psychology questions" });
   if (a.wouldTakeAgain == null) missing.push({ key: "wouldTakeAgain", label: "Would I take this setup again?" });
   return missing;
 }

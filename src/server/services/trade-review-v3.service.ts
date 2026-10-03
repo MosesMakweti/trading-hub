@@ -168,7 +168,6 @@ function computeFacts(trade: ReviewTrade) {
     answers: {
       tradeIntent: trade.tradeIntent,
       adherenceAnswers: (trade.adherenceAnswers as Record<string, boolean> | null) ?? {},
-      psychologyComplete: trade.psychology != null,
       wouldTakeAgain: trade.wouldTakeAgain,
     },
   });

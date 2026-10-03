@@ -73,7 +73,6 @@ export async function syncLiveTradeLifecycle(userId: string, tradeId: string, no
     answers: {
       tradeIntent: trade.tradeIntent,
       adherenceAnswers: (trade.adherenceAnswers as Record<string, boolean> | null) ?? {},
-      psychologyComplete: trade.psychology != null,
       wouldTakeAgain: trade.wouldTakeAgain,
     },
   });

@@ -112,7 +112,6 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
         answers: {
           tradeIntent: t.tradeIntent,
           adherenceAnswers: t.adherenceAnswers,
-          psychologyComplete: t.psychology != null,
           wouldTakeAgain: t.wouldTakeAgain,
         },
       },

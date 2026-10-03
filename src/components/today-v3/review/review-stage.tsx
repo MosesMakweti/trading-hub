@@ -7,7 +7,6 @@ import { Check, ChevronRight, Loader2, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useDebouncedAutosave, type SaveState } from "@/hooks/use-debounced-autosave";
 import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
@@ -16,21 +15,16 @@ import { TradeImageBucket } from "@/components/journal/workspace/trade-image-buc
 import {
   completeReviewAction,
   loadV3ReviewAction,
-  saveReviewPsychologyAction,
   setReviewIntentAction,
   updateReviewFieldsAction,
 } from "@/actions/trade-review-v3.actions";
 import { loadTradeBehaviourLabelsAction, setTradeBehaviourLabelsAction } from "@/actions/behaviour-labels.actions";
 import { setReviewLifecycleStatusAction } from "@/actions/trade-review.actions";
 import { ADHERENCE_QUESTIONS } from "@/domain/trades/adherence";
-import { PSYCHOLOGY_QUESTIONS, type ChoiceQuestion } from "@/domain/psychology/questions";
-import { HUMAN_KEYS } from "@/domain/psychology/review-adapter";
 import { REVIEW_STATE_LABEL, type ReviewState } from "@/domain/trades/review-state";
 import type { V3ReviewDTO } from "@/server/services/trade-review-v3.service";
-import type { EvidenceResult } from "@/domain/trades/review-evidence";
 import type { ComparisonTone } from "@/domain/trades/review-summary";
 
-type Answers = Record<string, string | number>;
 type Intent = NonNullable<V3ReviewDTO["tradeIntent"]>;
 
 const INTENTS: { value: Intent; label: string }[] = [
@@ -41,17 +35,6 @@ const INTENTS: { value: Intent; label: string }[] = [
   { value: "IMPULSE", label: "Impulsive" },
   { value: "MANUAL_OVERRIDE", label: "Manual override" },
 ];
-
-// V3 wording; storage keys and options are the canonical questionnaire's.
-const PROMPT: Record<string, string> = {
-  riskManaged: "Managed risk according to plan?",
-  followedExitPlan: "Followed the planned exit?",
-  alignedWithBias: "Was this trade aligned with the higher-timeframe trend or bias?",
-  influencedBySomeoneElseProfit: "Influenced by seeing someone else profit?",
-  influencedByOnlineOpinion: "Influenced by someone's opinion online?",
-  outcomeWillInfluenceNext: "Will this outcome affect your next trade?",
-  monitoringObsession: "How intensely did you monitor it? (1–100)",
-};
 
 const STATE_TONE: Record<ReviewState, string> = {
   NOT_AVAILABLE: "border-border text-muted-foreground",
@@ -71,14 +54,13 @@ const ROW_TONE: Record<ComparisonTone, string> = {
 
 /**
  * Today V3 (Phase 3) — the Review stage: RESULT → PLAN VS ACTUAL → PROCESS →
- * MOTIVE → PSYCHOLOGY → BEHAVIOUR → REFLECTION → AFTER IMAGES → Complete.
+ * MOTIVE → BEHAVIOUR → REFLECTION → AFTER IMAGES → Complete.
  * Derived facts come from trade-review-v3.service (read-only here); each
  * concept is asked once and stored in its existing canonical column.
  */
 export function ReviewStage({ tradeId, dateKey }: { tradeId: string; dateKey: string }) {
   const [data, setData] = useState<V3ReviewDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [psychDraft, setPsychDraft] = useState<Answers | null>(null);
   const router = useRouter();
 
   const reload = useCallback(async () => {
@@ -132,8 +114,7 @@ export function ReviewStage({ tradeId, dateKey }: { tradeId: string; dateKey: st
       <PlanVsActualBlock data={data} />
       <OverridesBlock data={data} />
       <ProcessBlock data={data} dateKey={dateKey} onChanged={changed} />
-      <MotiveBlock data={data} dateKey={dateKey} onChanged={changed} psychDraft={psychDraft} />
-      <PsychologyBlock data={data} dateKey={dateKey} onChanged={changed} onDraft={setPsychDraft} />
+      <MotiveBlock data={data} dateKey={dateKey} onChanged={changed} />
       <BehaviourBlock data={data} dateKey={dateKey} onChanged={changed} />
       <ReflectionBlock data={data} dateKey={dateKey} onChanged={changed} />
 
@@ -370,14 +351,10 @@ function MotiveBlock({
   data,
   dateKey,
   onChanged,
-  psychDraft,
 }: {
   data: V3ReviewDTO;
   dateKey: string;
   onChanged: () => Promise<void>;
-  /** Psychology answers not yet scored — FOMO comes from the motive, so a
-   *  draft that was only waiting for it is scored as soon as it's chosen. */
-  psychDraft: Answers | null;
 }) {
   const editable = useWorkspaceEditable();
   const [value, setValue] = useState<Intent | null>(data.tradeIntent);
@@ -392,9 +369,6 @@ function MotiveBlock({
         toast.error(r.error);
         setValue(data.tradeIntent);
         return;
-      }
-      if (v != null && psychDraft && !data.psychology.complete) {
-        await saveReviewPsychologyAction(dateKey, data.tradeId, { answers: psychDraft });
       }
       await onChanged();
     });
@@ -423,168 +397,6 @@ function MotiveBlock({
           </Button>
         ))}
       </div>
-    </Block>
-  );
-}
-
-// ── PSYCHOLOGY (evidence-assisted + influence) ──────────────────────────────
-
-function EvidenceSub({ evidence }: { evidence: EvidenceResult }) {
-  return (
-    <div className="mt-0.5 space-y-0.5">
-      {evidence.facts.length > 0 && (
-        <p className="font-mono text-[11px] text-muted-foreground">{evidence.facts.join(" · ")}</p>
-      )}
-      <p className="text-xs">
-        {evidence.suggestion ? (
-          <span className="text-primary">Suggested: {evidence.suggestion === "yes" ? "Yes" : "No"} — </span>
-        ) : null}
-        <span className="text-muted-foreground">{evidence.reason}</span>
-      </p>
-    </div>
-  );
-}
-
-function PsychologyBlock({
-  data,
-  dateKey,
-  onChanged,
-  onDraft,
-}: {
-  data: V3ReviewDTO;
-  dateKey: string;
-  onChanged: () => Promise<void>;
-  onDraft: (answers: Answers) => void;
-}) {
-  const editable = useWorkspaceEditable();
-  const src = data.psychology.sources;
-  const askedKeys = PSYCHOLOGY_QUESTIONS.map((q) => q.key).filter((k) => src[k] !== "DERIVED");
-  const [answers, setAnswers] = useState<Answers>(() => {
-    const seed: Answers = {};
-    for (const k of askedKeys) if (data.psychology.stored[k] !== undefined) seed[k] = data.psychology.stored[k];
-    return seed;
-  });
-  const [state, setState] = useState<SaveState>("idle");
-  const [obsession, setObsession] = useState(
-    typeof answers.monitoringObsession === "number" ? String(answers.monitoringObsession) : "",
-  );
-
-  const answered = askedKeys.filter((k) => answers[k] !== undefined).length;
-
-  async function commit(next: Answers) {
-    setAnswers(next);
-    onDraft(next);
-    if (askedKeys.some((k) => next[k] === undefined)) {
-      setState("idle");
-      return; // saved (and scored) once every asked question is answered
-    }
-    setState("saving");
-    const r = await saveReviewPsychologyAction(dateKey, data.tradeId, { answers: next });
-    if (!r.success) {
-      setState("error");
-      toast.error(r.error);
-      return;
-    }
-    if (!r.complete) {
-      setState("idle");
-      if (r.missing.includes("fomo")) toast.message("Choose the motive above — FOMO is taken from it.");
-      return;
-    }
-    setState("saved");
-    await onChanged();
-  }
-
-  function setChoice(key: string, value: string) {
-    const next = { ...answers };
-    if (next[key] === value) delete next[key];
-    else next[key] = value;
-    void commit(next);
-  }
-
-  function commitObsession() {
-    const n = Number(obsession);
-    const next = { ...answers };
-    if (obsession.trim() === "" || !Number.isFinite(n) || n < 1 || n > 100) delete next.monitoringObsession;
-    else next.monitoringObsession = Math.round(n);
-    if (next.monitoringObsession === answers.monitoringObsession) return;
-    void commit(next);
-  }
-
-  const choice = (key: string) => PSYCHOLOGY_QUESTIONS.find((q) => q.key === key) as ChoiceQuestion;
-  const opts = (key: string) => choice(key).options.map((o) => ({ value: o.value, label: o.label }));
-  const val = (key: string) => (answers[key] === undefined ? null : String(answers[key]));
-
-  return (
-    <Block
-      title="Psychology"
-      aside={
-        <>
-          <Saving state={state} />
-          {data.psychology.complete && data.psychology.percent != null ? (
-            <span className="font-mono">
-              {Math.round(data.psychology.percent)}% · {data.psychology.grade}
-            </span>
-          ) : (
-            <span>
-              {answered}/{askedKeys.length} answered{answered < askedKeys.length ? " · scored when complete" : ""}
-            </span>
-          )}
-        </>
-      }
-    >
-      <div className="space-y-0.5 rounded-lg bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
-        <p>
-          FOMO: <span className="font-medium text-foreground">{data.psychology.derived.fomo == null ? "— (choose the motive)" : data.psychology.derived.fomo === "yes" ? "Yes" : "No"}</span> · from your motive
-        </p>
-        {src.alignedWithBias === "DERIVED" && (
-          <p>
-            Aligned with today&apos;s bias:{" "}
-            <span className="font-medium text-foreground">{data.psychology.derived.alignedWithBias === "yes" ? "Yes" : "No"}</span> · {data.direction.toLowerCase()} vs frozen{" "}
-            {data.dailyBiasSnapshot?.toLowerCase()} bias
-          </p>
-        )}
-      </div>
-
-      <QuestionRow prompt={PROMPT.riskManaged} sub={<EvidenceSub evidence={data.risk} />}>
-        <YesNo value={val("riskManaged")} suggested={data.risk.suggestion} onChange={(v) => setChoice("riskManaged", v)} disabled={!editable} />
-      </QuestionRow>
-      <QuestionRow prompt={PROMPT.followedExitPlan} sub={<EvidenceSub evidence={data.exit} />}>
-        <YesNo value={val("followedExitPlan")} suggested={data.exit.suggestion} onChange={(v) => setChoice("followedExitPlan", v)} disabled={!editable} />
-      </QuestionRow>
-      {src.alignedWithBias === "HUMAN" && (
-        <QuestionRow
-          prompt={PROMPT.alignedWithBias}
-          sub={
-            <p className="text-xs text-muted-foreground">
-              {data.dailyBiasSnapshot === "NEUTRAL" ? "Today's bias for this asset was neutral" : "No daily bias was recorded for this asset"} — your judgement.
-            </p>
-          }
-        >
-          <YesNo value={val("alignedWithBias")} onChange={(v) => setChoice("alignedWithBias", v)} disabled={!editable} options={opts("alignedWithBias")} />
-        </QuestionRow>
-      )}
-
-      <p className="pt-1 font-mono text-[11px] tracking-wider text-muted-foreground uppercase">Influence</p>
-      {HUMAN_KEYS.filter((k) => k !== "monitoringObsession").map((k) => (
-        <QuestionRow key={k} prompt={PROMPT[k]}>
-          <YesNo value={val(k)} onChange={(v) => setChoice(k, v)} disabled={!editable} options={opts(k)} />
-        </QuestionRow>
-      ))}
-      <QuestionRow prompt={PROMPT.monitoringObsession}>
-        <Input
-          type="number"
-          min={1}
-          max={100}
-          inputMode="numeric"
-          className="h-7 w-20 font-mono text-xs"
-          value={obsession}
-          onChange={(e) => setObsession(e.target.value)}
-          onBlur={commitObsession}
-          onKeyDown={(e) => e.key === "Enter" && commitObsession()}
-          disabled={!editable}
-          aria-label={PROMPT.monitoringObsession}
-        />
-      </QuestionRow>
     </Block>
   );
 }

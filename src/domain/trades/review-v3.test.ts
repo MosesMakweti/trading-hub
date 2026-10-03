@@ -23,7 +23,6 @@ import { deriveLifecycleWithReview } from "./trade-lifecycle";
 const COMPLETE_ANSWERS = {
   tradeIntent: "PLANNED",
   adherenceAnswers: { followedStrategy: true, followedEntryModel: true, followedTradeManagement: false, remainedPatient: true },
-  psychologyComplete: true,
   wouldTakeAgain: true,
 };
 
@@ -163,7 +162,6 @@ describe("review state (interim vs final, explicit completion)", () => {
   it.each([
     ["intent", { tradeIntent: null }],
     ["a process answer", { adherenceAnswers: { followedStrategy: true, followedEntryModel: true, remainedPatient: true } }],
-    ["psychology", { psychologyComplete: false }],
     ["wouldTakeAgain", { wouldTakeAgain: null }],
   ])("missing %s → cannot be complete", (_label, patch) => {
     const r = deriveReviewState(facts({ reviewedAt: new Date("2026-10-03T11:00:00Z"), answers: { ...COMPLETE_ANSWERS, ...patch } }));
@@ -174,7 +172,7 @@ describe("review state (interim vs final, explicit completion)", () => {
   it("reflection text is not a requirement; text-stamped reviewedAt alone never completes", () => {
     // reviewedAt present (e.g. legacy text stamp) but no structured answers.
     const r = deriveReviewState(
-      facts({ reviewedAt: new Date("2026-10-03T11:00:00Z"), answers: { tradeIntent: null, adherenceAnswers: {}, psychologyComplete: false, wouldTakeAgain: null } }),
+      facts({ reviewedAt: new Date("2026-10-03T11:00:00Z"), answers: { tradeIntent: null, adherenceAnswers: {}, wouldTakeAgain: null } }),
     );
     expect(r.state).toBe("FINAL_REVIEW_REQUIRED");
     expect(r.missing.map((m) => m.key)).toEqual([
@@ -183,7 +181,6 @@ describe("review state (interim vs final, explicit completion)", () => {
       "adherence.followedEntryModel",
       "adherence.followedTradeManagement",
       "adherence.remainedPatient",
-      "psychology",
       "wouldTakeAgain",
     ]);
   });
