@@ -205,6 +205,11 @@ export interface TradeReflectionEntry {
   whatWentWrong: string | null;
   whatCouldImprove: string | null;
   wouldTakeAgain: boolean | null;
+  /** Today V3 (Phase 3) — the Review's "Key lesson" (psychLessonsLearned)
+   *  and the canonical post-trade motive (tradeIntent). Present only when
+   *  recorded, so older packages fingerprint exactly as before. */
+  keyLesson?: string;
+  tradeIntent?: string;
 }
 
 export interface ReflectionEvidence {

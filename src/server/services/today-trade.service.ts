@@ -1,13 +1,14 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
-import { dateKeyToUtcDate } from "@/lib/date";
+import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { tradeSchema, type TradeInput } from "@/lib/validation/trades";
 import type { QuickIdeaInput, IdeaUpdateInput, RecordEntryInput } from "@/lib/validation/today-v3";
 import { allMandatoryComplete } from "@/domain/today/routine-snapshot";
 import { computeDayUsage, evaluateNewTradeOverride, type NewTradeOverride } from "@/domain/today/limit-state";
 import { compatibilityFields } from "@/domain/today/idea-inheritance";
 import { exitedPercentFrom } from "@/domain/trades/trade-lifecycle";
+import { closedMomentFrom } from "@/domain/trades/review-state";
 import { scoreStrategyAdherence } from "@/domain/trades/strategy-adherence";
 import { getOrCreateTradingDay } from "@/server/services/trading-day.service";
 import { getOrCreateDayRoutine } from "@/server/services/today-routine.service";
@@ -281,6 +282,10 @@ export interface TradeLifecycleFactsDTO {
   /** The FROZEN strategy snapshot's execution confirmations (the set the
    *  execution score is computed against), in strategy order. */
   expectedExecution: string[];
+  /** Phase 3 — when the position became fully closed (ISO): Trade.closedAt,
+   *  else Performance settledAt / the last exit time. Review state compares
+   *  reviewedAt against it (interim vs final). */
+  closedMoment: string | null;
 }
 
 /** Per-trade facts the V3 lifecycle derivation needs that the shared
@@ -291,11 +296,18 @@ export async function getTradeLifecycleFacts(userId: string, tradeIds: string[])
   const [trades, partials, versions] = await Promise.all([
     prisma.trade.findMany({
       where: { id: { in: tradeIds }, userId },
-      select: { id: true, actualExit: true, limitOverrideReason: true, strategyExecutionSnapshot: true },
+      select: {
+        id: true,
+        actualExit: true,
+        limitOverrideReason: true,
+        strategyExecutionSnapshot: true,
+        closedAt: true,
+        performanceRiskSnapshot: { select: { settledAt: true } },
+      },
     }),
     prisma.tradeActualPartialExit.findMany({
       where: { tradeId: { in: tradeIds }, userId },
-      select: { tradeId: true, percentClosed: true },
+      select: { tradeId: true, percentClosed: true, exitedAt: true },
     }),
     prisma.tradePlanVersion.findMany({
       where: { tradeId: { in: tradeIds } },
@@ -317,13 +329,20 @@ export async function getTradeLifecycleFacts(userId: string, tradeIds: string[])
       expectedExecution: (
         ((t.strategyExecutionSnapshot as { execution?: { name: string }[] } | null)?.execution ?? []) as { name: string }[]
       ).map((e) => e.name),
+      closedMoment:
+        closedMomentFrom(
+          t.closedAt,
+          t.performanceRiskSnapshot?.settledAt ?? null,
+          partials.filter((p) => p.tradeId === t.id).map((p) => p.exitedAt),
+        )?.toISOString() ?? null,
     };
   }
   return out;
 }
 
 /**
- * LIVE positions entered on an EARLIER day that are still open: an actual
+ * LIVE positions entered on an EARLIER day that are still open (plus, since
+ * Phase 3, ones that closed after their day and still need a final review): an actual
  * entry, no closed result (no actualRR, not marked fully closed/cancelled),
  * Performance not settled, and less than 100% exited. Runs inside the
  * caller's workspace scope (Trade is a scoped root model), so a Backtesting
@@ -346,7 +365,30 @@ export async function listCarriedOpenTrades(userId: string, dateKey: string) {
     orderBy: [{ tradeDate: "desc" }, { executionMinutes: "desc" }],
     take: 50,
   });
-  if (candidates.length === 0) return [];
-  const facts = await getTradeLifecycleFacts(userId, candidates.map((t) => t.id));
-  return candidates.filter((t) => (facts[t.id]?.exitedPercent ?? 0) < 100);
+  const facts = candidates.length ? await getTradeLifecycleFacts(userId, candidates.map((t) => t.id)) : {};
+  const open = candidates.filter((t) => (facts[t.id]?.exitedPercent ?? 0) < 100);
+
+  // Phase 3 — a carried position that has since fully closed stays listed
+  // until its FINAL review is done (Trade.status is REVIEWED only then; see
+  // trade-lifecycle-sync.service.ts), bounded to closes in the last 7 days.
+  const dayStart = dateKeyToUtcDate(dateKey).getTime();
+  const since = new Date(dayStart - 7 * 86_400_000);
+  // Upper bound: closes up to the viewed day (+1 day of timezone slack).
+  const until = new Date(dayStart + 2 * 86_400_000);
+  const awaitingReview = await prisma.trade.findMany({
+    where: {
+      userId,
+      tradeDate: { lt: dateKeyToUtcDate(dateKey) },
+      actualEntry: { not: null },
+      reviewLifecycleStatus: "FULLY_CLOSED",
+      status: { not: "REVIEWED" },
+      closedAt: { gte: since, lt: until },
+      id: { notIn: open.map((t) => t.id) },
+    },
+    include: tradeInclude,
+    orderBy: [{ closedAt: "desc" }],
+    take: 20,
+  });
+  // Only positions actually carried past their own day.
+  return [...open, ...awaitingReview.filter((t) => t.closedAt && utcDateToKey(t.closedAt) > utcDateToKey(t.tradeDate))];
 }

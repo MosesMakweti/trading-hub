@@ -6,6 +6,7 @@ import { currentWorkspaceScope, isBacktestScope, scopeBacktestRunId } from "@/se
 import { dailyPercentsFromBalanceHistory } from "@/domain/performance/rr";
 import { scorePsychology, type PsychologyAnswer } from "@/domain/psychology/scoring";
 import { deriveStatus, nextClosedAt, nextReviewedAt } from "@/domain/trades/lifecycle";
+import { syncLiveTradeLifecycle } from "@/server/services/trade-lifecycle-sync.service";
 import { sanitizeAdherenceAnswers, scoreAdherence } from "@/domain/trades/adherence";
 import type { TradeInput, TradeWorkspaceSectionInput } from "@/lib/validation/trades";
 import {
@@ -709,6 +710,12 @@ export async function updateTradeSections(
   userId: string,
   tradeId: string,
   patch: TradeWorkspaceSectionInput,
+  options: {
+    /** Today V3 (Phase 3): the V3 Review completes explicitly, so its writes
+     *  pass false — free text must never stamp reviewedAt there. Legacy
+     *  callers keep the historical "first reflection = reviewed" stamp. */
+    stampReviewedAtFromText?: boolean;
+  } = {},
 ) {
   const existing = await prisma.trade.findFirst({ where: { id: tradeId, userId } });
   if (!existing) throw new Error("Trade not found.");
@@ -720,7 +727,10 @@ export async function updateTradeSections(
   const hasReview = REVIEW_TEXT_FIELDS.some((field) =>
     hasText(field in patchRecord ? patchRecord[field] : existingRecord[field]),
   );
-  const reviewedAt = nextReviewedAt(existing.reviewedAt, hasReview, new Date());
+  const reviewedAt =
+    options.stampReviewedAtFromText === false
+      ? existing.reviewedAt
+      : nextReviewedAt(existing.reviewedAt, hasReview, new Date());
 
   // Adherence answers, when present, are sanitized to known keys and rescored
   // server-side so the denormalized percent can never drift from the answers.
@@ -773,6 +783,9 @@ export async function updateTradeSections(
   if ("actualEntry" in patchRecord || "actualStopLoss" in patchRecord || "actualExit" in patchRecord) {
     await settlePerformanceTrade(userId, tradeId);
   }
+  // Today V3 (Phase 3) — LIVE lifecycle columns follow execution facts
+  // (no-op in Backtesting). Also run after V3 review writes (status).
+  await syncLiveTradeLifecycle(userId, tradeId);
 
   return updated;
 }

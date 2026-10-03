@@ -191,6 +191,8 @@ export const tradeWorkspaceSectionSchema = z
     whatSurprisedMe: workspaceNote,
     // Trade Review overhaul (Stage 7) — "What could I have done better?".
     whatCouldImprove: workspaceNote,
+    // Today V3 (Phase 3) — the Review's "Key lesson" (existing column).
+    psychLessonsLearned: workspaceNote,
     wouldTakeAgain: z.boolean().nullable(),
     // Behavioral intent tag for the Counterfactual (Discrepancy Gap) engine.
     tradeIntent: z

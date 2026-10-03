@@ -40,6 +40,7 @@ export default async function BacktestJournalTradePage({
           dailyMarketContext={loaded.dailyMarketContext}
           backHref={`/backtesting/${run.id}/journal/${dateKey}`}
           editHref={null}
+          reviewVariant="legacy"
         />
       </WorkspaceProvider>
     </FadeIn>

@@ -29,7 +29,7 @@ import { TradePhase } from "@/components/today-v3/trade-phase";
 import { ClosePhase } from "@/components/today-v3/close-phase";
 import { QuickIdeaSheet, type QuickIdeaRequest } from "@/components/today-v3/trade/quick-idea-sheet";
 import type { TradeListRow } from "@/components/today-v3/trade/trade-list";
-import { deriveTradeLifecycle, type TradeStageKey } from "@/domain/trades/trade-lifecycle";
+import { deriveLifecycleWithReview, type TradeStageKey } from "@/domain/trades/trade-lifecycle";
 import { ideaDefaults } from "@/domain/today/idea-inheritance";
 import type { DailyAssetAnalysisDTO } from "@/types/today";
 import type { OpportunityListItemDTO } from "@/types/opportunity";
@@ -89,22 +89,14 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
   );
   const limits = { riskLimitPercent: todaysPlan.riskBudgetPercent, maxTrades: todaysPlan.maxTradesPerDay };
   const limitState = evaluateLimitState(usage, limits);
-  const reviewPendingCount = trades.filter(
-    (t) =>
-      t.actualEntry != null &&
-      t.performanceRisk?.settled === true &&
-      t.reviewedAt == null &&
-      t.reviewLifecycleStatus !== "CANCELLED_NEVER_TRIGGERED",
-  ).length;
   const loggedBeforeReadyCount = trades.filter((t) => loggedBeforeReadiness(t.createdAt, routine.readyAt)).length;
   // Trade list rows — one derivation for every trade's display state.
   const tradingReady = ready && !archived;
   const toRow = (t: (typeof trades)[number], carried: boolean): TradeListRow => {
     const f = lifecycleFacts[t.id];
-    return {
-      trade: t,
-      carried,
-      lifecycle: deriveTradeLifecycle({
+    const closedMoment = f?.closedMoment ?? t.closedAt;
+    const { lifecycle } = deriveLifecycleWithReview(
+      {
         cancelled: t.reviewLifecycleStatus === "CANCELLED_NEVER_TRIGGERED",
         hasConfirmedPlan: f?.hasConfirmedPlan ?? t.plannedEntry != null,
         planLocked: f?.planLocked ?? false,
@@ -112,12 +104,25 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
         exitedPercent: f?.exitedPercent ?? null,
         hasLegacyResult: t.actualEntry == null && t.actualRR != null,
         settled: t.performanceRisk?.settled === true,
-        reviewed: t.reviewedAt != null,
         tradingReady,
-      }),
-    };
+      },
+      {
+        closedMoment: closedMoment ? new Date(closedMoment) : null,
+        reviewedAt: t.reviewedAt ? new Date(t.reviewedAt) : null,
+        answers: {
+          tradeIntent: t.tradeIntent,
+          adherenceAnswers: t.adherenceAnswers,
+          psychologyComplete: t.psychology != null,
+          wouldTakeAgain: t.wouldTakeAgain,
+        },
+      },
+    );
+    return { trade: t, carried, lifecycle };
   };
   const rows: TradeListRow[] = [...carriedTrades.map((t) => toRow(t, true)), ...trades.map((t) => toRow(t, false))];
+  // Phase 3 — "review needed" = the derived FINAL review is outstanding
+  // (an interim or text-only review doesn't clear it).
+  const reviewPendingCount = rows.filter((r) => !r.carried && r.lifecycle.state === "REVIEW_NEEDED").length;
 
   const analysisFor = (symbol: string) => dailyAssetAnalyses.find((a) => a.assetSymbol === symbol.toUpperCase()) ?? null;
   const planContext = { lookingFor: todaysPlan.lookingFor, stayOutConditions: todaysPlan.stayOutConditions };

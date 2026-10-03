@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useWorkspaceEditable } from "@/components/journal/workspace/editable-context";
-import { TradeReviewSection } from "@/components/journal/workspace/trade-review-section";
+import { ReviewStage } from "@/components/today-v3/review/review-stage";
 import { IdeaStage } from "@/components/today-v3/trade/idea-stage";
 import { PlanStage } from "@/components/today-v3/trade/plan-stage";
 import { ExecutionStage } from "@/components/today-v3/trade/execution-stage";
@@ -62,7 +62,10 @@ function stageSummary(stage: TradeStageKey, trade: TradeWorkspaceDTO, lifecycle:
         ? `In @ ${trade.actualEntry}${lifecycle.openPercent != null && lifecycle.openPercent > 0 ? ` · ${lifecycle.openPercent}% open` : " · closed"}`
         : "Not entered";
     case "review":
-      return trade.reviewedAt ? "Reviewed" : "Not reviewed";
+      if (lifecycle.state === "REVIEWED") return "Review complete";
+      if (lifecycle.state === "CANCELLED") return "Cancelled idea";
+      if (lifecycle.closed) return "Final review required";
+      return trade.reviewedAt ? "Interim review saved" : "Interim review available";
   }
 }
 
@@ -71,7 +74,7 @@ function stageSummary(stage: TradeStageKey, trade: TradeWorkspaceDTO, lifecycle:
  * REVIEW. One stage is open at a time; the others collapse to a one-line
  * summary. Availability follows canonical facts (domain/trades/
  * trade-lifecycle.ts) — nothing is marked done to advance the interface.
- * Review temporarily reuses the existing review section (Phase 3).
+ * Review is the V3 Review stage (Phase 3, components/today-v3/review).
  */
 export function TradeLifecycleWorkspace({
   trade,
@@ -246,7 +249,7 @@ export function TradeLifecycleWorkspace({
             executions={executions}
           />
         )}
-        {active === "review" && <TradeReviewSection trade={trade} />}
+        {active === "review" && <ReviewStage tradeId={trade.id} dateKey={trade.dateKey} />}
       </div>
     </section>
   );

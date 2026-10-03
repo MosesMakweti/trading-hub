@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db";
 import { computeNetPnl } from "@/domain/prop-firms/risk";
 import { settlePerformanceTrade } from "@/server/services/performance-account.service";
+import { syncLiveTradeLifecycle } from "@/server/services/trade-lifecycle-sync.service";
 import type { PartialExitUpsertInput } from "@/lib/validation/trade-plan";
 
 /**
@@ -88,6 +89,7 @@ export async function upsertPartialExit(userId: string, tradeId: string, input: 
   // part of the canonical actual-execution result, so it must recompute
   // realized R / settlement the same way changing actualExit does.
   await settlePerformanceTrade(userId, tradeId);
+  await syncLiveTradeLifecycle(userId, tradeId);
   return result;
 }
 
@@ -95,6 +97,7 @@ export async function deletePartialExit(userId: string, tradeId: string, partial
   await assertOwnsTrade(userId, tradeId);
   await prisma.tradeActualPartialExit.deleteMany({ where: { id: partialExitId, tradeId, userId } });
   await settlePerformanceTrade(userId, tradeId);
+  await syncLiveTradeLifecycle(userId, tradeId);
 }
 
 /** Sets a partial's planned-target mapping explicitly — the trader's own

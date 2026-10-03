@@ -120,6 +120,8 @@ export async function buildTraderReviewEvidencePackage(userId: string, sessionId
       whatWentWell: true,
       whatWentWrong: true,
       whatCouldImprove: true,
+      psychLessonsLearned: true,
+      tradeIntent: true,
       wouldTakeAgain: true,
       behaviourLabels: { include: { behaviourLabel: true } },
       psychology: true,
@@ -481,7 +483,9 @@ export async function buildTraderReviewEvidencePackage(userId: string, sessionId
     };
   });
 
-  const tradesWithReflection = trades.filter((t) => t.whatWentWell || t.whatWentWrong || t.whatCouldImprove);
+  const tradesWithReflection = trades.filter(
+    (t) => t.whatWentWell || t.whatWentWrong || t.whatCouldImprove || t.psychLessonsLearned,
+  );
   if (tradesWithReflection.length > MAX_TRADE_REFLECTIONS) {
     truncation.push({ field: "reflections.tradeReflections", totalAvailable: tradesWithReflection.length, included: MAX_TRADE_REFLECTIONS, selectionRule: "most recent" });
   }
@@ -493,7 +497,7 @@ export async function buildTraderReviewEvidencePackage(userId: string, sessionId
         id: `TRADE_REFLECTION:${t.id}`,
         strength: "TRADER_REPORTED",
         category: "TRADE_REFLECTION",
-        statement: [t.whatWentWell, t.whatWentWrong, t.whatCouldImprove].filter(Boolean).join(" | "),
+        statement: [t.whatWentWell, t.whatWentWrong, t.whatCouldImprove, t.psychLessonsLearned].filter(Boolean).join(" | "),
         dateKey,
       }),
       dateKey,
@@ -501,6 +505,8 @@ export async function buildTraderReviewEvidencePackage(userId: string, sessionId
       whatWentWrong: t.whatWentWrong,
       whatCouldImprove: t.whatCouldImprove,
       wouldTakeAgain: t.wouldTakeAgain,
+      ...(t.psychLessonsLearned ? { keyLesson: t.psychLessonsLearned } : {}),
+      ...(t.tradeIntent ? { tradeIntent: t.tradeIntent } : {}),
     };
   });
 

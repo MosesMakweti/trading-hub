@@ -2,8 +2,12 @@
 // Pure; no stored lifecycle enum. Every input is an existing canonical fact:
 // actualEntry, confirmed/locked TradePlanVersion, actual partial exits /
 // actualExit, the Performance snapshot's settledAt, reviewedAt, and the
-// CANCELLED_NEVER_TRIGGERED review status. The full lifecycle-status
-// normalization (deriving reviewLifecycleStatus itself) is Phase 3.
+// CANCELLED_NEVER_TRIGGERED review status. Phase 3: `reviewed` means the
+// FINAL review is complete (domain/trades/review-state.ts), never merely that
+// reviewedAt exists; Trade.reviewLifecycleStatus itself is kept in sync from
+// execution facts by trade-lifecycle-sync.service.ts (LIVE).
+
+import { deriveReviewState, type ReviewStateFacts, type ReviewStateResult } from "./review-state";
 
 export type TradeDisplayState =
   | "IDEA"
@@ -30,7 +34,12 @@ export interface TradeLifecycleFacts {
   hasLegacyResult: boolean;
   /** Performance snapshot settled (fully accounted, initial stop known). */
   settled: boolean;
+  /** FINAL review complete (review-state.ts FINAL_REVIEW_COMPLETE). */
   reviewed: boolean;
+  /** An interim review was saved while the position was open. */
+  interimReviewed?: boolean;
+  /** Closed, but an earlier (interim / legacy) review no longer counts. */
+  earlierReviewOutdated?: boolean;
   /** Readiness confirmed for today — gates TAKING a trade, never managing one. */
   tradingReady: boolean;
 }
@@ -123,13 +132,15 @@ export function deriveTradeLifecycle(f: TradeLifecycleFacts): TradeLifecycle {
           ? "Waiting for entry — recording it locks the plan"
           : "Waiting for readiness before entry";
       case "OPEN":
-        return "Position open — waiting for exit";
+        return `Position open — waiting for exit${f.interimReviewed ? " · interim review saved" : ""}`;
       case "PARTIALLY_CLOSED":
-        return `${openPercent}% still open — waiting for exit`;
+        return `${openPercent}% still open — waiting for exit${f.interimReviewed ? " · interim review saved" : ""}`;
       case "REVIEW_NEEDED":
         return f.hasActualEntry && !f.settled
           ? "Closed — initial stop needed before Performance can settle"
-          : "Trade closed — review required";
+          : f.earlierReviewOutdated
+            ? "Trade closed — final review required (earlier review was interim)"
+            : "Trade closed — review required";
       case "REVIEWED":
         return "Reviewed";
     }
@@ -169,3 +180,29 @@ export const STATE_SORT: Record<TradeDisplayState, number> = {
   REVIEWED: 5,
   CANCELLED: 6,
 };
+
+/**
+ * Phase 3 — display lifecycle + review state in one derivation: `closed`
+ * comes from the lifecycle facts, and REVIEWED requires the FINAL review
+ * (review-state.ts), so an interim or text-only review never shows as done.
+ */
+export function deriveLifecycleWithReview(
+  base: Omit<TradeLifecycleFacts, "reviewed" | "interimReviewed" | "earlierReviewOutdated">,
+  review: Pick<ReviewStateFacts, "closedMoment" | "reviewedAt" | "answers">,
+): { lifecycle: TradeLifecycle; review: ReviewStateResult } {
+  const pre = deriveTradeLifecycle({ ...base, reviewed: false });
+  const r = deriveReviewState({
+    cancelled: base.cancelled,
+    hasActualEntry: base.hasActualEntry,
+    hasLegacyResult: base.hasLegacyResult,
+    closed: pre.closed,
+    ...review,
+  });
+  const lifecycle = deriveTradeLifecycle({
+    ...base,
+    reviewed: r.state === "FINAL_REVIEW_COMPLETE",
+    interimReviewed: r.state === "INTERIM_REVIEWED",
+    earlierReviewOutdated: r.hasEarlierReview,
+  });
+  return { lifecycle, review: r };
+}

@@ -223,10 +223,17 @@ describe("Day summary calculations (Stage 8 §8/§9)", () => {
     const user = await makeUser("warnings");
     const dateKey = "2026-01-11";
     const trade = await createTrade(user.id, dateKey, minimalTradeInput());
-    await updateTradeSections(user.id, trade.id, { actualEntry: 1900 }); // executed, but no review status set
+    // Today V3 (Phase 3): a LIVE entry written through the canonical section
+    // service derives its review status from execution facts (STILL_HOLDING)…
+    const synced = await createTrade(user.id, dateKey, minimalTradeInput());
+    await updateTradeSections(user.id, synced.id, { actualEntry: 1900 });
+    expect((await prisma.trade.findUniqueOrThrow({ where: { id: synced.id } })).reviewLifecycleStatus).toBe("STILL_HOLDING");
+    // …so "no review status" is now only a legacy/unsynced row (written directly).
+    await prisma.trade.update({ where: { id: trade.id }, data: { actualEntry: 1900 } });
 
     const summary = await svc.getDayCloseSummary(user.id, dateKey);
     expect(summary.unresolvedCount).toBe(1);
+    expect(summary.stillHoldingCount).toBe(1);
     expect(summary.warnings.length).toBeGreaterThan(0);
 
     // Closing anyway must not corrupt anything — the trade is left exactly as it was.

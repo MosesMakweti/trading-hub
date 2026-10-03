@@ -15,6 +15,7 @@ import { TradeHeader } from "@/components/journal/workspace/trade-header";
 import { TradeIdeaSection, type DailyMarketContextDTO } from "@/components/journal/workspace/trade-idea-section";
 import { TradeExecutionSection } from "@/components/journal/workspace/trade-execution-section";
 import { TradeReviewSection } from "@/components/journal/workspace/trade-review-section";
+import { ReviewStage } from "@/components/today-v3/review/review-stage";
 import { TradeTimeline } from "@/components/journal/workspace/trade-timeline";
 import { TradeSummary } from "@/components/journal/workspace/trade-summary";
 import { WorkspaceSection } from "@/components/journal/workspace/workspace-ui";
@@ -32,6 +33,7 @@ export function TradeWorkspace({
   dailyMarketContext = null,
   backHref,
   editHref,
+  reviewVariant = "v3",
 }: {
   trade: TradeWorkspaceDTO;
   editable?: boolean;
@@ -49,6 +51,9 @@ export function TradeWorkspace({
   backHref?: string;
   /** Null hides "Edit trade" (the Backtesting Journal is review-only). */
   editHref?: string | null;
+  /** Today V3 (Phase 3) — the live Journal shows the same V3 Review as
+   *  Today (same canonical data); Backtesting keeps its V2 review. */
+  reviewVariant?: "v3" | "legacy";
 }) {
   const dateKey = trade.dateKey;
   const back = backHref ?? `/journal/${dateKey}`;
@@ -125,7 +130,11 @@ export function TradeWorkspace({
           title="Trade Review"
           description="What I learned."
         >
-          <TradeReviewSection trade={trade} />
+          {reviewVariant === "v3" ? (
+            <ReviewStage tradeId={trade.id} dateKey={trade.dateKey} />
+          ) : (
+            <TradeReviewSection trade={trade} />
+          )}
         </WorkspaceSection>
 
         <WorkspaceSection icon={History} title="Timeline">
