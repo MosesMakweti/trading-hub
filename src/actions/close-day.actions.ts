@@ -9,6 +9,7 @@ import { dayEditableGuard } from "@/actions/day-guard";
 import { dailyReflectionSchema, closeTradingDaySchema } from "@/lib/validation/close-day";
 import * as closeDayService from "@/server/services/close-day.service";
 import type { DayCloseSummaryDTO } from "@/server/services/close-day.service";
+import * as closeDayV3Service from "@/server/services/close-day-v3.service";
 
 type SimpleResult = { success: true } | { success: false; error: string };
 
@@ -64,6 +65,32 @@ export async function closeTradingDayAction(day: WorkspaceDayRef, input: unknown
     }
     revalidatePath("/today");
     revalidatePath("/journal");
+    return { success: true };
+  });
+}
+
+/**
+ * Today V3 (Phase 4) — CLOSE TRADING DAY from the LIVE Close phase. Never
+ * blocked by outstanding final reviews or open positions (the UI confirms
+ * those first); never writes trade data. See close-day-v3.service.ts.
+ */
+export async function closeTradingDayV3Action(day: WorkspaceDayRef, input: unknown): Promise<SimpleResult> {
+  const user = await requireUser();
+  return runInDayScope(user.id, day, "write", async (dateKey) => {
+    const parsed = closeTradingDaySchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    }
+    try {
+      await closeDayV3Service.closeTradingDayV3(user.id, dateKey, parsed.data);
+    } catch (error) {
+      return { success: false, error: errorMessage(error, "Failed to close the day.") };
+    }
+    revalidatePath("/today");
+    revalidatePath("/journal");
+    revalidatePath(`/journal/${dateKey}`);
+    revalidatePath("/dashboard");
+    revalidatePath("/analytics");
     return { success: true };
   });
 }

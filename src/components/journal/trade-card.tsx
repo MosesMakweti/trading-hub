@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { SquareArrowOutUpRight, Target, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { minutesToTimeString } from "@/lib/date";
+import { tradeBiasDisplay, tradeTimeDisplay } from "@/domain/trades/display-facts";
 import { Badge } from "@/components/ui/badge";
 import { Tag, TAG_STYLES, colorForName } from "@/components/ui/tag";
 import { TradeQualityBadge } from "@/components/journal/adherence-score";
@@ -85,6 +85,12 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
   }
 
   const targetPrecision = parseSymbol(trade.assetSymbol).spec?.decimalPrecision ?? null;
+  const bias = tradeBiasDisplay(trade);
+  const time = tradeTimeDisplay({
+    executionMinutes: trade.executionMinutes,
+    hasActualEntry: trade.hasActualEntry,
+    hasLegacyResult: !trade.hasActualEntry && trade.actualRR != null,
+  });
 
   return (
     <div className="glass space-y-3 rounded-2xl p-4">
@@ -96,8 +102,8 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
             <Badge variant={trade.direction === "LONG" ? "success" : "danger"}>
               {trade.direction === "LONG" ? "Long" : "Short"}
             </Badge>
-            <span className="text-xs text-muted-foreground">
-              {minutesToTimeString(trade.executionMinutes)}
+            <span className="text-xs text-muted-foreground" title={time.label}>
+              {time.executed ? time.time : `${time.label} ${time.time}`}
             </span>
             {trade.reviewLifecycleStatus && (
               <span
@@ -120,10 +126,11 @@ export function TradeCard({ dateKey, trade }: { dateKey: string; trade: TradeLis
               </span>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">
-            {trade.higherTimeframeBias === "BULLISH" ? "Bullish" : "Bearish"} bias ·{" "}
-            {trade.biasConfidencePercent}% confidence
-          </p>
+          {bias.value && (
+            <p className="text-xs text-muted-foreground">
+              {bias.label} · {bias.value}
+            </p>
+          )}
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
             {trade.strategyName &&
               (trade.strategyId ? (

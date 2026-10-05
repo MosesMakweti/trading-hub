@@ -6,7 +6,9 @@ import { requireUser } from "@/server/guards";
 import type { WorkspaceDayRef } from "@/lib/validation/workspace";
 import { runInDayScope, runInRecordScope } from "@/server/workspace/action-scope";
 import { dayEditableGuard } from "@/actions/day-guard";
-import { opportunityCreateSchema, missOutcomeSchema } from "@/lib/validation/opportunity";
+import { opportunityCreateSchema, missOutcomeSchema, missedSetupSchema } from "@/lib/validation/opportunity";
+import { prisma } from "@/server/db";
+import { utcDateToKey } from "@/lib/date";
 import * as opportunityService from "@/server/services/opportunity.service";
 import { OpportunityError } from "@/server/services/opportunity.service";
 
@@ -163,6 +165,60 @@ export async function deleteOpportunity(
       await opportunityService.deleteOpportunity(user.id, opportunityId);
       revalidateOpportunitySurfaces(dateKey);
       return { success: true };
+    } catch (e) {
+      return toError(e);
+    }
+  });
+}
+
+/** Today V3 (Phase 4) — "+ Setup missed": record a missed setup in one step. */
+export async function recordMissedSetup(day: WorkspaceDayRef, input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  return runInDayScope(user.id, day, "write", async (dateKey) => {
+    const blocked = await dayEditableGuard(user.id, dateKey);
+    if (blocked) return blocked;
+
+    const parsed = missedSetupSchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    }
+
+    try {
+      const op = await opportunityService.recordMissedSetup(user.id, dateKey, parsed.data.setup, parsed.data.miss);
+      revalidateOpportunitySurfaces(dateKey);
+      revalidatePath("/today");
+      return { success: true, opportunityId: op.id };
+    } catch (e) {
+      return toError(e);
+    }
+  });
+}
+
+/**
+ * Today V3 (Phase 4) — "Record as missed opportunity" on a cancelled idea.
+ * Only ever on the trader's explicit request. Guarded by the cancelled
+ * trade's OWN day (read server-side, never trusted from the client).
+ */
+export async function recordCancelledIdeaAsMissed(tradeId: string, input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  return runInRecordScope(user.id, { trade: tradeId }, "write", async () => {
+    const trade = await prisma.trade.findFirst({ where: { id: tradeId, userId: user.id }, select: { tradeDate: true } });
+    if (!trade) return { success: false, error: "Trade not found." };
+    const dateKey = utcDateToKey(trade.tradeDate);
+    const blocked = await dayEditableGuard(user.id, dateKey);
+    if (blocked) return blocked;
+
+    const parsed = missOutcomeSchema.safeParse(input);
+    if (!parsed.success) {
+      return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    }
+
+    try {
+      const op = await opportunityService.recordCancelledIdeaAsMissed(user.id, tradeId, parsed.data);
+      revalidateOpportunitySurfaces(dateKey);
+      revalidatePath("/today");
+      revalidatePath(`/journal/${dateKey}/trades/${tradeId}`);
+      return { success: true, opportunityId: op.id };
     } catch (e) {
       return toError(e);
     }

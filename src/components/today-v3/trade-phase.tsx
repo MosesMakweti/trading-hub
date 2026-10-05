@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Lock } from "lucide-react";
+import { Lock, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { OpportunitiesSection } from "@/components/journal/opportunity/opportunities-section";
+import { MissedSetupForm } from "@/components/today-v3/trade/missed-setup-form";
 import type { LinkableTrade } from "@/components/journal/opportunity/opportunity-card";
 import { TradeList, type TradeListRow } from "@/components/today-v3/trade/trade-list";
 import { TradeLifecycleWorkspace } from "@/components/today-v3/trade/trade-lifecycle-workspace";
@@ -43,6 +44,9 @@ export function TradePhase({
   executionsByTradeId,
   opportunities,
   linkableTrades,
+  showSetups,
+  onShowSetupsChange,
+  analyses,
 }: {
   ready: boolean;
   archived: boolean;
@@ -65,8 +69,12 @@ export function TradePhase({
   executionsByTradeId: Record<string, ExecutionDTO[]>;
   opportunities: OpportunityListItemDTO[];
   linkableTrades: LinkableTrade[];
+  /** Controlled by the workspace so Close can open the missed-setups panel. */
+  showSetups: boolean;
+  onShowSetupsChange: (open: boolean) => void;
+  analyses: DailyAssetAnalysisDTO[];
 }) {
-  const [showSetups, setShowSetups] = useState(false);
+  const [recordingMissed, setRecordingMissed] = useState(false);
   const canCreate = ready && !archived;
 
   // Default selection: the first row in display order (needs-action first).
@@ -106,12 +114,26 @@ export function TradePhase({
             canCreate={canCreate}
             lockReason={archived ? "This day is archived" : canCreate ? null : "Confirm readiness in Prepare first"}
             onNewIdea={onNewIdea}
-            onSetupMissed={() => setShowSetups((v) => !v)}
+            onSetupMissed={() => {
+              const next = !showSetups;
+              onShowSetupsChange(next);
+              setRecordingMissed(next && !archived);
+            }}
             missedCount={missed}
           />
         </aside>
 
         <div className="min-w-0 space-y-4">
+          {showSetups && !archived && (
+            recordingMissed ? (
+              <MissedSetupForm dateKey={dateKey} strategies={strategies} analyses={analyses} onDone={() => setRecordingMissed(false)} />
+            ) : (
+              <Button type="button" variant="outline" className="w-full gap-1.5" onClick={() => setRecordingMissed(true)}>
+                <Plus className="size-3.5" />
+                Setup missed
+              </Button>
+            )
+          )}
           {showSetups && (
             <div className="rounded-2xl border border-border bg-card p-4">
               <OpportunitiesSection

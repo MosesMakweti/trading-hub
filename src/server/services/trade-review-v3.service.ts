@@ -114,6 +114,9 @@ export interface V3ReviewDTO {
   legacyReflection: LegacyReflectionDTO[];
   labelSuggestions: { labelId: string; name: string; reason: string }[];
   reviewedAt: string | null;
+  /** Phase 4 — for a cancelled idea: the MISSED opportunity the trader
+   *  explicitly recorded from it (TradeOpportunity.originTradeId), else null. */
+  recordedMissedOpportunity: { id: string; missReason: string | null; missedOutcome: string | null } | null;
 }
 
 type ReviewTrade = NonNullable<Awaited<ReturnType<typeof loadReviewTrade>>>;
@@ -179,13 +182,19 @@ export async function getV3ReviewData(userId: string, tradeId: string): Promise<
   if (!trade) throw new Error("Trade not found.");
   const f = computeFacts(trade);
 
-  const [perf, day, catalog] = await Promise.all([
+  const [perf, day, catalog, recordedMissed] = await Promise.all([
     isBacktestScope() ? Promise.resolve(null) : getPerformanceConfig(userId),
     prisma.tradingDay.findFirst({
       where: { userId, date: trade.tradeDate },
       select: { riskBudgetPercent: true },
     }),
     listBehaviourLabels(userId),
+    f.cancelled
+      ? prisma.tradeOpportunity.findFirst({
+          where: { userId, originTradeId: trade.id, deletedAt: null },
+          select: { id: true, missReason: true, missedOutcome: true },
+        })
+      : Promise.resolve(null),
   ]);
 
   const direction = trade.direction;
@@ -361,7 +370,50 @@ export async function getV3ReviewData(userId: string, tradeId: string): Promise<
     legacyReflection,
     labelSuggestions,
     reviewedAt: trade.reviewedAt?.toISOString() ?? null,
+    recordedMissedOpportunity: recordedMissed,
   };
+}
+
+/** Phase 4 — the centralized review/settlement facts for many trades at once
+ *  (Close Day, Needs Attention). Same `computeFacts` the Review stage uses,
+ *  so Close can never disagree with Review about final completeness. */
+export interface TradeReviewFacts {
+  state: ReviewState;
+  missing: ReviewRequirement[];
+  hasEarlierReview: boolean;
+  hasActualEntry: boolean;
+  cancelled: boolean;
+  closed: boolean;
+  exitedPercent: number | null;
+  settled: boolean;
+  hasPerformanceSnapshot: boolean;
+  resolvedInitialStop: number | null;
+  settledRealizedR: number | null;
+  settledPnl: number | null;
+}
+
+export async function getTradeReviewFacts(userId: string, tradeIds: string[]): Promise<Record<string, TradeReviewFacts>> {
+  if (tradeIds.length === 0) return {};
+  const trades = await prisma.trade.findMany({ where: { id: { in: tradeIds }, userId }, include: reviewInclude });
+  const out: Record<string, TradeReviewFacts> = {};
+  for (const trade of trades) {
+    const f = computeFacts(trade);
+    out[trade.id] = {
+      state: f.review.state,
+      missing: f.review.missing,
+      hasEarlierReview: f.review.hasEarlierReview,
+      hasActualEntry: f.hasActualEntry,
+      cancelled: f.cancelled,
+      closed: f.closed,
+      exitedPercent: f.exited,
+      settled: f.settlement.settled,
+      hasPerformanceSnapshot: trade.performanceRiskSnapshot != null,
+      resolvedInitialStop: f.settlement.resolvedInitialStop,
+      settledRealizedR: f.settlement.settledRealizedR,
+      settledPnl: f.settlement.settledPnl,
+    };
+  }
+  return out;
 }
 
 // ── Writes ───────────────────────────────────────────────────────────────────

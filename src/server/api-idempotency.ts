@@ -64,3 +64,11 @@ export async function reserveIdempotencyKey(
 export async function recordIdempotencyResult(userId: string, key: string, tradeId: string): Promise<void> {
   await prisma.apiIdempotencyKey.update({ where: { userId_key: { userId, key } }, data: { tradeId } });
 }
+
+/** Releases a key reserved by this request when it fails BEFORE any trade
+ *  exists (archived day, unowned strategy, create error) — otherwise every
+ *  retry with the same key would read as "still being processed" (409)
+ *  forever. Only an unresolved reservation (tradeId null) is ever removed. */
+export async function releaseIdempotencyKey(userId: string, key: string): Promise<void> {
+  await prisma.apiIdempotencyKey.deleteMany({ where: { userId, key, tradeId: null } });
+}

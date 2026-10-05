@@ -1,4 +1,5 @@
 import { Info } from "lucide-react";
+import { tradeBiasDisplay } from "@/domain/trades/display-facts";
 
 import { cn } from "@/lib/utils";
 import { Tag, colorForName } from "@/components/ui/tag";
@@ -99,6 +100,7 @@ export function TradeIdeaSection({
    *  (not copied) from the Daily Market Plan (Stage 11 §18). */
   dailyMarketContext?: DailyMarketContextDTO | null;
 }) {
+  const bias = tradeBiasDisplay(trade);
   const performance = trade.accounts.find((a) => a.kind === "PERFORMANCE");
   const referenceRisk = performance
     ? `${performance.riskValue}% (Performance Account)`
@@ -142,10 +144,7 @@ export function TradeIdeaSection({
           }
           placeholder="No session"
         />
-        <WorkspaceField
-          label="Higher-timeframe bias"
-          value={`${trade.higherTimeframeBias === "BULLISH" ? "Bullish" : "Bearish"} · ${trade.biasConfidencePercent}%`}
-        />
+        <WorkspaceField label={bias.label} value={bias.value ?? undefined} placeholder="—" />
         <WorkspaceField
           label="Expected RR"
           value={trade.expectedRR != null ? `${trade.expectedRR.toFixed(2)}R` : undefined}

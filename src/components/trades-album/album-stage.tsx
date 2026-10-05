@@ -13,7 +13,8 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { formatDateKeyShort, minutesToTimeString } from "@/lib/date";
+import { formatDateKeyShort } from "@/lib/date";
+import { tradeTimeDisplay } from "@/domain/trades/display-facts";
 import { formatRR, formatPerformancePnl } from "@/components/journal/workspace/workspace-ui";
 import type { AlbumImageDTO, AlbumTradeDTO } from "@/types/trades-album";
 
@@ -153,7 +154,15 @@ export function AlbumStage({
           {trade.adherencePercent != null ? `${Math.round(trade.adherencePercent)}%` : "—"}
         </Stat>
         <Stat label="Date / time">
-          {formatDateKeyShort(trade.dateKey)} · {minutesToTimeString(trade.executionMinutes)}
+          {formatDateKeyShort(trade.dateKey)} ·{" "}
+          {(() => {
+            const t = tradeTimeDisplay({
+              executionMinutes: trade.executionMinutes,
+              hasActualEntry: trade.actualEntry != null,
+              hasLegacyResult: trade.actualEntry == null && trade.actualRR != null,
+            });
+            return t.executed ? t.time : `${t.label} ${t.time}`;
+          })()}
         </Stat>
       </div>
 

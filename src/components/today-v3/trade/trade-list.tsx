@@ -63,7 +63,7 @@ export function TradeList({
         </Button>
         <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={onSetupMissed}>
           <SearchX className="size-3.5" />
-          Setups{missedCount > 0 ? ` (${missedCount})` : ""}
+          Setup missed{missedCount > 0 ? ` (${missedCount})` : ""}
         </Button>
       </div>
 

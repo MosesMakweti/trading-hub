@@ -197,6 +197,11 @@ export function OpportunityCard({
             )}
           </div>
           {o.missNote && <p className="mt-1 text-xs text-muted-foreground">{o.missNote}</p>}
+          {o.originTrade && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Originated from cancelled idea Trade #{o.originTrade.tradeNumber ?? "—"} (still a cancelled trade).
+            </p>
+          )}
         </div>
       )}
 

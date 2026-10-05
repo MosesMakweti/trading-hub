@@ -57,6 +57,17 @@ export async function createOpportunity(
   dateKey: string,
   data: OpportunityCreateInput,
 ) {
+  return prisma.tradeOpportunity.create({ data: await buildSpottedOpportunityData(userId, dateKey, data) });
+}
+
+/** The scored, frozen create payload for a setup spotted directly (status
+ *  PENDING) — shared by createOpportunity and recordMissedSetup so both use
+ *  the one scoring path. */
+async function buildSpottedOpportunityData(
+  userId: string,
+  dateKey: string,
+  data: OpportunityCreateInput,
+): Promise<Prisma.TradeOpportunityUncheckedCreateInput> {
   // Freeze the strategy's expected set + benchmark at spot time (self-contained;
   // survives later strategy edits/deletes).
   const ref = await getStrategyReference(userId, data.strategyId);
@@ -94,32 +105,129 @@ export async function createOpportunity(
     data.direction,
   );
 
-  return prisma.tradeOpportunity.create({
-    data: {
-      userId,
-      spottedAt: dateKeyToUtcDate(dateKey),
-      assetSymbol: data.assetSymbol,
-      direction: data.direction,
-      timeframe: data.timeframe,
-      strategyId: ref.id,
-      strategyNameSnapshot: ref.name,
-      strategyVersionSnapshot: ref.version,
-      strategyExecutionSnapshot: expected as unknown as Prisma.InputJsonValue,
-      selectedConfluences: data.selectedConfluences as unknown as Prisma.InputJsonValue,
-      selectedExecution: data.selectedExecution as unknown as Prisma.InputJsonValue,
-      missingConfluences: setup.missingConfluences as unknown as Prisma.InputJsonValue,
-      confluencePercent: scores.confluencePercent,
-      executionPercent: scores.executionPercent,
-      setupScore: setup.setupScore,
-      setupRating: setup.setupRating,
-      setupValid: setup.setupValid,
-      plannedEntry: dec(data.plannedEntry),
-      plannedStopLoss: dec(data.plannedStopLoss),
-      plannedTarget: dec(data.plannedTarget),
-      plannedRR: dec(data.plannedRR),
-      expectedExpectancyR: dec(tm?.expectedExpectancy ?? null),
-      status: "PENDING",
-    },
+  return {
+    userId,
+    spottedAt: dateKeyToUtcDate(dateKey),
+    assetSymbol: data.assetSymbol,
+    direction: data.direction,
+    timeframe: data.timeframe,
+    strategyId: ref.id,
+    strategyNameSnapshot: ref.name,
+    strategyVersionSnapshot: ref.version,
+    strategyExecutionSnapshot: expected as unknown as Prisma.InputJsonValue,
+    selectedConfluences: data.selectedConfluences as unknown as Prisma.InputJsonValue,
+    selectedExecution: data.selectedExecution as unknown as Prisma.InputJsonValue,
+    missingConfluences: setup.missingConfluences as unknown as Prisma.InputJsonValue,
+    confluencePercent: scores.confluencePercent,
+    executionPercent: scores.executionPercent,
+    setupScore: setup.setupScore,
+    setupRating: setup.setupRating,
+    setupValid: setup.setupValid,
+    plannedEntry: dec(data.plannedEntry),
+    plannedStopLoss: dec(data.plannedStopLoss),
+    plannedTarget: dec(data.plannedTarget),
+    plannedRR: dec(data.plannedRR),
+    expectedExpectancyR: dec(tm?.expectedExpectancy ?? null),
+    status: "PENDING",
+  };
+}
+
+const missedFields = (data: MissOutcomeInput) => ({
+  status: "MISSED" as const,
+  missReason: data.missReason,
+  missNote: data.missNote,
+  missedOutcome: data.missedOutcome,
+  missedRealizedR: dec(data.missedRealizedR),
+});
+
+// ── Today V3 (Phase 4): record a missed setup in one step ────────────────────
+
+/**
+ * "+ Setup missed" — the compact V3 flow: the setup is scored and frozen
+ * exactly as createOpportunity does, and resolved MISSED in the same insert
+ * (no intermediate PENDING row). Never creates a Trade, so it can never count
+ * as executed or use Performance risk.
+ */
+export async function recordMissedSetup(
+  userId: string,
+  dateKey: string,
+  setup: OpportunityCreateInput,
+  miss: MissOutcomeInput,
+) {
+  const base = await buildSpottedOpportunityData(userId, dateKey, setup);
+  return prisma.tradeOpportunity.create({ data: { ...base, ...missedFields(miss) } });
+}
+
+/**
+ * "Record as missed opportunity" on a cancelled idea — ONLY on the trader's
+ * explicit request; cancelling never does this. The cancelled Trade is left
+ * untouched (it stays a cancelled Trade); a separate MISSED opportunity is
+ * created from the idea's FROZEN evidence (strategy snapshot, selections,
+ * setup score/validity, planned prices — never re-scored against live
+ * Strategy Lab) and linked back through originTradeId (provenance only;
+ * Trade.opportunityId — "the executed trade" — is not used). One per trade.
+ */
+export async function recordCancelledIdeaAsMissed(userId: string, tradeId: string, miss: MissOutcomeInput) {
+  try {
+    return await createFromCancelledIdea(userId, tradeId, miss);
+  } catch (e) {
+    // Idempotent under a double submit: the @unique on originTradeId lets
+    // only one concurrent insert win; the loser returns the winner's row.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      const winner = await prisma.tradeOpportunity.findFirst({ where: { originTradeId: tradeId, userId } });
+      if (winner) return winner;
+    }
+    throw e;
+  }
+}
+
+async function createFromCancelledIdea(userId: string, tradeId: string, miss: MissOutcomeInput) {
+  return prisma.$transaction(async (tx) => {
+    const trade = await tx.trade.findFirst({ where: { id: tradeId, userId, deletedAt: null } });
+    if (!trade) throw new OpportunityError("Trade not found.");
+    if (trade.reviewLifecycleStatus !== "CANCELLED_NEVER_TRIGGERED" || trade.actualEntry != null) {
+      throw new OpportunityError("Only a cancelled idea that was never entered can be recorded as a missed opportunity.");
+    }
+    // Idempotent: recording the same cancelled idea again returns the
+    // existing missed opportunity instead of creating a second one.
+    const existing = await tx.tradeOpportunity.findFirst({ where: { originTradeId: trade.id, userId, deletedAt: null } });
+    if (existing) return existing;
+
+    const tm = trade.strategyId
+      ? await tx.strategyTradeManagement.findFirst({
+          where: { strategy: { id: trade.strategyId, userId } },
+          select: { expectedExpectancy: true },
+        })
+      : null;
+
+    return tx.tradeOpportunity.create({
+      data: {
+        userId,
+        spottedAt: trade.tradeDate,
+        assetSymbol: trade.assetSymbol,
+        direction: trade.direction,
+        timeframe: trade.timeframe,
+        strategyId: trade.strategyId,
+        strategyNameSnapshot: trade.strategyNameSnapshot,
+        strategyVersionSnapshot: trade.strategyVersionSnapshot,
+        strategyExecutionSnapshot: trade.strategyExecutionSnapshot ?? Prisma.DbNull,
+        selectedConfluences: trade.selectedConfluences ?? Prisma.DbNull,
+        selectedExecution: trade.selectedExecution ?? Prisma.DbNull,
+        missingConfluences: trade.missingConfluences ?? Prisma.DbNull,
+        confluencePercent: trade.confluencePercent,
+        executionPercent: trade.executionPercent,
+        setupScore: trade.setupScore,
+        setupRating: trade.setupRating,
+        setupValid: trade.setupValid,
+        plannedEntry: trade.plannedEntry,
+        plannedStopLoss: trade.plannedStopLoss,
+        plannedTarget: trade.plannedTarget,
+        plannedRR: trade.expectedRR,
+        expectedExpectancyR: dec(tm?.expectedExpectancy ?? null),
+        originTradeId: trade.id,
+        ...missedFields(miss),
+      },
+    });
   });
 }
 
@@ -128,7 +236,10 @@ export async function createOpportunity(
 export function listOpportunitiesForDay(userId: string, dateKey: string) {
   return prisma.tradeOpportunity.findMany({
     where: { userId, spottedAt: dateKeyToUtcDate(dateKey) },
-    include: { executedTrade: { select: { id: true, tradeNumber: true, actualRR: true } } },
+    include: {
+      executedTrade: { select: { id: true, tradeNumber: true, actualRR: true } },
+      originTrade: { select: { id: true, tradeNumber: true, deletedAt: true } },
+    },
     orderBy: { createdAt: "asc" },
   });
 }
@@ -185,6 +296,10 @@ export async function listOpportunityDtosForDay(
             actualRR: num(o.executedTrade.actualRR),
           }
         : null,
+      // Nested includes aren't soft-delete filtered: a deleted origin trade
+      // is no longer shown as provenance (the opportunity itself stays).
+      originTrade:
+        o.originTrade && o.originTrade.deletedAt == null ? { id: o.originTrade.id, tradeNumber: o.originTrade.tradeNumber } : null,
     } satisfies OpportunityListItemDTO;
   });
 }
@@ -209,13 +324,7 @@ export async function logMissedOutcome(userId: string, id: string, data: MissOut
   assertPending(op.status);
   return prisma.tradeOpportunity.update({
     where: { id: op.id },
-    data: {
-      status: "MISSED",
-      missReason: data.missReason,
-      missNote: data.missNote,
-      missedOutcome: data.missedOutcome,
-      missedRealizedR: dec(data.missedRealizedR),
-    },
+    data: missedFields(data),
   });
 }
 
@@ -271,7 +380,8 @@ export async function deleteOpportunity(userId: string, id: string) {
   const op = await requireOpportunity(userId, id);
   // Detach any linked trade first so the trade survives (it's a real executed record).
   await prisma.trade.updateMany({ where: { opportunityId: op.id, userId }, data: { opportunityId: null } });
-  await prisma.tradeOpportunity.update({ where: { id: op.id }, data: { deletedAt: new Date() } });
+  // Releasing the provenance link lets the cancelled idea be recorded again.
+  await prisma.tradeOpportunity.update({ where: { id: op.id }, data: { deletedAt: new Date(), originTradeId: null } });
 }
 
 // ── Engine feed ───────────────────────────────────────────────────────────────

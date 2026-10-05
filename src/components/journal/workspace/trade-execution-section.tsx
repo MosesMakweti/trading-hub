@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tag } from "@/components/ui/tag";
 import { AdherenceMeter } from "@/components/journal/adherence-score";
 import { cn } from "@/lib/utils";
-import { minutesToTimeString } from "@/lib/date";
+import { tradeTimeDisplay } from "@/domain/trades/display-facts";
 import { needsExplicitInitialStopConfirmation } from "@/domain/performance/realized-r";
 import {
   WorkspaceField,
@@ -146,11 +146,16 @@ export function StopLossField({ trade }: { trade: TradeWorkspaceDTO }) {
 // Section 2 — Trade Execution: what actually happened. Kept separate from the plan.
 export function TradeExecutionSection({ trade }: { trade: TradeWorkspaceDTO }) {
   const targetPrecision = parseSymbol(trade.assetSymbol).spec?.decimalPrecision ?? null;
+  const time = tradeTimeDisplay({
+    executionMinutes: trade.executionMinutes,
+    hasActualEntry: trade.actualEntry != null,
+    hasLegacyResult: trade.actualEntry == null && trade.actualRR != null,
+  });
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-        <WorkspaceField label="Execution time" value={minutesToTimeString(trade.executionMinutes)} />
+        <WorkspaceField label={time.executed ? time.label : "Entry time"} value={time.executed ? time.time : undefined} placeholder="Not entered yet" />
         <WorkspaceField
           label="Direction"
           value={

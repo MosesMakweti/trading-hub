@@ -54,6 +54,12 @@ export interface TradeListItemDTO {
   direction: "LONG" | "SHORT";
   higherTimeframeBias: "BULLISH" | "BEARISH";
   biasConfidencePercent: number;
+  /** Phase 5 — frozen daily Final Bias (display prefers it over the legacy
+   *  compatibility HTF/confidence; domain/trades/display-facts.ts). */
+  dailyBiasSnapshot: "LONG" | "SHORT" | "NEUTRAL" | null;
+  /** Phase 5 — an actual entry exists (executionMinutes is then the real
+   *  Entry Time, otherwise the provisional idea-logged time). */
+  hasActualEntry: boolean;
   expectedRR: number | null;
   actualRR: number | null;
   targets: PlannedTargetDTO[];

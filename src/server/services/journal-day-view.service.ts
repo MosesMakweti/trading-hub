@@ -61,6 +61,8 @@ export async function loadJournalDay(userId: string, dateKey: string, { historic
       direction: t.direction,
       higherTimeframeBias: t.higherTimeframeBias,
       biasConfidencePercent: t.biasConfidencePercent,
+      dailyBiasSnapshot: (t.dailyBiasSnapshot as TradeListItemDTO["dailyBiasSnapshot"]) ?? null,
+      hasActualEntry: t.actualEntry != null,
       expectedRR: t.expectedRR ? t.expectedRR.toNumber() : null,
       actualRR: t.actualRR ? t.actualRR.toNumber() : null,
       targets: t.plannedTargets.map((pt) => ({

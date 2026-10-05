@@ -37,8 +37,10 @@ re-saving a legacy trade's review in V3 re-derives those two keys.
 
 ## Completion and interim vs final
 
-* Final review requires: motive, the four process answers, a scored
-  questionnaire, and `wouldTakeAgain`. Reflection text is optional.
+* Final review requires: motive, the four process answers and
+  `wouldTakeAgain` (the psychology questionnaire was removed from the
+  requirements in `aa6dcee`; stored answers still score). Reflection text is
+  optional.
 * **Complete review** stamps `Trade.reviewedAt`. V3 writes never stamp
   `reviewedAt` from free text (`updateTradeSections(..., { stampReviewedAtFromText: false })`);
   the legacy paths (edit form, imports, V2/Backtesting) keep the old stamp.

@@ -8,6 +8,9 @@ import { toTradeDiscrepancy } from "@/server/services/trade-discrepancy";
 import { currentSettlementBasis, settlementInclude, settlementInputs } from "@/server/services/settlement-basis";
 import { getOrCreateTradingDay, endDay } from "@/server/services/trading-day.service";
 import { reconcileTradeLifecycleForTrade } from "@/server/services/trade-review.service";
+import { syncLiveTradeLifecycle } from "@/server/services/trade-lifecycle-sync.service";
+import { getTradeReviewFacts } from "@/server/services/trade-review-v3.service";
+import { isBacktestScope } from "@/server/workspace/scope";
 import type { DailyReflectionInput, CloseTradingDayInput } from "@/lib/validation/close-day";
 
 /**
@@ -84,6 +87,11 @@ export interface DayCloseSummaryDTO {
    *  (Phase 2 §14's correction, carried through to Day Summary). */
   processBreachCount: number;
   behaviourLabels: BehaviourLabelCountDTO[];
+  /** Today V3 (Phase 4) — LIVE only: trades whose FINAL review is outstanding
+   *  under the centralized V3 review state (review-state.ts via
+   *  getTradeReviewFacts), never `reviewedAt != null`. Null in a backtest,
+   *  which keeps the V2 review flow. */
+  finalReviewRequiredCount: number | null;
   reflection: {
     dayWentWell: string | null;
     dayToImprove: string | null;
@@ -278,7 +286,20 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
       `${contradictoryFullyClosedCount} trade${contradictoryFullyClosedCount === 1 ? " is" : "s are"} marked Fully Closed but ${contradictoryFullyClosedCount === 1 ? "doesn't" : "don't"} have enough execution data to determine a result yet.`,
     );
   }
-  if (noReflectionCount > 0) {
+  // Today V3 (Phase 4) — LIVE review readiness is the centralized FINAL
+  // review state, not free text: the old "no reflection notes" rule counted
+  // a trade with notes but no final review as fine, and an interim review as
+  // final. Backtesting keeps its V2 rule (reviewedAt there still means text).
+  let finalReviewRequiredCount: number | null = null;
+  if (basis === "PERFORMANCE_ACCOUNT") {
+    const reviewFacts = await getTradeReviewFacts(userId, trades.map((t) => t.id));
+    finalReviewRequiredCount = Object.values(reviewFacts).filter((f) => f.state === "FINAL_REVIEW_REQUIRED").length;
+    if (finalReviewRequiredCount > 0) {
+      warnings.push(
+        `${finalReviewRequiredCount} trade${finalReviewRequiredCount === 1 ? " still requires" : "s still require"} a final review.`,
+      );
+    }
+  } else if (noReflectionCount > 0) {
     warnings.push(`${noReflectionCount} closed trade${noReflectionCount === 1 ? "" : "s"} ${noReflectionCount === 1 ? "has" : "have"} no reflection notes yet.`);
   }
   const stillOpenCount = partiallyClosedCount + stillHoldingCount;
@@ -310,6 +331,7 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
     missedValidOpportunityCount,
     processBreachCount,
     behaviourLabels: Array.from(labelCounts.values()).sort((a, b) => b.count - a.count),
+    finalReviewRequiredCount,
     reflection: {
       dayWentWell: day?.dayWentWell ?? null,
       dayToImprove: day?.dayToImprove ?? null,
@@ -359,12 +381,52 @@ export async function closeTradingDay(
     },
   });
 
-  const trades = await prisma.trade.findMany({ where: tradeWhereForDay(userId, dateKey), select: { id: true } });
-  for (const trade of trades) {
-    await reconcileTradeLifecycleForTrade(userId, trade.id);
-  }
-
+  await reconcileDayTradesForClose(userId, dateKey);
   return endDay(userId, dateKey);
+}
+
+/**
+ * Brings every trade's stored lifecycle columns in step before the day
+ * archives. Today V3 (Phase 4) fix: a LIVE entered trade is synced from its
+ * execution facts by the Phase 3 service (syncLiveTradeLifecycle), whose
+ * status=REVIEWED requires the FINAL review. The V2 reconcile it used to get
+ * marks REVIEWED whenever closedAt and reviewedAt both exist — which turned
+ * an interim review (reviewedAt before the close) into "reviewed" on close
+ * and dropped the trade from the carried "final review required" list.
+ * Everything else — Backtesting/Replay (V2 flow), cancelled ideas, LIVE rows
+ * whose review status was never set (unsynced legacy), and LIVE legacy
+ * results recorded as actualRR with no exit/settlement facts — keeps the V2
+ * reconcile exactly as before.
+ */
+export async function reconcileDayTradesForClose(userId: string, dateKey: string): Promise<void> {
+  const live = !isBacktestScope();
+  const trades = await prisma.trade.findMany({
+    where: tradeWhereForDay(userId, dateKey),
+    select: {
+      id: true,
+      actualEntry: true,
+      actualExit: true,
+      actualRR: true,
+      reviewLifecycleStatus: true,
+      _count: { select: { actualPartialExits: true } },
+      performanceRiskSnapshot: { select: { settledAt: true } },
+    },
+  });
+  for (const trade of trades) {
+    const hasCloseFacts =
+      trade.actualExit != null || trade._count.actualPartialExits > 0 || trade.performanceRiskSnapshot?.settledAt != null;
+    // Only trades already in the synced lifecycle (stored status set by the
+    // Phase 3 sync); an unsynced legacy row (status never set) is left
+    // exactly as it was, as before.
+    const v3Synced =
+      live &&
+      trade.actualEntry != null &&
+      trade.reviewLifecycleStatus != null &&
+      trade.reviewLifecycleStatus !== "CANCELLED_NEVER_TRIGGERED" &&
+      (trade.actualRR == null || hasCloseFacts);
+    if (v3Synced) await syncLiveTradeLifecycle(userId, trade.id);
+    else await reconcileTradeLifecycleForTrade(userId, trade.id);
+  }
 }
 
 // ── Journal calendar (Stage 9 §2/§19) ────────────────────────────────────────

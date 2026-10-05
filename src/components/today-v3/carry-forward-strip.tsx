@@ -2,7 +2,7 @@ import { History } from "lucide-react";
 
 import { formatDateKeyLong } from "@/lib/date";
 import { TodayFocusFromReview } from "@/components/today/today-focus-from-review";
-import type { CarryForwardDTO } from "@/server/services/trading-workspace.service";
+import type { CarryForwardDTO } from "@/server/services/close-day-v3.service";
 import type {
   AdherenceResultDTO,
   AdherenceTrend,
@@ -37,8 +37,8 @@ export function CarryForwardStrip({
   const rows = lastSession
     ? ([
         ["Focus", lastSession.carryForward],
-        ["Lesson", lastSession.mainLesson],
-        ["Improve", lastSession.toImprove],
+        ["Main lesson", lastSession.mainLesson],
+        ["Needs improvement", lastSession.toImprove],
       ] as const).filter(([, v]) => v)
     : [];
 
@@ -53,7 +53,7 @@ export function CarryForwardStrip({
             </h2>
             <span className="font-mono text-[11px] text-muted-foreground">{formatDateKeyLong(lastSession.fromDateKey)}</span>
           </div>
-          <dl className="grid grid-cols-[64px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+          <dl className="grid grid-cols-[96px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
             {rows.map(([label, value]) => (
               <div key={label} className="contents">
                 <dt className="font-mono text-[11px] tracking-wider text-muted-foreground uppercase">{label}</dt>

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireApiUser } from "@/server/api-auth";
 import { withCors, corsPreflight } from "@/server/api-cors";
-import { reserveIdempotencyKey, recordIdempotencyResult } from "@/server/api-idempotency";
+import { releaseIdempotencyKey, reserveIdempotencyKey, recordIdempotencyResult } from "@/server/api-idempotency";
 import { apiCreateTradeSchema } from "@/lib/validation/api-trades";
 import { isValidDateKey, localDateToKey } from "@/lib/date";
 import { dayEditableGuard } from "@/actions/day-guard";
@@ -103,8 +103,14 @@ async function handleCreateTrade(request: Request) {
   // Same guard a web-created trade goes through (trades.actions.ts::createTrade)
   // — an archived/closed trading day is read-only for every client, not just
   // the web app.
+  // A failure before the trade exists frees the key so the same retry can
+  // succeed later (e.g. after the day is reopened) — Phase 5.
+  const rejectBeforeCreate = async (message: string) => {
+    if (idempotencyKey) await releaseIdempotencyKey(userId, idempotencyKey);
+    return badRequest(request, message, 422);
+  };
   const blocked = await dayEditableGuard(userId, dateKey);
-  if (blocked) return badRequest(request, blocked.error, 422);
+  if (blocked) return rejectBeforeCreate(blocked.error);
 
   // Strategy ownership — reuses the SAME ownership-scoped query
   // getStrategyReference() already performs (server/services/strategies.
@@ -118,14 +124,14 @@ async function handleCreateTrade(request: Request) {
   // strategyId: null) — built on the exact same primitive, not a new rule.
   if (input.trade.strategyId) {
     const ref = await getStrategyReference(userId, input.trade.strategyId);
-    if (!ref) return badRequest(request, "strategyId not found.", 422);
+    if (!ref) return rejectBeforeCreate("strategyId not found.");
   }
 
   let trade;
   try {
     trade = await tradesService.createTrade(userId, dateKey, input.trade);
   } catch (e) {
-    return badRequest(request, errorMessage(e, "Could not create the trade."), 422);
+    return rejectBeforeCreate(errorMessage(e, "Could not create the trade."));
   }
 
   // The core trade now exists and is committed. Everything below is a

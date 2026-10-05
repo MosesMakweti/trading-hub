@@ -25,16 +25,34 @@ import {
 // Records WHY a valid setup was skipped + WHAT it would have done. The outcome is
 // trader-entered (Traditorium has no price feed); "Couldn't tell" (UNDETERMINED) hides
 // the R field and is honestly excluded from the missed-opportunity cost.
+export interface MissOutcomeValues {
+  missReason: MissReason;
+  missNote: string | null;
+  missedOutcome: MissedOutcome;
+  missedRealizedR: number | null;
+}
+
 export function MissOutcomeForm({
   dateKey,
   opportunityId,
   onDone,
   onCancel,
+  onSubmit,
+  submitLabel = "Record missed trade",
+  notePlaceholder = "What happened in the moment?",
+  successMessage = "Missed trade recorded.",
 }: {
   dateKey: string;
-  opportunityId: string;
+  /** Resolves this PENDING opportunity as MISSED (the Journal flow). */
+  opportunityId?: string;
   onDone: () => void;
   onCancel: () => void;
+  /** Today V3 (Phase 4): submit the same answers elsewhere instead (a missed
+   *  setup recorded in one step, or a cancelled idea recorded as missed). */
+  onSubmit?: (values: MissOutcomeValues) => Promise<{ success: true } | { success: false; error: string }>;
+  submitLabel?: string;
+  notePlaceholder?: string;
+  successMessage?: string;
 }) {
   const [reason, setReason] = useState<MissReason | "">("");
   const [outcome, setOutcome] = useState<MissedOutcome>("MISSED_UNDETERMINED");
@@ -47,14 +65,19 @@ export function MissOutcomeForm({
   const submit = () => {
     if (!reason) return toast.error("Pick a reason.");
     startTransition(async () => {
-      const res = await logMissedOutcome(dateKey, opportunityId, {
+      const values: MissOutcomeValues = {
         missReason: reason,
         missNote: note.trim() || null,
         missedOutcome: outcome,
         missedRealizedR: needsR ? Number(realizedR) : null,
-      });
+      };
+      const res = onSubmit
+        ? await onSubmit(values)
+        : opportunityId
+          ? await logMissedOutcome(dateKey, opportunityId, values)
+          : ({ success: false, error: "Nothing to record." } as const);
       if (res.success) {
-        toast.success("Missed trade recorded.");
+        toast.success(successMessage);
         onDone();
       } else {
         toast.error(res.error);
@@ -136,7 +159,7 @@ export function MissOutcomeForm({
           value={note}
           onChange={(e) => setNote(e.target.value)}
           rows={2}
-          placeholder="What happened in the moment?"
+          placeholder={notePlaceholder}
         />
       </div>
 
@@ -145,7 +168,7 @@ export function MissOutcomeForm({
           Cancel
         </Button>
         <Button size="sm" onClick={submit} disabled={pending}>
-          {pending ? "Saving…" : "Record missed trade"}
+          {pending ? "Saving…" : submitLabel}
         </Button>
       </div>
     </div>
