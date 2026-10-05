@@ -137,3 +137,9 @@ export function loggedBeforeReadiness(tradeCreatedAtIso: string, routineReadyAtI
   if (routineReadyAtIso == null) return true;
   return new Date(tradeCreatedAtIso).getTime() < new Date(routineReadyAtIso).getTime();
 }
+
+/** Plan UX — where "Plan set" continues to: Trade once readiness is
+ *  confirmed, otherwise Prepare (readiness gates trading, never planning). */
+export function phaseAfterPlan(ready: boolean): PhaseKey {
+  return ready ? "trade" : "prepare";
+}

@@ -115,7 +115,9 @@ export function TodayAssetsSection({
   const dayRef = useDayRef(dateKey);
   const router = useRouter();
   const [expanded, setExpanded] = useState<Set<string>>(
-    () => new Set(analyses.length === 1 ? [analyses[0].id] : []),
+    // V3 keeps every row collapsed: asset, strategy and final bias are in
+    // the row itself; the detailed analysis opens on demand.
+    () => new Set(variant === "v2" && analyses.length === 1 ? [analyses[0].id] : []),
   );
   const [newSymbol, setNewSymbol] = useState("");
   const [creating, startCreate] = useTransition();
@@ -140,7 +142,7 @@ export function TodayAssetsSection({
         toast.error(r.error);
         return;
       }
-      setExpanded((prev) => new Set(prev).add(r.id));
+      if (variant === "v2") setExpanded((prev) => new Set(prev).add(r.id));
       setNewSymbol("");
       router.refresh();
     });
@@ -161,11 +163,35 @@ export function TodayAssetsSection({
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Choose the assets you&apos;re watching/trading today, then analyze each one — technical
-        structure, fundamental view, and your final trading conclusion. They don&apos;t have to agree.
-      </p>
+    <div className={variant === "v3" ? "space-y-2" : "space-y-4"}>
+      {variant === "v2" && (
+        <p className="text-sm text-muted-foreground">
+          Choose the assets you&apos;re watching/trading today, then analyze each one — technical
+          structure, fundamental view, and your final trading conclusion. They don&apos;t have to agree.
+        </p>
+      )}
+
+      {variant === "v3" && analyses.length > 0 && (
+        <div className="space-y-2">
+          {analyses.map((analysis) => (
+            <AssetAnalysisCard
+              key={analysis.id}
+              dateKey={dateKey}
+              analysis={analysis}
+              expanded={expanded.has(analysis.id)}
+              onToggle={() => toggle(analysis.id)}
+              onDelete={() => setPendingDelete(analysis)}
+              strategies={strategies}
+              tradeFormAccounts={tradeFormAccounts}
+              activeSessions={activeSessions}
+              sessionWindows={sessionWindows}
+              variant={variant}
+              tradeCreationLocked={tradeCreationLocked}
+              onStartIdea={onStartIdea}
+            />
+          ))}
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <Input
@@ -177,13 +203,14 @@ export function TodayAssetsSection({
               addAsset(newSymbol);
             }
           }}
-          placeholder="Add today's asset — e.g. XAUUSD"
-          className="h-9 max-w-60"
+          placeholder={variant === "v3" ? (analyses.length === 0 ? "Which market today? e.g. XAUUSD" : "Add another market") : "Add today's asset — e.g. XAUUSD"}
+          className={variant === "v3" ? "h-8 max-w-60 text-sm" : "h-9 max-w-60"}
           disabled={creating}
         />
         <Button
           type="button"
           size="sm"
+          variant={variant === "v3" ? "ghost" : "default"}
           className="gap-1.5"
           disabled={creating || !newSymbol.trim()}
           onClick={() => addAsset(newSymbol)}
@@ -193,7 +220,7 @@ export function TodayAssetsSection({
         </Button>
       </div>
 
-      {analyses.length === 0 ? (
+      {variant === "v3" ? null : analyses.length === 0 ? (
         <EmptyState
           icon={LineChart}
           title="No assets selected yet"
@@ -495,6 +522,109 @@ function AssetAnalysisCard({
     </div>
   );
 
+  if (isV3) {
+    return (
+      <div className="rounded-xl border border-border/60">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2">
+          <span className={cn("inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-xs", symbolStyle.chip)}>
+            <span className={cn("size-1.5 shrink-0 rounded-full", symbolStyle.dot)} />
+            {analysis.assetSymbol}
+          </span>
+          <Select
+            items={{ "": "No strategy", ...Object.fromEntries(strategies.map((st) => [st.id, st.name])) }}
+            value={activeStrategyId ?? ""}
+            onValueChange={(v) => {
+              const next = v || null;
+              setActiveStrategyId(next);
+              void save({ activeStrategyId: next }).then((r) => {
+                if (r.success) router.refresh(); // today's strategies drive the suggested limits
+              });
+            }}
+          >
+            <SelectTrigger className="h-8 w-44 text-xs" aria-label={`${analysis.assetSymbol} strategy`}>
+              <SelectValue placeholder="No strategy" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">No strategy</SelectItem>
+              {strategies.map((st) => (
+                <SelectItem key={st.id} value={st.id}>
+                  {st.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-1" role="group" aria-label={`${analysis.assetSymbol} final bias`}>
+            {FINAL_BIASES.map((o) => (
+              <Button
+                key={o.value}
+                type="button"
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                variant={finalBias === o.value ? o.selected : "ghost"}
+                aria-pressed={finalBias === o.value}
+                onClick={() => {
+                  const next = finalBias === o.value ? null : o.value;
+                  setFinalBias(next);
+                  void save({ finalBias: next }).then((r) => {
+                    if (r.success) router.refresh();
+                  });
+                }}
+              >
+                {o.label}
+              </Button>
+            ))}
+          </div>
+          <span className="ml-auto flex items-center gap-1.5">
+            {(evidence.bullishCount > 0 || evidence.bearishCount > 0) && (
+              <span className="font-mono text-[11px] text-muted-foreground tabular-nums" title="Checked evidence: bullish / bearish">
+                ▲{evidence.bullishCount} ▼{evidence.bearishCount}
+              </span>
+            )}
+            <SaveDot state={saveState} />
+            {!tradeCreationLocked && onStartIdea && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1 text-xs"
+                onClick={() => onStartIdea({ ...analysis, finalBias, activeStrategyId, htfBias })}
+              >
+                <Sparkles className="size-3.5" />
+                Idea
+              </Button>
+            )}
+            <Button type="button" size="sm" variant="ghost" className="h-7 gap-1 text-xs text-muted-foreground" onClick={onToggle} aria-expanded={expanded}>
+              Analysis
+              {expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+            </Button>
+          </span>
+        </div>
+        {expanded && (
+          <div className="space-y-5 border-t border-border/60 p-3.5">
+            <AnalysisGroup label="Read">
+              {structureField}
+              {technicalBiases}
+              {fundamentalBiasRow}
+              {fundamentalNotesField}
+            </AnalysisGroup>
+            <AnalysisGroup label="Areas">{areasBlock}</AnalysisGroup>
+            <AnalysisGroup label="Evidence">{evidenceBlock}</AnalysisGroup>
+            <AnalysisGroup label="More">
+              {notesField}
+              {screenshotsField}
+            </AnalysisGroup>
+            <div className="flex justify-end">
+              <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-destructive hover:text-destructive" onClick={onDelete}>
+                <Trash2 className="size-3.5" />
+                Remove {analysis.assetSymbol}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="glass overflow-hidden rounded-2xl">
       <button
@@ -546,28 +676,7 @@ function AssetAnalysisCard({
         </div>
       </button>
 
-      {expanded &&
-        (isV3 ? (
-          <div className="space-y-5 border-t border-border/60 p-3.5">
-            {actionsRow}
-            <AnalysisGroup label="Read">
-              {structureField}
-              {technicalBiases}
-              {fundamentalBiasRow}
-              {fundamentalNotesField}
-            </AnalysisGroup>
-            <AnalysisGroup label="Areas">{areasBlock}</AnalysisGroup>
-            <AnalysisGroup label="Evidence">{evidenceBlock}</AnalysisGroup>
-            <AnalysisGroup label="Decision">
-              {finalBiasRow}
-              {strategySelect}
-            </AnalysisGroup>
-            <AnalysisGroup label="More">
-              {notesField}
-              {screenshotsField}
-            </AnalysisGroup>
-          </div>
-        ) : (
+      {expanded && (
           <div className="space-y-4 border-t border-border/60 p-3.5">
             {actionsRow}
             {areasBlock}
@@ -598,7 +707,7 @@ function AssetAnalysisCard({
             {notesField}
             {screenshotsField}
           </div>
-        ))}
+        )}
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, ChevronRight, Loader2, Plus } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Loader2, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import {
   confirmationState,
   suggestLimit,
   suggestSessions,
+  summarizeDayRules,
   type LimitSuggestion,
 } from "@/domain/today/rule-suggestions";
 import type { SessionWindow } from "@/domain/schedule/session-countdown";
@@ -348,5 +349,105 @@ export function TodaysRules({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Plan UX — the compact, quiet form of Today's Rules: one line of what's
+ * already known (inherited limits, risk per trade, sessions), a single
+ * "Confirm" when Strategy Lab suggests limits the trader hasn't confirmed
+ * yet (writes exactly the suggested values into the same TradingDay
+ * columns — a suggestion is still never stored without that click), and
+ * "View strategy rules" for the full editable detail (TodaysRules).
+ */
+export function RulesSummary({
+  dateKey,
+  plan,
+  rules,
+  sessionWindows,
+  readOnly,
+}: {
+  dateKey: string;
+  plan: TodaysPlanDTO;
+  rules: TodaysRulesDTO | null;
+  sessionWindows: SessionWindow[];
+  readOnly: boolean;
+}) {
+  const dayRef = useDayRef(dateKey);
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, start] = useTransition();
+  const strategies = rules?.strategies ?? [];
+  const summary = summarizeDayRules(
+    strategies.map((s) => ({ strategyId: s.id, strategyName: s.name, maxDailyRiskPercent: s.maxDailyRiskPercent, maxTradesPerDay: s.maxTradesPerDay })),
+    { riskBudgetPercent: plan.riskBudgetPercent, maxTradesPerDay: plan.maxTradesPerDay },
+    { active: plan.activeSessions, strategySessions: strategies.map((s) => s.sessions) },
+  );
+
+  function confirmAll() {
+    if (!summary.confirmPatch) return;
+    const patch = summary.confirmPatch;
+    start(async () => {
+      const r = await updateTodaysPlan(dayRef, patch);
+      if (!r.success) {
+        toast.error(r.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  const item = (label: string, value: string, muted = false) => (
+    <span className="whitespace-nowrap">
+      <span className="text-muted-foreground">{label} </span>
+      <span className={cn("font-mono tabular-nums", muted ? "text-muted-foreground" : "text-foreground")}>{value}</span>
+    </span>
+  );
+
+  return (
+    <section aria-label="Strategy rules" className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+        {summary.noLimits ? (
+          <span className="text-muted-foreground">No daily limits set</span>
+        ) : summary.allConfirmed ? (
+          <span className="flex items-center gap-1 text-success">
+            <Check className="size-3.5" />
+            Strategy rules
+          </span>
+        ) : (
+          <span className="text-warning">Rules not confirmed</span>
+        )}
+        {summary.risk.value != null && item("Risk", `${fmt(summary.risk.value)}%`, summary.risk.state === "SUGGESTED")}
+        {summary.maxTrades.value != null && item("Max trades", fmt(summary.maxTrades.value), summary.maxTrades.state === "SUGGESTED")}
+        {rules && item("Per trade", `${fmt(rules.performance.defaultRiskPercent)}%`)}
+        {summary.sessions.names.length > 0 && (
+          <span className={cn("whitespace-nowrap", summary.sessions.suggested ? "text-muted-foreground" : "text-foreground")}>
+            {summary.sessions.names.join(", ")}
+          </span>
+        )}
+        <span className="ml-auto flex items-center gap-2">
+          {summary.confirmPatch && !readOnly && (
+            <Button type="button" size="sm" className="h-7 gap-1.5" onClick={confirmAll} disabled={pending}>
+              {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+              Confirm
+            </Button>
+          )}
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {summary.noLimits && !readOnly ? "Set limits" : "View strategy rules"}
+            <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+          </button>
+        </span>
+      </div>
+      {open && (
+        <div className="rounded-xl border border-border/60 p-4">
+          <TodaysRules dateKey={dateKey} plan={plan} rules={rules} sessionWindows={sessionWindows} readOnly={readOnly} />
+        </div>
+      )}
+    </section>
   );
 }

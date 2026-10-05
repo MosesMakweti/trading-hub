@@ -267,6 +267,7 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
               setActive("trade");
               openQuickIdea(analysis);
             }}
+            onContinue={setActive}
           />
         )}
         {active === "trade" && (
