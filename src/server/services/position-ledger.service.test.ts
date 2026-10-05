@@ -10,7 +10,7 @@ import { createBacktestRun, runInBacktestRun } from "@/server/services/backtest-
 import { getOrCreateTradingDay } from "@/server/services/trading-day.service";
 import { getOrCreateDayRoutine, setRoutineReady } from "@/server/services/today-routine.service";
 import { savePlan } from "@/server/services/trade-plan.service";
-import { createQuickIdea, recordFirstEntry } from "@/server/services/today-trade.service";
+import { createQuickIdea, getTradeLifecycleFacts, recordFirstEntry } from "@/server/services/today-trade.service";
 import { createTrade, getTrade, updateTrade, updateTradeSections } from "@/server/services/trades.service";
 import { tradeToFormValues } from "@/server/services/trade-input.mapper";
 import { upsertPartialExit } from "@/server/services/trade-partial-exit.service";
@@ -261,6 +261,7 @@ describe("fills and canonical settlement", () => {
       expect(review.state).not.toBe("FINAL_REVIEW_REQUIRED");
       const open = await getDayCloseSummary(user.id, d);
       expect(open.totalRealizedRSoFar).toBeCloseTo(0.492, 6);
+      expect((await getTradeLifecycleFacts(user.id, [tradeId]))[tradeId].exitedPercent).toBeCloseTo(49.3976, 4);
 
       await recordCloseFill(user.id, tradeId, { percentOfRemaining: 50, price: 2024, executedAt: at(d, 660) });
       const last = await recordCloseFill(user.id, tradeId, { percentOfRemaining: 100, price: 2006, executedAt: at(d, 700) });
@@ -284,6 +285,7 @@ describe("fills and canonical settlement", () => {
 
       const t = await prisma.trade.findUniqueOrThrow({ where: { id: tradeId } });
       expect([t.reviewLifecycleStatus, t.status, t.actualExit]).toEqual(["FULLY_CLOSED", "CLOSED", null]);
+      expect((await getTradeLifecycleFacts(user.id, [tradeId]))[tradeId].exitedPercent).toBeCloseTo(100, 9);
       expect((await getV3ReviewData(user.id, tradeId)).state).toBe("FINAL_REVIEW_REQUIRED");
       const rows = await getCanonicalAnalyticsDataset(user.id, { from: d, to: d });
       expect(rows.find((r) => r.tradeId === tradeId)).toMatchObject({ isExecuted: true, realizedR: 1.122, pnl: 1122, winLossClass: "WIN" });

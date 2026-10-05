@@ -28,6 +28,7 @@ import { isQuantityLedgerEnabled } from "@/lib/feature-flags";
 import { enterQuantityLedgerTrade } from "@/server/services/position-ledger.service";
 import { lockPlanIfConfirmedAndUnlocked } from "@/server/services/trade-plan.service";
 import { syncLiveTradeLifecycle } from "@/server/services/trade-lifecycle-sync.service";
+import { withLedgerProjections } from "@/server/services/ledger-projection.service";
 
 /**
  * Today V3 (Phase 2) — the trade-lifecycle orchestration behind the LIVE
@@ -321,6 +322,7 @@ export async function getTradeLifecycleFacts(userId: string, tradeIds: string[])
       where: { id: { in: tradeIds }, userId },
       select: {
         id: true,
+        executionModel: true,
         actualExit: true,
         limitOverrideReason: true,
         strategyExecutionSnapshot: true,
@@ -338,12 +340,16 @@ export async function getTradeLifecycleFacts(userId: string, tradeIds: string[])
       select: { tradeId: true, locked: true },
     }),
   ]);
+  // A QUANTITY_LEDGER trade's exits come from its fill ledger (derived, in memory).
+  const withExits = await withLedgerProjections(
+    trades.map((t) => ({ ...t, actualPartialExits: partials.filter((p) => p.tradeId === t.id) })),
+  );
   const out: Record<string, TradeLifecycleFactsDTO> = {};
-  for (const t of trades) {
+  for (const t of withExits) {
     const latest = versions.find((v) => v.tradeId === t.id);
     out[t.id] = {
       exitedPercent: exitedPercentFrom(
-        partials.filter((p) => p.tradeId === t.id).map((p) => ({ percentClosed: p.percentClosed ? p.percentClosed.toNumber() : null })),
+        t.actualPartialExits.map((p) => ({ percentClosed: p.percentClosed ? p.percentClosed.toNumber() : null })),
         t.actualExit ? t.actualExit.toNumber() : null,
       ),
       hasConfirmedPlan: latest != null,
@@ -356,7 +362,7 @@ export async function getTradeLifecycleFacts(userId: string, tradeIds: string[])
         closedMomentFrom(
           t.closedAt,
           t.performanceRiskSnapshot?.settledAt ?? null,
-          partials.filter((p) => p.tradeId === t.id).map((p) => p.exitedAt),
+          t.actualPartialExits.map((p) => p.exitedAt),
         )?.toISOString() ?? null,
     };
   }
