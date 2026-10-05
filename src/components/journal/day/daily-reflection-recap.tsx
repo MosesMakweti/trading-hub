@@ -28,7 +28,7 @@ export function DailyReflectionRecap({ summary }: { summary: DayCloseSummaryDTO 
           <NoteBlock label="What went well today?" text={reflection.dayWentWell} />
           <NoteBlock label="What needs improvement?" text={reflection.dayToImprove} />
           <NoteBlock label="Main lesson" text={reflection.dayMainLesson} />
-          <NoteBlock label="Carry forward into next session" text={reflection.dayCarryForward} />
+          <NoteBlock label="Focus for next session" text={reflection.dayCarryForward} />
         </div>
       )}
 

@@ -67,12 +67,12 @@ model User {
 
   marketDataImports MarketDataImport[]
 
-  apiTokens         ApiToken[]
+  apiTokens          ApiToken[]
   apiIdempotencyKeys ApiIdempotencyKey[]
 
-  backtestRuns BacktestRun[]
+  backtestRuns            BacktestRun[]
   // Native Replay V2 — user-owned MT5 M1 datasets (independent of Edge Review's MarketDataImport)
-  historicalDatasets HistoricalDataset[]
+  historicalDatasets      HistoricalDataset[]
   historicalImportUploads HistoricalImportUpload[]
 }
 
@@ -798,7 +798,12 @@ model Trade {
   // no opportunity. @unique enforces one executed trade per opportunity (no
   // double-counting). SetNull so deleting the opportunity never deletes the trade.
   opportunityId String?           @unique
-  opportunity   TradeOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  opportunity   TradeOpportunity? @relation("OpportunityExecutedTrade", fields: [opportunityId], references: [id], onDelete: SetNull)
+
+  // Today V3 (Phase 4) — the reverse of TradeOpportunity.originTradeId: the
+  // MISSED opportunity the trader explicitly recorded from this cancelled
+  // idea, if any. Never set automatically; the Trade itself stays cancelled.
+  recordedMissedOpportunity TradeOpportunity? @relation("OpportunityOriginTrade")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -988,7 +993,17 @@ model TradeOpportunity {
 
   // The executed trade, when status = EXECUTED (reverse of Trade.opportunityId,
   // one-to-one). Null for every non-executed outcome.
-  executedTrade Trade?
+  executedTrade Trade? @relation("OpportunityExecutedTrade")
+
+  // Today V3 (Phase 4) — provenance only: the cancelled/never-entered Trade
+  // this MISSED opportunity was explicitly recorded from ("Record as missed
+  // opportunity"). Deliberately NOT Trade.opportunityId, which means "the
+  // executed trade" and feeds execution analytics. Null for every opportunity
+  // spotted directly. One opportunity per cancelled trade; SetNull so the
+  // opportunity survives if the trade is ever hard-deleted. A DB trigger
+  // keeps both rows in the same environment (LIVE / one backtest run).
+  originTradeId String? @unique
+  originTrade   Trade?  @relation("OpportunityOriginTrade", fields: [originTradeId], references: [id], onDelete: SetNull)
 
   // Backtesting (Stage 1) — environment discriminator, same contract as
   // Trade.backtestRunId. A missed setup spotted while replaying a historical
@@ -3763,10 +3778,10 @@ model BacktestRun {
   updatedAt  DateTime  @updatedAt
   archivedAt DateTime?
 
-  tradingDays   TradingDay[]
-  trades        Trade[]
-  opportunities TradeOpportunity[]
-  dailyNotes    DailyNote[]
+  tradingDays     TradingDay[]
+  trades          Trade[]
+  opportunities   TradeOpportunity[]
+  dailyNotes      DailyNote[]
   // Native Replay V2 — which historical dataset each asset replays, and the
   // authoritative replay position per simulation date × asset.
   datasets        BacktestRunDataset[]
@@ -3815,7 +3830,7 @@ model HistoricalDataset {
   /// Normalised identity ("EURUSD", "XAUUSD") — sourceSymbol stays recoverable.
   symbol        String
   /// Always "M1": the only stored resolution; every other timeframe is derived.
-  baseTimeframe String @default("M1")
+  baseTimeframe String               @default("M1")
 
   timeBasis        HistoricalTimeBasis @default(BROKER_SERVER)
   /// Broker server offset from UTC, ONLY if the trader stated it. Null =

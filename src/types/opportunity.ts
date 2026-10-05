@@ -73,4 +73,8 @@ export interface OpportunityListItemDTO {
 
   // EXECUTED-only link.
   executedTrade: { id: string; tradeNumber: number | null; actualRR: number | null } | null;
+
+  /** Today V3 (Phase 4) — the cancelled idea this missed opportunity was
+   *  explicitly recorded from (provenance only), else null. */
+  originTrade: { id: string; tradeNumber: number | null } | null;
 }

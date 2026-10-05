@@ -20,6 +20,9 @@ import {
 } from "@/actions/trade-review-v3.actions";
 import { loadTradeBehaviourLabelsAction, setTradeBehaviourLabelsAction } from "@/actions/behaviour-labels.actions";
 import { setReviewLifecycleStatusAction } from "@/actions/trade-review.actions";
+import { recordCancelledIdeaAsMissed } from "@/actions/opportunity.actions";
+import { MissOutcomeForm } from "@/components/journal/opportunity/miss-outcome-form";
+import { MISS_REASON_LABELS, MISSED_OUTCOME_LABELS, type MissReason, type MissedOutcome } from "@/types/opportunity";
 import { ADHERENCE_QUESTIONS } from "@/domain/trades/adherence";
 import { REVIEW_STATE_LABEL, type ReviewState } from "@/domain/trades/review-state";
 import type { V3ReviewDTO } from "@/server/services/trade-review-v3.service";
@@ -629,6 +632,65 @@ function CancelledReview({ data, dateKey, onChanged }: { data: V3ReviewDTO; date
         <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} disabled={!editable} />
       </div>
       <ReflectionField data={data} dateKey={dateKey} field="psychLessonsLearned" label="Key lesson (optional)" placeholder="What did this idea teach you?" />
+      <RecordAsMissed data={data} dateKey={dateKey} editable={editable} onChanged={onChanged} />
     </div>
+  );
+}
+
+/**
+ * Phase 4 — a cancelled idea is NOT automatically a missed opportunity. Only
+ * when the trader says the setup was real and they didn't take it is a
+ * separate MISSED opportunity recorded from this idea; the Trade stays a
+ * cancelled Trade either way.
+ */
+function RecordAsMissed({
+  data,
+  dateKey,
+  editable,
+  onChanged,
+}: {
+  data: V3ReviewDTO;
+  dateKey: string;
+  editable: boolean;
+  onChanged: () => Promise<void>;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const recorded = data.recordedMissedOpportunity;
+  if (recorded) {
+    return (
+      <p className="rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        Recorded as a missed opportunity
+        {recorded.missReason ? ` — ${MISS_REASON_LABELS[recorded.missReason as MissReason]}` : ""}
+        {recorded.missedOutcome ? ` · ${MISSED_OUTCOME_LABELS[recorded.missedOutcome as MissedOutcome]}` : ""}. This trade stays a cancelled idea.
+      </p>
+    );
+  }
+  if (!editable) return null;
+  return open ? (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground">
+        Was this a real setup you didn&apos;t take? Recording it keeps this cancelled idea as is and adds a separate missed opportunity.
+      </p>
+      <MissOutcomeForm
+        dateKey={dateKey}
+        onDone={() => setOpen(false)}
+        onCancel={() => setOpen(false)}
+        submitLabel="Record as missed opportunity"
+        successMessage="Recorded as a missed opportunity — the idea stays cancelled."
+        onSubmit={async (miss) => {
+          const r = await recordCancelledIdeaAsMissed(data.tradeId, miss);
+          if (!r.success) return r;
+          await onChanged();
+          router.refresh();
+          return { success: true };
+        }}
+      />
+    </div>
+  ) : (
+    <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={() => setOpen(true)}>
+      <Plus className="size-3.5" />
+      Record as missed opportunity
+    </Button>
   );
 }

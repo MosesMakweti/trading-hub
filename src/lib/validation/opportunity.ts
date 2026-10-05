@@ -79,5 +79,11 @@ export const missOutcomeSchema = z
     }
   });
 
+// Today V3 (Phase 4) — "+ Setup missed": spot + resolve MISSED in one step.
+export const missedSetupSchema = z.object({
+  setup: opportunityCreateSchema,
+  miss: missOutcomeSchema,
+});
+
 export type OpportunityCreateInput = z.infer<typeof opportunityCreateSchema>;
 export type MissOutcomeInput = z.infer<typeof missOutcomeSchema>;

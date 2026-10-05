@@ -66,6 +66,11 @@ not re-derived here.
 
 Migrations: `20260809120000_trade_opportunity`, `20260809130000_opportunity_snapshot`.
 
+Today V3 (Phase 4) adds `TradeOpportunity.originTradeId` (`@unique`, SetNull) — provenance only: the
+cancelled idea a MISSED opportunity was explicitly recorded from ("Record as missed opportunity").
+It is never `Trade.opportunityId`, so it never makes an opportunity EXECUTED. Migration
+`20261005120000_today_v3_missed_from_cancelled`; see `docs/TODAY_V3_CLOSE.md`.
+
 ## The historical-data guarantee (§19)
 
 Existing trades logged before this feature have **no** opportunity — they stay pure executed trades and

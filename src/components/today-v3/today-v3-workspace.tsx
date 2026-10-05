@@ -50,7 +50,6 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
     routine,
     todaysPlan,
     trades,
-    dailyAnalytics,
     dailyAssetAnalyses,
     sessionWindows,
     todaysRules,
@@ -60,6 +59,7 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
     commitmentAdherence,
     carriedTrades,
     lifecycleFacts,
+    closeDay,
   } = data;
   const dayRef = useDayRef(day.dateKey);
   const router = useRouter();
@@ -130,6 +130,13 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
   const [selectedTradeId, setSelectedTradeId] = useState<string | null>(null);
   const [requestedStage, setRequestedStage] = useState<{ tradeId: string; stage: TradeStageKey } | null>(null);
   const [quickIdea, setQuickIdea] = useState<QuickIdeaRequest | null>(null);
+  const [showSetups, setShowSetups] = useState(false);
+  // Close → "Review now" / "Open": jump straight to that trade's stage.
+  function openTrade(tradeId: string, stage: TradeStageKey) {
+    setActive("trade");
+    setSelectedTradeId(tradeId);
+    setRequestedStage({ tradeId, stage });
+  }
   const nowMinutes = () => {
     const d = new Date();
     return d.getHours() * 60 + d.getMinutes();
@@ -285,9 +292,23 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
             executionsByTradeId={data.executionsByTradeId}
             opportunities={data.opportunities}
             linkableTrades={data.linkableTrades}
+            showSetups={showSetups}
+            onShowSetupsChange={setShowSetups}
+            analyses={dailyAssetAnalyses}
           />
         )}
-        {active === "close" && <ClosePhase dateKey={day.dateKey} analytics={dailyAnalytics} archived={archived} />}
+        {active === "close" && closeDay && (
+          <ClosePhase
+            data={closeDay}
+            onOpenTrade={openTrade}
+            onOpenSetups={() => {
+              setActive("trade");
+              setShowSetups(true);
+            }}
+            onReopen={reopen}
+            reopening={reopening}
+          />
+        )}
       </div>
 
       <QuickIdeaSheet

@@ -1,6 +1,5 @@
-import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
+import { dateKeyToUtcDate } from "@/lib/date";
 import { deriveWorkflowSteps, type WorkflowDoneState } from "@/domain/today/workflow";
-import { prisma } from "@/server/db";
 import {
   archivePastActiveDays,
   getOrCreateTradingDay,
@@ -27,6 +26,7 @@ import { LIVE_SCOPE, runLive } from "@/server/workspace/scope";
 import { assertDatabaseSeesScope } from "@/server/workspace/scope-tripwire";
 import { getTodaysRules } from "@/server/services/today-rules.service";
 import { getTradeLifecycleFacts, listCarriedOpenTrades } from "@/server/services/today-trade.service";
+import { getCloseDayV3, getLastSessionCarryForward, type CarryForwardDTO } from "@/server/services/close-day-v3.service";
 import type { DailyAnalyticsDTO, TodaysRulesDTO } from "@/types/today";
 import type { AdherenceResultDTO, AdherenceTrend, EdgeReviewCommitmentDailyStatus, TodayCommitmentsDTO } from "@/types/edge-improvements";
 import type { ExecutionDTO } from "@/types/prop-firms";
@@ -47,12 +47,7 @@ import type { ExecutionDTO } from "@/types/prop-firms";
  */
 export type WorkspaceLoadTarget = { environment: "LIVE" } | { environment: "BACKTEST"; runId: string };
 
-export interface CarryForwardDTO {
-  fromDateKey: string;
-  carryForward: string | null;
-  mainLesson: string | null;
-  toImprove: string | null;
-}
+export type { CarryForwardDTO };
 
 const EMPTY_COMMITMENTS: TodayCommitmentsDTO = { weekly: [], monthly: [] };
 
@@ -108,32 +103,16 @@ async function load(userId: string, dateKey: string, isLive: boolean) {
     (executionsByTradeId[dto.tradeId] ??= []).push(dto);
   }
 
-  // The most recent EARLIER day that left a reflection. TradingDay is a
-  // workspace-scoped root model (server/workspace/prisma-scope.ts), so in a
-  // backtest this only sees the run's own simulated days, and LIVE only sees
-  // live days (backtestRunId = null) — a simulated day can never leak into
-  // Today. Today V3 shows it as "From your last session"; the V2 workspace
-  // still renders it for backtests only.
-  let carryForward: CarryForwardDTO | null = null;
-  {
-    const previous = await prisma.tradingDay.findFirst({
-      where: {
-        userId,
-        date: { lt: dateKeyToUtcDate(dateKey) },
-        OR: [{ dayCarryForward: { not: null } }, { dayMainLesson: { not: null } }, { dayToImprove: { not: null } }],
-      },
-      orderBy: { date: "desc" },
-      select: { date: true, dayCarryForward: true, dayMainLesson: true, dayToImprove: true },
-    });
-    if (previous) {
-      carryForward = {
-        fromDateKey: utcDateToKey(previous.date),
-        carryForward: previous.dayCarryForward,
-        mainLesson: previous.dayMainLesson,
-        toImprove: previous.dayToImprove,
-      };
-    }
-  }
+  // FROM YOUR LAST SESSION — the most recent EARLIER day that left a
+  // reflection, by reference (close-day-v3.service.ts documents the rule).
+  // TradingDay is workspace-scoped, so in a backtest this only sees the run's
+  // own simulated days, and LIVE only sees live days — a simulated day can
+  // never leak into Today.
+  const carryForward = await getLastSessionCarryForward(userId, dateKey);
+
+  // Today V3 (Phase 4) — the Close phase read model (LIVE only; the
+  // Backtesting Session keeps the V2 Day Summary + Close dialog).
+  const closeDay = isLive ? await getCloseDayV3(userId, dateKey) : null;
 
   // Today V3 — Strategy Lab / Performance Account sources for "Today's
   // Rules" (suggested limits, sessions, management reference). LIVE only:
@@ -181,6 +160,7 @@ async function load(userId: string, dateKey: string, isLive: boolean) {
       .filter((t) => t.opportunityId == null)
       .map((t) => ({ id: t.id, tradeNumber: t.tradeNumber, assetSymbol: t.assetSymbol, direction: t.direction })),
     carryForward,
+    closeDay,
     todaysRules,
     carriedTrades: carriedRaw.map(toTradeWorkspaceDTO),
     lifecycleFacts,
