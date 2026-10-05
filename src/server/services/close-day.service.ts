@@ -1,6 +1,7 @@
 import type { TagColor, TradingDay } from "@prisma/client";
 
 import { prisma } from "@/server/db";
+import { withLedgerProjections } from "@/server/services/ledger-projection.service";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { computeTradeExecutionSummary } from "@/domain/trades/trade-execution-summary";
 import { settledWinLossClass } from "@/domain/analytics/canonical-dataset";
@@ -129,7 +130,7 @@ function dayOutcome(
 export async function getDayCloseSummary(userId: string, dateKey: string): Promise<DayCloseSummaryDTO> {
   const [day, trades, missedValidOpportunityCount] = await Promise.all([
     prisma.tradingDay.findFirst({ where: { userId, date: dateKeyToUtcDate(dateKey) } }),
-    prisma.trade.findMany({ where: tradeWhereForDay(userId, dateKey), include: dayCloseTradeInclude }),
+    prisma.trade.findMany({ where: tradeWhereForDay(userId, dateKey), include: dayCloseTradeInclude }).then(withLedgerProjections),
     // TradeOpportunity = "a valid setup appeared," deliberately separate from
     // Trade (Final Phase §17) — a missed valid opportunity has no Trade row
     // at all, so it can only ever be counted here, never conflated with a
@@ -245,6 +246,7 @@ export async function getDayCloseSummary(userId: string, dateKey: string): Promi
         settled: settlement.settled,
         settledRealizedR: settlement.settledRealizedR,
         settledPnl: settlement.settledPnl,
+        realizedRSoFarOverride: trade.ledgerRealizedRSoFar,
       });
 
       if (summary.realizedRSoFar != null) totalRealizedRSoFar += summary.realizedRSoFar;
@@ -455,9 +457,11 @@ export interface DailyPerformanceSummaryDTO {
  * grouped by day in memory. Deliberately NOT one query per day (Stage 9 §19).
  */
 export async function listDailyPerformanceSummaries(userId: string): Promise<DailyPerformanceSummaryDTO[]> {
-  const trades = await prisma.trade.findMany({
+  const loaded = await prisma.trade.findMany({
     where: { userId },
     select: {
+      id: true,
+      executionModel: true,
       tradeDate: true,
       direction: true,
       actualEntry: true,
@@ -470,6 +474,7 @@ export async function listDailyPerformanceSummaries(userId: string): Promise<Dai
       ...settlementInclude,
     },
   });
+  const trades = await withLedgerProjections(loaded);
 
   const byDay = new Map<string, DailyPerformanceSummaryDTO>();
   const get = (dateKey: string) => {
@@ -507,6 +512,7 @@ export async function listDailyPerformanceSummaries(userId: string): Promise<Dai
       settled: settlement.settled,
       settledRealizedR: settlement.settledRealizedR,
       settledPnl: settlement.settledPnl,
+      realizedRSoFarOverride: trade.ledgerRealizedRSoFar,
     });
 
     if (summary.realizedRSoFar != null) entry.totalRealizedR += summary.realizedRSoFar;

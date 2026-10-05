@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import { Prisma } from "@prisma/client";
 
 import { prisma, type TransactionClient } from "@/server/db";
@@ -703,6 +704,24 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
   });
 }
 
+/** Quantity ledger (Phase 2): a QUANTITY_LEDGER trade's entry is frozen by
+ *  its sizing and its exits are PositionFill rows — a legacy section save
+ *  never writes either (a DB trigger enforces the same). */
+function assertLedgerSectionPatchAllowed(
+  existing: { executionModel: string; actualEntry: { toString(): string } | null },
+  patch: Record<string, unknown>,
+) {
+  if (existing.executionModel !== "QUANTITY_LEDGER") return;
+  if ("actualExit" in patch && patch.actualExit != null) {
+    throw new Error("This trade uses quantity-ledger execution — exits are recorded as fills.");
+  }
+  if ("actualEntry" in patch) {
+    const next = patch.actualEntry;
+    const same = next != null && existing.actualEntry != null && new Decimal(String(next)).equals(existing.actualEntry.toString());
+    if (!same) throw new Error("This trade's entry price is frozen by its quantity-ledger sizing.");
+  }
+}
+
 /**
  * Patches only the Trade Workspace case-file scalar columns (planned/actual
  * prices, market context, reasons, review prompts). userId-scoped via an
@@ -724,6 +743,7 @@ export async function updateTradeSections(
 ) {
   const existing = await prisma.trade.findFirst({ where: { id: tradeId, userId } });
   if (!existing) throw new Error("Trade not found.");
+  assertLedgerSectionPatchAllowed(existing, patch as Record<string, unknown>);
 
   // Editing a review prompt inline can be the moment a trade first becomes
   // "reviewed" — stamp reviewedAt from the merged (patch over existing) view.

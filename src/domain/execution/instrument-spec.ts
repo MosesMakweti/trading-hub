@@ -45,7 +45,7 @@ export interface ExecutionSpecLayer {
   pointSize?: DecimalInput | null;
 }
 
-type SpecField = keyof ExecutionSpecLayer;
+export type SpecField = keyof ExecutionSpecLayer;
 
 export interface ResolvedExecutionSpec {
   symbol: string;

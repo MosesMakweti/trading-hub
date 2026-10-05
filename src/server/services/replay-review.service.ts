@@ -1,6 +1,7 @@
 import { Prisma, type ReplayReviewSession } from "@prisma/client";
 
 import { prisma } from "@/server/db";
+import { withLedgerProjections } from "@/server/services/ledger-projection.service";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import {
   getCanonicalAnalyticsDataset,
@@ -159,10 +160,12 @@ const enrichmentInclude = {
 async function fetchActualTradeComparisonSnapshots(userId: string, tradeIds: string[]): Promise<ActualTradeComparisonSnapshot[]> {
   if (tradeIds.length === 0) return [];
 
-  const trades = await prisma.trade.findMany({
-    where: { userId, id: { in: tradeIds } },
-    include: enrichmentInclude,
-  });
+  const trades = await withLedgerProjections(
+    await prisma.trade.findMany({
+      where: { userId, id: { in: tradeIds } },
+      include: enrichmentInclude,
+    }),
+  );
 
   return trades.map((t) => {
     const confirmedPlan = t.planVersions[0]
@@ -213,6 +216,7 @@ async function fetchActualTradeComparisonSnapshots(userId: string, tradeIds: str
       settled: t.performanceRiskSnapshot?.settledAt != null,
       settledRealizedR: t.performanceRiskSnapshot?.realizedR?.toNumber() ?? null,
       settledPnl: t.performanceRiskSnapshot?.performancePnl?.toNumber() ?? null,
+      realizedRSoFarOverride: t.ledgerRealizedRSoFar == null ? null : Number(t.ledgerRealizedRSoFar),
       preTradeMoodTags: t.preTradeMoodTags,
       preTradeMoodIntensity: t.preTradeMoodIntensity,
       tradeIntent: t.tradeIntent,

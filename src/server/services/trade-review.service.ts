@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db";
+import { withLedgerProjection } from "@/server/services/ledger-projection.service";
 import { currentSettlementBasis, settlementInclude, settlementInputs } from "@/server/services/settlement-basis";
 import { computeTradeExecutionSummary } from "@/domain/trades/trade-execution-summary";
 import { buildPlannedVsActual } from "@/domain/trades/planned-vs-actual";
@@ -123,7 +124,7 @@ export interface TradeReviewDataDTO {
 }
 
 export async function getTradeReviewData(userId: string, tradeId: string): Promise<TradeReviewDataDTO> {
-  const trade = await prisma.trade.findFirst({
+  const loaded = await prisma.trade.findFirst({
     where: { id: tradeId, userId },
     include: {
       plannedTargets: { orderBy: { targetOrder: "asc" } },
@@ -131,7 +132,8 @@ export async function getTradeReviewData(userId: string, tradeId: string): Promi
       ...settlementInclude,
     },
   });
-  if (!trade) throw new Error("Trade not found.");
+  if (!loaded) throw new Error("Trade not found.");
+  const trade = await withLedgerProjection(loaded);
   // LIVE: Performance-settled result; BACKTEST: price-derived (settlement-basis.ts).
   const settlement = settlementInputs(trade, currentSettlementBasis());
 
@@ -161,6 +163,7 @@ export async function getTradeReviewData(userId: string, tradeId: string): Promi
     settled: settlement.settled,
     settledRealizedR: settlement.settledRealizedR,
     settledPnl: settlement.settledPnl,
+    realizedRSoFarOverride: trade.ledgerRealizedRSoFar,
   });
 
   const actual: PlannedVsActualDTO["actual"] = {

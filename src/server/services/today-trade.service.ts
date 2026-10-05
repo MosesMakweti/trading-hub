@@ -24,6 +24,10 @@ import {
 } from "@/server/services/trades.service";
 import { tradeToFormValues } from "@/server/services/trade-input.mapper";
 import { isBacktestScope } from "@/server/workspace/scope";
+import { isQuantityLedgerEnabled } from "@/lib/feature-flags";
+import { enterQuantityLedgerTrade } from "@/server/services/position-ledger.service";
+import { lockPlanIfConfirmedAndUnlocked } from "@/server/services/trade-plan.service";
+import { syncLiveTradeLifecycle } from "@/server/services/trade-lifecycle-sync.service";
 
 /**
  * Today V3 (Phase 2) — the trade-lifecycle orchestration behind the LIVE
@@ -213,7 +217,13 @@ export async function recordFirstEntry(userId: string, dateKey: string, tradeId:
   if (trade.actualEntry != null) throw new Error("An entry is already recorded — edit it in Execution.");
   if (trade.reviewLifecycleStatus === "CANCELLED_NEVER_TRIGGERED") throw new Error("This idea was cancelled.");
   if (!(await isTradingReady(userId, dateKey))) throw new TradingNotReadyError();
-  if (trade.plannedStopLoss == null && input.actualStopLoss == null) {
+  // Quantity ledger (Phase 2): with QUANTITY_LEDGER on, Today V3 is the one
+  // path that creates QUANTITY_LEDGER trades. An entry the quantity engine
+  // cannot size is REJECTED with a structured QuantityLedgerEntryError
+  // (INITIAL_STOP_REQUIRED, INSTRUMENT_SPEC_INSUFFICIENT, CONVERSION_REQUIRED,
+  // CANNOT_SIZE_WITHIN_RISK, …) — never silently downgraded to LEGACY_PERCENT.
+  const ledger = isQuantityLedgerEnabled() && !isBacktestScope();
+  if (!ledger && trade.plannedStopLoss == null && input.actualStopLoss == null) {
     throw new Error("No planned stop exists — enter the initial stop you actually used.");
   }
 
@@ -227,6 +237,19 @@ export async function recordFirstEntry(userId: string, dateKey: string, tradeId:
       where: { id: tradeId },
       data: { limitOverrideReason: reason, limitOverrideContext: overrideContextJson(override) },
     });
+  }
+
+  if (ledger) {
+    // Sizing, the frozen stop, the entry facts and the model are written
+    // atomically; then the same follow-ups a legacy section save runs.
+    await enterQuantityLedgerTrade(userId, tradeId, {
+      actualEntry: input.actualEntry,
+      entryMinutes: input.entryMinutes,
+      actualStopLoss: input.actualStopLoss ?? null,
+    });
+    await lockPlanIfConfirmedAndUnlocked(userId, tradeId);
+    await syncLiveTradeLifecycle(userId, tradeId);
+    return prisma.trade.findFirstOrThrow({ where: { id: tradeId, userId }, include: tradeInclude });
   }
 
   return updateTradeSections(userId, tradeId, {

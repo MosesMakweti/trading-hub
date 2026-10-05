@@ -17,6 +17,22 @@ async function assertOwnsTrade(userId: string, tradeId: string) {
   return trade;
 }
 
+/** Quantity ledger (Phase 2): a QUANTITY_LEDGER trade's exits are immutable
+ *  PositionFill rows — its execution history is never written here too (a
+ *  DB trigger enforces the same). */
+export class LedgerTradePartialExitError extends Error {
+  constructor() {
+    super("This trade uses quantity-ledger execution — exits are recorded as fills, not partial exits.");
+    this.name = "LedgerTradePartialExitError";
+  }
+}
+
+async function assertLegacyExecution(userId: string, tradeId: string) {
+  const trade = await assertOwnsTrade(userId, tradeId);
+  if (trade.executionModel === "QUANTITY_LEDGER") throw new LedgerTradePartialExitError();
+  return trade;
+}
+
 export async function listPartialExits(userId: string, tradeId: string) {
   await assertOwnsTrade(userId, tradeId);
   return prisma.tradeActualPartialExit.findMany({
@@ -37,7 +53,7 @@ async function otherPartialsPercentTotal(tradeId: string, excludeId?: string): P
 }
 
 export async function upsertPartialExit(userId: string, tradeId: string, input: PartialExitUpsertInput) {
-  await assertOwnsTrade(userId, tradeId);
+  await assertLegacyExecution(userId, tradeId);
 
   if (input.plannedTargetId) {
     const target = await prisma.plannedTarget.findFirst({ where: { id: input.plannedTargetId, tradeId } });
@@ -94,7 +110,7 @@ export async function upsertPartialExit(userId: string, tradeId: string, input: 
 }
 
 export async function deletePartialExit(userId: string, tradeId: string, partialExitId: string): Promise<void> {
-  await assertOwnsTrade(userId, tradeId);
+  await assertLegacyExecution(userId, tradeId);
   await prisma.tradeActualPartialExit.deleteMany({ where: { id: partialExitId, tradeId, userId } });
   await settlePerformanceTrade(userId, tradeId);
   await syncLiveTradeLifecycle(userId, tradeId);
@@ -104,7 +120,7 @@ export async function deletePartialExit(userId: string, tradeId: string, partial
  *  resolution of an AMBIGUOUS or CLOSEST automatic match (spec §14: "if
  *  matching remains ambiguous, allow the trader to select"). */
 export async function mapPartialToTarget(userId: string, tradeId: string, partialExitId: string, plannedTargetId: string | null): Promise<void> {
-  await assertOwnsTrade(userId, tradeId);
+  await assertLegacyExecution(userId, tradeId);
   if (plannedTargetId) {
     const target = await prisma.plannedTarget.findFirst({ where: { id: plannedTargetId, tradeId } });
     if (!target) throw new Error("Planned target not found on this trade.");

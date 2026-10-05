@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db";
+import { withLedgerProjection, withLedgerProjections } from "@/server/services/ledger-projection.service";
 import { isBacktestScope } from "@/server/workspace/scope";
 import { currentSettlementBasis, settlementInputs } from "@/server/services/settlement-basis";
 import { getPerformanceConfig } from "@/server/services/performance-account.service";
@@ -122,7 +123,9 @@ export interface V3ReviewDTO {
 type ReviewTrade = NonNullable<Awaited<ReturnType<typeof loadReviewTrade>>>;
 
 async function loadReviewTrade(userId: string, tradeId: string) {
-  return prisma.trade.findFirst({ where: { id: tradeId, userId }, include: reviewInclude });
+  const trade = await prisma.trade.findFirst({ where: { id: tradeId, userId }, include: reviewInclude });
+  // A QUANTITY_LEDGER trade's exits come from its fill ledger (derived, in memory).
+  return trade ? withLedgerProjection(trade) : null;
 }
 
 const num = (v: { toNumber(): number } | null | undefined): number | null => (v == null ? null : v.toNumber());
@@ -155,6 +158,7 @@ function computeFacts(trade: ReviewTrade) {
         settled: settlement.settled,
         settledRealizedR: settlement.settledRealizedR,
         settledPnl: settlement.settledPnl,
+        realizedRSoFarOverride: trade.ledgerRealizedRSoFar,
       })
     : null;
   const review = deriveReviewState({
@@ -394,7 +398,7 @@ export interface TradeReviewFacts {
 
 export async function getTradeReviewFacts(userId: string, tradeIds: string[]): Promise<Record<string, TradeReviewFacts>> {
   if (tradeIds.length === 0) return {};
-  const trades = await prisma.trade.findMany({ where: { id: { in: tradeIds }, userId }, include: reviewInclude });
+  const trades = await withLedgerProjections(await prisma.trade.findMany({ where: { id: { in: tradeIds }, userId }, include: reviewInclude }));
   const out: Record<string, TradeReviewFacts> = {};
   for (const trade of trades) {
     const f = computeFacts(trade);
