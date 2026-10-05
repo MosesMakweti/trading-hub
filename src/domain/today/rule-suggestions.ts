@@ -82,3 +82,55 @@ export function suggestSessions(strategySessions: string[][], activeSessions: st
   }
   return out;
 }
+
+// ── Plan UX (compact rules summary) ─────────────────────────────────────────
+
+export interface DayLimitSummary {
+  /** The value to show: the confirmed one, else the suggestion, else null. */
+  value: number | null;
+  state: ConfirmationState;
+}
+
+export interface DayRulesSummary {
+  risk: DayLimitSummary;
+  maxTrades: DayLimitSummary;
+  /** Every limit that has a suggestion is confirmed (or nothing to confirm). */
+  allConfirmed: boolean;
+  /** The single patch "Confirm" writes: ONLY unconfirmed limits that have a
+   *  Strategy Lab suggestion, at exactly the suggested value — the same
+   *  TradingDay columns the per-limit Confirm writes. Null = nothing to do. */
+  confirmPatch: { riskBudgetPercent?: number; maxTradesPerDay?: number; activeSessions?: string[] } | null;
+  /** No strategy suggests anything and nothing is confirmed. */
+  noLimits: boolean;
+  /** Sessions to show: the day's own, else today's strategies' (suggested). */
+  sessions: { names: string[]; suggested: boolean };
+}
+
+export function summarizeDayRules(
+  strategies: StrategyLimitSource[],
+  confirmed: { riskBudgetPercent: number | null; maxTradesPerDay: number | null },
+  sessions: { active: string[]; strategySessions: string[][] } = { active: [], strategySessions: [] },
+): DayRulesSummary {
+  const risk = suggestLimit(strategies, "maxDailyRiskPercent");
+  const trades = suggestLimit(strategies, "maxTradesPerDay");
+  const riskState = confirmationState(risk?.value ?? null, confirmed.riskBudgetPercent);
+  const tradesState = confirmationState(trades?.value ?? null, confirmed.maxTradesPerDay);
+  const patch: { riskBudgetPercent?: number; maxTradesPerDay?: number; activeSessions?: string[] } = {};
+  if (riskState === "SUGGESTED" && risk) patch.riskBudgetPercent = risk.value;
+  if (tradesState === "SUGGESTED" && trades) patch.maxTradesPerDay = trades.value;
+  // Sessions are only ever adopted when the day lists none — never merged
+  // into, or replacing, sessions the trader chose.
+  const suggestedSessions = sessions.active.length === 0 ? suggestSessions(sessions.strategySessions, []) : [];
+  if (suggestedSessions.length > 0) patch.activeSessions = suggestedSessions;
+  return {
+    risk: { value: confirmed.riskBudgetPercent ?? risk?.value ?? null, state: riskState },
+    maxTrades: { value: confirmed.maxTradesPerDay ?? trades?.value ?? null, state: tradesState },
+    allConfirmed: riskState !== "SUGGESTED" && tradesState !== "SUGGESTED" && suggestedSessions.length === 0,
+    confirmPatch: Object.keys(patch).length > 0 ? patch : null,
+    noLimits: riskState === "NOT_SET" && tradesState === "NOT_SET",
+    sessions:
+      sessions.active.length > 0
+        ? { names: sessions.active, suggested: false }
+        : { names: suggestedSessions, suggested: suggestedSessions.length > 0 },
+  };
+}

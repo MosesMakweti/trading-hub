@@ -3,36 +3,27 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CircleCheck, Info, Loader2 } from "lucide-react";
+import { ArrowRight, CircleCheck, Info, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { TodayAssetsSection } from "@/components/today/today-assets-section";
-import { TodaysRules } from "@/components/today-v3/todays-rules";
+import { RulesSummary } from "@/components/today-v3/todays-rules";
+import { phaseAfterPlan, type PhaseKey } from "@/domain/today/day-phase";
 import { DayContext } from "@/components/today-v3/day-context";
 import { updateTodaysPlan } from "@/actions/today.actions";
 import { useDayRef } from "@/components/workspace/workspace-context";
 import type { SessionWindow } from "@/domain/schedule/session-countdown";
 import type { DailyAssetAnalysisDTO, TodaysPlanDTO, TodaysRulesDTO } from "@/types/today";
 
-function PlanSection({ code, title, hint, children }: { code: string; title: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-border bg-card" aria-label={title}>
-      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b border-border px-4 py-2.5">
-        <span className="font-mono text-[11px] text-muted-foreground">{code}</span>
-        <h3 className="text-sm font-semibold">{title}</h3>
-        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-      </header>
-      <div className="p-4">{children}</div>
-    </section>
-  );
-}
-
 /**
- * Today V3 — Plan: Today's Rules → Day Context → Asset analysis → Plan set.
- * Not a wizard: every section is always open and reachable, before or after
- * the routine is confirmed (Decision 1). "Plan set" stays an explicit
- * action writing planCompletedAt; missing final biases are shown as
- * information, never as a blocker.
+ * Today V3 — Plan, as a pre-flight checklist (Plan UX pass):
+ *   markets (asset → strategy → final bias, one row each)
+ *   · quiet inherited rules line (confirm / view strategy rules)
+ *   · WHAT I'M LOOKING FOR / STAY OUT IF
+ *   · Ready → continues to Trade (or to Prepare while readiness is open).
+ * Same canonical data and autosaves as before; everything detailed is one
+ * click away. Plan stays reachable before readiness (Decision 1); missing
+ * final biases / limits are information, never a blocker.
  */
 export function PlanPhase({
   dateKey,
@@ -45,6 +36,7 @@ export function PlanPhase({
   ready,
   readOnly,
   onStartIdea,
+  onContinue,
 }: {
   dateKey: string;
   plan: TodaysPlanDTO;
@@ -57,6 +49,8 @@ export function PlanPhase({
   readOnly: boolean;
   /** Opens the V3 Quick Trade Idea for an analyzed asset. */
   onStartIdea: (analysis: DailyAssetAnalysisDTO) => void;
+  /** Moves to the next phase once the plan is set. */
+  onContinue: (phase: PhaseKey) => void;
 }) {
   const dayRef = useDayRef(dateKey);
   const router = useRouter();
@@ -65,17 +59,18 @@ export function PlanPhase({
   const withoutFinalBias = analyses.filter((a) => a.finalBias == null).length;
   const limitsUnconfirmed = [plan.riskBudgetPercent, plan.maxTradesPerDay].filter((v) => v == null).length;
 
-  function toggle() {
-    const next = !isComplete;
+  const next = phaseAfterPlan(ready);
+
+  function setPlan(complete: boolean) {
     start(async () => {
-      const r = await updateTodaysPlan(dayRef, { planComplete: next });
+      const r = await updateTodaysPlan(dayRef, { planComplete: complete });
       if (!r.success) {
         toast.error(r.error);
         return;
       }
-      setIsComplete(next);
-      toast.success(next ? "Plan set." : "Plan reopened.");
+      setIsComplete(complete);
       router.refresh();
+      if (complete) onContinue(next);
     });
   }
 
@@ -85,16 +80,9 @@ export function PlanPhase({
   if (limitsUnconfirmed > 0) notes.push(limitsUnconfirmed === 2 ? "Daily limits not confirmed" : "One daily limit not confirmed");
 
   return (
-    <div className="space-y-4">
-      <PlanSection code="A" title="Today's rules" hint="What Strategy Lab already knows — confirm, don't retype">
-        <TodaysRules dateKey={dateKey} plan={plan} rules={rules} sessionWindows={sessionWindows} readOnly={readOnly} />
-      </PlanSection>
-
-      <PlanSection code="B" title="Day context">
-        <DayContext dateKey={dateKey} plan={plan} readOnly={readOnly} />
-      </PlanSection>
-
-      <PlanSection code="C" title="Asset analysis" hint="Your thesis per market — the final bias is your decision">
+    <div className="space-y-8">
+      <section aria-label="Markets" className="space-y-3">
+        <h3 className="font-mono text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">Markets</h3>
         <TodayAssetsSection
           dateKey={dateKey}
           analyses={analyses}
@@ -106,9 +94,12 @@ export function PlanPhase({
           tradeCreationLocked={!ready || readOnly}
           onStartIdea={onStartIdea}
         />
-      </PlanSection>
+        <RulesSummary dateKey={dateKey} plan={plan} rules={rules} sessionWindows={sessionWindows} readOnly={readOnly} />
+      </section>
 
-      <div className="flex flex-wrap items-center justify-end gap-3 rounded-2xl border border-border bg-card px-4 py-3">
+      <DayContext dateKey={dateKey} plan={plan} readOnly={readOnly} />
+
+      <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border/60 pt-4">
         {!isComplete && notes.length > 0 && (
           <p className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground">
             <Info className="size-3.5 shrink-0" />
@@ -121,12 +112,23 @@ export function PlanPhase({
             Plan set
           </span>
         )}
-        {!readOnly && (
-          <Button type="button" variant={isComplete ? "outline" : "default"} onClick={toggle} disabled={pending} className="gap-1.5">
-            {pending && <Loader2 className="size-3.5 animate-spin" />}
-            {isComplete ? "Reopen plan" : "Plan set"}
-          </Button>
-        )}
+        {!readOnly &&
+          (isComplete ? (
+            <>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setPlan(false)} disabled={pending} className="text-muted-foreground">
+                Reopen plan
+              </Button>
+              <Button type="button" onClick={() => onContinue(next)} className="gap-1.5">
+                Continue to {next === "trade" ? "Trade" : "Prepare"}
+                <ArrowRight className="size-3.5" />
+              </Button>
+            </>
+          ) : (
+            <Button type="button" onClick={() => setPlan(true)} disabled={pending} className="gap-1.5">
+              {pending ? <Loader2 className="size-3.5 animate-spin" /> : <CircleCheck className="size-3.5" />}
+              {next === "trade" ? "Ready to trade" : "Plan set · continue to Prepare"}
+            </Button>
+          ))}
       </div>
     </div>
   );
