@@ -400,6 +400,26 @@ describe("POST /api/v1/trades", () => {
       expect(count).toBe(1);
     });
 
+    it("a request rejected before any trade exists (archived day) does not burn its key: the same retry works after reopening", async () => {
+      const user = await makeUser("idempotent-archived");
+      userIds.push(user.id);
+      const { rawToken } = await createApiToken(user.id, "test");
+      const key = "idem-archived-1";
+      const dateKey = "2026-03-02";
+      await prisma.tradingDay.create({ data: { userId: user.id, date: new Date(`${dateKey}T00:00:00Z`), status: "ARCHIVED", archivedAt: new Date() } });
+
+      const blocked = await createTradeRoute(req({ dateKey, trade: tradePayload() }, rawToken, key));
+      expect(blocked.status).toBe(422);
+      expect(await prisma.trade.count({ where: { userId: user.id } })).toBe(0);
+
+      await prisma.tradingDay.updateMany({ where: { userId: user.id }, data: { status: "ACTIVE", archivedAt: null } });
+      const retry = await createTradeRoute(req({ dateKey, trade: tradePayload() }, rawToken, key));
+      expect(retry.status).toBe(201);
+      const replay = await createTradeRoute(req({ dateKey, trade: tradePayload() }, rawToken, key));
+      expect(replay.status).toBe(200);
+      expect(await prisma.trade.count({ where: { userId: user.id } })).toBe(1);
+    });
+
     it("the same key with a DIFFERENT payload is a deterministic 409 conflict, not a second trade", async () => {
       const user = await makeUser("idempotent-conflict");
       userIds.push(user.id);

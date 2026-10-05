@@ -143,7 +143,7 @@ export async function getCloseDayV3(userId: string, dateKey: string): Promise<Cl
     listCarriedOpenTrades(userId, dateKey),
     prisma.tradeOpportunity.findMany({
       where: { userId, spottedAt: date, status: "MISSED", deletedAt: null },
-      include: { originTrade: { select: { id: true, tradeNumber: true } } },
+      include: { originTrade: { select: { id: true, tradeNumber: true, deletedAt: true } } },
       orderBy: { createdAt: "asc" },
     }),
   ]);
@@ -238,7 +238,8 @@ export async function getCloseDayV3(userId: string, dateKey: string): Promise<Cl
       missNote: m.missNote,
       missedOutcome: m.missedOutcome as MissedOutcome | null,
       missedRealizedR: num(m.missedRealizedR),
-      originTrade: m.originTrade ? { id: m.originTrade.id, tradeNumber: m.originTrade.tradeNumber } : null,
+      originTrade:
+        m.originTrade && m.originTrade.deletedAt == null ? { id: m.originTrade.id, tradeNumber: m.originTrade.tradeNumber } : null,
     })),
     cancelledIdeas: todayTrades
       .filter((t) => t.reviewLifecycleStatus === "CANCELLED_NEVER_TRIGGERED" && reviewFacts[t.id]?.hasActualEntry === false)
@@ -301,8 +302,10 @@ export async function closeTradingDayV3(userId: string, dateKey: string, reflect
   await reconcileDayTradesForClose(userId, dateKey);
 
   const now = new Date();
-  return prisma.tradingDay.update({
-    where: { id: day.id },
+  // Conditional on the day still being ACTIVE, so a double submit (or two
+  // tabs) closes it exactly once — the loser gets DayAlreadyClosedError.
+  const { count } = await prisma.tradingDay.updateMany({
+    where: { id: day.id, status: "ACTIVE" },
     data: {
       ...("dayWentWell" in reflection ? { dayWentWell: reflection.dayWentWell ?? null } : {}),
       ...("dayToImprove" in reflection ? { dayToImprove: reflection.dayToImprove ?? null } : {}),
@@ -313,6 +316,8 @@ export async function closeTradingDayV3(userId: string, dateKey: string, reflect
       archivedAt: now,
     },
   });
+  if (count === 0) throw new DayAlreadyClosedError();
+  return prisma.tradingDay.findUniqueOrThrow({ where: { id: day.id } });
 }
 
 // ── FROM YOUR LAST SESSION ───────────────────────────────────────────────────

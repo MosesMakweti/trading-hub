@@ -386,7 +386,9 @@ describe("Cancelled idea → Missed opportunity (explicit only)", () => {
       expect(inputs.find((i) => i.opportunityId === op.id)).toBeTruthy();
       expect(JSON.stringify(inputs.find((i) => i.opportunityId === op.id))).not.toContain(tradeId);
 
-      await expect(recordCancelledIdeaAsMissed(user.id, tradeId, miss())).rejects.toBeInstanceOf(OpportunityError);
+      // Phase 5: recording again is idempotent — the same opportunity, no second row.
+      expect((await recordCancelledIdeaAsMissed(user.id, tradeId, miss())).id).toBe(op.id);
+      expect(await prisma.tradeOpportunity.count({ where: { userId: user.id, originTradeId: tradeId } })).toBe(1);
       // Deleting the opportunity releases the link so it can be recorded again.
       await deleteOpportunity(user.id, op.id);
       const again = await recordCancelledIdeaAsMissed(user.id, tradeId, miss());

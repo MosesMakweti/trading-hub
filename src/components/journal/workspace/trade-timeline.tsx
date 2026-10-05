@@ -56,10 +56,10 @@ export function TradeTimeline({ trade }: { trade: TradeWorkspaceDTO }) {
     },
     {
       key: "reviewed",
-      label: "Reviewed",
-      description: trade.reviewedAt
-        ? "Reflection and lessons captured."
-        : "Not reviewed yet.",
+      label: "Review completed",
+      // Today V3: reviewedAt is the latest explicit review completion (an
+      // interim review counts here; final completeness is shown in Review).
+      description: trade.reviewedAt ? "Latest review completion." : "Not reviewed yet.",
       at: trade.reviewedAt,
       reached: trade.reviewedAt != null,
       icon: BookOpenCheck,

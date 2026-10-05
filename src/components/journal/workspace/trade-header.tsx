@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Tag, colorForName } from "@/components/ui/tag";
-import { formatDateKeyLong, minutesToTimeString } from "@/lib/date";
+import { formatDateKeyLong } from "@/lib/date";
+import { tradeTimeDisplay } from "@/domain/trades/display-facts";
 import {
   StrategyRef,
   TradeStatusBadge,
@@ -11,6 +12,11 @@ import {
 import type { TradeWorkspaceDTO } from "@/types/trades";
 
 export function TradeHeader({ trade }: { trade: TradeWorkspaceDTO }) {
+  const time = tradeTimeDisplay({
+    executionMinutes: trade.executionMinutes,
+    hasActualEntry: trade.actualEntry != null,
+    hasLegacyResult: trade.actualEntry == null && trade.actualRR != null,
+  });
   const resultTone =
     trade.actualRR == null ? "muted" : trade.actualRR >= 0 ? "success" : "danger";
 
@@ -25,7 +31,7 @@ export function TradeHeader({ trade }: { trade: TradeWorkspaceDTO }) {
             <TradeStatusBadge status={trade.status} />
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {formatDateKeyLong(trade.dateKey)} · {minutesToTimeString(trade.executionMinutes)}
+            {formatDateKeyLong(trade.dateKey)} · {time.executed ? time.time : `${time.label} ${time.time}`}
           </p>
         </div>
         <div className="text-right">

@@ -694,6 +694,11 @@ export async function updateTrade(userId: string, tradeId: string, data: TradeIn
     // the trade isn't locked yet. Re-fetched fresh so the returned trade
     // reflects the corrected allocation, not the pre-settlement 0/0 write.
     await settlePerformanceTrade(userId, tradeId);
+    // Today V3 (Phase 5) — the full edit form recomputes `status` with the
+    // legacy closed+reviewedAt rule, which marked a LIVE trade with only an
+    // interim review REVIEWED. Re-derive the LIVE lifecycle columns from the
+    // facts, exactly as section saves do (no-op in Backtesting).
+    await syncLiveTradeLifecycle(userId, tradeId);
     return prisma.trade.findFirstOrThrow({ where: { id: tradeId, userId }, include: tradeInclude });
   });
 }
