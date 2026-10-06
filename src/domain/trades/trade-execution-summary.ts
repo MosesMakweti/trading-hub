@@ -21,6 +21,10 @@ export interface TradeExecutionSummaryInput {
   settled: boolean;
   settledRealizedR: string | number | null;
   settledPnl: string | number | null;
+  /** Quantity ledger (Phase 2): a QUANTITY_LEDGER trade's own realized R so
+   *  far (PnL / intended risk) from its fill ledger. When given, it replaces
+   *  the price-weighted estimate below for a not-yet-settled position. */
+  realizedRSoFarOverride?: string | number | null;
 }
 
 export interface TradeExecutionSummaryResult {
@@ -73,7 +77,7 @@ export function computeTradeExecutionSummary(input: TradeExecutionSummaryInput):
 
   const progress = computeRealizedRProgress(input.direction, input.actualEntry, initialStop, exits);
   return {
-    realizedRSoFar: progress.realizedRSoFar?.toNumber() ?? null,
+    realizedRSoFar: input.realizedRSoFarOverride != null ? toNum(input.realizedRSoFarOverride) : (progress.realizedRSoFar?.toNumber() ?? null),
     proportionClosedPercent: progress.proportionClosed.toNumber(),
     remainingProportionPercent: progress.remainingProportion.toNumber(),
     isFullyClosed: progress.isFullyClosed,

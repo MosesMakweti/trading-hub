@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
+import { withLedgerProjections } from "@/server/services/ledger-projection.service";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { buildCanonicalTradeRow, type CanonicalAnalyticsTradeRow } from "@/domain/analytics/canonical-dataset";
 import {
@@ -86,7 +87,10 @@ export type CanonicalTradeRecord = Prisma.TradeGetPayload<{ include: typeof cano
 /** One Trade (loaded with `canonicalTradeInclude`) → its canonical row, under
  *  the given settlement basis. Shared by the dataset loader and the Backtest
  *  Run overview (which batches several runs into one query). */
-export function toCanonicalRow(t: CanonicalTradeRecord, basis: SettlementBasis): CanonicalAnalyticsTradeRow {
+export function toCanonicalRow(
+  t: CanonicalTradeRecord & { ledgerRealizedRSoFar?: string | null },
+  basis: SettlementBasis,
+): CanonicalAnalyticsTradeRow {
   const settlement = settlementInputs(t, basis);
   const setupSnapshot = t.setupValidationSnapshot as unknown as SetupValidationSnapshot | null;
   return buildCanonicalTradeRow({
@@ -116,6 +120,7 @@ export function toCanonicalRow(t: CanonicalTradeRecord, basis: SettlementBasis):
     settled: settlement.settled,
     settledRealizedR: settlement.settledRealizedR,
     settledPnl: settlement.settledPnl,
+    realizedRSoFarOverride: t.ledgerRealizedRSoFar == null ? null : Number(t.ledgerRealizedRSoFar),
     preTradeMoodTags: t.preTradeMoodTags,
     moodIntensity: t.preTradeMoodIntensity,
     behaviourLabels: t.behaviourLabels
@@ -148,15 +153,17 @@ const tradeDate =
       }
     : undefined;
 
-const trades = await prisma.trade.findMany({
-  where: {
-    userId,
-    ...(tradeDate ? { tradeDate } : {}),
-    ...(filters.accountId ? { allocations: { some: { tradingAccountId: filters.accountId } } } : {}),
-  },
-  include: canonicalTradeInclude,
-  orderBy: [{ tradeDate: "asc" }, { executionMinutes: "asc" }],
-});
+const trades = await withLedgerProjections(
+  await prisma.trade.findMany({
+    where: {
+      userId,
+      ...(tradeDate ? { tradeDate } : {}),
+      ...(filters.accountId ? { allocations: { some: { tradingAccountId: filters.accountId } } } : {}),
+    },
+    include: canonicalTradeInclude,
+    orderBy: [{ tradeDate: "asc" }, { executionMinutes: "asc" }],
+  }),
+);
 
 // LIVE: Performance-Account settlement (unchanged). BACKTEST: price-derived
 // settlement — see settlement-basis.ts.

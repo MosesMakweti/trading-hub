@@ -3,6 +3,7 @@ import { Decimal } from "decimal.js";
 import { prisma, type TransactionClient } from "@/server/db";
 import { isBacktestScope } from "@/server/workspace/scope";
 import { settleBacktestTrade } from "@/server/services/settlement-basis";
+import { settlePerformanceLedger } from "@/server/services/ledger-settlement.service";
 import { getOrCreatePerformanceAccount, PERFORMANCE_ACCOUNT_STARTING_BALANCE } from "@/server/services/accounts.service";
 import {
   computeCompoundedBalance,
@@ -154,6 +155,9 @@ export async function lockPerformanceRiskSnapshot(userId: string, tradeId: strin
 
   const trade = await prisma.trade.findFirst({ where: { id: tradeId, userId } });
   if (!trade || trade.actualEntry == null || trade.backtestRunId != null) return;
+  // A QUANTITY_LEDGER trade is sized and locked only by its own first-entry
+  // transaction (position-ledger.service.ts) — never by this legacy path.
+  if (trade.executionModel === "QUANTITY_LEDGER") return;
 
   const config = await getPerformanceConfig(userId);
   const performanceAllocation = await prisma.tradeAccountAllocation.findFirst({
@@ -296,6 +300,16 @@ export async function settlePerformanceTrade(userId: string, tradeId: string): P
     await settleBacktestTrade(userId, tradeId);
     return BACKTEST_NOT_APPLICABLE;
   }
+
+  // Exactly ONE engine per trade, chosen by the trade's stored execution
+  // model — never by the feature flag, so a ledger trade keeps settling
+  // through its ledger even after QUANTITY_LEDGER is switched off.
+  const model = await prisma.trade.findFirst({ where: { id: tradeId, userId }, select: { executionModel: true, backtestRunId: true } });
+  if (model?.backtestRunId != null) return BACKTEST_NOT_APPLICABLE;
+  if (model?.executionModel === "QUANTITY_LEDGER") {
+    return prisma.$transaction((tx) => settlePerformanceLedger(tx, userId, tradeId));
+  }
+
   await ensureInitialStopResolved(userId, tradeId);
 
   const [trade, snapshot, partials] = await Promise.all([

@@ -65,6 +65,8 @@ export interface CanonicalTradeRowInput {
   settled: boolean;
   settledRealizedR: number | null;
   settledPnl: number | null;
+  /** Quantity ledger (Phase 2): the ledger's own realized R so far (see computeTradeExecutionSummary). */
+  realizedRSoFarOverride?: number | null;
   preTradeMoodTags: string[];
   moodIntensity: number | null;
   behaviourLabels: CanonicalBehaviourLabel[];
@@ -185,6 +187,7 @@ export function buildCanonicalTradeRow(input: CanonicalTradeRowInput): Canonical
       settled: input.settled,
       settledRealizedR: input.settledRealizedR,
       settledPnl: input.settledPnl,
+      realizedRSoFarOverride: input.realizedRSoFarOverride,
     });
     realizedR = summary.realizedRSoFar;
     pnl = summary.pnl;

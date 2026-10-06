@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db";
 import { isBacktestScope } from "@/server/workspace/scope";
+import { withLedgerProjection } from "@/server/services/ledger-projection.service";
 import { exitedPercentFrom } from "@/domain/trades/trade-lifecycle";
 import { nextClosedAt } from "@/domain/trades/lifecycle";
 import { closedMomentFrom, deriveReviewState } from "@/domain/trades/review-state";
@@ -25,9 +26,11 @@ import { closedMomentFrom, deriveReviewState } from "@/domain/trades/review-stat
  */
 export async function syncLiveTradeLifecycle(userId: string, tradeId: string, now = new Date()): Promise<void> {
   if (isBacktestScope()) return;
-  const trade = await prisma.trade.findFirst({
+  const loaded = await prisma.trade.findFirst({
     where: { id: tradeId, userId },
     select: {
+      id: true,
+      executionModel: true,
       actualEntry: true,
       actualExit: true,
       actualRR: true,
@@ -44,6 +47,8 @@ export async function syncLiveTradeLifecycle(userId: string, tradeId: string, no
       actualPartialExits: { select: { percentClosed: true, exitedAt: true } },
     },
   });
+  // A QUANTITY_LEDGER trade's exits come from its fill ledger (derived, in memory).
+  const trade = loaded ? await withLedgerProjection(loaded) : null;
   if (!trade || trade.backtestRunId != null) return;
   if (trade.actualEntry == null || trade.reviewLifecycleStatus === "CANCELLED_NEVER_TRIGGERED") return;
 

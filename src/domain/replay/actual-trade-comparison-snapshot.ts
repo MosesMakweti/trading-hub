@@ -170,6 +170,8 @@ export interface ActualTradeComparisonSnapshotInput {
   settled: boolean;
   settledRealizedR: number | null;
   settledPnl: number | null;
+  /** Quantity ledger (Phase 2): the ledger's own realized R so far. */
+  realizedRSoFarOverride?: number | null;
   preTradeMoodTags: string[];
   preTradeMoodIntensity: number | null;
   tradeIntent: string | null;
@@ -225,6 +227,7 @@ export function buildActualTradeComparisonSnapshot(input: ActualTradeComparisonS
     settled: input.settled,
     settledRealizedR: input.settledRealizedR,
     settledPnl: input.settledPnl,
+    realizedRSoFarOverride: input.realizedRSoFarOverride,
     preTradeMoodTags: input.preTradeMoodTags,
     moodIntensity: input.preTradeMoodIntensity,
     behaviourLabels: input.behaviourLabels,

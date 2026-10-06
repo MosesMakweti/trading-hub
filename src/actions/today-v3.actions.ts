@@ -19,8 +19,15 @@ import { getPlanningReference } from "@/server/services/today-rules.service";
 import { getTrade } from "@/server/services/trades.service";
 import { tradeToFormValues } from "@/server/services/trade-input.mapper";
 import type { LimitOverrideKind } from "@/domain/today/limit-state";
+import { QuantityLedgerEntryError, type LedgerEntryErrorCode } from "@/server/services/position-ledger.service";
 
-type Failure = { success: false; error: string; override?: { kinds: LimitOverrideKind[]; messages: string[] } };
+type Failure = {
+  success: false;
+  error: string;
+  override?: { kinds: LimitOverrideKind[]; messages: string[] };
+  /** Quantity ledger (Phase 2): why the quantity engine could not size the entry. */
+  ledger?: { code: LedgerEntryErrorCode; details: Record<string, unknown> };
+};
 type SimpleResult = { success: true } | Failure;
 type CreateResult = { success: true; tradeId: string } | Failure;
 
@@ -31,6 +38,9 @@ function fail(error: unknown, fallback: string): Failure {
       error: error.message,
       override: { kinds: error.override.kinds, messages: error.override.messages },
     };
+  }
+  if (error instanceof QuantityLedgerEntryError) {
+    return { success: false, error: error.message, ledger: { code: error.code, details: error.details } };
   }
   return { success: false, error: error instanceof Error ? error.message : fallback };
 }

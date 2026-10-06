@@ -95,6 +95,11 @@ trades logged before readiness.
   via `deriveReviewState` (an interim review never satisfies it).
 * Closing a day archives the TradingDay only: trades stay open, reviews stay
   outstanding, nothing is fabricated. Reopen keeps all data.
+* Execution model (quantity ledger, Phase 2): chosen once at first entry.
+  `QUANTITY_LEDGER` (Today V3 + `QUANTITY_LEDGER=on` only) sizes in the entry
+  transaction and is rejected — never downgraded — when it can't be sized;
+  its exits are append-only PositionFill rows and it settles into the same
+  canonical columns. See `EXECUTION_ENGINE.md`.
 * "From your last session" is read by reference from the latest earlier
   TradingDay in scope with reflection text — never `date − 1`.
 

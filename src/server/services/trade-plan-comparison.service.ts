@@ -1,6 +1,7 @@
 import { Decimal } from "decimal.js";
 
 import { prisma } from "@/server/db";
+import { withLedgerProjection } from "@/server/services/ledger-projection.service";
 import { resolveInstrumentSpecForSymbol } from "@/server/services/trade-plan.service";
 import {
   buildAlignmentFlags,
@@ -96,7 +97,10 @@ export async function getPlanExecutionComparison(
   const [latestVersion, execution, partials] = await Promise.all([
     prisma.tradePlanVersion.findFirst({ where: { tradeId }, orderBy: { versionNumber: "desc" } }),
     prisma.tradeAccountExecution.findFirst({ where: { tradeId, userId, deletedAt: null }, orderBy: { createdAt: "asc" } }),
-    prisma.tradeActualPartialExit.findMany({ where: { tradeId, userId }, orderBy: { exitOrder: "asc" } }),
+    prisma.tradeActualPartialExit
+      .findMany({ where: { tradeId, userId }, orderBy: { exitOrder: "asc" } })
+      // A QUANTITY_LEDGER trade's exits come from its fill ledger (derived, in memory).
+      .then(async (rows) => (await withLedgerProjection({ id: trade.id, executionModel: trade.executionModel, actualPartialExits: rows })).actualPartialExits),
   ]);
 
   const spec = resolveInstrumentSpecForSymbol(trade.assetSymbol);
