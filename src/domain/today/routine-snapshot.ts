@@ -23,6 +23,9 @@ export interface RoutineSnapshotSection {
 export interface RoutineResponse {
   checked?: boolean;
   text?: string;
+  /** Preparation Score: SERVER instant (ISO) the item first became complete.
+   *  Written once by the server, never by the client, never rewritten. */
+  firstCompletedAt?: string;
 }
 
 export interface RoutineSnapshot {

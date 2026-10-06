@@ -221,6 +221,9 @@ describe("schedule applicability — weekdays, exceptions, era", () => {
   it("EXTRA_DAY makes a normally unscheduled date count", () => {
     const a = dayApplicability([NY], [{ dateKey: "2026-10-10", kind: "EXTRA_DAY", createdAt: at("2026-10-01T00:00:00Z") }], "2026-10-10");
     expect(a).toMatchObject({ kind: "SCHEDULED", viaExtraDay: true });
+    // Created at/after that date's target it is too late — it cannot pad a streak retroactively.
+    const tooLate = { dateKey: "2026-10-10", kind: "EXTRA_DAY" as const, createdAt: dayInstants(NY, "2026-10-10").targetAt };
+    expect(dayApplicability([NY], [tooLate], "2026-10-10").kind).toBe("NOT_SCHEDULED");
   });
 
   it("a new version governs only from its effectiveFrom; earlier dates keep the old target", () => {

@@ -101,8 +101,10 @@ export type DayApplicability =
  * Is `dateKey` a scheduled preparation day?
  *   • before the first version → OUTSIDE_ERA (no retroactive scoring)
  *   • a scheduled weekday, or an EXTRA_DAY exception → SCHEDULED
- *   • a DAY_OFF exception counts only if it was created BEFORE that day's
- *     target — a late one cannot erase a miss (history uses corrections)
+ *   • exceptions count only if created BEFORE that day's target instant
+ *     (at the target or later is too late): a late DAY_OFF cannot erase a
+ *     miss, and a late EXTRA_DAY cannot pad a streak — history changes go
+ *     through audited corrections
  *   • otherwise → NOT_SCHEDULED (never affects the streak)
  */
 export function dayApplicability(
@@ -113,11 +115,12 @@ export function dayApplicability(
   const version = scheduleVersionFor(versions, dateKey);
   if (!version) return { kind: "OUTSIDE_ERA" };
   const onDate = exceptions.filter((e) => e.dateKey === dateKey);
-  const weekdayScheduled = version.weekdays.includes(weekdayOfDateKey(dateKey));
-  const extra = onDate.some((e) => e.kind === "EXTRA_DAY");
-  if (!weekdayScheduled && !extra) return { kind: "NOT_SCHEDULED", version };
   const instants = dayInstants(version, dateKey);
-  const validDayOff = onDate.some((e) => e.kind === "DAY_OFF" && e.createdAt.getTime() < instants.targetAt.getTime());
+  const inAdvance = (e: PreparationDayException) => e.createdAt.getTime() < instants.targetAt.getTime();
+  const weekdayScheduled = version.weekdays.includes(weekdayOfDateKey(dateKey));
+  const extra = onDate.some((e) => e.kind === "EXTRA_DAY" && inAdvance(e));
+  if (!weekdayScheduled && !extra) return { kind: "NOT_SCHEDULED", version };
+  const validDayOff = onDate.some((e) => e.kind === "DAY_OFF" && inAdvance(e));
   if (validDayOff) return { kind: "DAY_OFF", version, instants };
   return { kind: "SCHEDULED", version, instants, viaExtraDay: !weekdayScheduled && extra };
 }

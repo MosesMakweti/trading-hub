@@ -4,6 +4,8 @@ import { prisma } from "@/server/db";
 import { canonicalJson } from "@/lib/canonical-json";
 import { getOrCreateTradingDay, getTradingDay } from "@/server/services/trading-day.service";
 import { getOrCreateDefaultRoutine } from "@/server/services/routine.service";
+import { finalizePreparationDays } from "@/server/services/preparation.service";
+import { isBacktestScope } from "@/server/workspace/scope";
 import {
   allMandatoryComplete,
   type RoutineResponse,
@@ -71,13 +73,28 @@ export async function getOrCreateDayRoutine(userId: string, day: TradingDay): Pr
   // `responses` it had read, clobbering ticks saved in between (found in
   // Backtesting V1 QA). Only `sections` is ever written here, atomically, so
   // responses saved concurrently by setRoutineResponse are never overwritten.
+  // Preparation Score: the mandatory item ids are frozen for SCORING the
+  // first time the day's routine is created (write-once, DB trigger). Later
+  // template edits still change the readiness gate (unchanged behaviour) but
+  // never the scoring denominator.
+  const requirements = JSON.stringify(mandatoryItemIds(sections));
   if (!stored) {
     await prisma.$executeRaw`
       UPDATE "TradingDay"
-      SET "routineSnapshot" = COALESCE("routineSnapshot", ${JSON.stringify(snapshot)}::jsonb), "updatedAt" = NOW()
+      SET "routineSnapshot" = COALESCE("routineSnapshot", ${JSON.stringify(snapshot)}::jsonb),
+          "routineScoringRequirements" = COALESCE("routineScoringRequirements", ${requirements}::jsonb),
+          "updatedAt" = NOW()
       WHERE "id" = ${day.id}
     `;
-  } else if (canonicalJson(stored.sections) !== canonicalJson(sections)) {
+  } else if (day.routineScoringRequirements == null) {
+    // A day whose routine predates scoring: freeze on its first load from now on.
+    await prisma.$executeRaw`
+      UPDATE "TradingDay"
+      SET "routineScoringRequirements" = COALESCE("routineScoringRequirements", ${requirements}::jsonb)
+      WHERE "id" = ${day.id}
+    `;
+  }
+  if (stored && canonicalJson(stored.sections) !== canonicalJson(sections)) {
     await prisma.$executeRaw`
       UPDATE "TradingDay"
       SET "routineSnapshot" = jsonb_set("routineSnapshot", '{sections}', ${JSON.stringify(sections)}::jsonb), "updatedAt" = NOW()
@@ -88,19 +105,40 @@ export async function getOrCreateDayRoutine(userId: string, day: TradingDay): Pr
   return { snapshot, readyAt };
 }
 
-/** Merge a single item's response into the day's snapshot (structure untouched). */
+/** The mandatory item ids of a routine structure, in order. */
+export function mandatoryItemIds(sections: RoutineSnapshotSection[]): string[] {
+  return sections.flatMap((s) => s.items.filter((i) => i.isMandatory === true).map((i) => i.id));
+}
+
+/**
+ * Merge a single item's response into the day's snapshot (structure untouched).
+ *
+ * Preparation Score: the first time an item becomes complete (checkbox
+ * ticked / text non-blank) the response gets `firstCompletedAt` = SERVER
+ * time. It is never rewritten — unticking, re-ticking, clearing or retyping
+ * leave it as it was (DB trigger backstop). Client input can never carry it:
+ * only `checked` / `text` are taken from `response`.
+ */
 export async function setRoutineResponse(
   userId: string,
   dateKey: string,
   itemId: string,
   response: RoutineResponse,
+  now: Date = new Date(),
 ): Promise<void> {
   const day = await getTradingDay(userId, dateKey);
   if (!day?.routineSnapshot) throw new Error("No routine for this day.");
 
   const snapshot = day.routineSnapshot as unknown as RoutineSnapshot;
-  const exists = snapshot.sections.some((s) => s.items.some((i) => i.id === itemId));
-  if (!exists) throw new Error("Unknown routine item.");
+  const item = snapshot.sections.flatMap((s) => s.items).find((i) => i.id === itemId);
+  if (!item) throw new Error("Unknown routine item.");
+
+  const clean: RoutineResponse = {};
+  if (typeof response.checked === "boolean") clean.checked = response.checked;
+  if (typeof response.text === "string") clean.text = response.text;
+  // Completeness as decided by the field this save carries for the item's type.
+  const completeNow = item.type === "CHECKBOX" ? clean.checked === true : typeof clean.text === "string" && clean.text.trim().length > 0;
+  const firstCompleted = completeNow ? JSON.stringify({ firstCompletedAt: now.toISOString() }) : "{}";
 
   // Atomic merge of ONE response into the stored snapshot. Rapid checkbox
   // ticks send concurrent saves; the previous read-modify-write of the whole
@@ -108,14 +146,19 @@ export async function setRoutineResponse(
   // QA: 14 of 17 ticks survived, so the readiness gate then refused). The row
   // lock serializes the merges. `day.id` comes from the environment-scoped
   // lookup above, so this raw statement can only touch the right day.
-  const patch = JSON.stringify(response);
+  // `firstCompleted` is merged UNDER the existing response, so an existing
+  // firstCompletedAt always wins — the first completion instant is kept.
+  const patch = JSON.stringify(clean);
   await prisma.$executeRaw`
     UPDATE "TradingDay"
     SET "routineSnapshot" = jsonb_set(
           "routineSnapshot",
           '{responses}',
           COALESCE("routineSnapshot"->'responses', '{}'::jsonb)
-            || jsonb_build_object(${itemId}::text, COALESCE("routineSnapshot"->'responses'->${itemId}::text, '{}'::jsonb) || ${patch}::jsonb)
+            || jsonb_build_object(
+                 ${itemId}::text,
+                 ${firstCompleted}::jsonb || COALESCE("routineSnapshot"->'responses'->${itemId}::text, '{}'::jsonb) || ${patch}::jsonb
+               )
         ),
         "updatedAt" = NOW()
     WHERE "id" = ${day.id}
@@ -133,7 +176,7 @@ export async function setRoutineResponse(
  * requirement can't be bypassed by the client (direct navigation, refresh, URL
  * manipulation) — the state that unlocks Today's Plan is unreachable otherwise.
  */
-export async function setRoutineReady(userId: string, dateKey: string, ready: boolean): Promise<void> {
+export async function setRoutineReady(userId: string, dateKey: string, ready: boolean, now: Date = new Date()): Promise<void> {
   const day = await getOrCreateTradingDay(userId, dateKey);
 
   if (ready) {
@@ -141,11 +184,26 @@ export async function setRoutineReady(userId: string, dateKey: string, ready: bo
     if (!snapshot || !allMandatoryComplete(snapshot)) {
       throw new RoutineGateError("Complete every required routine item before continuing.");
     }
+    // routineReadyAt/prepCompletedAt keep their workflow meaning (reopen
+    // clears them). routineFirstReadyAt is the Preparation Score's fact: set
+    // atomically by the FIRST successful confirmation only (COALESCE — a
+    // concurrent double confirm can't produce two values; DB trigger backstop).
+    await prisma.$executeRaw`
+      UPDATE "TradingDay"
+      SET "routineReadyAt" = ${now}, "prepCompletedAt" = ${now},
+          "routineFirstReadyAt" = COALESCE("routineFirstReadyAt", ${now}), "updatedAt" = NOW()
+      WHERE "id" = ${day.id}
+    `;
+    // A day readied by its cutoff is final now — record it (LIVE only; never
+    // allowed to break the readiness the trader just confirmed).
+    if (!isBacktestScope()) {
+      await finalizePreparationDays(userId, now).catch((e) => console.error("[preparation] finalize after readiness failed", e));
+    }
+    return;
   }
 
-  const now = ready ? new Date() : null;
   await prisma.tradingDay.update({
     where: { id: day.id },
-    data: { routineReadyAt: now, prepCompletedAt: now },
+    data: { routineReadyAt: null, prepCompletedAt: null },
   });
 }

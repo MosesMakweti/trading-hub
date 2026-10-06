@@ -3,8 +3,8 @@
 Status:
 - **Phase 0 (timezone foundation): built.**
 - **Phase 1 (pure scoring/streak/schedule domain): built.**
-- Phases 2–5 are not built: persistence, finalization, UI, history, and the
-  overall Discipline Score.
+- **Phase 2 (persistence, finalization, read model): built.**
+- Phases 3–5 are not built: UI, history, and the overall Discipline Score.
 
 The Preparation Score measures **process**: showing up and completing the
 pre-session routine on time. It never looks at PnL, wins, losses or trade
@@ -115,12 +115,76 @@ rules never rewrites history.
 
 ### Scoring and readiness may observe different requirement versions
 - **Scoring:** uses the mandatory item ids frozen when the day's routine was
-  first created (Phase 2 freezes them).
+  first created (`TradingDay.routineScoringRequirements`, write-once).
 - **The existing Today readiness gate:** still follows the live template
   for an active day. Its behaviour is unchanged on purpose.
 
 So a template edit made later that day changes what the gate requires, but
 never the scoring denominator.
+
+## Phase 2 — persistence (`server/services/preparation.service.ts`)
+
+The pipeline:
+
+> existing routine → write-once first readiness → per-item first completion
+> → frozen daily requirements → frozen schedule version → deterministic
+> outcome (Phase 1 domain) → immutable `PreparationDayRecord` → derived streak
+
+The routine (`today-routine.service.ts`) stays canonical; scoring only
+observes it. Nothing here gates Today, and Today looks the same: no UI until
+Phase 3.
+
+### Scoring facts on `TradingDay` (write-once, DB trigger)
+- **`routineFirstReadyAt`:** set atomically by the first successful readiness
+  confirmation (`COALESCE`). Reopening and re-confirming leave it alone.
+  `routineReadyAt` / `prepCompletedAt` keep their workflow meaning.
+- **`routineScoringRequirements`:** the mandatory item ids, frozen when the
+  day's routine is first created. A day whose routine predates Phase 2
+  freezes on its next load.
+- **`routineSnapshot.responses[id].firstCompletedAt`:** server time, set the
+  first time an item becomes complete (checkbox ticked; text non-blank).
+  - Unticking, re-ticking, clearing and retyping never rewrite it.
+  - It is merged *under* the existing response in a single atomic statement,
+    so concurrent saves lose nothing.
+  - The client can never supply it.
+
+### Tables (additive; all append-only history)
+
+| Table | Contents | Mutability |
+|---|---|---|
+| `PreparationScheduleVersion` | effectiveFrom, timezone, target, weekdays, frozen `rules` + `scoringVersion` | append-only; confirming creates a version from the trader's **next** local date; a double submit is a no-op |
+| `PreparationDayException` | `DAY_OFF` / `EXTRA_DAY` | append-only; counts only if created **before** that date's target (enforced on creation and again when scoring) |
+| `PreparationDayRecord` | one per `(userId, date)`: timezone, targetAt, cutoffAt, readyAt, deviation, required totals, points, status, scoringVersion, finalizedAt | immutable; only `noticeAcknowledgedAt` may be written, once; deleted only with its user |
+| `PreparationDayCorrection` | audited override (CHECK: reason + actor) | append-only; the latest one per record is effective; no UI |
+
+### Finalization (`finalizePreparationDays`)
+- Lazy (no cron), under a per-user advisory lock. Idempotent through the
+  `(userId, date)` unique constraint plus `skipDuplicates`.
+- Walks every date from the last stored record (or the era start) to today,
+  in the schedule's timezone.
+- Stores scored and `DAY_OFF` outcomes:
+  - a scheduled date with no TradingDay row becomes MISSED once its cutoff
+    passes;
+  - `PENDING` and `NOT_SCHEDULED` are never stored.
+- Runs on every Today load and right after a readiness confirmation, so a
+  day readied by its cutoff is recorded at once.
+- No schedule means a no-op: no records, no misses, no streak.
+- Live only: backtest scope is a no-op, and only `backtestRunId IS NULL`
+  TradingDays are read.
+
+### Read model (`getPreparationState` / `loadPreparationState`)
+Returns:
+- the schedule in effect and any pending schedule;
+- today: `OUTSIDE_ERA`, `NOT_SCHEDULED`, `DAY_OFF`, `PENDING` (derived) or
+  `SCORED` (with any correction applied);
+- the streak, derived by the Phase 1 engine from the stored records plus the
+  latest valid corrections;
+- the unacknowledged break notice. It exists only when INCOMPLETE/MISSED
+  ended a streak of at least 1, so repeated misses at zero don't repeat it.
+  Dismiss it with `acknowledgePreparationNotice`.
+
+The Today loader includes the read model as `preparation`. Nothing renders
+it yet.
 
 ## Future: Trader Discipline
 `domain/discipline/component.ts` sketches `DailyComponentScore`.
