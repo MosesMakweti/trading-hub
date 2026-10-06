@@ -24,31 +24,41 @@ export const DATE_RANGE_PRESET_LABELS: Record<DateRangePreset, string> = {
 // "since the beginning" without a schema change or a second range shape.
 export const ALL_TIME_FROM = "2000-01-01";
 
+/** Preset → range on the BROWSER/SERVER-LOCAL calendar of `today`. Server
+ *  pages must use `presetToRangeForKey` with the trader's today key instead
+ *  (trader-time.service.ts) — the server's own calendar is UTC. */
 export function presetToRange(
   preset: Exclude<DateRangePreset, "custom">,
   today: Date = new Date(),
 ): DateRange {
-  const to = localDateToKey(today);
+  return presetToRangeForKey(preset, localDateToKey(today));
+}
+
+/** Preset → range ending on `todayKey` (pure calendar arithmetic on date
+ *  keys — no timezone involved, so the trader's calendar decides "today"). */
+export function presetToRangeForKey(preset: Exclude<DateRangePreset, "custom">, todayKey: string): DateRange {
+  const to = todayKey;
   if (preset === "all") return { from: ALL_TIME_FROM, to };
-  const fromDate = new Date(today);
+  const [y, m, d] = todayKey.split("-").map(Number);
+  const fromDate = new Date(Date.UTC(y, m - 1, d));
   switch (preset) {
     case "week":
-      fromDate.setDate(fromDate.getDate() - 6);
+      fromDate.setUTCDate(fromDate.getUTCDate() - 6);
       break;
     case "month":
-      fromDate.setMonth(fromDate.getMonth() - 1);
+      fromDate.setUTCMonth(fromDate.getUTCMonth() - 1);
       break;
     case "3months":
-      fromDate.setMonth(fromDate.getMonth() - 3);
+      fromDate.setUTCMonth(fromDate.getUTCMonth() - 3);
       break;
     case "year":
-      fromDate.setFullYear(fromDate.getFullYear() - 1);
+      fromDate.setUTCFullYear(fromDate.getUTCFullYear() - 1);
       break;
     case "ytd":
-      fromDate.setMonth(0, 1);
+      fromDate.setUTCMonth(0, 1);
       break;
   }
-  return { from: localDateToKey(fromDate), to };
+  return { from: fromDate.toISOString().slice(0, 10), to };
 }
 
 export function daysBetweenInclusive(from: string, to: string): number {

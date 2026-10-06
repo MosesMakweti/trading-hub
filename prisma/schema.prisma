@@ -62,6 +62,7 @@ model User {
   tradeActualPartialExits  TradeActualPartialExit[]
   performanceRiskSnapshots PerformanceRiskSnapshot[]
   instrumentSpecs          UserInstrumentSpec[]
+  timezoneVersions         TraderTimezoneVersion[]
   positionFills            PositionFill[]
 
   propFirmImportBatches          PropFirmImportBatch[]
@@ -538,6 +539,24 @@ enum PositionFillSource {
 
 enum PercentBasis {
   REMAINING_QUANTITY
+}
+
+/// The trader's canonical IANA timezone, versioned and append-only
+/// (domain/time/trader-calendar.ts). It decides which LOCAL date "today" is
+/// (Today, Journal, Dashboard, API defaults). A change governs only from the
+/// next local date (`effectiveFrom`), so TradingDay dates never shift and the
+/// effective today key never moves backwards. No row → the UTC calendar.
+/// UPDATE is rejected; rows go only with their user (DB trigger).
+model TraderTimezoneVersion {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// IANA zone name, e.g. "Europe/London".
+  timezone      String
+  effectiveFrom DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([userId, effectiveFrom])
 }
 
 /// The trader's own instrument economics for a symbol — the USER_OVERRIDE

@@ -1,6 +1,6 @@
 import { requireUser } from "@/server/guards";
 import { loadTradingWorkspace } from "@/server/services/trading-workspace.service";
-import { localDateToKey } from "@/lib/date";
+import { getTraderTodayKey } from "@/server/services/trader-time.service";
 import { FadeIn } from "@/components/shared/motion";
 import { TodayWorkspace } from "@/components/today/today-workspace";
 import { TodayV3Workspace } from "@/components/today-v3/today-v3-workspace";
@@ -13,8 +13,9 @@ const useV3 = process.env.TODAY_V3 !== "off";
 
 export default async function TodayPage() {
   const user = await requireUser();
-  // LIVE: the effective date is the real trading day.
-  const todayKey = localDateToKey(new Date());
+  // LIVE: the effective date is the trader's local date (their configured
+  // timezone; UTC until one is confirmed) — never the server's calendar.
+  const todayKey = await getTraderTodayKey(user.id);
   const data = await loadTradingWorkspace(user.id, todayKey, { environment: "LIVE" });
 
   return (

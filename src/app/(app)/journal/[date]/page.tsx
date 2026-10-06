@@ -6,7 +6,8 @@ import { requireUser } from "@/server/guards";
 import { getOrCreateDailyNote } from "@/server/services/journal.service";
 import { loadJournalDay } from "@/server/services/journal-day-view.service";
 import { ImageAttachments } from "@/components/media/image-attachments";
-import { addDaysToKey, formatDateKeyLong, isValidDateKey, localDateToKey } from "@/lib/date";
+import { addDaysToKey, formatDateKeyLong, isValidDateKey } from "@/lib/date";
+import { getTraderTodayKey } from "@/server/services/trader-time.service";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
@@ -34,7 +35,7 @@ export default async function JournalDayPage({
   if (!isValidDateKey(dateKey)) notFound();
 
   const user = await requireUser();
-  const isToday = dateKey === localDateToKey(new Date());
+  const isToday = dateKey === (await getTraderTodayKey(user.id));
   // Shared with the Backtesting Journal (journal-day-view.service.ts). The
   // daily note is live-Journal-only.
   const [note, data] = await Promise.all([

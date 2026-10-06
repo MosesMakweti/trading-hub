@@ -4,7 +4,8 @@ import { Sparkles, Trophy } from "lucide-react";
 import { requireUser } from "@/server/guards";
 import { getDashboardData } from "@/server/services/dashboard.service";
 import { formatDateKeyLong } from "@/lib/date";
-import { presetToRange, type DateRangePreset } from "@/lib/date-ranges";
+import { presetToRangeForKey, type DateRangePreset } from "@/lib/date-ranges";
+import { getTraderTodayKey } from "@/server/services/trader-time.service";
 import { CommandBar, type UnreviewedTradeSummary } from "@/components/dashboard/command-bar";
 import { KpiRow } from "@/components/dashboard/kpi-row";
 import { CommandEquityCurve } from "@/components/dashboard/command-equity-curve";
@@ -35,7 +36,7 @@ export default async function DashboardPage({
   )
     ? (params.range as Exclude<DateRangePreset, "custom">)
     : "month";
-  const { from, to } = presetToRange(preset);
+  const { from, to } = presetToRangeForKey(preset, await getTraderTodayKey(user.id));
   const accountId = params.account || undefined;
 
   const data = await getDashboardData(user.id, { from, to, accountId });

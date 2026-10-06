@@ -13,7 +13,8 @@ import { getCurrentStageRuleHealth } from "@/server/services/prop-firms-health.s
 import { toUserPropFirmDTO, toRuleHealthDTO, collectAccountIds } from "@/server/services/prop-firms.mapper";
 import { computeBrokerageMetrics, computePropFirmRoi } from "@/domain/accounts/derived";
 import { daysBetweenInclusive } from "@/lib/date-ranges";
-import { dateKeyToUtcDate, localDateToKey, utcDateToKey } from "@/lib/date";
+import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
+import { getTraderTodayKey } from "@/server/services/trader-time.service";
 import type { PropFirmAccountDTO, RuleHealthDTO, UserPropFirmDTO } from "@/types/prop-firms";
 
 export interface BestAccountSummary {
@@ -178,7 +179,7 @@ export async function getDashboardData(
   userId: string,
   params: { from: string; to: string; accountId?: string },
 ) {
-  const todayKey = localDateToKey(new Date());
+  const todayKey = await getTraderTodayKey(userId);
   const filters: AnalyticsFilters | undefined = params.accountId ? { accountId: params.accountId } : undefined;
   const prevRange = previousPeriod(params.from, params.to);
 

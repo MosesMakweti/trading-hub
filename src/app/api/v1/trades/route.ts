@@ -4,7 +4,8 @@ import { requireApiUser } from "@/server/api-auth";
 import { withCors, corsPreflight } from "@/server/api-cors";
 import { releaseIdempotencyKey, reserveIdempotencyKey, recordIdempotencyResult } from "@/server/api-idempotency";
 import { apiCreateTradeSchema } from "@/lib/validation/api-trades";
-import { isValidDateKey, localDateToKey } from "@/lib/date";
+import { isValidDateKey } from "@/lib/date";
+import { getTraderTodayKey } from "@/server/services/trader-time.service";
 import { dayEditableGuard } from "@/actions/day-guard";
 import { getStrategyReference } from "@/server/services/strategies.service";
 import * as tradesService from "@/server/services/trades.service";
@@ -75,7 +76,7 @@ async function handleCreateTrade(request: Request) {
     });
   }
   const input = parsed.data;
-  const dateKey = input.dateKey ?? localDateToKey(new Date());
+  const dateKey = input.dateKey ?? (await getTraderTodayKey(userId));
   if (!isValidDateKey(dateKey)) return badRequest(request, "Invalid dateKey.", 422);
 
   // Idempotency (opt-in — only engaged when the caller sends the header).
