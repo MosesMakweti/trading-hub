@@ -2,6 +2,9 @@ import Link from "next/link";
 import { ChevronRight, Database, ListChecks, Plug, Trash2, type LucideIcon } from "lucide-react";
 
 import { FadeIn } from "@/components/shared/motion";
+import { TraderTimezoneCard } from "@/components/settings/trader-timezone-card";
+import { requireUser } from "@/server/guards";
+import { getTraderTimezoneState } from "@/server/services/trader-time.service";
 
 const AREAS: { href: string; icon: LucideIcon; title: string; description: string }[] = [
   {
@@ -31,7 +34,9 @@ const AREAS: { href: string; icon: LucideIcon; title: string; description: strin
   },
 ];
 
-export default function PreferencesPage() {
+export default async function PreferencesPage() {
+  const user = await requireUser();
+  const timezone = await getTraderTimezoneState(user.id);
   return (
     <FadeIn className="mx-auto max-w-2xl space-y-6">
       <div>
@@ -40,6 +45,8 @@ export default function PreferencesPage() {
           Customize how you prepare, plan, and log your trading.
         </p>
       </div>
+
+      <TraderTimezoneCard initial={timezone} />
 
       <div className="glass divide-y divide-border overflow-hidden rounded-2xl">
         {AREAS.map((area) => (

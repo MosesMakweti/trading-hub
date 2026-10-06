@@ -15,7 +15,8 @@ import { computeReviewPeriod } from "@/domain/replay/review-period";
 import { buildActualVsReplayComparison } from "@/domain/replay-comparison/comparison";
 import { synthesizeImprovements } from "@/domain/replay-improvements/synthesis";
 import { listCarryForwardCandidates, listCommitmentsForSession } from "@/server/services/edge-review-commitment.service";
-import { isValidDateKey, localDateToKey } from "@/lib/date";
+import { isValidDateKey } from "@/lib/date";
+import { getTraderTodayKey } from "@/server/services/trader-time.service";
 import { EdgeReviewWorkspace } from "@/components/edge/edge-review-workspace";
 import { FadeIn } from "@/components/shared/motion";
 import type { ReplayReviewType } from "@/types/replay";
@@ -45,7 +46,7 @@ export default async function EdgeReviewPage({
   const params = await searchParams;
 
   const reviewType: ReplayReviewType = params.type === "MONTHLY" ? "MONTHLY" : "WEEKLY";
-  const anchor = params.period && isValidDateKey(params.period) ? params.period : localDateToKey(new Date());
+  const anchor = params.period && isValidDateKey(params.period) ? params.period : await getTraderTodayKey(user.id);
   const { startDate, endDate } = computeReviewPeriod(reviewType, anchor);
 
   const strategyId = params.strategy || null;

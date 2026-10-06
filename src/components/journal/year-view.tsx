@@ -177,6 +177,7 @@ export function YearView({
   onSelectDay,
   onChangeYear,
   isDayAvailable,
+  todayKey: liveTodayKey,
   unavailableLabel = "Upcoming",
   showPnl = true,
 }: {
@@ -188,12 +189,14 @@ export function YearView({
   /** Backtesting (Stage 5): which dates belong to the run; defaults to "not in
    *  the future" (the live Journal). Unavailable days render muted/inert. */
   isDayAvailable?: (dateKey: string) => boolean;
+  /** The trader's "today" for the live Journal (server-computed); falls back to the browser calendar. */
+  todayKey?: string;
   unavailableLabel?: string;
   showPnl?: boolean;
 }) {
-  const todayKey = useMemo(() => (isDayAvailable ? null : localDateToKey(new Date())), [isDayAvailable]);
+  const todayKey = useMemo(() => (isDayAvailable ? null : (liveTodayKey ?? localDateToKey(new Date()))), [isDayAvailable, liveTodayKey]);
   const months = useMemo(
-    () => buildMonths(year, dailyPerformance, isDayAvailable ?? ((key) => key <= localDateToKey(new Date())), todayKey),
+    () => buildMonths(year, dailyPerformance, isDayAvailable ?? ((key) => key <= (todayKey ?? localDateToKey(new Date()))), todayKey),
     [year, dailyPerformance, isDayAvailable, todayKey],
   );
   const legend = [...LEGEND_BASE, { state: "future" as DayState, label: unavailableLabel }];

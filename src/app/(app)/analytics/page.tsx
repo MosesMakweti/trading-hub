@@ -13,7 +13,8 @@ import {
 import { getPropFirmAnalyticsSummary } from "@/server/services/prop-firms-analytics.service";
 import { buildImprovementAnalytics } from "@/server/services/edge-review-commitment.service";
 import { isValidDateKey } from "@/lib/date";
-import { presetToRange, type DateRangePreset } from "@/lib/date-ranges";
+import { presetToRangeForKey, type DateRangePreset } from "@/lib/date-ranges";
+import { getTraderTodayKey } from "@/server/services/trader-time.service";
 import { AnalyticsModule } from "@/components/analytics/analytics-module";
 import { FadeIn } from "@/components/shared/motion";
 
@@ -89,7 +90,7 @@ export default async function AnalyticsPage({
   const { from, to } =
     preset === "custom" && params.from && params.to && isValidDateKey(params.from) && isValidDateKey(params.to)
       ? { from: params.from, to: params.to }
-      : presetToRange(preset === "custom" ? "month" : preset);
+      : presetToRangeForKey(preset === "custom" ? "month" : preset, await getTraderTodayKey(user.id));
 
   const filters = parseFilters(params);
   const canonicalFilters = parseCanonicalFilters(params, from, to);

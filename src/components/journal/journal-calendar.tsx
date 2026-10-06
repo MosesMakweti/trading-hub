@@ -39,13 +39,18 @@ export function JournalCalendar({
   dailyPerformance,
   run,
   onVisibleMonthChange,
+  todayKey,
 }: {
   noteDates: string[];
   dailyPerformance: DailyPerformanceSummaryDTO[];
   run?: JournalCalendarRunContext;
   /** Reports the visible month (first day, local) — for a period summary. */
   onVisibleMonthChange?: (month: Date) => void;
+  /** The trader's "today" (server-computed in their timezone). The browser
+   *  calendar is only the fallback — it may disagree with the trader's zone. */
+  todayKey?: string;
 }) {
+  const today = useMemo(() => (todayKey ? keyToLocalDate(todayKey) : new Date()), [todayKey]);
   const router = useRouter();
   const hrefBase = run?.hrefBase ?? "/journal";
   const closedDateSet = useMemo(() => new Set(run?.closedDates ?? []), [run?.closedDates]);
@@ -63,7 +68,7 @@ export function JournalCalendar({
     [dailyPerformance],
   );
   const [view, setView] = useState<"month" | "year">("month");
-  const [month, setMonthState] = useState<Date>(run ? keyToLocalDate(run.initialDateKey) : new Date());
+  const [month, setMonthState] = useState<Date>(run ? keyToLocalDate(run.initialDateKey) : today);
   function setMonth(next: Date) {
     setMonthState(next);
     onVisibleMonthChange?.(new Date(next.getFullYear(), next.getMonth(), 1));
@@ -94,7 +99,7 @@ export function JournalCalendar({
             Current position
           </Button>
         ) : (
-          <Button variant="outline" size="sm" onClick={() => setMonth(new Date())}>
+          <Button variant="outline" size="sm" onClick={() => setMonth(today)}>
             Today
           </Button>
         )}
@@ -103,6 +108,7 @@ export function JournalCalendar({
       {view === "month" ? (
         <Calendar
           month={month}
+          today={today}
           onMonthChange={setMonth}
           onDayClick={goToDay}
           className="glass w-full max-w-none rounded-2xl p-2 [--cell-size:2.75rem] sm:p-4 sm:[--cell-size:3.5rem] lg:[--cell-size:4.5rem]"
@@ -134,6 +140,7 @@ export function JournalCalendar({
           }}
           onChangeYear={(y) => setMonth(new Date(y, month.getMonth(), 1))}
           isDayAvailable={isInRange}
+          todayKey={run ? undefined : todayKey}
           unavailableLabel={run ? "Outside run" : undefined}
           showPnl={!run}
         />

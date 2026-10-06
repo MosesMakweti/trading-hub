@@ -4,6 +4,13 @@ The one LIVE trading workflow. Phase detail lives in `TODAY_V3_REVIEW.md`
 (Review) and `TODAY_V3_CLOSE.md` (missed opportunities, Close, carry-forward);
 this page is the map and the invariants.
 
+## Date identity
+
+"Today" is the trader's LOCAL date in their confirmed IANA timezone
+(`getTraderTodayKey`; UTC until one is confirmed), from the server clock —
+never the server's or the browser's calendar. A timezone change governs from
+the next local date, so a TradingDay is never re-dated. See `DISCIPLINE.md`.
+
 ## Lifecycles
 
 **Day:** PREPARE → PLAN → TRADE → CLOSE (`components/today-v3/*`, loader
