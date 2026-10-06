@@ -26,6 +26,7 @@ import { LIVE_SCOPE, runLive } from "@/server/workspace/scope";
 import { assertDatabaseSeesScope } from "@/server/workspace/scope-tripwire";
 import { getTodaysRules } from "@/server/services/today-rules.service";
 import { getTradeLifecycleFacts, listCarriedOpenTrades } from "@/server/services/today-trade.service";
+import { loadPreparationState, type PreparationState } from "@/server/services/preparation.service";
 import { getCloseDayV3, getLastSessionCarryForward, type CarryForwardDTO } from "@/server/services/close-day-v3.service";
 import type { DailyAnalyticsDTO, TodaysRulesDTO } from "@/types/today";
 import type { AdherenceResultDTO, AdherenceTrend, EdgeReviewCommitmentDailyStatus, TodayCommitmentsDTO } from "@/types/edge-improvements";
@@ -125,6 +126,16 @@ async function load(userId: string, dateKey: string, isLive: boolean) {
       )
     : null;
 
+  // Preparation Score (Phase 2) — lazily finalize newly final days and build
+  // the read model. LIVE only; nothing renders it yet (Phase 3), and it can
+  // never block or alter Today — a failure is logged and Today loads as before.
+  const preparation: PreparationState | null = isLive
+    ? await loadPreparationState(userId).catch((e) => {
+        console.error("[preparation] load failed", e);
+        return null;
+      })
+    : null;
+
   const dailyAnalytics: DailyAnalyticsDTO = { ...dailyPerf, analyzed: day.analyzedAt != null };
 
   // Pre-Session/Today's Plan/Day Summary are owned by the TradingDay; Trade
@@ -164,6 +175,7 @@ async function load(userId: string, dateKey: string, isLive: boolean) {
     todaysRules,
     carriedTrades: carriedRaw.map(toTradeWorkspaceDTO),
     lifecycleFacts,
+    preparation,
   };
 }
 

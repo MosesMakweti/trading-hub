@@ -63,6 +63,10 @@ model User {
   performanceRiskSnapshots PerformanceRiskSnapshot[]
   instrumentSpecs          UserInstrumentSpec[]
   timezoneVersions         TraderTimezoneVersion[]
+  preparationSchedules     PreparationScheduleVersion[]
+  preparationExceptions    PreparationDayException[]
+  preparationRecords       PreparationDayRecord[]
+  preparationCorrections   PreparationDayCorrection[]
   positionFills            PositionFill[]
 
   propFirmImportBatches          PropFirmImportBatch[]
@@ -163,6 +167,19 @@ model TradingDay {
   // routineReadyAt is set by the "I am ready to trade" gate and drives prepCompletedAt.
   routineSnapshot Json?
   routineReadyAt  DateTime?
+
+  // Preparation Score (Phase 2) — scoring FACTS, write-once (DB trigger):
+  //  • routineFirstReadyAt — the FIRST successful readiness confirmation.
+  //    routineReadyAt above still follows the workflow (reopen clears it,
+  //    re-confirming re-stamps it); this one never changes once set.
+  //  • routineScoringRequirements — the mandatory item ids frozen when the
+  //    day's routine was first created; the Preparation Score's denominator.
+  //    The readiness gate keeps following the live template (unchanged), so
+  //    scoring and gating may temporarily observe different requirement sets.
+  // Per-item first completion instants live in routineSnapshot.responses
+  // [itemId].firstCompletedAt (server time, write-once — DB trigger).
+  routineFirstReadyAt        DateTime?
+  routineScoringRequirements Json?
 
   // ── LEGACY (Stage 11 Daily Market Plan refinement) ──────────────────────
   // `bias`/`conviction`/`keyLevels` were a day-level "Today's Plan" HTF bias +
@@ -539,6 +556,117 @@ enum PositionFillSource {
 
 enum PercentBasis {
   REMAINING_QUANTITY
+}
+
+// ── Preparation Score (Phase 2) ─────────────────────────────────────────────
+// docs/DISCIPLINE.md. LIVE only. All four tables are append-only history;
+// PreparationDayRecord additionally allows exactly one metadata write
+// (noticeAcknowledgedAt NULL → set). DB triggers enforce it.
+
+enum PreparationStatus {
+  VERY_EARLY
+  EARLY
+  ON_TIME
+  LATE
+  VERY_LATE
+  INCOMPLETE
+  MISSED
+  DAY_OFF
+  NOT_SCHEDULED
+}
+
+enum PreparationExceptionKind {
+  DAY_OFF
+  EXTRA_DAY
+}
+
+/// One immutable version of the trader's Preparation Schedule. A change is a
+/// NEW version effective from the trader's next local date. The scoring
+/// rules (bands, weights, cutoff) are frozen in `rules` with `scoringVersion`.
+model PreparationScheduleVersion {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// First LOCAL date this version governs.
+  effectiveFrom  DateTime @db.Date
+  timezone       String
+  targetMinutes  Int
+  weekdays       Int[]
+  rules          Json
+  scoringVersion Int
+  createdAt      DateTime @default(now())
+
+  records PreparationDayRecord[]
+
+  @@index([userId, effectiveFrom])
+}
+
+/// DAY_OFF / EXTRA_DAY for one local date. Counts only when created before
+/// that date's target instant. Append-only.
+model PreparationDayException {
+  id        String                   @id @default(cuid())
+  userId    String
+  user      User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime                 @db.Date
+  kind      PreparationExceptionKind
+  note      String?
+  createdAt DateTime                 @default(now())
+
+  @@index([userId, date])
+}
+
+/// The immutable scoring fact for one scheduled (or DAY_OFF) local date.
+/// NOT_SCHEDULED dates and the still-pending current day are never stored.
+model PreparationDayRecord {
+  id                   String                     @id @default(cuid())
+  userId               String
+  user                 User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date                 DateTime                   @db.Date
+  scheduleVersionId    String
+  scheduleVersion      PreparationScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: NoAction)
+  timezone             String
+  targetAt             DateTime
+  cutoffAt             DateTime
+  readyAt              DateTime?
+  /// Exact signed deviation (readyAt − targetAt); the rounded minutes are for display.
+  deviationSeconds     Int?
+  deviationMinutes     Int?
+  requiredTotal        Int
+  requiredDone         Int
+  completionPoints     Int
+  timingPoints         Int
+  score                Int
+  status               PreparationStatus
+  bandLabel            String?
+  scoringVersion       Int
+  finalizedAt          DateTime                   @default(now())
+  /// The only mutable column: set once when a streak-break notice is dismissed.
+  noticeAcknowledgedAt DateTime?
+
+  corrections PreparationDayCorrection[]
+
+  @@unique([userId, date])
+  @@index([scheduleVersionId])
+}
+
+/// An audited administrative correction (append-only). The latest valid one
+/// per record is the effective outcome; the record itself never changes.
+model PreparationDayCorrection {
+  id               String               @id @default(cuid())
+  userId           String
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recordId         String
+  record           PreparationDayRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  status           PreparationStatus
+  score            Int
+  completionPoints Int?
+  timingPoints     Int?
+  reason           String
+  actor            String
+  createdAt        DateTime             @default(now())
+
+  @@index([recordId])
+  @@index([userId])
 }
 
 /// The trader's canonical IANA timezone, versioned and append-only
