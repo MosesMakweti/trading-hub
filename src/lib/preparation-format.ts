@@ -109,17 +109,22 @@ export const WEEKDAYS_MONDAY_FIRST: readonly { day: number; short: string; lette
   { day: 0, short: "Sun", letter: "S", name: "Sunday" },
 ];
 
-/** "Mon–Fri" · "Every day" · "Mon, Wed, Fri" · "Sat–Sun" … */
+/**
+ * "Mon–Fri" · "Sun–Thu" · "Every day" · "Mon, Wed, Fri" · "Sat, Sun".
+ * A run of 3+ consecutive days is a range, including one that wraps the
+ * week (Sun–Thu); anything else is listed Monday-first.
+ */
 export function weekdaysSummary(weekdays: readonly number[]): string {
   const set = new Set(weekdays);
   if (set.size === 7) return "Every day";
   if (set.size === 0) return "No days";
   const order = WEEKDAYS_MONDAY_FIRST.map((w) => w.day);
-  const idx = order.filter((d) => set.has(d)).map((d) => order.indexOf(d));
-  const contiguous = idx.every((v, i) => i === 0 || v === idx[i - 1] + 1);
+  const on = order.map((d) => set.has(d));
   const short = (i: number) => WEEKDAYS_MONDAY_FIRST[i].short;
-  if (contiguous && idx.length >= 3) return `${short(idx[0])}–${short(idx[idx.length - 1])}`;
-  return idx.map(short).join(", ");
+  // Run starts: selected days whose previous day (cyclically) is not selected.
+  const starts = on.flatMap((v, i) => (v && !on[(i + 6) % 7] ? [i] : []));
+  if (starts.length === 1 && set.size >= 3) return `${short(starts[0])}–${short((starts[0] + set.size - 1) % 7)}`;
+  return on.flatMap((v, i) => (v ? [short(i)] : [])).join(", ");
 }
 
 /** "Fri, Oct 10" for a date key (calendar date, timezone-independent). */

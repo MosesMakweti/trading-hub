@@ -99,7 +99,10 @@ describe("timezone formatting", () => {
     expect(weekdaysSummary([0, 1, 2, 3, 4, 5, 6])).toBe("Every day");
     expect(weekdaysSummary([1, 3, 5])).toBe("Mon, Wed, Fri");
     expect(weekdaysSummary([6, 0])).toBe("Sat, Sun");
-    expect(weekdaysSummary([0, 1, 2, 3, 4])).toBe("Mon, Tue, Wed, Thu, Sun");
+    expect(weekdaysSummary([0, 1, 2, 3, 4])).toBe("Sun–Thu");
+    expect(weekdaysSummary([5, 6, 0])).toBe("Fri–Sun");
+    expect(weekdaysSummary([1, 2, 3, 4, 5, 6])).toBe("Mon–Sat");
+    expect(weekdaysSummary([0, 1, 3])).toBe("Mon, Wed, Sun");
   });
 });
 
