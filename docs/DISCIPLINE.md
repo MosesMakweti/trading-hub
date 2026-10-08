@@ -4,7 +4,9 @@ Status:
 - **Phase 0 (timezone foundation): built.**
 - **Phase 1 (pure scoring/streak/schedule domain): built.**
 - **Phase 2 (persistence, finalization, read model): built.**
-- Phases 3–5 are not built: UI, history, and the overall Discipline Score.
+- **Phase 3 (Today + Settings UX, timezone synchronization): built.**
+- Phases 4–5 are not built: history (Journal/Analytics) and the overall
+  Discipline Score.
 
 The Preparation Score measures **process**: showing up and completing the
 pre-session routine on time. It never looks at PnL, wins, losses or trade
@@ -183,8 +185,93 @@ Returns:
   ended a streak of at least 1, so repeated misses at zero don't repeat it.
   Dismiss it with `acknowledgePreparationNotice`.
 
-The Today loader includes the read model as `preparation`. Nothing renders
-it yet.
+The Today loader includes the read model as `preparation` (since Phase 3,
+as the serializable view model below).
+
+## Phase 3 — user experience
+
+Nothing in the UI scores anything. React formats the canonical values of
+the read model; score, points, status, streak, longest streak and the break
+all come from the server.
+
+### Serialization boundary
+- `server/services/preparation.mapper.ts` turns the read model into
+  `types/preparation.ts` DTOs: instants as ISO strings, dates as keys, plain
+  JSON only (no `Date`, no raw millisecond deviation).
+- No schedule → `{ configured: false }`, and Today renders nothing extra.
+- `restartedToday` is the only mapper derivation: the read model's
+  `restartedAfterBreak` stays true for the whole new streak, so the mapper
+  narrows it to the date that started it. "New streak started" therefore
+  shows on that day only, with no new persistence.
+- Wording lives in `lib/preparation-format.ts` (pure, locale- and
+  zone-independent, so server render and hydration agree).
+
+### Today (V3 only)
+- A compact row at the top of the Prepare card:
+  `PRE-SESSION  Target 08:00 · 25 min remaining   🔥 14   92/100`.
+  - Before readiness: target in the schedule's zone + time remaining/late,
+    from the server's `minutesToTarget`. A presentation clock anchored to
+    `serverNow` animates it; passing the cutoff triggers `router.refresh()`
+    so the server decides the outcome.
+  - Scored: "On time · Routine complete", "Routine complete · 17 min late",
+    "2 of 4 required · Missed cutoff", "Pre-session routine missed".
+  - The score chip opens the breakdown (Completion / Timing / Target / Ready
+    / Deviation / Status, and Cutoff when missed); the flame opens the
+    streak (current, best). Both are Base UI popovers (`ui/popover.tsx`):
+    buttons with full accessible names, keyboard-operable, status carried
+    by text + icon as well as colour.
+  - Day off / not scheduled / schedule not started yet each get one line.
+- Readiness confirmed in-session → a quiet toast with the score (and "New
+  Preparation Streak started." when applicable). Initial loads never toast.
+- The streak-break notice sits above the phase rail (visible in every
+  phase) and is factual ("Your 14-day Preparation Streak ended — Monday's
+  pre-session routine wasn't completed. Best streak: 14 days"). Dismiss
+  calls `acknowledgePreparationNoticeAction`; it is hidden optimistically.
+- The V2 workspace (`TODAY_V3=off`, Backtesting, Replay) is unchanged.
+
+### Settings → Routine → Preparation Schedule
+- Timezone, target time (`<input type="time">`, wall-clock minutes in that
+  zone, never reinterpreted by the browser), Mon-first weekday toggles
+  (`aria-pressed`, full day names). Default prefill: 08:00 Mon–Fri
+  (`DEFAULT_PREPARATION_SCHEDULE`).
+- Current and Upcoming are shown separately ("Changes take effect: …").
+  Every save is a new version from the next local date.
+- Days off / extra days: upcoming list plus an add form. The server decides
+  whether each is still allowed; its refusal is shown as-is.
+
+### Timezone synchronization
+- The trader timezone (`TraderTimezoneVersion`) is the one canonical zone.
+  The schedule no longer accepts a timezone of its own.
+  - `confirmPreparationSchedule` uses the trader zone that governs the
+    effective date (a pending change included).
+  - `setTraderTimezone` calls `syncScheduleTimezone` in the same
+    transaction: if a schedule exists and the version for the next local
+    date uses another zone, it appends a version for that date with the
+    same target, weekdays and frozen rules. Nothing is mutated.
+  - Lock order for both writers: `trader-timezone` → `prep-schedule`.
+    Version `createdAt` is forced monotonic, so the last write under the
+    lock always wins a same-date tie.
+- The Settings form's timezone IS the trading timezone: saving a different
+  zone changes it (from the next local date), then confirms the schedule.
+- Preparation "today" is now the trader's canonical today
+  (`traderTodayKey`), not a key derived from the schedule's zone. This
+  closes a Phase 2 gap: while an eastward change was pending, the old
+  derivation could report tomorrow's date.
+- Known residual (inherited from Phase 0's "N is the first date the new
+  zone governs"): after a large eastward change, the transition date's
+  target can fall before the trader's calendar reaches that date. That
+  day can only be readied late (and an eastward jump of 24h or more skips
+  the date entirely, so it is MISSED). A DAY_OFF set before the change
+  avoids it.
+
+### Server actions (`actions/preparation.actions.ts`)
+`savePreparationScheduleAction`, `addPreparationExceptionAction`,
+`acknowledgePreparationNoticeAction`:
+- authenticated user only (`requireUser`); no action accepts a userId;
+- zod-validated;
+- LIVE scope;
+- the acknowledgment matches the record id together with the user, so
+  another trader's id is a no-op.
 
 ## Future: Trader Discipline
 `domain/discipline/component.ts` sketches `DailyComponentScore`.

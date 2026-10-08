@@ -26,9 +26,11 @@ import { LIVE_SCOPE, runLive } from "@/server/workspace/scope";
 import { assertDatabaseSeesScope } from "@/server/workspace/scope-tripwire";
 import { getTodaysRules } from "@/server/services/today-rules.service";
 import { getTradeLifecycleFacts, listCarriedOpenTrades } from "@/server/services/today-trade.service";
-import { loadPreparationState, type PreparationState } from "@/server/services/preparation.service";
+import { loadPreparationState } from "@/server/services/preparation.service";
+import { toPreparationDTO } from "@/server/services/preparation.mapper";
 import { getCloseDayV3, getLastSessionCarryForward, type CarryForwardDTO } from "@/server/services/close-day-v3.service";
 import type { DailyAnalyticsDTO, TodaysRulesDTO } from "@/types/today";
+import type { PreparationDTO } from "@/types/preparation";
 import type { AdherenceResultDTO, AdherenceTrend, EdgeReviewCommitmentDailyStatus, TodayCommitmentsDTO } from "@/types/edge-improvements";
 import type { ExecutionDTO } from "@/types/prop-firms";
 
@@ -126,14 +128,18 @@ async function load(userId: string, dateKey: string, isLive: boolean) {
       )
     : null;
 
-  // Preparation Score (Phase 2) — lazily finalize newly final days and build
-  // the read model. LIVE only; nothing renders it yet (Phase 3), and it can
-  // never block or alter Today — a failure is logged and Today loads as before.
-  const preparation: PreparationState | null = isLive
-    ? await loadPreparationState(userId).catch((e) => {
-        console.error("[preparation] load failed", e);
-        return null;
-      })
+  // Preparation Score — lazily finalize newly final days and build the read
+  // model, then cross the server/client boundary as a plain-JSON view model
+  // (Phase 3). LIVE only; it can never block or alter Today — a failure is
+  // logged and Today loads without the Preparation summary.
+  const preparationNow = new Date();
+  const preparation: PreparationDTO | null = isLive
+    ? await loadPreparationState(userId, preparationNow)
+        .then((state) => toPreparationDTO(state, preparationNow))
+        .catch((e) => {
+          console.error("[preparation] load failed", e);
+          return null;
+        })
     : null;
 
   const dailyAnalytics: DailyAnalyticsDTO = { ...dailyPerf, analyzed: day.analyzedAt != null };

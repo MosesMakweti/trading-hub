@@ -2,6 +2,10 @@ import { ListChecks } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
 import { getOrCreateDefaultRoutine } from "@/server/services/routine.service";
+import { getPreparationScheduleOverview } from "@/server/services/preparation.service";
+import { getTraderTimezoneState } from "@/server/services/trader-time.service";
+import { toPreparationSettingsDTO } from "@/server/services/preparation.mapper";
+import { PreparationScheduleCard } from "@/components/settings/preparation-schedule-card";
 import { FadeIn } from "@/components/shared/motion";
 import { RoutineEditor, type RoutineSectionDTO } from "@/components/routine/routine-editor";
 
@@ -10,7 +14,11 @@ import { RoutineEditor, type RoutineSectionDTO } from "@/components/routine/rout
 // snapshots this template each day (P4).
 export default async function RoutineSettingsPage() {
   const user = await requireUser();
-  const sections = await getOrCreateDefaultRoutine(user.id);
+  const [sections, overview, timezone] = await Promise.all([
+    getOrCreateDefaultRoutine(user.id),
+    getPreparationScheduleOverview(user.id),
+    getTraderTimezoneState(user.id),
+  ]);
 
   const dto: RoutineSectionDTO[] = sections.map((s) => ({
     id: s.id,
@@ -38,6 +46,8 @@ export default async function RoutineSettingsPage() {
           </p>
         </div>
       </div>
+
+      <PreparationScheduleCard initial={toPreparationSettingsDTO(overview, timezone)} />
 
       <RoutineEditor sections={dto} />
     </FadeIn>
