@@ -30,7 +30,7 @@ import { TradePhase } from "@/components/today-v3/trade-phase";
 import { ClosePhase } from "@/components/today-v3/close-phase";
 import { PreparationSummary } from "@/components/today-v3/preparation-summary";
 import { PreparationBreakNotice } from "@/components/today-v3/preparation-notice";
-import { scoredSummary } from "@/lib/preparation-format";
+import { readinessFeedback } from "@/lib/preparation-format";
 import { QuickIdeaSheet, type QuickIdeaRequest } from "@/components/today-v3/trade/quick-idea-sheet";
 import type { TradeListRow } from "@/components/today-v3/trade/trade-list";
 import { deriveLifecycleWithReview, type TradeStageKey } from "@/domain/trades/trade-lifecycle";
@@ -84,18 +84,16 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
       }
     });
   }
-  // Readiness confirmed this session → the refreshed read model now holds a
-  // score: say it once, quietly. (Initial loads never toast.)
-  const prevPrepKind = useRef(preparation?.today.kind);
+  // Quiet score feedback, ONLY for a readiness confirmation made here: the
+  // flag is armed by onReadyChange(true) and consumed by the first refreshed
+  // read model after it. Refreshes (incl. the cutoff refresh that finalizes
+  // a day as INCOMPLETE/MISSED) and repeated renders never toast.
+  const awaitingReadinessFeedback = useRef(false);
   useEffect(() => {
-    const today = preparation?.today;
-    const was = prevPrepKind.current;
-    prevPrepKind.current = today?.kind;
-    if (was !== "PENDING" || today?.kind !== "SCORED") return;
-    const score = today.corrected?.score ?? today.score;
-    toast.success(`Preparation ${score}/100`, {
-      description: preparation?.streak.restartedToday ? `${scoredSummary(today)} · New Preparation Streak started.` : scoredSummary(today),
-    });
+    if (!awaitingReadinessFeedback.current) return;
+    awaitingReadinessFeedback.current = false;
+    const feedback = readinessFeedback(true, preparation?.today, preparation?.streak.restartedToday ?? false);
+    if (feedback) toast.success(feedback.title, { description: feedback.description });
   }, [preparation]);
 
   // Same readiness rule as V2: confirmation AND every mandatory item still
@@ -291,6 +289,7 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
             onMandatoryRemainingChange={onMandatoryRemainingChange}
             onReadyChange={(next) => {
               setOptimisticReady(next);
+              awaitingReadinessFeedback.current = next && preparation != null;
               if (next) setActive(todaysPlan.planComplete ? "trade" : "plan");
             }}
           />

@@ -94,6 +94,29 @@ describe("savePreparationScheduleAction", () => {
   });
 });
 
+describe("never-configured trader (Phase 3.1)", () => {
+  it("saving with the intended zone establishes that zone — never UTC", async () => {
+    const id = await user("p3a-unset-ny", null);
+    signIn(id);
+    const r = await savePreparationScheduleAction({ timezone: NY, targetMinutes: 480, weekdays: [1, 2, 3, 4, 5] });
+    expect(r).toMatchObject({ success: true, settings: { trader: { pendingTimezone: NY }, upcoming: { timezone: NY, targetMinutes: 480 } } });
+    const tz = await prisma.traderTimezoneVersion.findMany({ where: { userId: id }, select: { timezone: true } });
+    expect(tz.map((v) => v.timezone)).toEqual([NY]);
+    expect((await getScheduleVersions(id)).map((v) => v.timezone)).toEqual([NY]);
+  });
+
+  it("a save without a chosen zone is refused and changes nothing (no implicit UTC)", async () => {
+    const id = await user("p3a-unset-empty", null);
+    signIn(id);
+    for (const timezone of ["", "   ", undefined]) {
+      const r = await savePreparationScheduleAction({ timezone, targetMinutes: 480, weekdays: [1, 2, 3, 4, 5] });
+      expect(r.success).toBe(false);
+    }
+    expect(await prisma.traderTimezoneVersion.count({ where: { userId: id } })).toBe(0);
+    expect(await prisma.preparationScheduleVersion.count({ where: { userId: id } })).toBe(0);
+  });
+});
+
 describe("exception actions", () => {
   it("DAY_OFF and EXTRA_DAY for upcoming dates; refusals come back as clean errors", async () => {
     const id = await user("p3a-exc");

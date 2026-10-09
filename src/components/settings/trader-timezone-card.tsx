@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { setTraderTimezoneAction } from "@/actions/trader-time.actions";
-import { allTimeZones } from "@/lib/timezones";
+import { allTimeZones, readBrowserTimeZone } from "@/lib/timezones";
 import type { TraderTimezoneState } from "@/server/services/trader-time.service";
 
 function formatInstant(iso: string, timeZone: string) {
@@ -28,12 +28,7 @@ export function TraderTimezoneCard({ initial }: { initial: TraderTimezoneState }
   const [browserZone, setBrowserZone] = useState<string | null>(null);
   const [choice, setChoice] = useState(state.pending?.timezone ?? state.timezone);
   useEffect(() => {
-    let zone: string | null = null;
-    try {
-      zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch {
-      zone = null;
-    }
+    const zone = readBrowserTimeZone();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot read of a browser-only value after hydration
     setBrowserZone(zone);
     if (zone && !initial.configured && !initial.pending) setChoice(zone);
