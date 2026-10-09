@@ -4,9 +4,17 @@ import { AppBackdrop } from "@/components/layout/app-backdrop";
 import { Topbar } from "@/components/layout/topbar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { CommandCenter } from "@/components/shared/command-center";
+import { PsychologyResetHost } from "@/components/psychology-reset/psychology-reset-host";
+import { getPsychologyResetState } from "@/server/services/psychology-reset.service";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
+  // Optional Trading Psychology Reset: OFF (the default) → nothing renders.
+  // A failure here never takes the app down.
+  const psychologyReset = await getPsychologyResetState(user.id).catch((e) => {
+    console.error("[psychology-reset] state load failed", e);
+    return { enabled: false, session: null };
+  });
 
   return (
     <>
@@ -21,6 +29,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="flex-1 p-6">{children}</div>
         </SidebarInset>
         <CommandCenter />
+        <PsychologyResetHost initial={psychologyReset} />
       </SidebarProvider>
     </>
   );

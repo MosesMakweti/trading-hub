@@ -25,6 +25,13 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  /// Trading Psychology Reset (optional, per user). OFF by default: nothing
+  /// interrupts a workflow until the trader turns it on in Settings.
+  psychologyResetEnabled   Boolean   @default(false)
+  /// Last time it was turned ON. Only trades that close at/after this moment
+  /// can trigger a reset, so re-enabling never replays older events.
+  psychologyResetEnabledAt DateTime?
+
   accounts Account[]
   sessions Session[]
 
@@ -68,6 +75,7 @@ model User {
   preparationRecords       PreparationDayRecord[]
   preparationCorrections   PreparationDayCorrection[]
   positionFills            PositionFill[]
+  psychologyResetSessions  PsychologyResetSession[]
 
   propFirmImportBatches          PropFirmImportBatch[]
   propFirmImportMappingTemplates PropFirmImportMappingTemplate[]
@@ -900,6 +908,7 @@ enum TradeValidationOverrideReason {
 }
 
 model Trade {
+  psychologyResetSession   PsychologyResetSession?
   id                       String                      @id @default(cuid())
   userId                   String
   user                     User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1237,9 +1246,10 @@ enum MissedOutcome {
 }
 
 model TradeOpportunity {
-  id     String @id @default(cuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  psychologyResetSession PsychologyResetSession?
+  id                     String                  @id @default(cuid())
+  userId                 String
+  user                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // When the setup was spotted (the "trading day" it belongs to) + market context.
   spottedAt   DateTime  @db.Date
@@ -4314,4 +4324,46 @@ model ReplayChartDrawing {
   updatedAt     DateTime    @updatedAt
 
   @@index([backtestRunId, assetSymbol])
+}
+
+// ── Trading Psychology Reset (optional) ────────────────────────────────────
+// A guided reflection after a settled LOSING trade or a recorded MISSED
+// opportunity. Created only while the trader has the feature ON, at most
+// once per trade / opportunity (unique), never in a backtest. Answers are a
+// map of step id → { option, note } written atomically per step. Turning the
+// feature OFF never deletes sessions. See docs/PSYCHOLOGY_RESET.md.
+enum PsychologyResetTrigger {
+  LOSING_TRADE
+  MISSED_OPPORTUNITY
+}
+
+enum PsychologyResetStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+model PsychologyResetSession {
+  id            String                 @id @default(cuid())
+  userId        String
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trigger       PsychologyResetTrigger
+  tradeId       String?                @unique
+  trade         Trade?                 @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  opportunityId String?                @unique
+  opportunity   TradeOpportunity?      @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  /// Content version of the flow the answers belong to (domain/psychology-reset).
+  flowVersion   Int
+  status        PsychologyResetStatus  @default(IN_PROGRESS)
+  /// Index of the step being shown; steps.length = the summary.
+  currentStep   Int                    @default(0)
+  answers       Json                   @default("{}")
+  /// The final step's answer (the trader's chosen next action), set on completion.
+  nextAction    String?
+  /// "Finish later": stops the automatic prompt; the session stays resumable.
+  deferredAt    DateTime?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  completedAt   DateTime?
+
+  @@index([userId, status, createdAt])
 }
