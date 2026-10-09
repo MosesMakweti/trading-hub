@@ -24,6 +24,7 @@ import {
   type MissReasonRow,
 } from "@/domain/analytics/miss-reasons";
 import type { OpportunityCreateInput, MissOutcomeInput } from "@/lib/validation/opportunity";
+import { queueMissedOpportunityResetSafely } from "@/server/services/psychology-reset.service";
 import type { MissReason, MissedOutcome, OpportunityListItemDTO } from "@/types/opportunity";
 
 export class OpportunityError extends Error {}
@@ -155,7 +156,9 @@ export async function recordMissedSetup(
   miss: MissOutcomeInput,
 ) {
   const base = await buildSpottedOpportunityData(userId, dateKey, setup);
-  return prisma.tradeOpportunity.create({ data: { ...base, ...missedFields(miss) } });
+  const op = await prisma.tradeOpportunity.create({ data: { ...base, ...missedFields(miss) } });
+  await queueMissedOpportunityResetSafely(userId, op.id); // optional Psychology Reset; never fails the record
+  return op;
 }
 
 /**
@@ -168,6 +171,12 @@ export async function recordMissedSetup(
  * Trade.opportunityId — "the executed trade" — is not used). One per trade.
  */
 export async function recordCancelledIdeaAsMissed(userId: string, tradeId: string, miss: MissOutcomeInput) {
+  const op = await recordCancelledIdeaAsMissedOnce(userId, tradeId, miss);
+  await queueMissedOpportunityResetSafely(userId, op.id); // idempotent per opportunity
+  return op;
+}
+
+async function recordCancelledIdeaAsMissedOnce(userId: string, tradeId: string, miss: MissOutcomeInput) {
   try {
     return await createFromCancelledIdea(userId, tradeId, miss);
   } catch (e) {
@@ -322,10 +331,12 @@ function assertPending(status: string) {
 export async function logMissedOutcome(userId: string, id: string, data: MissOutcomeInput) {
   const op = await requireOpportunity(userId, id);
   assertPending(op.status);
-  return prisma.tradeOpportunity.update({
+  const updated = await prisma.tradeOpportunity.update({
     where: { id: op.id },
     data: missedFields(data),
   });
+  await queueMissedOpportunityResetSafely(userId, updated.id); // optional Psychology Reset; never fails the record
+  return updated;
 }
 
 // ── Resolve: INVALIDATED / EXPIRED (not real misses; excluded from the gap) ────

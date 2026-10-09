@@ -4,6 +4,7 @@ import { withLedgerProjection } from "@/server/services/ledger-projection.servic
 import { exitedPercentFrom } from "@/domain/trades/trade-lifecycle";
 import { nextClosedAt } from "@/domain/trades/lifecycle";
 import { closedMomentFrom, deriveReviewState } from "@/domain/trades/review-state";
+import { queueLosingTradeResetSafely } from "@/server/services/psychology-reset.service";
 
 /**
  * Today V3 (Phase 3) — the ONE service that keeps a LIVE trade's stored
@@ -26,6 +27,14 @@ import { closedMomentFrom, deriveReviewState } from "@/domain/trades/review-stat
  */
 export async function syncLiveTradeLifecycle(userId: string, tradeId: string, now = new Date()): Promise<void> {
   if (isBacktestScope()) return;
+  await syncLifecycleColumns(userId, tradeId, now);
+  // Trading Psychology Reset (optional): every live execution save ends
+  // here, after settlement and closedAt are final for this save. Observes
+  // only; it can never fail, delay or roll back the save.
+  await queueLosingTradeResetSafely(userId, tradeId);
+}
+
+async function syncLifecycleColumns(userId: string, tradeId: string, now: Date): Promise<void> {
   const loaded = await prisma.trade.findFirst({
     where: { id: tradeId, userId },
     select: {
