@@ -372,10 +372,17 @@ export async function deleteBacktestRun(userId: string, runId: string): Promise<
       `
     ).map((r) => r.id);
 
+    const opportunityIds = (
+      await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "TradeOpportunity" WHERE "backtestRunId" = ${run.id} AND "userId" = ${userId}
+      `
+    ).map((r) => r.id);
+
     const owners = [
       { ownerType: "TRADE" as const, ownerIds: tradeIds },
       { ownerType: "DAILY_ASSET_ANALYSIS" as const, ownerIds: analysisIds },
       { ownerType: "DAILY_NOTE" as const, ownerIds: noteIds },
+      { ownerType: "OPPORTUNITY" as const, ownerIds: opportunityIds },
     ];
     const candidateAssetIds = await collectMediaCandidates(tx, userId, owners, tradeIds);
     await removeOwnerAttachments(tx, userId, owners);

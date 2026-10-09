@@ -879,6 +879,9 @@ enum MediaOwnerType {
   // Replay foundation (Stage 12) — screenshots for a ReplayTrade. Readiness
   // only; no upload UI wired yet (see ReplayTrade's own doc comment).
   REPLAY_TRADE
+  // Chart screenshots of a missed setup, attached to its TradeOpportunity
+  // (same environment as the opportunity — live or its Backtest Run).
+  OPPORTUNITY
 }
 
 // ── Trade Idea Validation Shield (Stage 4) ──────────────────────────────────

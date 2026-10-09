@@ -63,15 +63,21 @@ const STRATEGY_MEDIA_OWNERS: MediaOwnerType[] = [
  * wiped Backtest Runs' screenshots along with live trades.
  */
 async function liveOwnerIds(tx: TransactionClient, userId: string) {
-  const [trades, notes, analyses] = await Promise.all([
+  const [trades, notes, analyses, opportunities] = await Promise.all([
     tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Trade" WHERE "userId" = ${userId} AND "backtestRunId" IS NULL`,
     tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "DailyNote" WHERE "userId" = ${userId} AND "backtestRunId" IS NULL`,
     tx.$queryRaw<{ id: string }[]>`
       SELECT a."id" FROM "DailyAssetAnalysis" a JOIN "TradingDay" d ON d."id" = a."tradingDayId"
       WHERE a."userId" = ${userId} AND d."backtestRunId" IS NULL
     `,
+    tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "TradeOpportunity" WHERE "userId" = ${userId} AND "backtestRunId" IS NULL`,
   ]);
-  return { tradeIds: trades.map((r) => r.id), noteIds: notes.map((r) => r.id), analysisIds: analyses.map((r) => r.id) };
+  return {
+    tradeIds: trades.map((r) => r.id),
+    noteIds: notes.map((r) => r.id),
+    analysisIds: analyses.map((r) => r.id),
+    opportunityIds: opportunities.map((r) => r.id),
+  };
 }
 
 /** Deletes every Backtest Run of the user, each with its media-safe cleanup. */
@@ -95,8 +101,11 @@ export async function deleteDataSection(userId: string, section: DataSection): P
       // LIVE trades only (explicit scope) — Backtest Runs are their own section.
       const keys = await runLive(() =>
         prisma.$transaction(async (tx) => {
-          const { tradeIds } = await liveOwnerIds(tx, userId);
-          const owners: MediaOwnerSet[] = [{ ownerType: "TRADE", ownerIds: tradeIds }];
+          const { tradeIds, opportunityIds } = await liveOwnerIds(tx, userId);
+          const owners: MediaOwnerSet[] = [
+            { ownerType: "TRADE", ownerIds: tradeIds },
+            { ownerType: "OPPORTUNITY", ownerIds: opportunityIds },
+          ];
           const candidates = await collectMediaCandidates(tx, userId, owners, tradeIds);
           await removeOwnerAttachments(tx, userId, owners);
           // Opportunities are journal/trade data — remove them too. (Trade.opportunityId

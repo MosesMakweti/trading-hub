@@ -32,6 +32,7 @@ const OWNER_TYPES: MediaOwnerType[] = [
   "ARSENAL_CONCEPT",
   "PROP_FIRM_MILESTONE",
   "DAILY_ASSET_ANALYSIS",
+  "OPPORTUNITY",
 ];
 
 // Certificates/confirmation evidence accept PDFs too; every other owner type
@@ -89,6 +90,7 @@ export async function POST(request: Request) {
     if (ownerType === "TRADE") scope = await resolveRecordScope(userId, { trade: ownerId }, "write");
     if (ownerType === "DAILY_ASSET_ANALYSIS") scope = await resolveRecordScope(userId, { analysis: ownerId }, "write");
     if (ownerType === "DAILY_NOTE") scope = await resolveRecordScope(userId, { note: ownerId }, "write");
+    if (ownerType === "OPPORTUNITY") scope = await resolveRecordScope(userId, { opportunity: ownerId }, "write");
   } catch (e) {
     if (e instanceof WorkspaceAccessError) return bad(e.message, 403);
     throw e;
@@ -134,6 +136,22 @@ export async function POST(request: Request) {
       if (analysis) {
         try {
           await assertDayEditable(userId, utcDateToKey(analysis.tradingDay.date));
+        } catch (e) {
+          if (e instanceof DayArchivedError) return bad(e.message, 403);
+          throw e;
+        }
+      }
+    }
+
+    // Same rule for a missed setup: its spotted date is the day it belongs to.
+    if (ownerType === "OPPORTUNITY") {
+      const opportunity = await prisma.tradeOpportunity.findFirst({
+        where: { id: ownerId, userId },
+        select: { spottedAt: true },
+      });
+      if (opportunity) {
+        try {
+          await assertDayEditable(userId, utcDateToKey(opportunity.spottedAt));
         } catch (e) {
           if (e instanceof DayArchivedError) return bad(e.message, 403);
           throw e;
