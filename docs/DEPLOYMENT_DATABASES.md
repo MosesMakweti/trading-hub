@@ -9,201 +9,206 @@ Values were never decrypted.
 |---|---|---|
 | `DATABASE_URL` | **one** variable for Production, Preview **and** Development | Every Preview reads and writes the **production** Neon database |
 | `DIRECT_URL` | Production only | Used only by the build-time migration gate |
-| `AUTH_SECRET` | **one** variable for all three environments | Preview and Production can decrypt each other's session cookies |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | separate entry per environment | Whether the values differ (separate bucket and token) is **not known** without reading them |
+| `AUTH_SECRET` | **one** variable for all three | Preview and Production can decrypt each other's session cookies |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | separate entry per environment | Whether the Preview values are a separate bucket and token is **not known** without reading them |
 
 Other facts:
-- There is no Vercel Marketplace integration; Neon was added by hand.
+- The build command is the default `npm run build` (`node
+  scripts/vercel-migrate.mjs && next build`), with no ignored-build-step.
+- System environment variables are exposed (`autoExposeSystemEnvs: true`).
+- There are 0 custom environments, 0 team-level shared variables and no
+  Marketplace integration.
 - Previews are protected by Vercel Authentication (`all_except_custom_domains`).
-- Local `.env` / `.env.test` use `localhost`; `.env.local` holds only
-  `VERCEL_OIDC_TOKEN`.
-- Team-level (shared) environment variables were not inspected.
+- Local `.env` / `.env.test` database URLs use `localhost`. Local `.env` also
+  contains R2 credentials; check which bucket they point at.
 
-### How Production migrations work
-- `npm run build` = `node scripts/vercel-migrate.mjs && next build`, with no
-  `vercel.json`. If the migration step fails, `next build` never runs and the
-  deployment fails, so the previous Production keeps serving.
+### How Production migrations work (unchanged by this change)
 - In Production the gate:
   - uses `DIRECT_URL`;
   - throws if it is missing;
-  - throws if its host contains `-pooler`. This is Neon's PgBouncer host;
-    Prisma's session-level advisory lock is unsafe through transaction
-    pooling (P1002 incident, `8fce274`).
+  - throws if its host contains `-pooler` (Neon's PgBouncer: Prisma's
+    advisory lock is unsafe through transaction pooling; incident `8fce274`).
 - It then runs `prisma migrate deploy` with `DATABASE_URL` overridden to that
-  direct URL.
-- Runtime traffic is separate: the app uses `DATABASE_URL` (pooled) through
-  `@prisma/adapter-pg`. `prisma.config.ts` reads `DATABASE_URL` only for
-  CLI commands.
-- **A migration lands only when a Production build actually runs.** Merging
-  is not enough; check the Production build log or `prisma migrate status`.
-- Previously Preview, Development and other Vercel environments skipped
-  migrations. Local builds (no `VERCEL_ENV`) migrate `DATABASE_URL`.
+  URL. A failure stops `next build`, so the previous Production keeps serving.
+- Runtime traffic uses `DATABASE_URL` (pooled) via `@prisma/adapter-pg`.
+- **A migration lands only when a Production build actually runs.** Check the
+  build log or `prisma migrate status`.
 
-### Variable precedence (Vercel docs)
-- *"Any branch-specific variables will override other preview environment
-  variables with the same name."*
-- *"Changes … only apply to new deployments."* Existing deployments must be
-  redeployed.
-- The docs do **not** describe two all-branch Preview variables with the same
-  name. **Do not add a second `DATABASE_URL`/`AUTH_SECRET` for Preview while
-  the shared one still includes Preview.** Untick Preview on the shared
-  variable first, or use a branch-specific override.
-- This is why the Preview migration URL has its own name, `PREVIEW_DIRECT_URL`.
-  No scoping mistake with `DIRECT_URL` can ever hand Production's direct URL
-  to a Preview migration.
+### Vercel variable precedence (docs)
+- Branch-specific Preview variables override general Preview variables with
+  the same name.
+- Changes apply only to new deployments.
+- Two all-branch Preview variables with the same name are not documented.
+  **Untick Preview on the shared variable before adding a Preview-only one.**
+- `VERCEL_ENV` is only `production`, `preview` or `development`. Custom
+  environments run with `VERCEL_ENV=preview` and their name in
+  `VERCEL_TARGET_ENV`.
 
 ## The migration gate (`scripts/lib/migrate-plan.mjs`, unit-tested)
 
 | Build | Behaviour |
 |---|---|
-| Production | **Unchanged**: `DIRECT_URL`, the same missing/`-pooler` checks and the same messages |
-| Preview, no `PREVIEW_DIRECT_URL` | Skip (today's behaviour) and log which variables enable it |
-| Preview, `PREVIEW_DIRECT_URL` set | Migrate it only if all checks below pass |
-| Preview, `PRODUCTION_DB_ENDPOINT` set and runtime `DATABASE_URL` is that endpoint | **Fail** the build: Preview would run against production |
-| Development / custom environments | Skip (unchanged) |
+| Production | **Unchanged**: `DIRECT_URL`, the same missing/`-pooler` checks and messages |
+| Preview, no `PREVIEW_DIRECT_URL` | Skip (today's behaviour); logs what enables it |
+| Preview, `PRODUCTION_DB_ENDPOINT` set and runtime `DATABASE_URL` is that endpoint | **Fail**: Preview would run against production |
+| Preview, `PREVIEW_DIRECT_URL` set | Migrate only if **both** layers below pass |
+| Custom environment (`VERCEL_TARGET_ENV` ≠ `preview`) | Skip |
+| Development | Skip (unchanged) |
 | Local (no `VERCEL_ENV`) | Migrate `DATABASE_URL` (unchanged) |
 
-Before a Preview migration, all of these must hold. Any failure fails the
-build with the reason:
-- `PRODUCTION_DB_ENDPOINT` is set and looks like `ep-…`;
-- `PREVIEW_DIRECT_URL` is a valid URL and not a `-pooler` host;
-- its endpoint is **not** the production endpoint;
-- the Preview runtime `DATABASE_URL` is the **same** endpoint (pooled and
-  direct connections of one branch).
+**Layer 1 — configuration.**
+- `PRODUCTION_DB_ENDPOINT` must be set and look like `ep-…`.
+- Both `PREVIEW_DIRECT_URL` and the Preview `DATABASE_URL` must be Neon
+  `ep-…` endpoint hosts. Generic and non-Neon hosts are rejected.
+- `PREVIEW_DIRECT_URL` must not be a `-pooler` host.
+- Both URLs must be the **same** endpoint, and it must differ from
+  `PRODUCTION_DB_ENDPOINT`.
+- `DATABASE_URL` and `DIRECT_URL` are never Preview migration targets.
 
-`DATABASE_URL` and `DIRECT_URL` are never Preview migration targets.
+**Layer 2 — database marker.**
+- Right before migrating, the build connects to the exact database it is
+  about to migrate (`PREVIEW_DIRECT_URL`).
+- It requires `public._traditorium_environment` to contain exactly one row
+  `role = 'preview'`.
+- That row exists only on the Neon preview branch. A missing table or row, a
+  wrong value, duplicates or a connection error all refuse.
 
-A shared Preview branch tolerates migrations from abandoned PRs:
-`prisma migrate deploy` does not fail on applied migrations it doesn't have
-locally (verified on a throwaway database).
+Layer 1 relies on correctly entered values. A swapped or mistyped
+`PRODUCTION_DB_ENDPOINT` combined with a production `PREVIEW_DIRECT_URL`
+passes layer 1, and layer 2 is what stops it (regression-tested). The
+protection is therefore only as strong as the rule **"the marker exists only
+on the Preview branch"**. Never create it in production, and never create a
+branch from a database that has it.
+
+Other notes:
+- `prisma migrate deploy` ignores the extra marker table.
+- It also tolerates migrations from abandoned PRs that are applied on the
+  branch but missing locally (verified on a throwaway database).
 
 ## Sessions — `AUTH_SECRET`
-- Auth.js v5 with `session: { strategy: "jwt" }` (`src/server/auth.ts`). The
-  session cookie is encrypted with `AUTH_SECRET` and carries the user id.
-- With a shared secret, a token issued by a Preview decrypts on Production.
-  A branch copied from production has the same user ids, so a token minted
-  on Preview is a valid Production session.
-- Browsers won't send the cookie across domains, but a copied token can be
-  replayed.
-- **Fix:** untick Preview on the shared `AUTH_SECRET` and add a
-  Preview-only value (`openssl rand -base64 32`). No code change is needed;
-  Auth.js reads `AUTH_SECRET` from the environment.
-- Changing it signs out every Preview user once.
+- Auth.js v5 uses JWT sessions encrypted with `AUTH_SECRET`
+  (`src/server/auth.ts`), and the token carries the user id.
+- While Preview and Production share the secret, and a data branch shares
+  the user ids, a token from a Preview is a valid Production session.
+- **Fix:** give Preview its own `AUTH_SECRET`. No code change is needed.
+  Changing it signs Preview users out once.
 
-## Storage — R2 (must be isolated before, or with, the database)
+## Storage — R2
+- **One client, no fallback:** all app storage goes through `getR2()`
+  (`src/lib/r2.ts`). It throws if any `R2_*` variable is missing, and there
+  is no fallback or hard-coded bucket.
+- **Safe defaults:** uploads and both market-data caches disable themselves
+  when R2 isn't configured. The cache flags (`DATABENTO_R2_CACHE_ENABLED`,
+  `TWELVE_DATA_R2_CACHE_ENABLED`) are not set in Vercel.
+- **Exception:** the manual script
+  `scripts/purge-twelvedata-market-data-cache.mjs` builds its own client from
+  whatever `R2_*` is in the shell or `.env`.
+- **Deletes act on keys stored in database rows:**
+  - media deletion;
+  - the Data Management reset (`data-management.service.ts`);
+  - MT5 and historical import cleanup.
+- **Two invariants the setup must keep:**
+  1. **Database copied from production + production bucket** → a Preview
+     delete removes production files that production still references.
+  2. **Production database + Preview bucket** → a Preview upload creates
+     production rows that point at objects only in the Preview bucket, which
+     show as broken images in production.
 
-Code paths, from the R2 client in `src/lib/r2.ts`:
-- **Deletes by key read from database rows:**
-  - media deletion (`media.service`, `api/media/upload`, `api/v1/media`);
-  - **Data Management full reset** (`data-management.service.ts:47`, which
-    deletes every `storageKey` of the user's media);
-  - MT5 import deletion (`deleteImportChunks`);
-  - historical import cleanup (`deleteImportObject`);
-  - the Twelve Data cache purge (`purgeAllTwelveDataCache`).
-- **Deterministic keys, which Preview can overwrite:**
-  - market-data caches (`market-data/databento/…`, Twelve Data `…/1m/<date>.json`);
-  - MT5 chunks of an existing import (`market-data-imports/<user>/<import>/…`).
-- **Random keys, never overwritten:** new media uploads (`<userId>/<uuid>`).
-
-Risk:
-- **Today:** Preview and Production share the database, so the rows and files
-  stay consistent with each other.
-- **After isolating only the database with a data copy:** a Preview row still
-  points at a production object. Deleting media or running a data reset on
-  Preview would **delete production files that production still references**.
-- **Rule:** give Preview its own bucket **and** an R2 API token limited to
-  that bucket before Preview gets a copied database. A schema-only branch also
-  avoids copied `storageKey`s.
-- **Side effect:** with a separate bucket, media copied from production shows
-  as missing in Preview.
+  So a Preview's database and bucket must always switch **together**: R2
+  first, database immediately after, in one sitting. The rehearsal does the
+  same with variables scoped to its own branch.
 
 ## Manual setup — in this order
 
 Never paste connection strings or keys into chat, code or committed files.
-Enter them in the Vercel dashboard or at the `vercel env add` prompt (which
-doesn't echo values).
+Use the Vercel dashboard or the `vercel env add` prompt.
 
-**0. Land the code first.**
-- Merge this change. With no new variables it behaves exactly as today.
-- Then bring other open branches up to date with `master` (e.g. PR #21's
-  branch), so their Previews get the gate.
+**0. Land the code.**
+- Merge this change. Without new variables it behaves exactly as today.
+- Update other open branches from `master` later (step 5).
 
-**1. Isolate storage.**
-- Cloudflare: create a bucket for Preview, e.g. `traditorium-preview`.
-- Cloudflare: create an R2 API token with Object Read & Write on **that
-  bucket only**.
-- Vercel: edit the existing **Preview** entries of `R2_BUCKET`,
-  `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` to the new values.
-  `R2_ACCOUNT_ID` can stay.
-- If a check shows the Preview entries already use a separate bucket and a
-  token scoped to it, skip this step.
+**1. Prepare, without changing any deployment.**
+- Cloudflare R2: create a **Preview bucket** and an API token with Object
+  Read & Write on **that bucket only**.
+- Neon: create branch `preview` from production. **Schema-only** is preferred
+  if your plan offers it (no user data, no copied file keys); otherwise copy
+  data at "head".
+- Neon SQL editor, **on the `preview` branch only**, create the marker:
+  ```sql
+  CREATE TABLE public."_traditorium_environment" (key text PRIMARY KEY, value text NOT NULL);
+  INSERT INTO public."_traditorium_environment" (key, value) VALUES ('role', 'preview');
+  ```
+  Then confirm the production branch has **no** such table.
+- Note the production and preview endpoint ids (the `ep-…` first host label).
+- Confirm production is at `master`'s migration head (latest Production
+  build log, or `prisma migrate status` against production). The branch
+  starts from that state.
 
-**2. Neon: create the Preview branch.**
-- Create a branch named `preview` from the production branch.
-  **Schema-only** is preferred if your plan offers it: no production user
-  data and no copied file keys. Otherwise copy data at "head".
-- Do **not** install the Neon Vercel integration for this option.
-- Note two endpoint ids (the `ep-…` first host label; not secrets): the
-  **production** compute endpoint and the **preview** branch endpoint.
-- If the branch is schema-only, plan a test login for Preview, since there
-  are no users.
-
-**3. Rehearse on one test Git branch** (a branch-specific override touches
-no other Preview). In Vercel, add **branch-specific** Preview variables for a
-new branch, e.g. `preview-db-rehearsal`:
+**2. Rehearse on one test Git branch.** Branch-specific variables override
+only that branch; no other Preview changes. For a new branch, e.g.
+`preview-db-rehearsal`, add these **branch-specific** Preview variables:
 
 | Variable | Value |
 |---|---|
+| `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | the Preview bucket and its token (add these **first**) |
 | `DATABASE_URL` | preview branch **pooled** URL |
 | `PREVIEW_DIRECT_URL` | preview branch **direct** URL |
-| `AUTH_SECRET` | a new random value |
-| `PRODUCTION_DB_ENDPOINT` | the production `ep-…` id (type Config is fine) |
+| `AUTH_SECRET` | a new random value (`openssl rand -base64 32`) |
+| `PRODUCTION_DB_ENDPOINT` | the production `ep-…` id |
 
-- Push `preview-db-rehearsal` (based on the updated `master`).
-- Its build log must show
-  `[migrate] Preview: prisma migrate deploy → isolated branch ep-<preview id>`.
-- Log in on that Preview, upload and delete a test image, and confirm it
-  lands in the Preview bucket.
-- Production is untouched throughout.
+- Push `preview-db-rehearsal`, based on the updated `master`.
+- The build log must show `[migrate] Preview: marker verified; prisma migrate
+  deploy → isolated branch ep-<preview id>`.
+- Log in, upload a test image (it must land in the Preview bucket) and delete
+  it.
+- Production rows, files and caches are not touched: this branch's database,
+  bucket and secret are all its own.
 
-**4. Cut over all Previews, in one sitting, while nobody pushes.**
-1. Shared `DATABASE_URL`: untick **Preview**. Also untick **Development**, so
-   `vercel env pull` can never write the production URL to a local file.
-2. Immediately add `DATABASE_URL` for Preview, all branches: the preview
-   branch pooled URL.
-3. Shared `AUTH_SECRET`: untick **Preview**; add `AUTH_SECRET` for Preview,
-   all branches: a new value.
-4. Add `PREVIEW_DIRECT_URL` for Preview, all branches: the preview branch
-   direct URL.
-5. **Last**, add `PRODUCTION_DB_ENDPOINT` for Preview, all branches: the
-   production id. From now on, any Preview that points at production fails
-   its build instead of running.
+**3. Cut over all Previews, in one maintenance window, while nobody pushes.**
+Storage first, database immediately after, so no Preview ever pairs a
+production database with the Preview bucket, or a copied database with the
+production bucket:
+1. Set the all-branches **Preview** values of `R2_BUCKET`, `R2_ACCESS_KEY_ID`
+   and `R2_SECRET_ACCESS_KEY` to the Preview bucket and its token.
+2. Shared `DATABASE_URL`: untick **Preview** (and **Development**, so
+   `vercel env pull` never writes the production URL locally). Immediately
+   add a Preview `DATABASE_URL` set to the branch pooled URL.
+3. Shared `AUTH_SECRET`: untick **Preview**; add a Preview `AUTH_SECRET`
+   with a new value.
+4. Add a Preview `PREVIEW_DIRECT_URL`: the branch direct URL.
+5. **Last**, add a Preview `PRODUCTION_DB_ENDPOINT`: the production id. From
+   then on, a Preview pointing at production fails its build.
 6. Remove the rehearsal branch-specific variables.
 
-Between steps 1 and 2, a Preview build that starts has **no** database: it
-fails or errors, but cannot reach production. Doing step 5 last means
-partial configuration never blocks Previews prematurely.
+Existing Preview deployments keep their old variables until redeployed (a
+Preview built during the window with R2 switched but the database not yet
+switched would mix them). Run steps 1–2 back to back, and redeploy
+afterwards rather than relying on any Preview built during the window.
 
-**5. Redeploy and verify.**
-- Redeploy the Previews you need; old Preview deployments keep their old
-  variables.
-- Check the build log line, login and a media upload.
-- The next Production build log is unchanged: no Preview line, and the usual
-  `prisma migrate deploy` output.
+**4. Redeploy and verify.**
+- Redeploy the Previews you need. Check the build log line, login and
+  upload.
+- The next Production build log is unchanged.
+
+**5. Open branches** (e.g. PR #21).
+- Merge `master` into the branch, push, and check its Preview migrated the
+  isolated branch before considering a merge to production.
 
 **6. Upkeep.**
-- After an abandoned PR's migration, or whenever Preview data drifts: Neon →
-  `preview` → *Reset from parent*.
+- Neon *Reset from parent* removes the marker (it doesn't exist on
+  production), so Preview builds then refuse until you recreate it with the
+  SQL in step 1.
 
 ## Remaining risks
+- **The marker is the deciding safeguard.** It must exist only on the Preview
+  branch.
 - **Production data in Preview:** a full-copy branch holds production
-  personal data, reachable by team members through protected Previews. Any
+  personal data, reachable by team members through protected Previews. A
   custom domain assigned to a Preview bypasses Vercel Authentication.
-- **Rows copied by a data branch:** API tokens, prop-firm accounts, etc. are
-  valid in Preview against the Preview database.
-- **R2:** until step 1, Preview may share production storage. Market-data
-  caches can be overwritten by a Preview with buggy cache code.
-- **Not checked:** team-level environment variables and custom-domain
-  assignments.
-- **Neon naming assumption:** the gate relies on Neon host naming (`ep-…`
-  first label, `-pooler` for pooled hosts).
+- **Rows copied by a data branch:** API tokens etc. work in Preview against
+  the Preview database.
+- **Local R2:** local runs use whatever bucket `.env` points at, including the
+  manual purge script.
+- **Pre-existing:** if system environment variables were ever disabled,
+  `VERCEL_ENV` would be absent and the build would take the local path
+  (`DATABASE_URL`).
