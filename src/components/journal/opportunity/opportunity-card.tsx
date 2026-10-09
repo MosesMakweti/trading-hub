@@ -17,6 +17,7 @@ import {
 import { Tag } from "@/components/ui/tag";
 import { RatingBadge } from "@/components/journal/setup-score-card";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { ImageAttachments } from "@/components/media/image-attachments";
 import { cn } from "@/lib/utils";
 import { MissOutcomeForm } from "@/components/journal/opportunity/miss-outcome-form";
 import {
@@ -203,6 +204,11 @@ export function OpportunityCard({
             </p>
           )}
         </div>
+      )}
+
+      {/* Chart screenshots of the missed setup */}
+      {o.status === "MISSED" && (
+        <ImageAttachments ownerType="OPPORTUNITY" ownerId={o.id} label="Images" max={6} disabled={!editable} />
       )}
 
       {o.status === "EXECUTED" && o.executedTrade && (
