@@ -26,7 +26,14 @@ import {
   type PreparationStreak,
   type StreakBreak,
 } from "@/domain/discipline";
-import { addDaysToDateKey, effectiveTimezoneAt, isValidTimeZone, localDateKeyAt, traderTodayKey } from "@/domain/time/trader-calendar";
+import {
+  addDaysToDateKey,
+  effectiveTimezoneAt,
+  isValidTimeZone,
+  pendingTimezoneAt,
+  traderTodayKey,
+  type TimezoneVersion,
+} from "@/domain/time/trader-calendar";
 import type { RoutineSnapshot } from "@/domain/today/routine-snapshot";
 
 /**
@@ -75,10 +82,31 @@ export async function getScheduleVersions(userId: string, db: Db = prisma): Prom
 }
 
 export interface ConfirmScheduleInput {
-  /** Defaults to the trader's confirmed timezone (trader-time.service). */
-  timezone?: string;
   targetMinutes: number;
   weekdays: number[];
+}
+
+const timezoneVersions = (db: Db, userId: string): Promise<TimezoneVersion[]> =>
+  db.traderTimezoneVersion.findMany({ where: { userId }, select: { timezone: true, effectiveFrom: true, createdAt: true } });
+
+/**
+ * The trader timezone that governs the trader's NEXT local date. A confirmed
+ * timezone change always takes effect at the start of that date
+ * (trader-calendar `effectiveFromForChange`), so a pending change — if any —
+ * is exactly the zone of the next date; otherwise the current zone continues.
+ */
+function timezoneForNextLocalDate(tzVersions: readonly TimezoneVersion[], now: Date): string {
+  return pendingTimezoneAt(tzVersions, now)?.timezone ?? effectiveTimezoneAt(tzVersions, now);
+}
+
+/**
+ * createdAt for a new version: `now`, but strictly after every existing
+ * version, so "latest createdAt wins" on a shared effectiveFrom always means
+ * "the last write under the lock wins", even if callers' clocks interleave.
+ */
+function monotonicCreatedAt(existing: readonly PreparationScheduleVersion[], now: Date): Date {
+  const latest = existing.reduce((m, v) => Math.max(m, v.createdAt.getTime()), 0);
+  return new Date(Math.max(now.getTime(), latest + 1));
 }
 
 /**
@@ -86,13 +114,21 @@ export interface ConfirmScheduleInput {
  * effective from the trader's NEXT local date — today's (and every past)
  * outcome is never rewritten. Re-confirming the schedule already in place
  * for that date is a no-op (double submits never duplicate versions).
+ *
+ * Timezone (Phase 3): the schedule has no timezone of its own — it always
+ * uses the canonical trader timezone that governs the effective date
+ * (including a change confirmed today that starts tomorrow). Changing the
+ * timezone goes through trader-time.service, which appends the matching
+ * schedule version (`syncScheduleTimezone`), so the two never drift apart.
+ * Lock order (both writers): trader-timezone → prep-schedule.
  */
 export async function confirmPreparationSchedule(userId: string, input: ConfirmScheduleInput, now: Date = new Date()) {
   if (isBacktestScope()) throw new PreparationError("The Preparation Schedule is set from the live workspace.");
   return prisma.$transaction(async (tx) => {
+    await lock(tx, `trader-timezone:${userId}`);
     await lock(tx, `prep-schedule:${userId}`);
-    const tzVersions = await tx.traderTimezoneVersion.findMany({ where: { userId }, select: { timezone: true, effectiveFrom: true, createdAt: true } });
-    const timezone = (input.timezone ?? effectiveTimezoneAt(tzVersions, now)).trim();
+    const tzVersions = await timezoneVersions(tx, userId);
+    const timezone = timezoneForNextLocalDate(tzVersions, now);
     if (!isValidTimeZone(timezone)) throw new PreparationError("Choose a valid timezone.");
     const effectiveFrom = nextEffectiveDate(traderTodayKey(tzVersions, now));
     const candidate = {
@@ -125,11 +161,46 @@ export async function confirmPreparationSchedule(userId: string, input: ConfirmS
         weekdays: candidate.weekdays,
         rules: candidate.rules as unknown as Prisma.InputJsonValue,
         scoringVersion: candidate.rules.scoringVersion,
-        createdAt: now,
+        createdAt: monotonicCreatedAt(existing, now),
       },
     });
     return { created: true, version: toDomainVersion(row) };
   });
+}
+
+/**
+ * Timezone synchronization (Phase 3). Called by trader-time.service inside
+ * the transaction that records a trader timezone change, AFTER the new
+ * TraderTimezoneVersion is written (the caller already holds the
+ * trader-timezone lock). If a Preparation Schedule exists and the version
+ * governing the trader's next local date uses a different zone, a NEW
+ * version is appended for that same date — same target, weekdays and frozen
+ * rules, the new zone. Existing versions and records are never touched.
+ * Returns the created version, or null when nothing needed to change.
+ */
+export async function syncScheduleTimezone(tx: TransactionClient, userId: string, now: Date): Promise<PreparationScheduleVersion | null> {
+  await lock(tx, `prep-schedule:${userId}`);
+  const versions = await getScheduleVersions(userId, tx);
+  if (versions.length === 0) return null;
+  const tzVersions = await timezoneVersions(tx, userId);
+  const effectiveFrom = nextEffectiveDate(traderTodayKey(tzVersions, now));
+  const timezone = timezoneForNextLocalDate(tzVersions, now);
+  const inPlace = scheduleVersionFor(versions, effectiveFrom);
+  // No version governs that date yet (impossible: versions start at most tomorrow) or already in sync.
+  if (!inPlace || inPlace.timezone === timezone) return null;
+  const row = await tx.preparationScheduleVersion.create({
+    data: {
+      userId,
+      effectiveFrom: dateKeyToUtcDate(effectiveFrom),
+      timezone,
+      targetMinutes: inPlace.targetMinutes,
+      weekdays: inPlace.weekdays,
+      rules: inPlace.rules as unknown as Prisma.InputJsonValue,
+      scoringVersion: inPlace.rules.scoringVersion,
+      createdAt: monotonicCreatedAt(versions, now),
+    },
+  });
+  return toDomainVersion(row);
 }
 
 // ── Exceptions ──────────────────────────────────────────────────────────────
@@ -195,10 +266,13 @@ async function liveDayFacts(db: Db, userId: string, from: string, to: string): P
   return map;
 }
 
-function scheduleTodayKey(versions: PreparationScheduleVersion[], now: Date): string {
-  const latest = versions.reduce((a, b) => (b.effectiveFrom > a.effectiveFrom || (b.effectiveFrom === a.effectiveFrom && b.createdAt > a.createdAt) ? b : a));
-  const probe = localDateKeyAt(now, latest.timezone);
-  return localDateKeyAt(now, (scheduleVersionFor(versions, probe) ?? latest).timezone);
+/**
+ * The Preparation "today" is the trader's canonical today (Phase 0
+ * calendar). Schedule versions follow the trader timezone (synchronized
+ * since Phase 3), so every date before this key is past its cutoff.
+ */
+async function preparationTodayKey(db: Db, userId: string, now: Date): Promise<string> {
+  return traderTodayKey(await timezoneVersions(db, userId), now);
 }
 
 // ── Finalization ────────────────────────────────────────────────────────────
@@ -219,7 +293,7 @@ export async function finalizePreparationDays(userId: string, now: Date = new Da
     if (versions.length === 0) return 0; // no schedule → no scoring at all
 
     const last = await tx.preparationDayRecord.findFirst({ where: { userId }, orderBy: { date: "desc" }, select: { date: true } });
-    const todayKey = scheduleTodayKey(versions, now);
+    const todayKey = await preparationTodayKey(tx, userId, now);
     const from = last ? addDaysToDateKey(utcDateToKey(last.date), 1) : undefined;
     const era = versions.reduce((m, v) => (v.effectiveFrom < m ? v.effectiveFrom : m), versions[0].effectiveFrom);
     const start = from && from > era ? from : era;
@@ -357,6 +431,8 @@ export interface PreparationState {
   /** A confirmed change that starts at a later local date. */
   pendingSchedule: { timezone: string; targetMinutes: number; weekdays: number[]; effectiveFrom: string } | null;
   todayKey: string | null;
+  /** Point maxima of the rules governing today (frozen with the schedule version). */
+  scoring: { completionMax: number; timingMax: number } | null;
   today: PreparationToday;
   streak: PreparationStreak;
   /** The streak-break notice, until acknowledged. */
@@ -407,9 +483,18 @@ function breakdownFromRecord(r: {
 export async function getPreparationState(userId: string, now: Date = new Date()): Promise<PreparationState> {
   const versions = await getScheduleVersions(userId);
   if (versions.length === 0) {
-    return { configured: false, schedule: null, pendingSchedule: null, todayKey: null, today: { kind: "OUTSIDE_ERA" }, streak: EMPTY_STREAK, notice: null };
+    return {
+      configured: false,
+      schedule: null,
+      pendingSchedule: null,
+      todayKey: null,
+      scoring: null,
+      today: { kind: "OUTSIDE_ERA" },
+      streak: EMPTY_STREAK,
+      notice: null,
+    };
   }
-  const todayKey = scheduleTodayKey(versions, now);
+  const todayKey = await preparationTodayKey(prisma, userId, now);
   const current = scheduleVersionFor(versions, todayKey);
   const future = versions.filter((v) => v.effectiveFrom > todayKey).sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : 1)).pop() ?? null;
   const pick = (v: PreparationScheduleVersion | null) =>
@@ -474,6 +559,7 @@ export async function getPreparationState(userId: string, now: Date = new Date()
     schedule: pick(current),
     pendingSchedule: pick(future),
     todayKey,
+    scoring: current ? { completionMax: current.rules.completionMax, timingMax: current.rules.timingMax } : null,
     today,
     streak,
     notice: noticeFor(streak.lastBreak, streak.longest, records),
@@ -495,6 +581,61 @@ function noticeFor(
 /** Dismisses a streak-break notice. Touches only noticeAcknowledgedAt (once) — never the outcome or streak. */
 export async function acknowledgePreparationNotice(userId: string, recordId: string, now: Date = new Date()): Promise<void> {
   await prisma.preparationDayRecord.updateMany({ where: { id: recordId, userId, noticeAcknowledgedAt: null }, data: { noticeAcknowledgedAt: now } });
+}
+
+// ── Settings read model (Phase 3) ───────────────────────────────────────────
+
+export interface PreparationScheduleSummary {
+  timezone: string;
+  targetMinutes: number;
+  weekdays: number[];
+  effectiveFrom: string;
+}
+
+export interface PreparationScheduleOverview {
+  todayKey: string;
+  /** The version governing today (null before the first version starts). */
+  current: PreparationScheduleSummary | null;
+  /** The confirmed version that starts at a later local date, if any. */
+  upcoming: PreparationScheduleSummary | null;
+  /** The date a change confirmed now would take effect. */
+  nextEffectiveFrom: string;
+  /** DAY_OFF / EXTRA_DAY exceptions dated today or later, ascending. */
+  upcomingExceptions: { id: string; dateKey: string; kind: "DAY_OFF" | "EXTRA_DAY"; note: string | null }[];
+}
+
+/** Settings → Routine → Preparation Schedule. Read-only; scope-independent (schedules are live-only). */
+export async function getPreparationScheduleOverview(userId: string, now: Date = new Date()): Promise<PreparationScheduleOverview> {
+  const [versions, tzVersions] = await Promise.all([getScheduleVersions(userId), timezoneVersions(prisma, userId)]);
+  const todayKey = traderTodayKey(tzVersions, now);
+  const current = scheduleVersionFor(versions, todayKey);
+  const upcoming = versions.filter((v) => v.effectiveFrom > todayKey).reduce<PreparationScheduleVersion | null>(
+    (best, v) => (!best || v.effectiveFrom > best.effectiveFrom || (v.effectiveFrom === best.effectiveFrom && v.createdAt > best.createdAt) ? v : best),
+    null,
+  );
+  const exceptions = versions.length
+    ? await prisma.preparationDayException.findMany({
+        where: { userId, date: { gte: dateKeyToUtcDate(todayKey) } },
+        orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+      })
+    : [];
+  const pick = (v: PreparationScheduleVersion | null): PreparationScheduleSummary | null =>
+    v ? { timezone: v.timezone, targetMinutes: v.targetMinutes, weekdays: v.weekdays, effectiveFrom: v.effectiveFrom } : null;
+  // A change that ended up identical to today's schedule (e.g. a timezone
+  // change confirmed and then cancelled) is not an "upcoming" change.
+  const same =
+    current &&
+    upcoming &&
+    current.timezone === upcoming.timezone &&
+    current.targetMinutes === upcoming.targetMinutes &&
+    current.weekdays.join(",") === upcoming.weekdays.join(",");
+  return {
+    todayKey,
+    current: pick(current),
+    upcoming: same ? null : pick(upcoming),
+    nextEffectiveFrom: nextEffectiveDate(todayKey),
+    upcomingExceptions: exceptions.map((e) => ({ id: e.id, dateKey: utcDateToKey(e.date), kind: e.kind, note: e.note })),
+  };
 }
 
 /** Finalize (LIVE) then read — the Today loader's single call. */

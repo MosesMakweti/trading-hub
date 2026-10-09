@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db";
+import { syncScheduleTimezone } from "@/server/services/preparation.service";
 import {
   effectiveFromForChange,
   effectiveTimezoneAt,
@@ -62,6 +63,8 @@ export class TimezoneChangeError extends Error {}
  * every stored TradingDay stay put. Choosing the zone already in effect
  * while a different change is pending cancels that change (a newer version
  * with the same effective instant wins). A no-op when nothing would change.
+ * A confirmed Preparation Schedule is re-versioned to the new zone from the
+ * same next local date (`syncScheduleTimezone`).
  */
 export async function setTraderTimezone(userId: string, timezone: string, now: Date = new Date()): Promise<TraderTimezoneState> {
   const tz = timezone.trim();
@@ -89,6 +92,11 @@ export async function setTraderTimezone(userId: string, timezone: string, now: D
     // so the newest choice always wins.
     if (pending && pending.effectiveFrom.getTime() > effectiveFrom.getTime()) effectiveFrom = pending.effectiveFrom;
     await tx.traderTimezoneVersion.create({ data: { userId, timezone: tz, effectiveFrom, createdAt: now } });
+    // Preparation Phase 3 — the Preparation Schedule follows the canonical
+    // trader timezone: a matching NEW schedule version governs from the same
+    // next local date (nothing existing is rewritten). Same transaction, so
+    // the two can never be observed out of sync.
+    await syncScheduleTimezone(tx, userId, now);
   });
   return getTraderTimezoneState(userId, now);
 }

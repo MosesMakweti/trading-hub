@@ -365,7 +365,8 @@ describe("immutability", () => {
       await setRoutineResponse(t.id, d, t.items.a, { checked: false }, ny(d, "16:01"));
     });
     await setTraderTimezone(t.id, "Asia/Tokyo", ny(d, "16:02"));
-    await confirmPreparationSchedule(t.id, { timezone: "Asia/Tokyo", targetMinutes: 9 * 60, weekdays: [1, 2, 3, 4, 5] }, ny(d, "16:03"));
+    // Phase 3: the schedule takes the (pending) trader timezone — no zone of its own.
+    await confirmPreparationSchedule(t.id, { targetMinutes: 9 * 60, weekdays: [1, 2, 3, 4, 5] }, ny(d, "16:03"));
     await finalize(t.id, ny("2026-10-08", "20:00"));
     expect(await record(t.id, d)).toEqual(before);
     expect(before).toMatchObject({ timezone: NY, targetAt: ny(d, "08:00"), cutoffAt: ny(d, "14:00") });
@@ -457,7 +458,9 @@ describe("isolation and Today integration", () => {
     const d = "2026-10-05";
     await prepare(t, d, ny(d, "07:55"));
     const data = await loadTradingWorkspace(t.id, "2026-10-06", { environment: "LIVE" });
-    expect(data.preparation).toMatchObject({ configured: true, streak: { current: 1 } });
+    // The loader reads the real clock, so assert what can't decay with time
+    // (the current streak would be broken by later scheduled days).
+    expect(data.preparation).toMatchObject({ configured: true, streak: { longest: 1 } });
     expect(data.routine.snapshot.sections.length).toBeGreaterThan(0);
 
     const none = await trader("prep-today-none", { schedule: false });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { FlagOff, Loader2 } from "lucide-react";
@@ -9,6 +9,7 @@ import { formatDateKeyLong } from "@/lib/date";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { reopenDay } from "@/actions/today.actions";
+import { acknowledgePreparationNoticeAction } from "@/actions/preparation.actions";
 import { useDayRef } from "@/components/workspace/workspace-context";
 import { PreSessionRoutineSection } from "@/components/today/pre-session-routine-section";
 import { allMandatoryComplete, mandatoryProgress } from "@/domain/today/routine-snapshot";
@@ -27,6 +28,9 @@ import { PhaseRail } from "@/components/today-v3/phase-rail";
 import { PlanPhase } from "@/components/today-v3/plan-phase";
 import { TradePhase } from "@/components/today-v3/trade-phase";
 import { ClosePhase } from "@/components/today-v3/close-phase";
+import { PreparationSummary } from "@/components/today-v3/preparation-summary";
+import { PreparationBreakNotice } from "@/components/today-v3/preparation-notice";
+import { scoredSummary } from "@/lib/preparation-format";
 import { QuickIdeaSheet, type QuickIdeaRequest } from "@/components/today-v3/trade/quick-idea-sheet";
 import type { TradeListRow } from "@/components/today-v3/trade/trade-list";
 import { deriveLifecycleWithReview, type TradeStageKey } from "@/domain/trades/trade-lifecycle";
@@ -64,6 +68,35 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
   const dayRef = useDayRef(day.dateKey);
   const router = useRouter();
   const archived = day.status === "ARCHIVED";
+
+  // Preparation Score (Phase 3) — server read model only; no schedule → nothing renders.
+  const preparation = data.preparation?.configured ? data.preparation : null;
+  const [dismissedNotice, setDismissedNotice] = useState<string | null>(null);
+  const [dismissing, startDismiss] = useTransition();
+  const notice = preparation?.notice && preparation.notice.recordId !== dismissedNotice ? preparation.notice : null;
+  function dismissNotice(recordId: string) {
+    setDismissedNotice(recordId); // optimistic; the server records the acknowledgment
+    startDismiss(async () => {
+      const r = await acknowledgePreparationNoticeAction({ recordId });
+      if (!r.success) {
+        setDismissedNotice(null);
+        toast.error(r.error);
+      }
+    });
+  }
+  // Readiness confirmed this session → the refreshed read model now holds a
+  // score: say it once, quietly. (Initial loads never toast.)
+  const prevPrepKind = useRef(preparation?.today.kind);
+  useEffect(() => {
+    const today = preparation?.today;
+    const was = prevPrepKind.current;
+    prevPrepKind.current = today?.kind;
+    if (was !== "PENDING" || today?.kind !== "SCORED") return;
+    const score = today.corrected?.score ?? today.score;
+    toast.success(`Preparation ${score}/100`, {
+      description: preparation?.streak.restartedToday ? `${scoredSummary(today)} · New Preparation Streak started.` : scoredSummary(today),
+    });
+  }, [preparation]);
 
   // Same readiness rule as V2: confirmation AND every mandatory item still
   // complete; `optimisticReady` unlocks the moment the routine confirms.
@@ -230,6 +263,15 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
         commitmentAdherence={commitmentAdherence}
       />
 
+      {notice && preparation && (
+        <PreparationBreakNotice
+          notice={notice}
+          todayKey={preparation.todayKey}
+          onDismiss={() => dismissNotice(notice.recordId)}
+          dismissing={dismissing}
+        />
+      )}
+
       <PhaseRail
         items={rail}
         active={active}
@@ -245,6 +287,7 @@ export function TodayV3Workspace(data: TradingWorkspaceData) {
             dateKey={day.dateKey}
             routine={routine}
             variant="v3"
+            summary={preparation ? <PreparationSummary view={preparation} onCutoffPassed={() => router.refresh()} /> : undefined}
             onMandatoryRemainingChange={onMandatoryRemainingChange}
             onReadyChange={(next) => {
               setOptimisticReady(next);

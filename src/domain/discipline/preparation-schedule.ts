@@ -28,6 +28,15 @@ export interface PreparationScheduleVersion {
   createdAt: Date;
 }
 
+/**
+ * Prefill for a trader who has not confirmed a schedule yet: 08:00 local,
+ * Monday–Friday. Only a suggestion — nothing is scored until confirmed.
+ */
+export const DEFAULT_PREPARATION_SCHEDULE: Readonly<{ targetMinutes: number; weekdays: readonly number[] }> = {
+  targetMinutes: 8 * 60,
+  weekdays: [1, 2, 3, 4, 5],
+};
+
 export type PreparationExceptionKind = "DAY_OFF" | "EXTRA_DAY";
 
 export interface PreparationDayException {

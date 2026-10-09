@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -34,9 +34,13 @@ export function PreSessionRoutineSection({
   onReadyChange,
   onMandatoryRemainingChange,
   variant = "v2",
+  summary,
 }: {
   dateKey: string;
   routine: DayRoutineDTO;
+  /** Today V3 (Preparation Phase 3) — a compact row rendered at the top of
+   *  the routine's progress card (score, timing, streak). */
+  summary?: ReactNode;
   /** Today V3: the routine gates TRADING (Plan stays open), so the gate copy
    *  and the ready state read differently. Backtesting keeps V2. */
   variant?: "v2" | "v3";
@@ -134,6 +138,7 @@ export function PreSessionRoutineSection({
     <div className="space-y-4">
       {/* Progress */}
       <div className="glass space-y-2 rounded-2xl p-4">
+        {summary}
         <div className="flex items-center justify-between gap-2 text-sm">
           <span className="font-medium">Pre-session routine</span>
           <div className="flex items-center gap-3">

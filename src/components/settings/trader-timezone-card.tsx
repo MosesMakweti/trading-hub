@@ -6,17 +6,8 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { setTraderTimezoneAction } from "@/actions/trader-time.actions";
+import { allTimeZones } from "@/lib/timezones";
 import type { TraderTimezoneState } from "@/server/services/trader-time.service";
-
-function allTimeZones(): string[] {
-  try {
-    const list = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone");
-    if (list && list.length > 0) return list.includes("UTC") ? list : ["UTC", ...list];
-  } catch {
-    // fall through
-  }
-  return ["UTC"];
-}
 
 function formatInstant(iso: string, timeZone: string) {
   return new Intl.DateTimeFormat(undefined, { timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
@@ -71,8 +62,8 @@ export function TraderTimezoneCard({ initial }: { initial: TraderTimezoneState }
         <div className="min-w-0">
           <div className="text-sm font-medium">Trading timezone</div>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Decides which date &ldquo;today&rdquo; is in Today, the Journal and the Dashboard. A change starts with your
-            next local day — today and past days never move.
+            Decides which date &ldquo;today&rdquo; is in Today, the Journal and the Dashboard, and the zone of your
+            Preparation Schedule. A change starts with your next local day — today and past days never move.
           </p>
         </div>
       </div>
