@@ -165,3 +165,26 @@ export function breakNoticeText(notice: PreparationNoticeDTO, todayKey: string):
 export function streakDays(n: number): string {
   return `${n} scheduled trading ${n === 1 ? "day" : "days"}`;
 }
+
+/**
+ * The quiet score feedback after the trader CONFIRMS readiness. `awaiting`
+ * is true only between a readiness confirmation and the first refreshed
+ * read model after it; a score that appears for any other reason (a page
+ * refresh, the cutoff finalizing the day) gets no feedback. Never for an
+ * INCOMPLETE / MISSED result — readiness can't produce one before the
+ * cutoff, and a success-style message for a missed day would be wrong.
+ */
+export function readinessFeedback(
+  awaiting: boolean,
+  today: PreparationTodayDTO | undefined,
+  restartedToday: boolean,
+): { title: string; description: string } | null {
+  if (!awaiting || today?.kind !== "SCORED") return null;
+  const status = today.corrected?.status ?? today.status;
+  if (status === "INCOMPLETE" || status === "MISSED") return null;
+  const summary = scoredSummary(today);
+  return {
+    title: `Preparation ${today.corrected?.score ?? today.score}/100`,
+    description: restartedToday ? `${summary} · New Preparation Streak started.` : summary,
+  };
+}

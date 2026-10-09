@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { CalendarClock, CalendarOff, CalendarPlus } from "lucide-react";
 import { toast } from "sonner";
@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { allTimeZones } from "@/lib/timezones";
+import { allTimeZones, initialTimeZoneChoice, readBrowserTimeZone } from "@/lib/timezones";
 import { addPreparationExceptionAction, savePreparationScheduleAction } from "@/actions/preparation.actions";
 import { minutesToTimeString, timeStringToMinutes } from "@/lib/date";
 import {
@@ -29,21 +29,39 @@ import type { PreparationScheduleDTO, PreparationSettingsDTO } from "@/types/pre
  * weekdays are wall-clock values in that zone — the browser's own zone never
  * reinterprets them. Every change takes effect from the next local day; the
  * server decides whether a day off / extra day is still allowed.
+ *
+ * A trader who never chose a timezone runs on the UTC fallback calendar;
+ * that fallback is never presented as their choice. The form starts on the
+ * device's zone as a suggestion (read after mount, like the Trading
+ * timezone card) or on an explicit "Choose…", and says that saving
+ * establishes the trading timezone.
  */
 export function PreparationScheduleCard({ initial }: { initial: PreparationSettingsDTO }) {
   const [settings, setSettings] = useState(initial);
   const base = settings.upcoming ?? settings.current;
   const zones = useMemo(() => allTimeZones(), []);
   const traderZone = settings.trader.pendingTimezone ?? settings.trader.timezone;
-  const [timezone, setTimezone] = useState(base?.timezone ?? traderZone);
+  const chosen = initialTimeZoneChoice(settings.trader, null).source === "configured";
+  // Server render and hydration agree on "" for a never-configured trader;
+  // the device suggestion is filled in after mount.
+  const [timezone, setTimezone] = useState(chosen ? (base?.timezone ?? traderZone) : "");
+  const [suggestion, setSuggestion] = useState<{ checked: boolean; zone: string | null }>({ checked: false, zone: null });
+  useEffect(() => {
+    if (initialTimeZoneChoice(initial.trader, null).source === "configured") return;
+    const zone = readBrowserTimeZone();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot read of a browser-only value after hydration
+    setSuggestion({ checked: true, zone });
+    const start = initialTimeZoneChoice(initial.trader, zone);
+    if (start.value) setTimezone((prev) => prev || start.value);
+  }, [initial.trader]);
   const [time, setTime] = useState(minutesToTimeString(base?.targetMinutes ?? settings.defaults.targetMinutes));
   const [weekdays, setWeekdays] = useState<number[]>(base?.weekdays ?? settings.defaults.weekdays);
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const zoneOptions = zones.includes(timezone) ? zones : [timezone, ...zones];
+  const zoneOptions = !timezone || zones.includes(timezone) ? zones : [timezone, ...zones];
   const timeValid = /^\d{2}:\d{2}$/.test(time);
-  const changesTimezone = timezone !== traderZone || !settings.trader.configured;
+  const changesTimezone = chosen && timezone !== "" && timezone !== traderZone;
 
   function toggleDay(day: number) {
     setWeekdays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]));
@@ -51,6 +69,10 @@ export function PreparationScheduleCard({ initial }: { initial: PreparationSetti
 
   function save() {
     setError(null);
+    if (!timezone) {
+      setError("Choose your trading timezone.");
+      return;
+    }
     startSave(async () => {
       const r = await savePreparationScheduleAction({ timezone, targetMinutes: timeStringToMinutes(time), weekdays });
       if (!r.success) {
@@ -58,6 +80,7 @@ export function PreparationScheduleCard({ initial }: { initial: PreparationSetti
         return;
       }
       setSettings(r.settings);
+      setTimezone(r.settings.trader.pendingTimezone ?? r.settings.trader.timezone);
       toast.success(`Preparation Schedule saved — takes effect ${formatDateKeyCompact(r.settings.nextEffectiveFrom)}.`);
     });
   }
@@ -91,7 +114,13 @@ export function PreparationScheduleCard({ initial }: { initial: PreparationSetti
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
               aria-describedby="prep-timezone-help"
+              required
             >
+              {!timezone && (
+                <option value="" disabled>
+                  Choose your timezone…
+                </option>
+              )}
               {zoneOptions.map((z) => (
                 <option key={z} value={z}>
                   {z}
@@ -104,10 +133,17 @@ export function PreparationScheduleCard({ initial }: { initial: PreparationSetti
                 trading timezone
               </Link>{" "}
               — one setting for Today, the Journal and Preparation.
-              {changesTimezone && settings.trader.configured && (
+              {changesTimezone && (
                 <span className="text-warning"> Saving changes your trading timezone too, from your next local day.</span>
               )}
             </p>
+            {!chosen && (
+              <p role="note" className="text-xs text-warning" data-testid="prep-timezone-unset">
+                You haven&apos;t set a trading timezone yet (UTC is used until you do). Saving this schedule sets your trading timezone to{" "}
+                {timezone ? <strong className="font-medium">{timezone}</strong> : "the zone you choose"}, from your next local day.
+                {suggestion.checked && (suggestion.zone ? " Suggested from this device — check it before saving." : " This device's timezone couldn't be detected — choose yours.")}
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="prep-target">Target preparation time</Label>
@@ -124,7 +160,7 @@ export function PreparationScheduleCard({ initial }: { initial: PreparationSetti
           </div>
         </div>
         <p id="prep-target-help" className="-mt-2 text-xs text-muted-foreground">
-          This is when you aim to have your pre-session preparation completed, in {timezone}.
+          This is when you aim to have your pre-session preparation completed, in {timezone || "your trading timezone"}.
         </p>
 
         <fieldset className="space-y-1.5">
@@ -159,7 +195,7 @@ export function PreparationScheduleCard({ initial }: { initial: PreparationSetti
           </p>
         )}
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" onClick={save} disabled={saving || weekdays.length === 0 || !timeValid}>
+          <Button type="button" onClick={save} disabled={saving || weekdays.length === 0 || !timeValid || !timezone}>
             {settings.current || settings.upcoming ? "Save schedule" : "Start Preparation Schedule"}
           </Button>
           <span className="text-xs text-muted-foreground">

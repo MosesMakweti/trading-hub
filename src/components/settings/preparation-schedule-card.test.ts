@@ -76,4 +76,40 @@ describe("Preparation Schedule card", () => {
     expect(t).toContain("Oct 12 Day off Travel Day off — does not affect your Preparation Streak.");
     expect(t).toContain("Oct 18 Extra trading day This day will count toward your Preparation Streak.");
   });
+
+  describe("trading timezone not configured yet (Phase 3.1)", () => {
+    const unset = { timezone: "UTC", configured: false, pendingTimezone: null };
+
+    it("does not present the UTC fallback as the trader's choice: nothing selected, Save disabled", () => {
+      const html = render(settings({ trader: unset }));
+      expect(html).toMatch(/<option value="" disabled="" selected="">Choose your timezone…<\/option>/);
+      expect(html).not.toMatch(/<option value="UTC" selected=""/);
+      expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Start Preparation Schedule<\/button>/);
+      expect(text(html)).toContain("in your trading timezone.");
+    });
+
+    it("warns that saving establishes the trading timezone", () => {
+      const t = text(render(settings({ trader: unset })));
+      expect(t).toContain("You haven't set a trading timezone yet (UTC is used until you do).");
+      expect(t).toContain("Saving this schedule sets your trading timezone to the zone you choose, from your next local day.");
+    });
+
+    it("a trader with an existing UTC-fallback schedule still gets no UTC preselection", () => {
+      const html = render(settings({ trader: unset, current: { timezone: "UTC", targetMinutes: 480, weekdays: [1, 2, 3, 4, 5], effectiveFrom: "2026-10-05" } }));
+      expect(html).not.toMatch(/<option value="UTC" selected=""/);
+      expect(text(html)).toContain("You haven't set a trading timezone yet");
+    });
+
+    it("configured (or scheduled) traders are unchanged: their zone is selected and there is no 'not set' warning", () => {
+      for (const trader of [
+        { timezone: NY, configured: true, pendingTimezone: null },
+        { timezone: "UTC", configured: false, pendingTimezone: NY },
+      ]) {
+        const html = render(settings({ trader }));
+        expect(html).toMatch(/<option value="America\/New_York" selected=""/);
+        expect(html).not.toContain("prep-timezone-unset");
+        expect(html).not.toContain("Choose your timezone…");
+      }
+    });
+  });
 });

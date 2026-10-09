@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   breakNoticeText,
+  readinessFeedback,
   formatDuration,
   formatLocalTime,
   minutesUntil,
@@ -119,5 +120,48 @@ describe("streak wording", () => {
     const text = JSON.stringify(breakNoticeText(n, "2026-10-07")).toLowerCase();
     for (const word of ["fail", "undisciplined", "bad"]) expect(text).not.toContain(word);
     expect([streakDays(1), streakDays(14)]).toEqual(["1 scheduled trading day", "14 scheduled trading days"]);
+  });
+});
+
+describe("readiness feedback (Phase 3.1)", () => {
+  const missed = scored({ status: "MISSED", score: 0, completionPoints: 0, timingPoints: 0, requiredDone: 0, readyAt: null, deviationMinutes: null, bandLabel: null });
+  const incomplete = scored({ status: "INCOMPLETE", score: 35, completionPoints: 35, timingPoints: 0, requiredDone: 2, readyAt: null, deviationMinutes: null, bandLabel: null });
+
+  it("an actual readiness confirmation gets the quiet score feedback", () => {
+    expect(readinessFeedback(true, scored({}), false)).toEqual({ title: "Preparation 100/100", description: "On time · Routine complete" });
+    expect(readinessFeedback(true, scored({ status: "LATE", score: 88, timingPoints: 18, deviationMinutes: 32 }), true)).toEqual({
+      title: "Preparation 88/100",
+      description: "Routine complete · 32 min late · New Preparation Streak started.",
+    });
+  });
+
+  it("a refresh-driven PENDING → INCOMPLETE/MISSED finalization gets no feedback", () => {
+    // Not awaiting (no confirmation): a page refresh / cutoff refresh.
+    for (const today of [missed, incomplete, scored({})]) expect(readinessFeedback(false, today, false)).toBeNull();
+    // Even right after a confirmation, a missed/incomplete result is never success feedback.
+    expect(readinessFeedback(true, missed, false)).toBeNull();
+    expect(readinessFeedback(true, incomplete, false)).toBeNull();
+    expect(readinessFeedback(true, scored({ corrected: { status: "MISSED", score: 0 } }), false)).toBeNull();
+  });
+
+  it("no score yet or no schedule → nothing", () => {
+    expect(readinessFeedback(true, { kind: "PENDING", targetAt: "2026-10-05T12:00:00.000Z", cutoffAt: "2026-10-05T18:00:00.000Z", minutesToTarget: 5, requiredTotal: 4, requiredDone: 4 }, false)).toBeNull();
+    expect(readinessFeedback(true, undefined, false)).toBeNull();
+  });
+
+  it("repeated renders don't duplicate: the workspace consumes the flag once", () => {
+    // Mirrors today-v3-workspace: arm on confirmation, consume on the first refreshed read model.
+    let awaiting = true;
+    const shown: string[] = [];
+    const onReadModel = (today: Parameters<typeof readinessFeedback>[1]) => {
+      if (!awaiting) return;
+      awaiting = false;
+      const f = readinessFeedback(true, today, false);
+      if (f) shown.push(f.title);
+    };
+    onReadModel(scored({}));
+    onReadModel(scored({}));
+    onReadModel(missed); // a later cutoff/page refresh
+    expect(shown).toEqual(["Preparation 100/100"]);
   });
 });
