@@ -7,6 +7,8 @@ Status:
 - **Phase 3 (Today + Settings UX, timezone synchronization): built.**
 - Phases 4–5 are not built: history (Journal/Analytics) and the overall
   Discipline Score.
+- **Discipline Streaks (🔥 routine · 📝 review · 🎯 plan adherence,
+  achievements, activity calendar): built** — see `docs/DISCIPLINE_STREAKS.md`.
 
 The Preparation Score measures **process**: showing up and completing the
 pre-session routine on time. It never looks at PnL, wins, losses or trade

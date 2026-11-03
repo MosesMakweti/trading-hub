@@ -74,6 +74,7 @@ model User {
   preparationExceptions    PreparationDayException[]
   preparationRecords       PreparationDayRecord[]
   preparationCorrections   PreparationDayCorrection[]
+  disciplineAchievements   DisciplineAchievement[]
   positionFills            PositionFill[]
   psychologyResetSessions  PsychologyResetSession[]
 
@@ -677,6 +678,25 @@ model PreparationDayCorrection {
   @@index([userId])
 }
 
+/// Discipline Streaks — a discipline achievement the trader has earned
+/// (domain/discipline/streaks/achievements.ts). Inserted the first time the
+/// derived history shows the threshold met; `achievedOn` is the LOCAL date it
+/// was actually met. Never deleted or rewritten (DB trigger) — a historical
+/// achievement survives later edits to the records that earned it. The only
+/// mutable column is `seenAt`, set once when the celebration is dismissed.
+model DisciplineAchievement {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Stable catalogue key, e.g. "routine.streak7".
+  key        String
+  achievedOn DateTime  @db.Date
+  unlockedAt DateTime  @default(now())
+  seenAt     DateTime?
+
+  @@unique([userId, key])
+}
+
 /// The trader's canonical IANA timezone, versioned and append-only
 /// (domain/time/trader-calendar.ts). It decides which LOCAL date "today" is
 /// (Today, Journal, Dashboard, API defaults). A change governs only from the
@@ -984,6 +1004,12 @@ model Trade {
   // executionMinutes), and updatedAt is the last edit.
   closedAt                 DateTime?
   reviewedAt               DateTime?
+  // Discipline Streaks — the FIRST moment this trade's FINAL review was
+  // completed (completeReview, COALESCE; write-once DB trigger). reviewedAt
+  // above is re-stamped on every re-completion; this one dates the review
+  // credit, so re-saving a review can never move or duplicate it. Credit is
+  // only given while the derived review state is still FINAL_REVIEW_COMPLETE.
+  finalReviewCreditedAt    DateTime?
   // Trade Review overhaul (Stage 7) — the trader's own answer to "what's the
   // current state of this trade?", set at the start of Trade Review. Null =
   // not yet reviewed. Deliberately a SEPARATE axis from `status`

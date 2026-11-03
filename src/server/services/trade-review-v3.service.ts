@@ -394,6 +394,8 @@ export interface TradeReviewFacts {
   resolvedInitialStop: number | null;
   settledRealizedR: number | null;
   settledPnl: number | null;
+  /** When the position became fully closed (closedMomentFrom); null when unknown/open. */
+  closedMoment: Date | null;
 }
 
 export async function getTradeReviewFacts(userId: string, tradeIds: string[]): Promise<Record<string, TradeReviewFacts>> {
@@ -415,6 +417,9 @@ export async function getTradeReviewFacts(userId: string, tradeIds: string[]): P
       resolvedInitialStop: f.settlement.resolvedInitialStop,
       settledRealizedR: f.settlement.settledRealizedR,
       settledPnl: f.settlement.settledPnl,
+      closedMoment: f.closed
+        ? closedMomentFrom(trade.closedAt, trade.performanceRiskSnapshot?.settledAt ?? null, trade.actualPartialExits.map((p) => p.exitedAt))
+        : null,
     };
   }
   return out;
@@ -528,7 +533,13 @@ export async function completeReview(userId: string, tradeId: string, now = new 
   if (f.review.missing.length > 0) throw new ReviewIncompleteError(f.review.missing);
   const closedAt = trade.closedAt;
   const reviewedAt = closedAt && closedAt.getTime() > now.getTime() ? closedAt : now;
-  await prisma.trade.update({ where: { id: tradeId }, data: { reviewedAt } });
+  // Discipline Streaks: the FIRST final completion dates the review credit
+  // (write-once — the conditional updateMany is a no-op once it is set, so
+  // re-completing or a double submit can never move or duplicate it).
+  await prisma.$transaction([
+    prisma.trade.update({ where: { id: tradeId }, data: { reviewedAt } }),
+    prisma.trade.updateMany({ where: { id: tradeId, userId, finalReviewCreditedAt: null }, data: { finalReviewCreditedAt: reviewedAt } }),
+  ]);
   await syncLiveTradeLifecycle(userId, tradeId, now);
   return { mode: "FINAL" };
 }

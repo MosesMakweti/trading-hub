@@ -8,6 +8,9 @@ import { tradeExecutionEditableGuard } from "@/actions/day-guard";
 import { reviewFieldsSchema, reviewIntentSchema, reviewPsychologySchema } from "@/lib/validation/trade-review-v3";
 import * as review from "@/server/services/trade-review-v3.service";
 import type { V3ReviewDTO } from "@/server/services/trade-review-v3.service";
+import { reviewFeedback } from "@/server/services/discipline-streaks.service";
+import { isBacktestScope } from "@/server/workspace/scope";
+import type { DisciplineFeedbackDTO } from "@/types/discipline";
 
 type Failure = { success: false; error: string };
 type SimpleResult = { success: true } | Failure;
@@ -22,6 +25,7 @@ function revalidateReview(dateKey: string, tradeId: string) {
   revalidatePath(`/journal/${dateKey}/trades/${tradeId}`);
   revalidatePath("/dashboard");
   revalidatePath("/analytics");
+  revalidatePath("/discipline");
 }
 
 /** The normal execution/review guard, plus the V3 carve-out: a carried
@@ -102,7 +106,7 @@ export async function saveReviewPsychologyAction(
 export async function completeReviewAction(
   dateKey: string,
   tradeId: string,
-): Promise<{ success: true; mode: "FINAL" | "INTERIM" } | Failure> {
+): Promise<{ success: true; mode: "FINAL" | "INTERIM"; discipline: DisciplineFeedbackDTO | null } | Failure> {
   const user = await requireUser();
   return runInRecordScope(user.id, { trade: tradeId }, "write", async () => {
     const blocked = await reviewGuard(user.id, dateKey, tradeId);
@@ -110,7 +114,10 @@ export async function completeReviewAction(
     try {
       const r = await review.completeReview(user.id, tradeId);
       revalidateReview(dateKey, tradeId);
-      return { success: true as const, mode: r.mode };
+      // Discipline Streaks (LIVE only): where the review/adherence streaks
+      // stand now. Never fails the review itself (reviewFeedback never throws).
+      const discipline = r.mode === "FINAL" && !isBacktestScope() ? await reviewFeedback(user.id, tradeId) : null;
+      return { success: true as const, mode: r.mode, discipline };
     } catch (error) {
       return fail(error, "Could not complete the review.");
     }

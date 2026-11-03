@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { showDisciplineFeedback } from "@/components/discipline/discipline-feedback";
 import { Check, ChevronRight, Loader2, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -567,7 +568,8 @@ function CompleteBar({ data, dateKey, onChanged }: { data: V3ReviewDTO; dateKey:
         toast.error(r.error);
         return;
       }
-      toast.success(r.mode === "FINAL" ? "Review complete." : "Interim review saved — the final review opens once the position closes.");
+      if (r.mode === "FINAL") showDisciplineFeedback(r.discipline, "Review complete.");
+      else toast.success("Interim review saved — the final review opens once the position closes.");
       await onChanged();
     });
   }

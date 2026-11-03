@@ -10,6 +10,8 @@ import { dailyReflectionSchema, closeTradingDaySchema } from "@/lib/validation/c
 import * as closeDayService from "@/server/services/close-day.service";
 import type { DayCloseSummaryDTO } from "@/server/services/close-day.service";
 import * as closeDayV3Service from "@/server/services/close-day-v3.service";
+import { routineFeedback } from "@/server/services/discipline-streaks.service";
+import type { DisciplineFeedbackDTO } from "@/types/discipline";
 
 type SimpleResult = { success: true } | { success: false; error: string };
 
@@ -74,7 +76,10 @@ export async function closeTradingDayAction(day: WorkspaceDayRef, input: unknown
  * blocked by outstanding final reviews or open positions (the UI confirms
  * those first); never writes trade data. See close-day-v3.service.ts.
  */
-export async function closeTradingDayV3Action(day: WorkspaceDayRef, input: unknown): Promise<SimpleResult> {
+export async function closeTradingDayV3Action(
+  day: WorkspaceDayRef,
+  input: unknown,
+): Promise<{ success: true; discipline: DisciplineFeedbackDTO | null } | { success: false; error: string }> {
   const user = await requireUser();
   return runInDayScope(user.id, day, "write", async (dateKey) => {
     const parsed = closeTradingDaySchema.safeParse(input);
@@ -91,6 +96,9 @@ export async function closeTradingDayV3Action(day: WorkspaceDayRef, input: unkno
     revalidatePath(`/journal/${dateKey}`);
     revalidatePath("/dashboard");
     revalidatePath("/analytics");
-    return { success: true };
+    revalidatePath("/discipline");
+    // Discipline Streaks — closing the day completes the post-session half
+    // of the routine. Never fails the close (routineFeedback never throws).
+    return { success: true, discipline: await routineFeedback(user.id, dateKey) };
   });
 }
