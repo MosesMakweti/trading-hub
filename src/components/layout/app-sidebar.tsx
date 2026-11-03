@@ -11,6 +11,7 @@ import {
   PlaySquare,
   Settings,
   Sun,
+  Target,
   TrendingUp,
   Wallet,
 } from "lucide-react";
@@ -32,6 +33,7 @@ import {
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/today", label: "Today", icon: Sun },
+  { href: "/discipline", label: "Discipline", icon: Target },
   { href: "/journal", label: "Journal", icon: BookOpenText },
   { href: "/trades-album", label: "Trades Album", icon: PlaySquare },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },

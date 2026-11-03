@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { showDisciplineFeedback } from "@/components/discipline/discipline-feedback";
 import { AlertTriangle, ArrowRight, CircleCheck, FlagOff, Loader2, Lock } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -89,7 +90,7 @@ export function ClosePhase({
         return;
       }
       setConfirming(false);
-      toast.success("Day closed — it's in your Journal.");
+      showDisciplineFeedback(r.discipline, "Day closed — it's in your Journal.");
       router.refresh();
     });
   }
