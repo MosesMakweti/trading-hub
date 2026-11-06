@@ -1,3 +1,5 @@
+import { TRACK_META } from "@/components/discipline/discipline-feedback";
+import type { TrackKey } from "@/types/discipline";
 import { PLAN_ADHERENCE_RULES, STREAK_MILESTONES } from "@/domain/discipline/streaks";
 
 /** The streak rules, in plain language. Transparency is part of the design. */
@@ -14,7 +16,10 @@ export function StreakRules({ timezone }: { timezone: string }) {
       </p>
       <div className="mt-4 grid grid-cols-1 gap-4 text-sm md:grid-cols-3">
         <div>
-          <h3 className="font-medium">🔥 Daily routine</h3>
+          <h3 className="flex items-center gap-1.5 font-medium">
+            <TrackIcon track="routine" />
+            Daily routine
+          </h3>
           <ul className="mt-1.5 list-disc space-y-1 pl-4 text-muted-foreground">
             <li>A day counts when you complete every required pre-session item (“I am ready to trade”) that day, and close the day with a written reflection by the next day.</li>
             <li>Missing a scheduled trading day breaks the streak. Weekends, unscheduled days and days off booked in advance never do (Settings → Routine).</li>
@@ -22,7 +27,10 @@ export function StreakRules({ timezone }: { timezone: string }) {
           </ul>
         </div>
         <div>
-          <h3 className="font-medium">📝 Trade reviews</h3>
+          <h3 className="flex items-center gap-1.5 font-medium">
+            <TrackIcon track="review" />
+            Trade reviews
+          </h3>
           <ul className="mt-1.5 list-disc space-y-1 pl-4 text-muted-foreground">
             <li>A trade counts once its final review is complete: motive, the four process questions and “would I take it again”.</li>
             <li>Every review adds to your total; a day with any review adds one to the streak.</li>
@@ -30,7 +38,10 @@ export function StreakRules({ timezone }: { timezone: string }) {
           </ul>
         </div>
         <div>
-          <h3 className="font-medium">🎯 Plan adherence</h3>
+          <h3 className="flex items-center gap-1.5 font-medium">
+            <TrackIcon track="adherence" />
+            Plan adherence
+          </h3>
           <ul className="mt-1.5 list-disc space-y-1 pl-4 text-muted-foreground">
             {PLAN_ADHERENCE_RULES.map((r) => (
               <li key={r}>{r}</li>
@@ -45,4 +56,9 @@ export function StreakRules({ timezone }: { timezone: string }) {
       </p>
     </section>
   );
+}
+
+function TrackIcon({ track }: { track: TrackKey }) {
+  const Icon = TRACK_META[track].icon;
+  return <Icon aria-hidden className="size-4 shrink-0 text-primary" />;
 }

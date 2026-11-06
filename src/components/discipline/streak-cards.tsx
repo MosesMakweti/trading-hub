@@ -8,7 +8,7 @@ import { TRACK_META, plural } from "@/components/discipline/discipline-feedback"
 import type { DisciplineOverviewDTO, StreakTrackDTO, TrackKey } from "@/types/discipline";
 
 /**
- * The three current streaks — 🔥 routine · 📝 review · 🎯 plan adherence.
+ * The three current streaks — routine · review · plan adherence.
  * Motion is spent only on change: the number pops when a streak increases
  * (never on first paint) and a milestone badge settles in once. Everything
  * honours prefers-reduced-motion.
@@ -48,6 +48,7 @@ function todayLine(o: DisciplineOverviewDTO, key: TrackKey): TodayLine {
 
 function StreakCard({ track, todayLine: line, compact }: { track: StreakTrackDTO; todayLine: TodayLine; compact: boolean }) {
   const meta = TRACK_META[track.key];
+  const Icon = meta.icon;
   const reduce = useReducedMotion();
   const m = track.milestone;
   const active = track.current > 0;
@@ -66,9 +67,10 @@ function StreakCard({ track, todayLine: line, compact }: { track: StreakTrackDTO
       </div>
 
       <div className="mt-2 flex items-baseline gap-1.5">
-        <span aria-hidden className={cn("text-2xl leading-none", !active && "opacity-40 grayscale")}>
-          {meta.emoji}
-        </span>
+        <Icon
+          aria-hidden
+          className={cn("size-5 shrink-0 self-center", active ? "text-primary" : "text-muted-foreground opacity-50")}
+        />
         <AnimatePresence initial={false} mode="popLayout">
           <motion.span
             key={track.current}

@@ -1,4 +1,4 @@
-import { Award, Lock } from "lucide-react";
+import { Award, Lock, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { formatDateKeyShort } from "@/lib/date";
@@ -19,8 +19,8 @@ export function AchievementsGrid({ achievements }: { achievements: AchievementDT
       <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-3">
         {(["routine", "review", "adherence"] as TrackKey[]).map((track) => (
           <div key={track} className="space-y-2">
-            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <span aria-hidden className="mr-1">{TRACK_META[track].emoji}</span>
+            <h3 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <TrackIcon icon={TRACK_META[track].icon} />
               {TRACK_META[track].label}
             </h3>
             <ul className="space-y-2">
@@ -90,19 +90,19 @@ function AchievementRow({ a }: { a: AchievementDTO }) {
 export function LifetimeStats({ overview }: { overview: DisciplineOverviewDTO }) {
   const t = overview.tracks;
   const stats = [
-    { label: "Routine days completed", value: t.routine.total, emoji: "🔥" },
-    { label: "Trades reviewed", value: t.review.total, emoji: "📝" },
-    { label: "Perfectly followed trades", value: t.adherence.total, emoji: "🎯" },
-    { label: "Longest routine streak", value: t.routine.longest, emoji: "🔥", suffix: "days" },
-    { label: "Longest review streak", value: t.review.longest, emoji: "📝", suffix: "days" },
-    { label: "Longest adherence streak", value: t.adherence.longest, emoji: "🎯", suffix: "trading days" },
+    { label: "Routine days completed", value: t.routine.total, icon: TRACK_META.routine.icon },
+    { label: "Trades reviewed", value: t.review.total, icon: TRACK_META.review.icon },
+    { label: "Perfectly followed trades", value: t.adherence.total, icon: TRACK_META.adherence.icon },
+    { label: "Longest routine streak", value: t.routine.longest, icon: TRACK_META.routine.icon, suffix: "days" },
+    { label: "Longest review streak", value: t.review.longest, icon: TRACK_META.review.icon, suffix: "days" },
+    { label: "Longest adherence streak", value: t.adherence.longest, icon: TRACK_META.adherence.icon, suffix: "trading days" },
   ];
   return (
     <section aria-label="Lifetime" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
       {stats.map((s) => (
         <div key={s.label} className="rounded-xl border border-border bg-card p-3">
-          <div className="text-xs text-muted-foreground">
-            <span aria-hidden className="mr-1">{s.emoji}</span>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <TrackIcon icon={s.icon} />
             {s.label}
           </div>
           <div className="mt-1 text-2xl font-semibold tabular-nums">
@@ -113,4 +113,8 @@ export function LifetimeStats({ overview }: { overview: DisciplineOverviewDTO })
       ))}
     </section>
   );
+}
+
+function TrackIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return <Icon aria-hidden className="size-3.5 shrink-0" />;
 }
