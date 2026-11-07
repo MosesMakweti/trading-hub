@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import type { LucideIcon } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 import { formatDateKeyLong } from "@/lib/date";
 import { TRACK_META, plural } from "@/components/discipline/discipline-feedback";
@@ -17,11 +19,11 @@ import type { DisciplineCalendarDayDTO, StreakDayStatus, TrackKey } from "@/type
  */
 
 type Filter = "all" | TrackKey;
-const FILTERS: { key: Filter; label: string }[] = [
+const FILTERS: { key: Filter; label: string; icon?: LucideIcon }[] = [
   { key: "all", label: "All" },
-  { key: "routine", label: `${TRACK_META.routine.emoji} Routine` },
-  { key: "review", label: `${TRACK_META.review.emoji} Reviews` },
-  { key: "adherence", label: `${TRACK_META.adherence.emoji} Adherence` },
+  { key: "routine", label: "Routine", icon: TRACK_META.routine.icon },
+  { key: "review", label: "Reviews", icon: TRACK_META.review.icon },
+  { key: "adherence", label: "Adherence", icon: TRACK_META.adherence.icon },
 ];
 
 const STATUS_WORD: Record<StreakDayStatus, string> = { ACTIVE: "done", MISSED: "missed", REST: "rest day", PENDING: "pending" };
@@ -51,7 +53,7 @@ function describe(d: DisciplineCalendarDayDTO): string {
     d.tradesExecuted === 0
       ? "no trades"
       : `${d.perfectTrades}/${d.tradesExecuted} to plan${d.tradesAwaitingReview > 0 ? ` (${d.tradesAwaitingReview} awaiting review)` : ""}`;
-  return `${formatDateKeyLong(d.dateKey)} — 🔥 ${routine} · 📝 ${reviews} · 🎯 ${adherence}`;
+  return `${formatDateKeyLong(d.dateKey)} — Routine: ${routine} · Reviews: ${reviews} · Adherence: ${adherence}`;
 }
 
 function cellClass(d: DisciplineCalendarDayDTO, filter: Filter): { className: string; missed: boolean } {
@@ -125,10 +127,11 @@ export function ActivityCalendar({ days, todayKey }: { days: DisciplineCalendarD
               aria-checked={filter === f.key}
               onClick={() => setFilter(f.key)}
               className={cn(
-                "rounded-md px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 filter === f.key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
               )}
             >
+              {f.icon && <f.icon aria-hidden className="size-3.5" />}
               {f.label}
             </button>
           ))}

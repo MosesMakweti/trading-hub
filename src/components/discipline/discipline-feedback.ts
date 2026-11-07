@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { CalendarCheck, ClipboardCheck, Target, type LucideIcon } from "lucide-react";
 
 import type { DisciplineFeedbackDTO, TrackKey } from "@/types/discipline";
 
@@ -8,10 +9,10 @@ import type { DisciplineFeedbackDTO, TrackKey } from "@/types/discipline";
  * number comes from the server's feedback DTO.
  */
 
-export const TRACK_META: Record<TrackKey, { emoji: string; label: string; unit: string; totalLabel: string }> = {
-  routine: { emoji: "🔥", label: "Daily routine", unit: "day", totalLabel: "routine days" },
-  review: { emoji: "📝", label: "Trade reviews", unit: "day", totalLabel: "trades reviewed" },
-  adherence: { emoji: "🎯", label: "Plan adherence", unit: "trading day", totalLabel: "perfectly followed trades" },
+export const TRACK_META: Record<TrackKey, { icon: LucideIcon; label: string; unit: string; totalLabel: string }> = {
+  routine: { icon: CalendarCheck, label: "Daily routine", unit: "day", totalLabel: "routine days" },
+  review: { icon: ClipboardCheck, label: "Trade reviews", unit: "day", totalLabel: "trades reviewed" },
+  adherence: { icon: Target, label: "Plan adherence", unit: "trading day", totalLabel: "perfectly followed trades" },
 };
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -26,7 +27,7 @@ export function showDisciplineFeedback(fb: DisciplineFeedbackDTO | null, fallbac
     return;
   }
   const extras: string[] = [];
-  for (const a of fb.newAchievements) extras.push(`🏆 Achievement unlocked: ${a.title}`);
+  for (const a of fb.newAchievements) extras.push(`Achievement unlocked: ${a.title}`);
 
   if (fb.kind === "REVIEW" && fb.review) {
     if (!fb.review.counted) {
@@ -34,10 +35,10 @@ export function showDisciplineFeedback(fb: DisciplineFeedbackDTO | null, fallbac
       return;
     }
     const lines = [`Review streak ${plural(fb.review.streak, "day")}`];
-    if (fb.adherence?.perfect) lines.push(`🎯 Plan followed perfectly · ${fb.adherence.totalPerfect} total`);
+    if (fb.adherence?.perfect) lines.push(`Plan followed perfectly · ${fb.adherence.totalPerfect} total`);
     const milestone = fb.review.milestoneReached ?? fb.adherence?.milestoneReached ?? null;
     if (milestone) lines.push(`Milestone reached: ${milestone} days`);
-    toast.success(`📝 Review complete · ${plural(fb.review.totalReviewed, "trade")} reviewed`, {
+    toast.success(`Review complete · ${plural(fb.review.totalReviewed, "trade")} reviewed`, {
       description: [...lines, ...extras].join(" · "),
     });
     return;
@@ -46,8 +47,8 @@ export function showDisciplineFeedback(fb: DisciplineFeedbackDTO | null, fallbac
   if (fb.kind === "ROUTINE" && fb.routine) {
     if (fb.routine.complete) {
       const title = fb.routine.milestoneReached
-        ? `🔥 ${fb.routine.milestoneReached}-day routine streak — milestone reached`
-        : `🔥 Full routine complete · ${plural(fb.routine.streak, "day")} streak`;
+        ? `${fb.routine.milestoneReached}-day routine streak — milestone reached`
+        : `Full routine complete · ${plural(fb.routine.streak, "day")} streak`;
       toast.success(title, { description: [fallback, ...extras].join(" · ") });
       return;
     }
