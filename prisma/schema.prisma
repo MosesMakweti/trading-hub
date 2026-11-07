@@ -77,6 +77,8 @@ model User {
   disciplineAchievements   DisciplineAchievement[]
   positionFills            PositionFill[]
   psychologyResetSessions  PsychologyResetSession[]
+  goals                    Goal[]
+  goalDays                 GoalDay[]
 
   propFirmImportBatches          PropFirmImportBatch[]
   propFirmImportMappingTemplates PropFirmImportMappingTemplate[]
@@ -4395,4 +4397,140 @@ model PsychologyResetSession {
   completedAt   DateTime?
 
   @@index([userId, status, createdAt])
+}
+
+// ── Goals (consecutive trading-day commitments) ─────────────────────────────
+//
+// One OPEN (ACTIVE or PAUSED) goal per user, enforced by the partial unique
+// index below plus an advisory lock in goals.service. Daily progress is
+// derived from existing activity records (domain/goals) and persisted in
+// GoalDay once a date is final; a stored day never changes (DB trigger).
+
+enum GoalStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ABANDONED
+}
+
+enum GoalCategory {
+  ROUTINE
+  EXECUTION
+  RISK
+  JOURNAL
+  MINDSET
+  OTHER
+}
+
+enum GoalRequirementType {
+  PRE_SESSION_ROUTINE
+  CLOSE_AND_REFLECT
+  REVIEW_CLOSED_TRADES
+  FOLLOW_PLAN
+  RESPECT_RISK
+  JOURNAL_ENTRY
+  CUSTOM_CHECKIN
+}
+
+enum GoalDayStatus {
+  QUALIFIED
+  MISSED
+  REST
+  PAUSED
+}
+
+model Goal {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  category    GoalCategory
+  /// Consecutive qualifying trading days needed to complete the goal.
+  targetDays  Int
+  /// Trader-local first date the goal is evaluated.
+  startDate   DateTime     @db.Date
+  status      GoalStatus   @default(ACTIVE)
+  /// Trader-local date of the day that completed the goal.
+  completedOn DateTime?    @db.Date
+  completedAt DateTime?
+  abandonedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  requirements GoalRequirement[]
+  pauses       GoalPause[]
+  days         GoalDay[]
+  checkIns     GoalCheckIn[]
+
+  @@unique([userId], map: "Goal_open_userId_key", where: raw("\"status\" IN ('ACTIVE', 'PAUSED')"))
+  @@index([userId, status])
+}
+
+/// A daily requirement, versioned: an edit retires the old row from a date
+/// and adds a new one, so past days keep the rules they were judged by.
+model GoalRequirement {
+  id            String              @id @default(cuid())
+  goalId        String
+  goal          Goal                @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  type          GoalRequirementType
+  /// Custom check-ins only: what the trader commits to do.
+  label         String?
+  mandatory     Boolean             @default(true)
+  position      Int                 @default(0)
+  effectiveFrom DateTime            @db.Date
+  /// First date the requirement no longer applies (null = still applies).
+  retiredFrom   DateTime?           @db.Date
+  createdAt     DateTime            @default(now())
+
+  checkIns GoalCheckIn[]
+
+  @@index([goalId])
+}
+
+/// A pause, from `fromDate` up to but not including `toDate` (null = open).
+model GoalPause {
+  id        String    @id @default(cuid())
+  goalId    String
+  goal      Goal      @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  fromDate  DateTime  @db.Date
+  toDate    DateTime? @db.Date
+  createdAt DateTime  @default(now())
+
+  @@index([goalId])
+}
+
+/// A finalized goal day. Written once, never updated (DB trigger).
+model GoalDay {
+  id          String        @id @default(cuid())
+  goalId      String
+  goal        Goal          @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date        DateTime      @db.Date
+  status      GoalDayStatus
+  /// 1-based attempt the day belongs to (0 before the first qualifying day).
+  attempt     Int
+  /// Consecutive qualifying days in the current attempt after this day.
+  streakAfter Int
+  /// Per-requirement results, for the goal's day history.
+  results     Json
+  finalizedAt DateTime      @default(now())
+
+  @@unique([goalId, date])
+  @@index([userId, date])
+}
+
+/// A custom requirement ticked for a date (only today or yesterday).
+model GoalCheckIn {
+  id            String          @id @default(cuid())
+  goalId        String
+  goal          Goal            @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  requirementId String
+  requirement   GoalRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  date          DateTime        @db.Date
+  createdAt     DateTime        @default(now())
+
+  @@unique([requirementId, date])
+  @@index([goalId, date])
 }

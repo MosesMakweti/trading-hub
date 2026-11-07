@@ -67,9 +67,35 @@ const IMPULSIVE_INTENT_LABEL: Record<string, string> = {
   MANUAL_OVERRIDE: "Manually overrode the plan",
 };
 
+/**
+ * Violation keys that are about RISK rather than the plan itself. Goals use
+ * this to split plan adherence into "followed my plan" and "respected my
+ * risk"; the Discipline adherence track still treats every key as one set.
+ */
+export const RISK_VIOLATION_KEYS: ReadonlySet<string> = new Set(["limitOverride", "stopWidened", "riskManaged", "followedExitPlan"]);
+
+/**
+ * Every violation of a trade, split by evidence kind. `objective` is known as
+ * soon as the trade is recorded; `judged` is only meaningful once the final
+ * review is complete (before that it is empty).
+ */
+export function collectAdherenceViolations(f: PlanAdherenceFacts): { objective: AdherenceViolation[]; judged: AdherenceViolation[] } {
+  if (!f.executed) return { objective: [], judged: [] };
+  return { objective: objectiveViolations(f), judged: f.reviewComplete ? judgedViolations(f) : [] };
+}
+
 export function evaluatePlanAdherence(f: PlanAdherenceFacts): PlanAdherenceResult {
   if (!f.executed) return { status: "NOT_APPLICABLE", violations: [] };
 
+  const objective = objectiveViolations(f);
+  if (objective.length > 0) return { status: "VIOLATED", violations: objective };
+  if (!f.reviewComplete) return { status: "AWAITING_REVIEW", violations: [] };
+
+  const judged = judgedViolations(f);
+  return judged.length === 0 ? { status: "PERFECT", violations: [] } : { status: "VIOLATED", violations: judged };
+}
+
+function objectiveViolations(f: PlanAdherenceFacts): AdherenceViolation[] {
   const objective: AdherenceViolation[] = [];
   if (f.setupValid === false) objective.push({ key: "setupInvalid", label: "A mandatory setup condition was missing" });
   if (f.validationState === "OVERRIDDEN") objective.push({ key: "setupOverridden", label: "Setup validation was overridden" });
@@ -79,9 +105,10 @@ export function evaluatePlanAdherence(f: PlanAdherenceFacts): PlanAdherenceResul
   if (f.tradeIntent != null && IMPULSIVE_INTENT_LABEL[f.tradeIntent]) {
     objective.push({ key: "impulsiveIntent", label: IMPULSIVE_INTENT_LABEL[f.tradeIntent] });
   }
-  if (objective.length > 0) return { status: "VIOLATED", violations: objective };
-  if (!f.reviewComplete) return { status: "AWAITING_REVIEW", violations: [] };
+  return objective;
+}
 
+function judgedViolations(f: PlanAdherenceFacts): AdherenceViolation[] {
   const judged: AdherenceViolation[] = [];
   if (f.tradeIntent !== "PLANNED") judged.push({ key: "notPlanned", label: "Not a planned trade" });
   for (const q of ADHERENCE_QUESTIONS) {
@@ -89,8 +116,7 @@ export function evaluatePlanAdherence(f: PlanAdherenceFacts): PlanAdherenceResul
   }
   if (f.riskManaged === "no") judged.push({ key: "riskManaged", label: "Risk not managed per plan" });
   if (f.followedExitPlan === "no") judged.push({ key: "followedExitPlan", label: "Exit plan not followed" });
-
-  return judged.length === 0 ? { status: "PERFECT", violations: [] } : { status: "VIOLATED", violations: judged };
+  return judged;
 }
 
 /** The plain-language rule list shown to the trader (transparency). */
