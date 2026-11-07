@@ -13,6 +13,7 @@ import {
   STREAK_MILESTONES,
   TRACK_KEYS,
   buildDisciplineDays,
+  collectAdherenceViolations,
   deriveDailyStreak,
   evaluateAchievements,
   evaluatePlanAdherence,
@@ -25,6 +26,7 @@ import {
   traderDateKeyOf,
   type AchievementEvaluation,
   type AdherenceTradeFact,
+  type AdherenceViolation,
   type DailyStreak,
   type DayRequirement,
   type DisciplineDay,
@@ -60,6 +62,25 @@ const STREAK_THRESHOLDS = [...new Set([...STREAK_MILESTONES, ...ACHIEVEMENT_STRE
 const hasText = (s: string | null | undefined) => typeof s === "string" && s.trim().length > 0;
 const num = (v: { toNumber(): number } | null | undefined): number | null => (v == null ? null : v.toNumber());
 
+/**
+ * Everything the discipline rules know about one executed LIVE trade, for
+ * consumers that need more than the three tracks (Goals). Dates are
+ * trader-local keys.
+ */
+export interface DisciplineTradeFact {
+  tradeId: string;
+  tradeDateKey: string;
+  /** Local date the position fully closed; null while still open. */
+  closedDateKey: string | null;
+  /** Local date of the first completed final review; null = not complete. */
+  creditDateKey: string | null;
+  reviewComplete: boolean;
+  /** Known at once (see plan-adherence.ts). */
+  objective: AdherenceViolation[];
+  /** From the completed final review (empty until then). */
+  judged: AdherenceViolation[];
+}
+
 export interface DisciplineComputation {
   todayKey: string;
   timezone: string;
@@ -72,6 +93,12 @@ export interface DisciplineComputation {
   /** Per executed trade: its plan-adherence result. */
   adherence: Map<string, PlanAdherenceResult>;
   routineDays: Map<string, RoutineDayEvaluation>;
+  /** Per executed LIVE trade, in no particular order. */
+  trades: DisciplineTradeFact[];
+  /** Trading-day requirement of any date (past or future), from the Preparation Schedule. */
+  dayRequirement: (dateKey: string) => DayRequirement;
+  /** Dates skipped by a timezone change, within [first record, today]. */
+  skipped: Set<string>;
 }
 
 /** Loads every fact and derives the three tracks. Read-only. */
@@ -141,6 +168,7 @@ export async function computeDiscipline(userId: string, now: Date = new Date()):
     const adherenceFacts: AdherenceTradeFact[] = [];
     const reviewCredit = new Map<string, string | null>();
     const adherence = new Map<string, PlanAdherenceResult>();
+    const tradeFacts: DisciplineTradeFact[] = [];
     for (const t of trades) {
       const f = facts[t.id];
       if (!f || (f.cancelled && !f.hasActualEntry)) continue;
@@ -153,7 +181,7 @@ export async function computeDiscipline(userId: string, now: Date = new Date()):
       reviewCredit.set(t.id, creditDateKey);
 
       const psych = (t.psychology?.answers as Record<string, unknown> | undefined) ?? {};
-      const result = evaluatePlanAdherence({
+      const planFacts = {
         executed: f.hasActualEntry || t.actualRR != null,
         reviewComplete: complete,
         adherenceAnswers: (t.adherenceAnswers as Record<string, boolean> | null) ?? {},
@@ -165,8 +193,14 @@ export async function computeDiscipline(userId: string, now: Date = new Date()):
         stopWidened: stopWidened(t.direction, f.resolvedInitialStop, num(t.actualStopLoss)),
         riskManaged: typeof psych.riskManaged === "string" ? psych.riskManaged : null,
         followedExitPlan: typeof psych.followedExitPlan === "string" ? psych.followedExitPlan : null,
-      });
+      };
+      const result = evaluatePlanAdherence(planFacts);
       adherence.set(t.id, result);
+      if (planFacts.executed) {
+        const v = collectAdherenceViolations(planFacts);
+        const closedDateKey = reviews[reviews.length - 1].closedDateKey;
+        tradeFacts.push({ tradeId: t.id, tradeDateKey, closedDateKey, creditDateKey, reviewComplete: complete, objective: v.objective, judged: v.judged });
+      }
       if (tradeDateKey <= todayKey) adherenceFacts.push({ tradeId: t.id, tradeDateKey, status: result.status });
     }
 
@@ -191,11 +225,12 @@ export async function computeDiscipline(userId: string, now: Date = new Date()):
       return r;
     };
 
+    const skipped = skippedDateKeys(tz, from, todayKey);
     const days = buildDisciplineDays({
       from,
       todayKey,
       requirement,
-      skipped: skippedDateKeys(tz, from, todayKey),
+      skipped,
       routineDays,
       reviews,
       adherence: adherenceFacts,
@@ -231,6 +266,9 @@ export async function computeDiscipline(userId: string, now: Date = new Date()):
       reviewCredit,
       adherence,
       routineDays,
+      trades: tradeFacts,
+      dayRequirement: requirement,
+      skipped,
     };
   });
 }
