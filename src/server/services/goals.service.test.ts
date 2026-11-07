@@ -11,6 +11,7 @@ import {
   abandonGoal,
   createGoal,
   getGoalsOverview,
+  getProgressSummary,
   pauseGoal,
   processGoalProgress,
   resumeGoal,
@@ -307,5 +308,31 @@ describe("custom check-ins", () => {
     await setGoalCheckIn(u.id, { goalId: id, requirementId: req.id, dateKey: "2026-03-04", checked: true }, at("2026-03-04", "09:00:00"));
     await setGoalCheckIn(u.id, { goalId: id, requirementId: req.id, dateKey: "2026-03-04", checked: false }, at("2026-03-04", "10:00:00"));
     expect(await prisma.goalCheckIn.count({ where: { goalId: id } })).toBe(2);
+  });
+});
+
+describe("progress summary (Dashboard)", () => {
+  it("one call brings goals and achievements up to date, with next milestone and this week's consistency", async () => {
+    const u = await user("summary");
+    await createGoal(u.id, routineGoal({ targetDays: 10 }), at(MON, "06:00:00"));
+    const days = tradingDays(MON, 8).filter((d) => d !== "2026-03-04"); // Wed missed
+    for (const d of days) await readyDay(u.id, d);
+    const { goals, achievements } = await getProgressSummary(u.id, at("2026-03-12", "18:00:00"));
+    // Thu 5, Fri 6, Mon 9, Tue 10, Wed 11 qualified; today (Thu 12) is still open → current 5.
+    expect(goals.active).toMatchObject({ currentStreak: 5, nextMilestone: { days: 7, title: "One Week Strong" } });
+    // Last 7 calendar days (Fri 6 – Thu 12): 4 decided trading days, all qualified; today isn't decided yet.
+    expect(goals.active?.thisWeek).toEqual({ qualified: 4, owed: 4 });
+    expect(achievements.achievements.find((a) => a.key === "goal.streak3")?.unlocked).toBe(true);
+    expect(achievements.unlocked).toBeGreaterThan(0);
+  });
+
+  it("the next milestone never goes past the goal's own target", async () => {
+    const u = await user("summary-cap");
+    await createGoal(u.id, routineGoal({ targetDays: 5 }), at(MON, "06:00:00"));
+    await readyDay(u.id, MON);
+    const { goals } = await getProgressSummary(u.id, at("2026-03-03", "06:00:00"));
+    expect(goals.active?.nextMilestone).toEqual({ days: 3, title: "Building Momentum" });
+    const later = await getProgressSummary(u.id, at("2026-03-03", "06:00:00"));
+    expect(later.goals.active?.currentStreak).toBe(1);
   });
 });

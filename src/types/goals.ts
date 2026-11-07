@@ -58,6 +58,10 @@ export interface ActiveGoalDTO {
   today: GoalDayDTO | null;
   /** Oldest first, from the start date to today. */
   days: GoalDayDTO[];
+  /** The next streak length worth celebrating (a named milestone, or the goal itself). */
+  nextMilestone: { days: number; title: string } | null;
+  /** Decided trading days in the last 7 calendar days. */
+  thisWeek: { qualified: number; owed: number };
   pause: { pausedSince: string | null; daysUsed: number; daysLeft: number; limit: number };
 }
 

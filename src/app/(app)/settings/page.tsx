@@ -4,6 +4,8 @@ import { ChevronRight, Database, ListChecks, Plug, Trash2, type LucideIcon } fro
 import { FadeIn } from "@/components/shared/motion";
 import { TraderTimezoneCard } from "@/components/settings/trader-timezone-card";
 import { PsychologyResetCard } from "@/components/settings/psychology-reset-card";
+import { CelebrationsCard } from "@/components/settings/celebrations-card";
+import { getCelebrationPreferences } from "@/server/services/achievements.service";
 import { getPsychologyResetPreference } from "@/server/services/psychology-reset.service";
 import { requireUser } from "@/server/guards";
 import { getTraderTimezoneState } from "@/server/services/trader-time.service";
@@ -38,7 +40,11 @@ const AREAS: { href: string; icon: LucideIcon; title: string; description: strin
 
 export default async function PreferencesPage() {
   const user = await requireUser();
-  const [timezone, psychologyReset] = await Promise.all([getTraderTimezoneState(user.id), getPsychologyResetPreference(user.id)]);
+  const [timezone, psychologyReset, celebrations] = await Promise.all([
+    getTraderTimezoneState(user.id),
+    getPsychologyResetPreference(user.id),
+    getCelebrationPreferences(user.id),
+  ]);
   return (
     <FadeIn className="mx-auto max-w-2xl space-y-6">
       <div>
@@ -51,6 +57,8 @@ export default async function PreferencesPage() {
       <TraderTimezoneCard initial={timezone} />
 
       <PsychologyResetCard initialEnabled={psychologyReset.enabled} />
+
+      <CelebrationsCard initial={celebrations} />
 
       <div className="glass divide-y divide-border overflow-hidden rounded-2xl">
         {AREAS.map((area) => (

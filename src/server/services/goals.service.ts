@@ -3,8 +3,9 @@ import { Prisma } from "@prisma/client";
 import { prisma, type TransactionClient } from "@/server/db";
 import { runLive } from "@/server/workspace/scope";
 import { computeDiscipline, type DisciplineComputation } from "@/server/services/discipline-streaks.service";
-import { syncAllAchievements, type AchievementSync } from "@/server/services/achievements.service";
-import { GOAL_MILESTONES, streakAchievementKey } from "@/domain/achievements";
+import { achievementsOverview, syncAllAchievements, type AchievementSync } from "@/server/services/achievements.service";
+import type { AchievementsOverviewDTO } from "@/types/achievements";
+import { GOAL_MILESTONES, STREAK_ACHIEVEMENTS, streakAchievementKey } from "@/domain/achievements";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { addDaysToDateKey, traderTodayKey, type TimezoneVersion } from "@/domain/time/trader-calendar";
 import { getTimezoneVersions } from "@/server/services/trader-time.service";
@@ -273,6 +274,21 @@ function dayDTO(d: GoalProgress["days"][number]): GoalDayDTO {
   };
 }
 
+/** The next streak length worth celebrating, capped at the goal's own target. */
+function nextMilestone(current: number, target: number): { days: number; title: string } | null {
+  const candidates = [...STREAK_ACHIEVEMENTS.map((s) => ({ days: s.days, title: s.title })), { days: target, title: "Goal complete" }]
+    .filter((m) => m.days > current && m.days <= target)
+    .sort((a, b) => a.days - b.days);
+  return candidates[0] ?? null;
+}
+
+/** Decided trading days of the last 7 calendar days (today included once decided). */
+function weekConsistency(days: GoalProgress["days"], todayKey: string): { qualified: number; owed: number } {
+  const from = addDaysToDateKey(todayKey, -6);
+  const recent = days.filter((d) => d.dateKey >= from && (d.status === "QUALIFIED" || d.status === "MISSED"));
+  return { qualified: recent.filter((d) => d.status === "QUALIFIED").length, owed: recent.length };
+}
+
 function activeDTO(p: ProcessedGoal): ActiveGoalDTO {
   const { goal, progress, todayKey, ctx } = p;
   const def = toDefinition(goal);
@@ -315,6 +331,8 @@ function activeDTO(p: ProcessedGoal): ActiveGoalDTO {
     started,
     today: progress.today ? dayDTO({ ...progress.today, attempt: progress.attempt, streakAfter: progress.currentStreak }) : null,
     days: progress.days.map(dayDTO),
+    nextMilestone: nextMilestone(progress.currentStreak, goal.targetDays),
+    thisWeek: weekConsistency(progress.days, todayKey),
     pause: {
       pausedSince: openPause?.fromDate ?? null,
       daysUsed: Math.min(used, GOAL_PAUSE_LIMIT_DAYS),
@@ -362,6 +380,19 @@ export async function syncProgress(userId: string, now: Date = new Date()): Prom
 
 export async function getGoalsOverview(userId: string, now: Date = new Date()): Promise<GoalsOverviewDTO> {
   const { processed } = await syncProgress(userId, now);
+  return goalsOverviewFrom(userId, processed, now);
+}
+
+/**
+ * Everything the Dashboard and the Goals / Achievements pages show, brought
+ * up to date ONCE per request (goal days finalized, achievements persisted).
+ */
+export async function getProgressSummary(userId: string, now: Date = new Date()): Promise<{ goals: GoalsOverviewDTO; achievements: AchievementsOverviewDTO }> {
+  const { processed, achievements } = await syncProgress(userId, now);
+  return { goals: await goalsOverviewFrom(userId, processed, now), achievements: achievementsOverview(achievements) };
+}
+
+async function goalsOverviewFrom(userId: string, processed: ProcessedGoal | null, now: Date): Promise<GoalsOverviewDTO> {
   const [closed, stored, tz] = await Promise.all([
     prisma.goal.findMany({
       where: { userId, status: { in: ["COMPLETED", "ABANDONED"] } },

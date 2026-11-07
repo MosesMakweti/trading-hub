@@ -170,7 +170,7 @@ describe("celebrations", () => {
     const pending = await getPendingCelebrations(u.id);
     expect(pending.length).toBeGreaterThan(3);
     expect(pending.map((c) => c.level)).toEqual([...pending.map((c) => c.level)].sort((a, b) => b - a));
-    expect(pending.find((c) => c.kind === "GOAL_COMPLETED")).toMatchObject({ title: "Goal complete", goalName: "Prepare every session", days: 7 });
+    expect(pending.find((c) => c.kind === "GOAL_COMPLETED")).toMatchObject({ title: "Prepare every session", goalName: "Prepare every session", days: 7 });
     expect(pending.find((c) => c.achievementKey === "goal.streak7")).toMatchObject({ title: "One Week Strong", level: 2 });
 
     // Navigation and refresh don't consume them…
