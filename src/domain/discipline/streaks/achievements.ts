@@ -24,9 +24,13 @@ export interface AchievementDefinition {
   target: number;
 }
 
-/** Order = display order. Keys are persisted: never rename one. */
+/**
+ * Order = display order. Keys are persisted: never rename one. Titles may
+ * change (they are display only); they must stay distinct from the Goals
+ * milestone names in domain/achievements/catalogue.ts.
+ */
 export const ACHIEVEMENTS: readonly AchievementDefinition[] = [
-  { key: "routine.first", track: "routine", title: "First Steps", description: "Complete your first full routine day.", metric: "TOTAL", target: 1 },
+  { key: "routine.first", track: "routine", title: "Routine Ready", description: "Complete your first full routine day.", metric: "TOTAL", target: 1 },
   { key: "routine.streak7", track: "routine", title: "Consistent", description: "Complete 7 consecutive routine days.", metric: "STREAK", target: 7 },
   { key: "routine.streak30", track: "routine", title: "Disciplined", description: "Complete 30 consecutive routine days.", metric: "STREAK", target: 30 },
   { key: "routine.streak90", track: "routine", title: "Unstoppable", description: "Complete 90 consecutive routine days.", metric: "STREAK", target: 90 },
@@ -36,8 +40,8 @@ export const ACHIEVEMENTS: readonly AchievementDefinition[] = [
   { key: "review.total500", track: "review", title: "Master Reviewer", description: "Review 500 trades.", metric: "TOTAL", target: 500 },
   { key: "adherence.first", track: "adherence", title: "Rule Follower", description: "Record your first perfectly followed trade.", metric: "TOTAL", target: 1 },
   { key: "adherence.total10", track: "adherence", title: "Precision", description: "Record 10 perfectly followed trades.", metric: "TOTAL", target: 10 },
-  { key: "adherence.total30", track: "adherence", title: "Consistency", description: "Record 30 perfectly followed trades.", metric: "TOTAL", target: 30 },
-  { key: "adherence.total100", track: "adherence", title: "Discipline Master", description: "Record 100 perfectly followed trades.", metric: "TOTAL", target: 100 },
+  { key: "adherence.total30", track: "adherence", title: "Steady Hands", description: "Record 30 perfectly followed trades.", metric: "TOTAL", target: 30 },
+  { key: "adherence.total100", track: "adherence", title: "Rule Master", description: "Record 100 perfectly followed trades.", metric: "TOTAL", target: 100 },
 ];
 
 export interface TrackAchievementInput {

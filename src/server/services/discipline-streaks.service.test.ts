@@ -117,7 +117,7 @@ describe("🔥 routine streak", () => {
     expect(o.tracks.routine).toMatchObject({ current: 1, longest: 2, total: 3, todayStatus: "PENDING", creditedToday: false });
     expect(o.tracks.routine.lastBreak).toEqual({ dateKey: "2026-03-04", endedLength: 2 });
     expect(o.today).toMatchObject({ requirement: "REQUIRED", routinePreSession: true, routinePostSession: false });
-    // "First Steps" unlocked, dated by the first full day.
+    // "Routine Ready" (routine.first) unlocked, dated by the first full day.
     const first = o.achievements.find((a) => a.key === "routine.first")!;
     expect(first).toMatchObject({ unlocked: true, achievedOn: "2026-03-02", isNew: true });
   });
