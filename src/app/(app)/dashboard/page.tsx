@@ -3,7 +3,7 @@ import { Sparkles, Trophy } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
 import { getDashboardData } from "@/server/services/dashboard.service";
-import { getDisciplineOverview } from "@/server/services/discipline-streaks.service";
+import { getProgressSummary } from "@/server/services/goals.service";
 import { formatDateKeyLong } from "@/lib/date";
 import { presetToRangeForKey, type DateRangePreset } from "@/lib/date-ranges";
 import { getTraderTodayKey } from "@/server/services/trader-time.service";
@@ -21,7 +21,7 @@ import { DailyNoteEditor } from "@/components/journal/daily-note-editor";
 import { LIVE_WORKSPACE, WorkspaceProvider } from "@/components/workspace/workspace-context";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FadeIn } from "@/components/shared/motion";
-import { DisciplineOverview } from "@/components/discipline/discipline-overview";
+import { ProgressRow } from "@/components/dashboard/progress-row";
 
 const VALID_PRESETS: Exclude<DateRangePreset, "custom">[] = ["week", "month", "3months", "year"];
 
@@ -41,11 +41,11 @@ export default async function DashboardPage({
   const { from, to } = presetToRangeForKey(preset, await getTraderTodayKey(user.id));
   const accountId = params.account || undefined;
 
-  const [data, discipline] = await Promise.all([
+  const [data, progress] = await Promise.all([
     getDashboardData(user.id, { from, to, accountId }),
-    // The discipline summary must never take the Dashboard down with it.
-    getDisciplineOverview(user.id).catch((e) => {
-      console.error("[dashboard] discipline overview failed", e);
+    // Goals & achievements must never take the Dashboard down with them.
+    getProgressSummary(user.id).catch((e) => {
+      console.error("[dashboard] progress summary failed", e);
       return null;
     }),
   ]);
@@ -81,8 +81,8 @@ export default async function DashboardPage({
           unreviewedTrades={unreviewedTrades}
         />
 
-        {/* Process before profits: the discipline record sits above the P&L row. */}
-        {discipline && <DisciplineOverview overview={discipline} />}
+        {/* Process before profits: the goal and achievements sit above the P&L row. */}
+        {progress && <ProgressRow goals={progress.goals} achievements={progress.achievements} />}
 
         <KpiRow analytics={data.analytics} previousAnalytics={data.previousAnalytics} />
 
