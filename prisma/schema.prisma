@@ -32,6 +32,11 @@ model User {
   /// can trigger a reset, so re-enabling never replays older events.
   psychologyResetEnabledAt DateTime?
 
+  /// Celebrations (Goals & Achievements): animations on by default; sound
+  /// off by default and only ever played after the trader interacts.
+  celebrationAnimations Boolean @default(true)
+  celebrationSound      Boolean @default(false)
+
   accounts Account[]
   sessions Session[]
 
@@ -79,6 +84,7 @@ model User {
   psychologyResetSessions  PsychologyResetSession[]
   goals                    Goal[]
   goalDays                 GoalDay[]
+  progressEvents           ProgressEvent[]
 
   propFirmImportBatches          PropFirmImportBatch[]
   propFirmImportMappingTemplates PropFirmImportMappingTemplate[]
@@ -4462,6 +4468,7 @@ model Goal {
   pauses       GoalPause[]
   days         GoalDay[]
   checkIns     GoalCheckIn[]
+  events       ProgressEvent[]
 
   @@unique([userId], map: "Goal_open_userId_key", where: raw("\"status\" IN ('ACTIVE', 'PAUSED')"))
   @@index([userId, status])
@@ -4533,4 +4540,42 @@ model GoalCheckIn {
 
   @@unique([requirementId, date])
   @@index([goalId, date])
+}
+
+// ── Progress events (the celebration queue) ─────────────────────────────────
+//
+// One row per thing worth celebrating: an achievement unlock, a goal
+// milestone, a goal completion. Created in the same transaction as the fact
+// that caused it, each at most once (partial unique indexes), and shown until
+// the trader dismisses it (`seenAt`, written once — DB trigger). Level, title
+// and description come from the code catalogue (domain/achievements).
+
+enum ProgressEventKind {
+  ACHIEVEMENT
+  MILESTONE
+  GOAL_COMPLETED
+}
+
+model ProgressEvent {
+  id             String            @id @default(cuid())
+  userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind           ProgressEventKind
+  /// ACHIEVEMENT: the catalogue key.
+  achievementKey String?
+  /// MILESTONE / GOAL_COMPLETED: the goal.
+  goalId         String?
+  goal           Goal?             @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  /// MILESTONE: the streak length reached.
+  days           Int?
+  /// Trader-local date the event happened.
+  occurredOn     DateTime          @db.Date
+  createdAt      DateTime          @default(now())
+  seenAt         DateTime?
+
+  @@unique([userId, achievementKey], map: "ProgressEvent_achievement_key", where: raw("\"kind\" = 'ACHIEVEMENT'"))
+  @@unique([goalId, days], map: "ProgressEvent_milestone_key", where: raw("\"kind\" = 'MILESTONE'"))
+  @@unique([goalId], map: "ProgressEvent_goal_completed_key", where: raw("\"kind\" = 'GOAL_COMPLETED'"))
+  @@index([userId, seenAt])
+  @@index([userId, occurredOn])
 }

@@ -2,7 +2,9 @@ import { Prisma } from "@prisma/client";
 
 import { prisma, type TransactionClient } from "@/server/db";
 import { runLive } from "@/server/workspace/scope";
-import { computeDiscipline } from "@/server/services/discipline-streaks.service";
+import { computeDiscipline, type DisciplineComputation } from "@/server/services/discipline-streaks.service";
+import { syncAllAchievements, type AchievementSync } from "@/server/services/achievements.service";
+import { GOAL_MILESTONES, streakAchievementKey } from "@/domain/achievements";
 import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import { addDaysToDateKey, traderTodayKey, type TimezoneVersion } from "@/domain/time/trader-calendar";
 import { getTimezoneVersions } from "@/server/services/trader-time.service";
@@ -84,6 +86,8 @@ interface LoadedFacts {
   facts: Omit<GoalActivityFacts, "checkIns">;
   ctx: GoalDayContext;
   todayKey: string;
+  /** Reused by the achievement engine so the history is computed once per request. */
+  discipline: DisciplineComputation;
 }
 
 /** Everything the requirement evaluators read, from the existing records. */
@@ -97,6 +101,7 @@ async function loadActivity(userId: string, now: Date): Promise<LoadedFacts> {
   for (const [k, r] of c.routineDays) routine.set(k, { preSession: r.preSession, postSession: r.postSession });
   return {
     todayKey: c.todayKey,
+    discipline: c,
     facts: { todayKey: c.todayKey, routine, trades: c.trades, journalDates },
     ctx: { requirement: c.dayRequirement, skipped: c.skipped },
   };
@@ -155,6 +160,7 @@ interface ProcessedGoal {
   progress: GoalProgress;
   todayKey: string;
   ctx: GoalDayContext;
+  discipline: DisciplineComputation;
 }
 
 /**
@@ -214,9 +220,36 @@ export async function processGoalProgress(userId: string, now: Date = new Date()
         where: { id: goal.id },
         data: { status: "COMPLETED", completedOn: dateKeyToUtcDate(progress.completedOn), completedAt: now },
       });
+      await tx.progressEvent.createMany({
+        data: [{ userId, kind: "GOAL_COMPLETED", goalId: goal.id, occurredOn: dateKeyToUtcDate(progress.completedOn), createdAt: now }],
+        skipDuplicates: true,
+      });
+    }
+
+    // Goal milestones. The FIRST time a length is ever reached, the personal
+    // achievement (goal.streakN) is the celebration, so the milestone is only
+    // queued once that achievement is already held: a repeat on a later goal
+    // or attempt. Never both for the same moment.
+    const reached = progress.toFinalize.filter((d) => d.status === "QUALIFIED" && GOAL_MILESTONES.includes(d.streakAfter));
+    if (reached.length > 0) {
+      const held = new Set(
+        (
+          await tx.disciplineAchievement.findMany({
+            where: { userId, key: { in: reached.map((d) => streakAchievementKey(d.streakAfter)) } },
+            select: { key: true },
+          })
+        ).map((a) => a.key),
+      );
+      const repeats = reached.filter((d) => held.has(streakAchievementKey(d.streakAfter)));
+      if (repeats.length > 0) {
+        await tx.progressEvent.createMany({
+          data: repeats.map((d) => ({ userId, kind: "MILESTONE" as const, goalId: goal.id, days: d.streakAfter, occurredOn: dateKeyToUtcDate(d.dateKey), createdAt: now })),
+          skipDuplicates: true,
+        });
+      }
     }
     const fresh = (await tx.goal.findFirst({ where: { id: goal.id }, include: goalInclude }))!;
-    return { goal: fresh, progress, todayKey, ctx: loaded.ctx };
+    return { goal: fresh, progress, todayKey, ctx: loaded.ctx, discipline: loaded.discipline };
   });
 }
 
@@ -316,8 +349,19 @@ function historyDTO(g: Prisma.GoalGetPayload<{ include: { days: true } }>, tz: r
 }
 
 /** The trader's goals: the open one (processed first), history and personal totals. */
-export async function getGoalsOverview(userId: string, now: Date = new Date()): Promise<GoalsOverviewDTO> {
+/**
+ * Brings everything up to date for a read: finalizes goal days (with their
+ * milestone / completion events), then evaluates and persists achievements,
+ * reusing the same history computation. Idempotent.
+ */
+export async function syncProgress(userId: string, now: Date = new Date()): Promise<{ processed: ProcessedGoal | null; achievements: AchievementSync }> {
   const processed = await processGoalProgress(userId, now);
+  const achievements = await syncAllAchievements(userId, processed?.discipline, now);
+  return { processed, achievements };
+}
+
+export async function getGoalsOverview(userId: string, now: Date = new Date()): Promise<GoalsOverviewDTO> {
+  const { processed } = await syncProgress(userId, now);
   const [closed, stored, tz] = await Promise.all([
     prisma.goal.findMany({
       where: { userId, status: { in: ["COMPLETED", "ABANDONED"] } },

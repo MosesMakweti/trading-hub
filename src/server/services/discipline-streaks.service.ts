@@ -1,9 +1,10 @@
 import { prisma } from "@/server/db";
+import { markCelebrationsSeen, persistUnlocks, type StoredAchievement } from "@/server/services/achievement-store";
 import { runLive } from "@/server/workspace/scope";
 import { getTimezoneVersions } from "@/server/services/trader-time.service";
 import { getScheduleVersions } from "@/server/services/preparation.service";
 import { getTradeReviewFacts } from "@/server/services/trade-review-v3.service";
-import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
+import { utcDateToKey } from "@/lib/date";
 import { effectiveTimezoneAt, traderTodayKey, type TimezoneVersion } from "@/domain/time/trader-calendar";
 import { deriveBiasAlignment } from "@/domain/psychology/review-adapter";
 import { stopWidened } from "@/domain/trades/review-evidence";
@@ -275,53 +276,26 @@ export async function computeDiscipline(userId: string, now: Date = new Date()):
 
 // ── Achievements (persisted, append-only) ───────────────────────────────────
 
-export interface StoredAchievement {
-  key: string;
-  achievedOn: Date;
-  unlockedAt: Date;
-  seenAt: Date | null;
-}
+export type { StoredAchievement } from "@/server/services/achievement-store";
 
 /**
  * Persists every achievement the derived history shows as met and that is
- * not stored yet. Per-user advisory lock + the (userId, key) unique
- * constraint + skipDuplicates: concurrent loads unlock each achievement
- * exactly once. Existing rows are never touched (DB trigger), so an
- * achievement stays earned even if the records behind it change later.
+ * not stored yet, with its celebration event (achievement-store.ts). Existing
+ * rows are never touched (DB trigger), so an achievement stays earned even if
+ * the records behind it change later.
  */
 export async function syncAchievements(
   userId: string,
   evaluations: readonly AchievementEvaluation[],
   now: Date = new Date(),
 ): Promise<{ all: StoredAchievement[]; inserted: string[] }> {
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`discipline-achievements:${userId}`}, 0))`;
-    const existing = await tx.disciplineAchievement.findMany({
-      where: { userId },
-      select: { key: true, achievedOn: true, unlockedAt: true, seenAt: true },
-    });
-    const have = new Set(existing.map((e) => e.key));
-    const fresh = evaluations.filter((e) => e.achieved && e.achievedOn != null && !have.has(e.key));
-    if (fresh.length === 0) return { all: existing, inserted: [] };
-    await tx.disciplineAchievement.createMany({
-      data: fresh.map((e) => ({ userId, key: e.key, achievedOn: dateKeyToUtcDate(e.achievedOn!), unlockedAt: now })),
-      skipDuplicates: true,
-    });
-    const all = await tx.disciplineAchievement.findMany({
-      where: { userId },
-      select: { key: true, achievedOn: true, unlockedAt: true, seenAt: true },
-    });
-    return { all, inserted: fresh.map((e) => e.key) };
-  });
+  const unlocks = evaluations.filter((e) => e.achieved && e.achievedOn != null).map((e) => ({ key: e.key, achievedOn: e.achievedOn! }));
+  return persistUnlocks(userId, unlocks, now);
 }
 
 /** Dismisses the celebration of the given (or all) unseen achievements. Own rows only. */
 export async function acknowledgeAchievements(userId: string, keys: string[] | null, now: Date = new Date()): Promise<number> {
-  const { count } = await prisma.disciplineAchievement.updateMany({
-    where: { userId, seenAt: null, ...(keys ? { key: { in: keys } } : {}) },
-    data: { seenAt: now },
-  });
-  return count;
+  return markCelebrationsSeen(userId, keys ? { achievementKeys: keys } : "ALL", now);
 }
 
 // ── Read model ──────────────────────────────────────────────────────────────
