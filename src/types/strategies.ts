@@ -1,3 +1,4 @@
+import type { ScenarioContext, ScenarioExecutionPlan } from "@/domain/strategies/scenario-playbook";
 import type { TagColor } from "@prisma/client";
 
 import type { StrategyStatusValue } from "@/lib/validation/strategies";
@@ -165,11 +166,21 @@ export interface StrategySetupConditionDTO {
   effectiveWeight: number | null;
   effectiveMandatory: boolean;
   sortOrder: number;
+  /** Visual Playbook — what to look for, for this condition in this scenario. */
+  note: string | null;
 }
 
 export interface StrategySetupScenarioDTO {
   id: string;
-  direction: "BULLISH" | "BEARISH";
+  name: string;
+  direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+  scenarioType: "CONTINUATION" | "REVERSAL" | "BREAKOUT" | "CUSTOM" | null;
+  customType: string | null;
+  instruments: string[];
+  timeframes: string[];
+  context: ScenarioContext;
+  executionPlan: ScenarioExecutionPlan;
+  sortOrder: number;
   description: string | null;
   conditions: StrategySetupConditionDTO[];
 }
@@ -179,8 +190,8 @@ export interface StrategySetupTypeDTO {
   name: string;
   description: string | null;
   sortOrder: number;
-  /** Always exactly 2 — Bullish and Bearish, one of which may have zero
-   *  conditions if the trader intentionally doesn't trade that side. */
+  /** Live scenarios in display order. A new Setup Type starts with a Bullish
+   *  and a Bearish one; the trader may add more (any direction) or remove them. */
   scenarios: StrategySetupScenarioDTO[];
 }
 
@@ -225,7 +236,13 @@ export interface StrategyVersionSetupConditionSnapshot {
   sortOrder: number;
 }
 export interface StrategyVersionSetupScenarioSnapshot {
-  direction: "BULLISH" | "BEARISH";
+  direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+  /** Optional — snapshots published before named scenarios don't have them. */
+  name?: string;
+  scenarioType?: "CONTINUATION" | "REVERSAL" | "BREAKOUT" | "CUSTOM" | null;
+  sortOrder?: number;
+  context?: ScenarioContext;
+  executionPlan?: ScenarioExecutionPlan;
   description: string | null;
   conditions: StrategyVersionSetupConditionSnapshot[];
 }

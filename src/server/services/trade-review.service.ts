@@ -90,7 +90,7 @@ export interface ValidationShieldConditionReviewDTO {
 
 export interface ValidationShieldReviewDTO {
   setupTypeName: string | null;
-  scenarioDirection: "BULLISH" | "BEARISH" | null;
+  scenarioDirection: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
   validationState: "NOT_VALIDATED" | "VALIDATED" | "OVERRIDDEN" | null;
   score: number | null;
   mandatoryGateMet: boolean | null;

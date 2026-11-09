@@ -92,8 +92,8 @@ export function SetupTypesSection({
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Name the setup structures you recognize — each with a Bullish and a Bearish scenario built
-        from this strategy&apos;s own confluences and execution confirmations.
+        Name the setup structures you recognize — each with its own scenarios (Bullish, Bearish or
+        Neutral) built from this strategy&apos;s own confluences and execution confirmations.
         {setupTypes.length > 0 && (
           <span className="ml-1 text-muted-foreground/70">
             {setupTypes.length} setup type{setupTypes.length === 1 ? "" : "s"}.

@@ -165,3 +165,39 @@ describe("buildSetupValidationSnapshot", () => {
     expect(snapshot.conditions[0].checked).toBe(false);
   });
 });
+
+describe("buildSetupValidationSnapshot — NEUTRAL scenarios", () => {
+  const conditions = [
+    condition({ id: "c1", checklistItemId: "bull-only", directionApplicability: "BULLISH", mandatory: true }),
+    condition({ id: "c2", checklistItemId: "bear-only", directionApplicability: "BEARISH", mandatory: true }),
+    condition({ id: "c3", checklistItemId: "both", directionApplicability: "BOTH", mandatory: false }),
+  ];
+
+  it("scores only the conditions that apply to the trade's own direction", () => {
+    const { snapshot } = buildSetupValidationSnapshot(
+      baseInput({
+        scenario: { id: "sc-n", direction: "NEUTRAL", name: "Range play" },
+        tradeDirection: "SHORT",
+        conditions,
+        selectedChecklistItemIds: ["bear-only"],
+      }),
+    );
+    expect(snapshot.conditions.map((c) => c.checklistItemId).sort()).toEqual(["bear-only", "both"]);
+    expect(snapshot.mandatoryGateMet).toBe(true);
+    expect(snapshot.scenario.name).toBe("Range play");
+  });
+
+  it("a long trade on the same neutral scenario needs the bullish mandatory instead", () => {
+    const { snapshot, validationState } = buildSetupValidationSnapshot(
+      baseInput({
+        scenario: { id: "sc-n", direction: "NEUTRAL" },
+        tradeDirection: "LONG",
+        conditions,
+        selectedChecklistItemIds: ["bear-only"],
+      }),
+    );
+    expect(snapshot.conditions.map((c) => c.checklistItemId).sort()).toEqual(["both", "bull-only"]);
+    expect(snapshot.missingMandatoryConditionNames).toEqual(["bull-only"]);
+    expect(validationState).toBe("NOT_VALIDATED");
+  });
+});

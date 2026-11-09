@@ -73,7 +73,7 @@ export interface ActualTradeComparisonSnapshot {
   strategyName: string | null;
   strategyVersion: number | null;
   setupTypeName: string | null;
-  scenarioDirection: "BULLISH" | "BEARISH" | null;
+  scenarioDirection: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
 
   // ── Validation ───────────────────────────────────────────────────────
   validationState: "NOT_VALIDATED" | "VALIDATED" | "OVERRIDDEN" | null;

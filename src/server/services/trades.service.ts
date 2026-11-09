@@ -440,18 +440,19 @@ async function buildSetupValidation(
   });
   if (!owns) throw new Error("Setup type not found for the selected strategy.");
 
-  // LONG -> BULLISH, SHORT -> BEARISH. The trader never picks the scenario
-  // side directly (spec §1) — getEffectiveScenario is also the userId-scoped
-  // read path, so a cross-user setupTypeId resolves to null here.
-  const scenarioDirection = data.direction === "LONG" ? "BULLISH" : "BEARISH";
-  const effective = await getEffectiveScenario(userId, data.setupTypeId, scenarioDirection);
+  // The scenario is the first one of the trade's direction (LONG -> Bullish,
+  // SHORT -> Bearish), else a Neutral one — see pickScenarioForTrade.
+  // getEffectiveScenario is also the userId-scoped read path, so a
+  // cross-user setupTypeId resolves to null here.
+  const effective = await getEffectiveScenario(userId, data.setupTypeId, data.direction);
   if (!effective) throw new Error("Setup type scenario not found.");
 
   const { snapshot, validationState, overrideReason, overrideNote } = buildSetupValidationSnapshot({
     strategyName: strategySnapshot.strategyNameSnapshot,
     strategyVersion: strategySnapshot.strategyVersionSnapshot,
     setupType: effective.setupType,
-    scenario: { id: effective.scenario.id, direction: effective.scenario.direction },
+    scenario: { id: effective.scenario.id, direction: effective.scenario.direction, name: effective.scenario.name },
+    tradeDirection: data.direction,
     conditions: effective.conditions,
     selectedChecklistItemIds: data.selectedSetupConditions,
     overrideReason: data.setupOverrideReason,

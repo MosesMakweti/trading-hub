@@ -3,7 +3,7 @@
 import { useState, useTransition, type HTMLAttributes } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { GripVertical, Plus, X } from "lucide-react";
+import { Copy, GripVertical, MoreHorizontal, Plus, Trash2, X } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -31,21 +31,41 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ConfluenceDirectionBadge } from "@/components/shared/confluence-direction-badge";
 import { isEligibleForScenario } from "@/domain/strategies/setup-type-scoring";
 import {
   addScenarioCondition,
+  archiveScenario,
+  duplicateScenario,
   removeScenarioCondition,
   reorderScenarioConditions,
   updateScenarioCondition,
   updateScenarioDescription,
+  updateScenarioDetails,
 } from "@/actions/strategy-setup-types.actions";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import { SaveDot } from "@/components/today/today-ui";
 import type { StrategyChecklistItemDTO } from "@/components/strategy-lab/sot/strategy-checklist-section";
 import type { StrategySetupConditionDTO, StrategySetupScenarioDTO } from "@/types/strategies";
 
-const DIRECTION_LABEL = { BULLISH: "Bullish", BEARISH: "Bearish" } as const;
+type Direction = StrategySetupScenarioDTO["direction"];
+
+const DIRECTION_LABEL = { BULLISH: "Bullish", BEARISH: "Bearish", NEUTRAL: "Neutral" } as const;
+
+/** Card tint + label colour per direction. Neutral scenarios fit long and short trades. */
+export const SCENARIO_TONE: Record<Direction, { card: string; text: string }> = {
+  BULLISH: { card: "border-success/25 bg-success/[0.03]", text: "text-success" },
+  BEARISH: { card: "border-danger/25 bg-danger/[0.03]", text: "text-danger" },
+  NEUTRAL: { card: "border-primary/25 bg-primary/[0.03]", text: "text-primary" },
+};
 
 export function SetupTypeScenarioPanel({
   strategyId,
@@ -57,8 +77,10 @@ export function SetupTypeScenarioPanel({
   availableConditions: StrategyChecklistItemDTO[];
 }) {
   const router = useRouter();
+  const [name, setName] = useState(scenario.name);
   const [description, setDescription] = useState(scenario.description ?? "");
   const [order, setOrder] = useState<string[] | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [isPending, startTransition] = useTransition();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
@@ -70,6 +92,48 @@ export function SetupTypeScenarioPanel({
       if (m) toast.error(m);
     },
   });
+
+  const nameSave = useDebouncedAutosave({
+    value: name,
+    serialize: (v) => v.trim(),
+    save: async (v) => {
+      if (!v.trim()) return { success: false, error: "" };
+      return updateScenarioDetails(strategyId, scenario.id, { name: v });
+    },
+    onError: (m) => {
+      if (m) toast.error(m);
+    },
+  });
+
+  function handleDirection(next: string | null) {
+    if (!next || next === scenario.direction) return;
+    startTransition(async () => {
+      const result = await updateScenarioDetails(strategyId, scenario.id, { direction: next as Direction });
+      if (!result.success) toast.error(result.error);
+      router.refresh();
+    });
+  }
+
+  function handleDuplicate() {
+    startTransition(async () => {
+      const result = await duplicateScenario(strategyId, scenario.id);
+      if (!result.success) toast.error(result.error);
+      else toast.success("Scenario duplicated");
+      router.refresh();
+    });
+  }
+
+  function handleRemove() {
+    startTransition(async () => {
+      const result = await archiveScenario(strategyId, scenario.id);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      setConfirmRemove(false);
+      router.refresh();
+    });
+  }
 
   const conditions = order
     ? (order.map((id) => scenario.conditions.find((c) => c.id === id)).filter(Boolean) as StrategySetupConditionDTO[])
@@ -104,22 +168,48 @@ export function SetupTypeScenarioPanel({
   }
 
   return (
-    <div
-      className={cn(
-        "space-y-2.5 rounded-xl border p-3",
-        scenario.direction === "BULLISH" ? "border-success/25 bg-success/[0.03]" : "border-danger/25 bg-danger/[0.03]",
-      )}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span
-          className={cn(
-            "text-xs font-semibold uppercase tracking-wide",
-            scenario.direction === "BULLISH" ? "text-success" : "text-danger",
-          )}
-        >
-          {DIRECTION_LABEL[scenario.direction]} scenario
-        </span>
-        <SaveDot state={descriptionSave} />
+    <div className={cn("space-y-2.5 rounded-xl border p-3", SCENARIO_TONE[scenario.direction].card)}>
+      <div className="flex items-center gap-1.5">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={`${DIRECTION_LABEL[scenario.direction]} scenario`}
+          aria-label="Scenario name"
+          className="h-8 min-w-0 flex-1 border-transparent bg-transparent px-1.5 text-sm font-semibold shadow-none focus-visible:border-input focus-visible:bg-background/50"
+        />
+        <SaveDot state={nameSave === "idle" ? descriptionSave : nameSave} />
+        <Select value={scenario.direction} onValueChange={handleDirection} disabled={isPending}>
+          <SelectTrigger
+            size="sm"
+            aria-label="Scenario direction"
+            className={cn("h-7 w-auto gap-1 text-xs font-semibold uppercase tracking-wide", SCENARIO_TONE[scenario.direction].text)}
+          >
+            <SelectValue>{(v: Direction) => DIRECTION_LABEL[v]}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(DIRECTION_LABEL) as Direction[]).map((d) => (
+              <SelectItem key={d} value={d}>
+                {DIRECTION_LABEL[d]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button type="button" variant="ghost" size="icon-sm" aria-label="Scenario actions" disabled={isPending} />}
+          >
+            <MoreHorizontal />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleDuplicate}>
+              <Copy /> Duplicate
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={() => setConfirmRemove(true)}>
+              <Trash2 /> Remove scenario
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <Input
@@ -151,7 +241,7 @@ export function SetupTypeScenarioPanel({
 
       {pickable.length > 0 && (
         <Select value="" onValueChange={handleAdd} disabled={isPending}>
-          <SelectTrigger className="h-8 text-xs" aria-label={`Add condition to ${scenario.direction} scenario`}>
+          <SelectTrigger className="h-8 text-xs" aria-label={`Add condition to ${scenario.name || DIRECTION_LABEL[scenario.direction]}`}>
             <span className="flex items-center gap-1 text-muted-foreground">
               <Plus className="size-3" />
               <SelectValue placeholder="Add a confluence or execution confirmation…" />
@@ -166,6 +256,17 @@ export function SetupTypeScenarioPanel({
           </SelectContent>
         </Select>
       )}
+
+      <ConfirmDialog
+        open={confirmRemove}
+        onOpenChange={setConfirmRemove}
+        title="Remove this scenario?"
+        description="Its conditions, context and plan are removed from this setup type. Trades already validated against it keep their link and their saved validation. The confluences themselves stay in the strategy."
+        confirmLabel="Remove"
+        variant="destructive"
+        isPending={isPending}
+        onConfirm={handleRemove}
+      />
     </div>
   );
 }
