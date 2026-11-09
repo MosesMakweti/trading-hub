@@ -46,6 +46,37 @@ interface Point {
  * app's own /api/media/upload route (local filesystem backend), which enforces
  * auth, ownership, and server-side MIME/size validation before any file is saved.
  */
+/**
+ * Paste routing. Several galleries can share a page, so a pasted image goes to
+ * the one the trader last pointed at, focused or touched — or, when there is
+ * only one on the page, to that one. A paste while typing in a text field
+ * outside the gallery is left alone, so pasting into a note never uploads.
+ */
+let activePasteTarget: symbol | null = null;
+
+function isEditable(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  return el.isContentEditable || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+}
+
+/** Image files on the clipboard, named so a pasted screenshot isn't just "image.png". */
+export function clipboardImageFiles(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const files: File[] = [];
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const f = item.getAsFile();
+    if (f) files.push(f);
+  }
+  if (files.length === 0) for (const f of Array.from(data.files ?? [])) if (f.type.startsWith("image/")) files.push(f);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return files.map((f, i) => {
+    const ext = f.type.split("/")[1]?.replace("jpeg", "jpg").replace("svg+xml", "svg") || "png";
+    const generic = !f.name || /^image\.\w+$/i.test(f.name);
+    return generic ? new File([f], `pasted-${stamp}${files.length > 1 ? `-${i + 1}` : ""}.${ext}`, { type: f.type }) : f;
+  });
+}
+
 export function ImageAttachments({
   ownerType,
   ownerId,
@@ -90,6 +121,9 @@ export function ImageAttachments({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const pasteId = useRef(Symbol("image-attachments"));
+  const pasteHandler = useRef<(files: File[]) => void>(() => {});
   const [timeframe, setTimeframe] = useState<string>(timeframeOptions[0] ?? "");
 
   // Self-fetch on mount unless the caller supplied `initial`.
@@ -150,6 +184,10 @@ export function ImageAttachments({
   }
 
   function beginUpload(files: File[]) {
+    if (!canUpload) {
+      if (canManage && remaining <= 0) toast.warning(`This gallery is full (max ${max}).`);
+      return;
+    }
     const accepted = files.filter((file) => acceptedSet.has(file.type));
     if (accepted.length === 0) {
       toast.error(acceptDocuments ? "Only image or PDF files can be uploaded." : "Only image files can be uploaded.");
@@ -181,6 +219,32 @@ export function ImageAttachments({
       });
   }
 
+  // Paste (Ctrl/Cmd+V) — see activePasteTarget above. The handler ref keeps the
+  // document listener stable while always calling the latest beginUpload.
+  useEffect(() => {
+    pasteHandler.current = (files) => beginUpload(files);
+  });
+  useEffect(() => {
+    const id = pasteId.current;
+    activePasteTarget ??= id;
+    const onPaste = (e: ClipboardEvent) => {
+      if (activePasteTarget !== id || e.defaultPrevented) return;
+      if (isEditable(e.target) && !rootRef.current?.contains(e.target as Node)) return;
+      const files = clipboardImageFiles(e.clipboardData);
+      if (files.length === 0) return;
+      e.preventDefault();
+      pasteHandler.current(files);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => {
+      document.removeEventListener("paste", onPaste);
+      if (activePasteTarget === id) activePasteTarget = null;
+    };
+  }, []);
+  const claimPaste = () => {
+    activePasteTarget = pasteId.current;
+  };
+
   function onFilesPicked(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
     beginUpload(Array.from(fileList));
@@ -209,7 +273,13 @@ export function ImageAttachments({
   }
 
   return (
-    <div className={cn("space-y-2", className)}>
+    <div
+      ref={rootRef}
+      className={cn("space-y-2", className)}
+      onPointerEnter={claimPaste}
+      onPointerDown={claimPaste}
+      onFocusCapture={claimPaste}
+    >
       {label && (
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-medium text-muted-foreground">{label}</span>
@@ -343,9 +413,10 @@ export function ImageAttachments({
               <>
                 <UploadCloud className="size-4 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">
-                  Drop {acceptDocuments ? "images or PDFs" : "images"} or{" "}
+                  Drop or paste {acceptDocuments ? "images or PDFs" : "images"}, or{" "}
                   <span className="text-primary">click to upload</span>
                 </span>
+                <span className="sr-only">You can also paste a copied image with Control or Command and V.</span>
               </>
             ) : (
               <span className="text-xs text-muted-foreground">Limit reached ({max})</span>

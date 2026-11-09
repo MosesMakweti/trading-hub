@@ -1,8 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma, type TransactionClient } from "@/server/db";
-import { deleteMediaFile } from "@/lib/media-storage";
-import { isR2Configured } from "@/lib/r2";
+import { deleteMediaFile, isMediaStorageConfigured } from "@/lib/media-storage";
 import type { MediaOwnerType } from "@prisma/client";
 
 // Re-exported for backward compatibility (existing server-side importers) —
@@ -39,7 +38,7 @@ export interface MediaItemDTO {
 
 /** Uploads are enabled once the R2 bucket credentials are configured. */
 export function isUploadsEnabled(): boolean {
-  return isR2Configured();
+  return isMediaStorageConfigured();
 }
 
 /** How many attachments an owner already has in a given category (for the cap). */

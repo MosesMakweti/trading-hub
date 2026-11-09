@@ -7,6 +7,7 @@ import { utcDateToKey } from "@/lib/date";
 import { getTrade } from "@/server/services/trades.service";
 import { assertDayEditable, DayArchivedError } from "@/server/services/trading-day.service";
 import { saveMediaFile, deleteMediaFile } from "@/lib/media-storage";
+import { prepareUpload, UploadRejectedError } from "@/lib/media-processing";
 import { resolveRecordScope, WorkspaceAccessError } from "@/server/workspace/action-scope";
 import { LIVE_SCOPE, runInWorkspaceScope, type WorkspaceScope } from "@/server/workspace/scope";
 import {
@@ -162,11 +163,18 @@ export async function POST(request: Request) {
     const accepted = acceptedMimeFor(ownerType);
     const created: MediaItemDTO[] = [];
     for (const file of files) {
-      if (!accepted.has(file.type)) return bad(`Unsupported file type: ${file.type || "unknown"}.`);
       if (file.size > MAX_FILE_SIZE) return bad("Image is larger than the 8MB limit.");
 
-      const bytes = Buffer.from(await file.arrayBuffer());
-      const storageKey = await saveMediaFile(userId, bytes, file.type);
+      // The type is decided by the file's CONTENT, never the browser's claim;
+      // raster screenshots are optimized (WebP, metadata stripped, long edge capped).
+      let prepared;
+      try {
+        prepared = await prepareUpload(Buffer.from(await file.arrayBuffer()), file.name, accepted);
+      } catch (e) {
+        if (e instanceof UploadRejectedError) return bad(e.message, 415);
+        throw e;
+      }
+      const storageKey = await saveMediaFile(userId, prepared.bytes, prepared.mimeType);
       try {
         created.push(
           await attachMedia({
@@ -175,9 +183,9 @@ export async function POST(request: Request) {
             ownerId,
             category,
             storageKey,
-            fileName: file.name || "image",
-            mimeType: file.type,
-            fileSize: file.size,
+            fileName: prepared.fileName || "image",
+            mimeType: prepared.mimeType,
+            fileSize: prepared.bytes.length,
             caption,
             timeframe,
           }),

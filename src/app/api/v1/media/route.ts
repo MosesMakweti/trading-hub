@@ -4,6 +4,7 @@ import { requireApiUser } from "@/server/api-auth";
 import { withCors, corsPreflight } from "@/server/api-cors";
 import { ACCEPTED_IMAGE_MIME, MAX_FILE_SIZE } from "@/lib/media-constants";
 import { saveMediaFile, deleteMediaFile } from "@/lib/media-storage";
+import { prepareUpload, UploadRejectedError } from "@/lib/media-processing";
 import { createStandaloneMediaAsset } from "@/server/services/media.service";
 
 export const runtime = "nodejs";
@@ -48,26 +49,33 @@ export async function POST(request: Request) {
   if (file.size === 0) {
     return withCors(request, NextResponse.json({ error: "The file is empty." }, { status: 400 }));
   }
-  // Never trust a filename extension — only the browser-reported MIME type,
-  // the same signal the existing /api/media/upload route relies on.
-  if (!ACCEPTED_IMAGE_MIME.includes(file.type as (typeof ACCEPTED_IMAGE_MIME)[number])) {
-    return withCors(request, NextResponse.json({ error: `Unsupported file type: ${file.type || "unknown"}.` }, { status: 415 }));
-  }
   if (file.size > MAX_FILE_SIZE) {
     return withCors(request, NextResponse.json({ error: "Image is larger than the 8MB limit." }, { status: 413 }));
   }
-
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const storageKey = await saveMediaFile(userId, bytes, file.type);
+  // Never trust a filename extension or the declared MIME type: the type is
+  // sniffed from the file's bytes. Captures are stored as sent (no re-encode),
+  // because the trade-plan screenshot flow reads their pixels and dimensions.
+  let prepared;
+  try {
+    prepared = await prepareUpload(Buffer.from(await file.arrayBuffer()), file.name || "capture.png", new Set<string>(ACCEPTED_IMAGE_MIME), {
+      optimize: false,
+    });
+  } catch (e) {
+    if (e instanceof UploadRejectedError) {
+      return withCors(request, NextResponse.json({ error: e.message }, { status: 415 }));
+    }
+    throw e;
+  }
+  const storageKey = await saveMediaFile(userId, prepared.bytes, prepared.mimeType);
 
   let asset;
   try {
     asset = await createStandaloneMediaAsset({
       userId,
       storageKey,
-      fileName: file.name || "capture.png",
-      mimeType: file.type,
-      fileSize: file.size,
+      fileName: prepared.fileName,
+      mimeType: prepared.mimeType,
+      fileSize: prepared.bytes.length,
     });
   } catch (e) {
     // Never leave the just-written R2 object orphaned if the DB write fails

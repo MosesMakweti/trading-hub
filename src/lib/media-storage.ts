@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import { mkdir, readFile, rm, writeFile } from "fs/promises";
+import path from "path";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -6,7 +8,41 @@ import {
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 
-import { getR2 } from "@/lib/r2";
+import { getR2, isR2Configured } from "@/lib/r2";
+
+/**
+ * Storage drivers. Production always uses the private R2 bucket. For local
+ * development and automated tests, MEDIA_STORAGE_DRIVER=local stores the same
+ * `<userId>/<uuid>.<ext>` objects on disk (MEDIA_LOCAL_DIR, default
+ * `.media-storage/`, git-ignored) so uploads can be exercised end to end
+ * without cloud credentials. The local driver refuses to run in production.
+ */
+function isLocalDriver(): boolean {
+  if (process.env.MEDIA_STORAGE_DRIVER !== "local") return false;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("MEDIA_STORAGE_DRIVER=local is for development and tests only; production must use R2.");
+  }
+  return true;
+}
+
+/** Which backend stores media: the local disk driver (dev/test only), R2, or none. */
+export function mediaStorageDriver(): "local" | "r2" | null {
+  if (isLocalDriver()) return "local";
+  return isR2Configured() ? "r2" : null;
+}
+
+/** Whether any storage backend is available (gates uploads in the UI and API). */
+export function isMediaStorageConfigured(): boolean {
+  return mediaStorageDriver() !== null;
+}
+
+function localPath(storageKey: string): string {
+  const root = path.resolve(process.env.MEDIA_LOCAL_DIR || ".media-storage");
+  const full = path.resolve(root, storageKey);
+  // The key is validated by assertValidKey; this is belt and braces against traversal.
+  if (!full.startsWith(root + path.sep)) throw new Error("Invalid storage key.");
+  return full;
+}
 
 // Cloudflare R2 backend for the universal media system. Objects live in a PRIVATE
 // bucket and are only ever served through the auth-scoped GET /api/media/[id]
@@ -53,6 +89,13 @@ export async function saveMediaFile(
   mimeType: string,
 ): Promise<string> {
   const storageKey = `${userId}/${randomUUID()}.${extForMime(mimeType)}`;
+  assertValidKey(storageKey);
+  if (isLocalDriver()) {
+    const file = localPath(storageKey);
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, bytes);
+    return storageKey;
+  }
   const { client, bucket } = getR2();
   await client.send(
     new PutObjectCommand({
@@ -67,6 +110,18 @@ export async function saveMediaFile(
 
 export async function readMediaFile(storageKey: string): Promise<Buffer> {
   assertValidKey(storageKey);
+  if (isLocalDriver()) {
+    try {
+      return await readFile(localPath(storageKey));
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+        const err = new Error("Media object not found.");
+        err.name = "MediaNotFoundError";
+        throw err;
+      }
+      throw e;
+    }
+  }
   const { client, bucket } = getR2();
   try {
     const res = await client.send(
@@ -87,6 +142,10 @@ export async function readMediaFile(storageKey: string): Promise<Buffer> {
 
 export async function deleteMediaFile(storageKey: string): Promise<void> {
   assertValidKey(storageKey);
+  if (isLocalDriver()) {
+    await rm(localPath(storageKey), { force: true });
+    return;
+  }
   const { client, bucket } = getR2();
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: storageKey }));
 }

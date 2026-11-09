@@ -53,3 +53,6 @@ next-env.d.ts
 
 # 16-bit 8K backdrop masters (~90MB each) — regenerate with `node scripts/generate-backdrop.mjs --master`
 assets/backdrop-source/spotlight-*-master.png
+
+# local media storage (MEDIA_STORAGE_DRIVER=local, dev/test only)
+/.media-storage/
