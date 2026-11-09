@@ -7,7 +7,7 @@
 // whole checklist. See domain/strategies/setup-type-scoring.ts for how that
 // scoped list is resolved from Strategy Lab.
 
-import { scoreConfluences, type ConfluenceDirectionValue } from "@/domain/trades/confluence-score";
+import { isConfluenceEligible, scoreConfluences, type ConfluenceDirectionValue } from "@/domain/trades/confluence-score";
 import { toScorableConfluences, type ResolvedSetupCondition } from "@/domain/strategies/setup-type-scoring";
 
 export type TradeValidationStateValue = "NOT_VALIDATED" | "VALIDATED" | "OVERRIDDEN";
@@ -20,7 +20,7 @@ export type OverrideReasonValue =
   | "NEWS_DRIVEN"
   | "OTHER";
 
-export type ScenarioDirectionValue = "BULLISH" | "BEARISH";
+export type ScenarioDirectionValue = "BULLISH" | "BEARISH" | "NEUTRAL";
 
 export interface SetupValidationSnapshotCondition {
   checklistItemId: string;
@@ -37,7 +37,8 @@ export interface SetupValidationSnapshot {
   strategyName: string | null;
   strategyVersion: number | null;
   setupType: { id: string; name: string };
-  scenario: { id: string; direction: ScenarioDirectionValue };
+  /** `name` is absent on snapshots frozen before named scenarios existed. */
+  scenario: { id: string; direction: ScenarioDirectionValue; name?: string };
   conditions: SetupValidationSnapshotCondition[];
   score: number | null;
   totalEligibleWeight: number;
@@ -68,7 +69,11 @@ export interface BuildSetupValidationSnapshotInput {
   strategyName: string | null;
   strategyVersion: number | null;
   setupType: { id: string; name: string };
-  scenario: { id: string; direction: ScenarioDirectionValue };
+  scenario: { id: string; direction: ScenarioDirectionValue; name?: string };
+  /** The trade's own direction. Required to score a NEUTRAL scenario (whose
+   *  conditions may be bull- or bear-only); for a Bullish/Bearish scenario it
+   *  is implied, so older callers may omit it. */
+  tradeDirection?: "LONG" | "SHORT";
   conditions: ResolvedSetupCondition[];
   /** checklistItemIds the trader checked — matched by id, not name, so a
    *  renamed checklist item can't silently lose its checked state. */
@@ -91,26 +96,30 @@ export interface BuildSetupValidationSnapshotResult {
  * The Stage 4 hand-off point: resolveScenarioConditions() (Stage 3) resolved
  * WHICH conditions apply and at what effective weight/mandatory status; this
  * scores what the trader actually checked against them and freezes the
- * result. `conditions` are already scoped to one BULLISH/BEARISH scenario, so
- * every one of them is eligible for it by construction (isEligibleForScenario
- * is enforced when a condition is added to a scenario in Strategy Lab) — the
- * pseudo trade-direction passed to scoreConfluences (BULLISH -> LONG, BEARISH
- * -> SHORT) exists only to satisfy that engine's eligibility filter, not to
- * represent this trade's own already-known direction a second time.
+ * result. For a BULLISH/BEARISH scenario every condition is eligible by
+ * construction (isEligibleForScenario is enforced when a condition is added in
+ * Strategy Lab) and the direction passed to scoreConfluences is the one the
+ * scenario implies. A NEUTRAL scenario is two-sided, so its conditions are
+ * filtered to the trade's own direction (`tradeDirection`) before scoring.
  */
 export function buildSetupValidationSnapshot(
   input: BuildSetupValidationSnapshotInput,
 ): BuildSetupValidationSnapshotResult {
   const selected = new Set(input.selectedChecklistItemIds);
-  const selectedNames = input.conditions
-    .filter((c) => selected.has(c.checklistItemId))
-    .map((c) => c.name);
+  const direction: "LONG" | "SHORT" =
+    input.tradeDirection ?? (input.scenario.direction === "BEARISH" ? "SHORT" : "LONG");
+  // A NEUTRAL scenario may hold bull-only and bear-only conditions: only the
+  // ones that apply to THIS trade's direction are part of its checklist.
+  const conditions =
+    input.scenario.direction === "NEUTRAL"
+      ? input.conditions.filter((c) => isConfluenceEligible(c.directionApplicability, direction))
+      : input.conditions;
+  const selectedNames = conditions.filter((c) => selected.has(c.checklistItemId)).map((c) => c.name);
 
-  const pseudoDirection = input.scenario.direction === "BULLISH" ? "LONG" : "SHORT";
   const result = scoreConfluences({
-    confluences: toScorableConfluences(input.conditions),
+    confluences: toScorableConfluences(conditions),
     selectedNames,
-    direction: pseudoDirection,
+    direction,
   });
 
   const validationState = resolveValidationState(result.mandatoryRequirementsMet, input.overrideReason != null);
@@ -122,7 +131,7 @@ export function buildSetupValidationSnapshot(
     strategyVersion: input.strategyVersion,
     setupType: input.setupType,
     scenario: input.scenario,
-    conditions: input.conditions
+    conditions: conditions
       .slice()
       .sort((a, b) => a.sortOrder - b.sortOrder)
       .map((c) => ({

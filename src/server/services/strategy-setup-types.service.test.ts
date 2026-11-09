@@ -266,7 +266,7 @@ describe("strategy-setup-types.service — Stage 3", () => {
       )!.conditions[0];
       await svc.updateScenarioCondition(userId, condition.id, { weightOverride: 60 });
 
-      const effective = await svc.getEffectiveScenario(userId, setupType.id, "BULLISH");
+      const effective = await svc.getEffectiveScenario(userId, setupType.id, "LONG");
       expect(effective).not.toBeNull();
       expect(effective!.conditions).toHaveLength(1);
       expect(effective!.conditions[0].weight).toBe(60); // overridden
@@ -280,7 +280,7 @@ describe("strategy-setup-types.service — Stage 3", () => {
       const owner = await setupStrategy("effective-owner");
       const setupType = await svc.createSetupType(owner.userId, owner.strategyId, { name: "Type A" });
 
-      expect(await svc.getEffectiveScenario(attacker.id, setupType.id, "BULLISH")).toBeNull();
+      expect(await svc.getEffectiveScenario(attacker.id, setupType.id, "LONG")).toBeNull();
     });
 
     it("returns an empty condition list for the Bearish scenario when the trader only trades Bullish", async () => {
@@ -296,7 +296,7 @@ describe("strategy-setup-types.service — Stage 3", () => {
       const bullishScenario = withScenarios.scenarios.find((s) => s.direction === "BULLISH")!;
       await svc.addScenarioCondition(userId, bullishScenario.id, { checklistItemId: item.id });
 
-      const bearishEffective = await svc.getEffectiveScenario(userId, setupType.id, "BEARISH");
+      const bearishEffective = await svc.getEffectiveScenario(userId, setupType.id, "SHORT");
       expect(bearishEffective).not.toBeNull();
       expect(bearishEffective!.conditions).toHaveLength(0); // intentionally empty, not missing
     });
@@ -347,6 +347,170 @@ describe("strategy-setup-types.service — Stage 3", () => {
       expect(
         snapshotTypeAfterEdit.scenarios.find((s) => s.direction === "BULLISH")!.conditions[0].weight,
       ).toBe(30); // unchanged — still the value frozen at publish time
+    });
+  });
+  describe("named scenarios (Visual Playbook)", () => {
+    async function setupPlaybook(label: string) {
+      const { userId, strategyId } = await setupStrategy(label);
+      const bullItem = await createChecklistItem(
+        userId,
+        strategyId,
+        "CONFLUENCE",
+        confluence({ name: "Bull sweep", weight: 40, mandatory: true, directionApplicability: "BULLISH" }),
+      );
+      const bearItem = await createChecklistItem(
+        userId,
+        strategyId,
+        "CONFLUENCE",
+        confluence({ name: "Bear sweep", weight: 40, mandatory: true, directionApplicability: "BEARISH" }),
+      );
+      const setupType = await svc.createSetupType(userId, strategyId, { name: "Type P" });
+      const [listed] = await svc.listSetupTypesWithScenarios(userId, strategyId);
+      return { userId, strategyId, setupType, bullItem, bearItem, scenarios: listed.scenarios };
+    }
+
+    it("names the default scenarios and orders them Bullish then Bearish", async () => {
+      const { scenarios } = await setupPlaybook("named-defaults");
+      expect(scenarios.map((s) => [s.name, s.direction, s.sortOrder])).toEqual([
+        ["Bullish", "BULLISH", 0],
+        ["Bearish", "BEARISH", 1],
+      ]);
+    });
+
+    it("holds several scenarios of the same direction; the first by order is the default", async () => {
+      const { userId, strategyId, setupType } = await setupPlaybook("multi");
+      const second = await svc.createScenario(userId, setupType.id, { name: "Bullish breakout", direction: "BULLISH", scenarioType: "BREAKOUT" });
+      expect(second.sortOrder).toBe(2);
+
+      const listed = (await svc.listSetupTypesWithScenarios(userId, strategyId))[0].scenarios;
+      expect(listed.filter((s) => s.direction === "BULLISH")).toHaveLength(2);
+
+      expect((await svc.getEffectiveScenario(userId, setupType.id, "LONG"))!.scenario.name).toBe("Bullish");
+      expect((await svc.getEffectiveScenario(userId, setupType.id, "LONG", second.id))!.scenario.name).toBe("Bullish breakout");
+      // An explicit choice that doesn't fit the trade is never swapped for another.
+      expect(await svc.getEffectiveScenario(userId, setupType.id, "SHORT", second.id)).toBeNull();
+
+      await svc.reorderScenarios(userId, setupType.id, [second.id, ...listed.filter((s) => s.id !== second.id).map((s) => s.id)]);
+      expect((await svc.getEffectiveScenario(userId, setupType.id, "LONG"))!.scenario.id).toBe(second.id);
+    });
+
+    it("a Neutral scenario accepts any condition and serves trades in both directions", async () => {
+      const { userId, setupType, bullItem, bearItem, scenarios } = await setupPlaybook("neutral");
+      for (const s of scenarios) await svc.archiveScenario(userId, s.id);
+      const neutral = await svc.createScenario(userId, setupType.id, { name: "Range", direction: "NEUTRAL" });
+      await svc.addScenarioCondition(userId, neutral.id, { checklistItemId: bullItem.id });
+      await svc.addScenarioCondition(userId, neutral.id, { checklistItemId: bearItem.id });
+
+      const long = await svc.getEffectiveScenario(userId, setupType.id, "LONG");
+      const short = await svc.getEffectiveScenario(userId, setupType.id, "SHORT");
+      expect(long!.scenario.id).toBe(neutral.id);
+      expect(short!.scenario.id).toBe(neutral.id);
+      expect(long!.conditions).toHaveLength(2); // filtered per trade at scoring time
+    });
+
+    it("refuses a direction change while a condition wouldn't apply, then allows it once removed", async () => {
+      const { userId, strategyId, bullItem, scenarios } = await setupPlaybook("direction-change");
+      const bull = scenarios[0];
+      const cond = await svc.addScenarioCondition(userId, bull.id, { checklistItemId: bullItem.id });
+      await expect(svc.updateScenarioDetails(userId, bull.id, { direction: "BEARISH" })).rejects.toThrow(/Bull sweep/);
+      // Neutral can hold anything, so that change is fine.
+      await svc.updateScenarioDetails(userId, bull.id, { direction: "NEUTRAL" });
+      await svc.removeScenarioCondition(userId, cond.id);
+      await svc.updateScenarioDetails(userId, bull.id, { direction: "BEARISH", name: "Bearish B" });
+      const after = (await svc.listSetupTypesWithScenarios(userId, strategyId))[0].scenarios.find((s) => s.id === bull.id)!;
+      expect([after.direction, after.name]).toEqual(["BEARISH", "Bearish B"]);
+    });
+
+    it("saves context and execution plan, and clears them with null", async () => {
+      const { userId, strategyId, scenarios } = await setupPlaybook("details");
+      const id = scenarios[0].id;
+      await svc.updateScenarioDetails(userId, id, {
+        context: { htfBias: "H4 bullish", custom: [{ id: "c1", label: "DXY", value: "weak" }] },
+        executionPlan: { entry: [{ id: "r1", text: "MSB on M5", mandatory: true }], minRiskReward: 2 },
+        instruments: ["EURUSD"],
+        timeframes: ["H4", "M5"],
+      });
+      let row = (await svc.listSetupTypesWithScenarios(userId, strategyId))[0].scenarios.find((s) => s.id === id)!;
+      expect(row.context).toEqual({ htfBias: "H4 bullish", custom: [{ id: "c1", label: "DXY", value: "weak" }] });
+      expect(row.executionPlan).toEqual({ entry: [{ id: "r1", text: "MSB on M5", mandatory: true }], minRiskReward: 2 });
+      expect(row.timeframes).toEqual(["H4", "M5"]);
+
+      await svc.updateScenarioDetails(userId, id, { context: null });
+      row = (await svc.listSetupTypesWithScenarios(userId, strategyId))[0].scenarios.find((s) => s.id === id)!;
+      expect(row.context).toBeNull();
+    });
+
+    it("duplicates a scenario right after the original, copying conditions and notes but not checklist items", async () => {
+      const { userId, strategyId, bullItem, scenarios } = await setupPlaybook("duplicate");
+      const [bull, bear] = scenarios;
+      const cond = await svc.addScenarioCondition(userId, bull.id, { checklistItemId: bullItem.id, weightOverride: 55 });
+      await svc.updateScenarioCondition(userId, cond.id, { note: "Must take out Asia low" });
+      await svc.updateScenarioDetails(userId, bull.id, { context: { htfBias: "Up" } });
+
+      const copy = await svc.duplicateScenario(userId, bull.id);
+      const listed = (await svc.listSetupTypesWithScenarios(userId, strategyId))[0].scenarios;
+      expect(listed.map((s) => s.id)).toEqual([bull.id, copy.id, bear.id]);
+
+      const copied = listed.find((s) => s.id === copy.id)!;
+      expect(copied.name).toBe("Bullish (copy)");
+      expect(copied.context).toEqual({ htfBias: "Up" });
+      expect(copied.conditions).toHaveLength(1);
+      expect(copied.conditions[0].checklistItemId).toBe(bullItem.id);
+      expect(copied.conditions[0].weightOverride).toBe(55);
+      expect(copied.conditions[0].note).toBe("Must take out Asia low");
+      expect(await prisma.strategyChecklistItem.count({ where: { strategyId } })).toBe(2);
+    });
+
+    it("archiving a scenario hides it but keeps a trade's link to it", async () => {
+      const { userId, strategyId, setupType, scenarios } = await setupPlaybook("archive");
+      const [bull] = scenarios;
+      const trade = await prisma.trade.create({
+        data: {
+          userId,
+          tradeDate: new Date("2026-01-05"),
+          executionMinutes: 5,
+          direction: "LONG",
+          higherTimeframeBias: "BULLISH",
+          biasConfidencePercent: 80,
+          expectedRR: 3,
+          assetSymbol: "EURUSD",
+          strategyId,
+          setupTypeId: setupType.id,
+          setupScenarioId: bull.id,
+        },
+      });
+      await svc.archiveScenario(userId, bull.id);
+      const listed = (await svc.listSetupTypesWithScenarios(userId, strategyId))[0].scenarios;
+      expect(listed.map((s) => s.id)).not.toContain(bull.id);
+      expect((await prisma.trade.findUniqueOrThrow({ where: { id: trade.id } })).setupScenarioId).toBe(bull.id);
+      // No Bullish scenario left: a long trade no longer resolves.
+      expect(await svc.getEffectiveScenario(userId, setupType.id, "LONG")).toBeNull();
+    });
+
+    it("another user can't add, edit, duplicate, archive or reorder scenarios", async () => {
+      const { setupType, scenarios } = await setupPlaybook("owner");
+      const attacker = await makeUser("playbook-attacker");
+      userIds.push(attacker.id);
+      const id = scenarios[0].id;
+      await expect(svc.createScenario(attacker.id, setupType.id, { name: "x", direction: "NEUTRAL" })).rejects.toThrow();
+      await expect(svc.updateScenarioDetails(attacker.id, id, { name: "x" })).rejects.toThrow();
+      await expect(svc.duplicateScenario(attacker.id, id)).rejects.toThrow();
+      await expect(svc.archiveScenario(attacker.id, id)).rejects.toThrow();
+      await expect(svc.reorderScenarios(attacker.id, setupType.id, [id])).rejects.toThrow();
+    });
+
+    it("freezes scenario names, order and playbook fields into a published version", async () => {
+      const { userId, strategyId, scenarios } = await setupPlaybook("snapshot-playbook");
+      await svc.updateScenarioDetails(userId, scenarios[0].id, { context: { keyLevels: "1.0850" } });
+      const published = await publishStrategyVersion(userId, strategyId, "v1");
+      const version = await getStrategyVersion(userId, strategyId, published.version);
+      const frozen = version!.snapshot.setupTypes![0].scenarios;
+      expect(frozen.map((s) => s.name)).toEqual(["Bullish", "Bearish"]);
+      expect(frozen[0].context).toEqual({ keyLevels: "1.0850" });
+
+      await svc.updateScenarioDetails(userId, scenarios[0].id, { name: "Renamed", context: null });
+      const again = await getStrategyVersion(userId, strategyId, published.version);
+      expect(again!.snapshot.setupTypes![0].scenarios[0].name).toBe("Bullish");
     });
   });
 });

@@ -9,7 +9,7 @@ import type { ScorableConfluence } from "@/domain/trades/confluence-score";
 
 export type ConfluenceDirectionValue = "BULLISH" | "BEARISH" | "BOTH";
 export type ChecklistKindValue = "CONFLUENCE" | "EXECUTION";
-export type SetupScenarioDirectionValue = "BULLISH" | "BEARISH";
+export type SetupScenarioDirectionValue = "BULLISH" | "BEARISH" | "NEUTRAL";
 
 /** One scenario condition as read from the DB — the join row plus enough of
  *  its underlying StrategyChecklistItem to resolve an effective value. Plain
@@ -99,6 +99,9 @@ export function isEligibleForScenario(
 ): boolean {
   return (
     itemDirection === "BOTH" ||
+    // A NEUTRAL (two-sided) scenario accepts bull- and bear-only items; at
+    // trade time only those matching the trade's direction are scored.
+    scenarioDirection === "NEUTRAL" ||
     (scenarioDirection === "BULLISH" && itemDirection === "BULLISH") ||
     (scenarioDirection === "BEARISH" && itemDirection === "BEARISH")
   );

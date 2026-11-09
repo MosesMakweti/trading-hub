@@ -2070,18 +2070,42 @@ model StrategySetupType {
 enum SetupScenarioDirection {
   BULLISH
   BEARISH
+  // Visual Playbook — a range / two-sided scenario: eligible for long AND
+  // short trades; its conditions are still scored direction-aware.
+  NEUTRAL
 }
 
-// Exactly one BULLISH and one BEARISH scenario per Setup Type — both rows are
-// always created together (see strategy-setup-types.service.ts), so "the
-// trader doesn't trade this side" is expressed as a scenario with zero
-// conditions, never a missing scenario. No soft delete: a scenario's lifetime
-// is its parent Setup Type's.
+// Visual Playbook — what kind of move a scenario describes. Null = unset.
+enum SetupScenarioType {
+  CONTINUATION
+  REVERSAL
+  BREAKOUT
+  CUSTOM
+}
+
+// A named scenario of a Setup Type (Visual Playbook). A new Setup Type still
+// starts with a Bullish and a Bearish scenario, but a Setup Type may hold any
+// number of scenarios in any direction (incl. NEUTRAL). Soft-deleted
+// (`deletedAt`) so a trade that was validated against a scenario keeps its
+// link; its frozen setupValidationSnapshot is the historical record anyway.
 model StrategySetupScenario {
   id          String                 @id @default(cuid())
   setupTypeId String
   setupType   StrategySetupType      @relation(fields: [setupTypeId], references: [id], onDelete: Cascade)
   direction   SetupScenarioDirection
+
+  name          String             @default("")
+  scenarioType  SetupScenarioType?
+  /// Only for scenarioType = CUSTOM: the trader's own label.
+  customType    String?
+  instruments   String[]           @default([])
+  timeframes    String[]           @default([])
+  /// Market context — see domain/strategies/scenario-playbook.ts (ScenarioContext).
+  context       Json?
+  /// Execution plan — see domain/strategies/scenario-playbook.ts (ScenarioExecutionPlan).
+  executionPlan Json?
+  sortOrder     Int                @default(0)
+  deletedAt     DateTime?
 
   description String? // optional short notes for this scenario
 
@@ -2092,8 +2116,7 @@ model StrategySetupScenario {
   // Trade Idea Validation Shield (Stage 4) — see StrategySetupType.trades.
   trades     Trade[]
 
-  @@unique([setupTypeId, direction])
-  @@index([setupTypeId])
+  @@index([setupTypeId, deletedAt, sortOrder])
 }
 
 // One curated confluence/execution item within a scenario. References an
@@ -2113,6 +2136,8 @@ model StrategySetupScenarioCondition {
 
   mandatoryOverride Boolean? // null = inherit checklistItem.mandatory
   weightOverride    Int? // null = inherit checklistItem.weight
+  /// Visual Playbook — why this condition matters in THIS scenario / what to look for.
+  note              String?
 
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())

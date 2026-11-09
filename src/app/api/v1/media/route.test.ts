@@ -44,7 +44,10 @@ function multipartRequest(rawToken: string | undefined, file: File | null | "mal
   return new Request("http://localhost/api/v1/media", { method: "POST", headers, body: form });
 }
 
-function pngFile(bytes = "fake-png-bytes", name = "chart.png", type = "image/png") {
+/** A real 2×2 PNG: the route checks the file's CONTENT, not just its declared type. */
+const TINY_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVR4nGMQMgkTMgljgFAAEA4CcUNrdOsAAAAASUVORK5CYII=", "base64");
+
+function pngFile(bytes: string | Uint8Array<ArrayBuffer> = new Uint8Array(TINY_PNG), name = "chart.png", type = "image/png") {
   return new File([bytes], name, { type });
 }
 
@@ -129,6 +132,17 @@ describe("POST /api/v1/media (Step 8)", () => {
 
     // A .png filename with a non-image MIME — the MIME type governs, not the extension.
     const res = await uploadMedia(multipartRequest(rawToken, pngFile("x", "chart.png", "application/x-msdownload")));
+    expect(res.status).toBe(415);
+    expect(mediaStorage.saveMediaFile).not.toHaveBeenCalled();
+  });
+
+  it("415s a file that only CLAIMS to be an image — the type comes from its bytes", async () => {
+    const user = await makeUser("spoofed");
+    userIds.push(user.id);
+    const { rawToken } = await createApiToken(user.id, "test");
+
+    // image/png type and .png name, but the content is HTML.
+    const res = await uploadMedia(multipartRequest(rawToken, pngFile("<html><script>alert(1)</script></html>", "chart.png", "image/png")));
     expect(res.status).toBe(415);
     expect(mediaStorage.saveMediaFile).not.toHaveBeenCalled();
   });

@@ -55,7 +55,8 @@ function uploadRequest(ownerId: string) {
   const form = new FormData();
   form.set("ownerType", "OPPORTUNITY");
   form.set("ownerId", ownerId);
-  form.append("files", new File([new Uint8Array([137, 80, 78, 71])], "chart.png", { type: "image/png" }));
+  // A real 2×2 PNG: the route checks content, then stores screenshots as optimized WebP.
+  form.append("files", new File([new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVR4nGMQMgkTMgljgFAAEA4CcUNrdOsAAAAASUVORK5CYII=", "base64"))], "chart.png", { type: "image/png" }));
   return new Request("http://localhost/api/media/upload", { method: "POST", body: form });
 }
 
@@ -88,7 +89,7 @@ describe("POST /api/media/upload with ownerType OPPORTUNITY", () => {
     expect(res.status).toBe(200);
     const { items } = await res.json();
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ mimeType: "image/png", fileName: "chart.png" });
+    expect(items[0]).toMatchObject({ mimeType: "image/webp", fileName: "chart.webp" });
     expect((await listMedia(userId, "OPPORTUNITY", id)).map((m) => m.id)).toEqual([items[0].id]);
   });
 

@@ -3,7 +3,7 @@
 import { useState, useTransition, type HTMLAttributes } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, ChevronDown, GripVertical, Loader2, Trash2 } from "lucide-react";
+import { Check, ChevronDown, GripVertical, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { SetupTypeScenarioPanel } from "@/components/strategy-lab/setup-type-scenario-panel";
-import { archiveSetupType, updateSetupType } from "@/actions/strategy-setup-types.actions";
+import { archiveSetupType, createScenario, updateSetupType } from "@/actions/strategy-setup-types.actions";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useDebouncedAutosave } from "@/hooks/use-debounced-autosave";
 import type { StrategyChecklistItemDTO } from "@/components/strategy-lab/sot/strategy-checklist-section";
 import type { StrategySetupTypeDTO } from "@/types/strategies";
@@ -35,6 +41,7 @@ export function SetupTypeCard({
   const [description, setDescription] = useState(setupType.description ?? "");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isDeleting, startDelete] = useTransition();
+  const [isAdding, startAdd] = useTransition();
 
   const nameSave = useDebouncedAutosave({
     value: name,
@@ -69,8 +76,18 @@ export function SetupTypeCard({
     });
   }
 
-  const bullish = setupType.scenarios.find((s) => s.direction === "BULLISH");
-  const bearish = setupType.scenarios.find((s) => s.direction === "BEARISH");
+  function handleAddScenario(direction: "BULLISH" | "BEARISH" | "NEUTRAL") {
+    const label = direction === "BULLISH" ? "Bullish" : direction === "BEARISH" ? "Bearish" : "Neutral";
+    const taken = new Set(setupType.scenarios.map((s) => s.name));
+    let name = label;
+    for (let n = 2; taken.has(name); n++) name = `${label} ${n}`;
+    startAdd(async () => {
+      const result = await createScenario(strategyId, setupType.id, { name, direction });
+      if (!result.success) toast.error(result.error);
+      router.refresh();
+    });
+  }
+
   const conditionCount = setupType.scenarios.reduce((sum, s) => sum + s.conditions.length, 0);
 
   return (
@@ -143,21 +160,30 @@ export function SetupTypeCard({
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {bullish && (
+            {setupType.scenarios.map((scenario) => (
               <SetupTypeScenarioPanel
+                key={scenario.id}
                 strategyId={strategyId}
-                scenario={bullish}
+                scenario={scenario}
                 availableConditions={availableConditions}
               />
-            )}
-            {bearish && (
-              <SetupTypeScenarioPanel
-                strategyId={strategyId}
-                scenario={bearish}
-                availableConditions={availableConditions}
-              />
-            )}
+            ))}
           </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button type="button" variant="outline" size="sm" disabled={isAdding} />}
+            >
+              {isAdding ? <Loader2 className="animate-spin" /> : <Plus />} Add scenario
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => handleAddScenario("BULLISH")}>Bullish scenario</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddScenario("BEARISH")}>Bearish scenario</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleAddScenario("NEUTRAL")}>
+                Neutral scenario (fits long and short)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
 
@@ -165,7 +191,7 @@ export function SetupTypeCard({
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="Delete this setup type?"
-        description="This removes the setup type and its scenarios. The underlying confluences/execution confirmations stay in the strategy, completely untouched."
+        description="This removes the setup type and all its scenarios. The underlying confluences/execution confirmations stay in the strategy, completely untouched."
         confirmLabel="Delete"
         variant="destructive"
         isPending={isDeleting}

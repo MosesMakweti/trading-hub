@@ -12,6 +12,7 @@
  * they actually did.
  */
 import type { ResolvedSetupCondition } from "@/domain/strategies/setup-type-scoring";
+import { pickScenarioForTrade } from "@/domain/strategies/scenario-playbook";
 import type {
   StrategyVersionSetupScenarioSnapshot,
   StrategyVersionSetupTypeSnapshot,
@@ -31,9 +32,12 @@ export function findHistoricalScenario(
 ): { setupType: StrategyVersionSetupTypeSnapshot; scenario: StrategyVersionSetupScenarioSnapshot } | null {
   const setupType = setupTypes.find((s) => s.name === setupTypeName);
   if (!setupType) return null;
-  const scenario = setupType.scenarios.find((s) => s.direction === scenarioDirectionForTradeDirection(direction));
-  if (!scenario) return null;
-  return { setupType, scenario };
+  // Same rule as live trades (pickScenarioForTrade): first scenario of the
+  // matching direction, else a NEUTRAL one. Snapshot order = display order.
+  const indexed = setupType.scenarios.map((s, i) => ({ id: String(i), direction: s.direction, sortOrder: s.sortOrder ?? i, s }));
+  const picked = pickScenarioForTrade(indexed, direction);
+  if (!picked) return null;
+  return { setupType, scenario: picked.s };
 }
 
 /** Adapts the frozen historical condition shape into `ResolvedSetupCondition`

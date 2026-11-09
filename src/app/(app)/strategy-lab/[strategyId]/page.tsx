@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { readExecutionPlan, readScenarioContext } from "@/domain/strategies/scenario-playbook";
 
 import { requireUser } from "@/server/guards";
 import { getStrategy, listStrategyVersions } from "@/server/services/strategies.service";
@@ -93,7 +94,15 @@ export default async function StrategyWorkspacePage({
     sortOrder: st.sortOrder,
     scenarios: st.scenarios.map((sc) => ({
       id: sc.id,
+      name: sc.name,
       direction: sc.direction,
+      scenarioType: sc.scenarioType,
+      customType: sc.customType,
+      instruments: sc.instruments,
+      timeframes: sc.timeframes,
+      context: readScenarioContext(sc.context),
+      executionPlan: readExecutionPlan(sc.executionPlan),
+      sortOrder: sc.sortOrder,
       description: sc.description,
       conditions: sc.conditions.map((c) => ({
         id: c.id,
@@ -109,6 +118,7 @@ export default async function StrategyWorkspacePage({
         effectiveWeight: c.weightOverride ?? c.checklistItem.weight,
         effectiveMandatory: c.mandatoryOverride ?? c.checklistItem.mandatory,
         sortOrder: c.sortOrder,
+        note: c.note,
       })),
     })),
   }));

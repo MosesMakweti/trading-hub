@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
+import { readExecutionPlan, readScenarioContext } from "@/domain/strategies/scenario-playbook";
 import { summarizeStrategyVersionSnapshot } from "@/domain/strategies/version-snapshot";
 import { diffStrategyVersions } from "@/domain/strategies/version-diff";
 import type {
@@ -36,6 +37,8 @@ const strategyTreeInclude = {
     orderBy: { sortOrder: "asc" },
     include: {
       scenarios: {
+        where: { deletedAt: null },
+        orderBy: { sortOrder: "asc" },
         include: {
           conditions: {
             orderBy: { sortOrder: "asc" },
@@ -172,6 +175,11 @@ function buildSnapshot(s: StrategyTree): StrategyVersionSnapshot {
       description: st.description,
       scenarios: st.scenarios.map((sc) => ({
         direction: sc.direction,
+        name: sc.name,
+        scenarioType: sc.scenarioType,
+        sortOrder: sc.sortOrder,
+        context: readScenarioContext(sc.context),
+        executionPlan: readExecutionPlan(sc.executionPlan),
         description: sc.description,
         conditions: sc.conditions.map((c) => ({
           checklistItemId: c.checklistItemId,
