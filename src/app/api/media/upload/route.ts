@@ -34,6 +34,7 @@ const OWNER_TYPES: MediaOwnerType[] = [
   "PROP_FIRM_MILESTONE",
   "DAILY_ASSET_ANALYSIS",
   "OPPORTUNITY",
+  "TRADING_DAY",
 ];
 
 // Certificates/confirmation evidence accept PDFs too; every other owner type
@@ -92,6 +93,7 @@ export async function POST(request: Request) {
     if (ownerType === "DAILY_ASSET_ANALYSIS") scope = await resolveRecordScope(userId, { analysis: ownerId }, "write");
     if (ownerType === "DAILY_NOTE") scope = await resolveRecordScope(userId, { note: ownerId }, "write");
     if (ownerType === "OPPORTUNITY") scope = await resolveRecordScope(userId, { opportunity: ownerId }, "write");
+    if (ownerType === "TRADING_DAY") scope = await resolveRecordScope(userId, { day: ownerId }, "write");
   } catch (e) {
     if (e instanceof WorkspaceAccessError) return bad(e.message, 403);
     throw e;
@@ -153,6 +155,19 @@ export async function POST(request: Request) {
       if (opportunity) {
         try {
           await assertDayEditable(userId, utcDateToKey(opportunity.spottedAt));
+        } catch (e) {
+          if (e instanceof DayArchivedError) return bad(e.message, 403);
+          throw e;
+        }
+      }
+    }
+
+    // Plan images on an archived day are read-only like the rest of the plan.
+    if (ownerType === "TRADING_DAY") {
+      const day = await prisma.tradingDay.findFirst({ where: { id: ownerId, userId }, select: { date: true } });
+      if (day) {
+        try {
+          await assertDayEditable(userId, utcDateToKey(day.date));
         } catch (e) {
           if (e instanceof DayArchivedError) return bad(e.message, 403);
           throw e;

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { toast } from "sonner";
 import {
   FileText,
   ImageOff,
+  ImagePlus,
   Loader2,
   RotateCcw,
   Trash2,
@@ -77,6 +78,12 @@ export function clipboardImageFiles(data: DataTransfer | null): File[] {
   });
 }
 
+/** True when the clipboard carries text too (e.g. a copy from a document) —
+ *  then a paste into a note is left to the editor, so no text is lost. */
+function clipboardHasText(data: DataTransfer | null): boolean {
+  return Boolean(data?.getData("text/plain").trim());
+}
+
 export function ImageAttachments({
   ownerType,
   ownerId,
@@ -90,6 +97,8 @@ export function ImageAttachments({
   acceptDocuments = false,
   requireTimeframe = false,
   timeframeOptions = DEFAULT_TIMEFRAMES,
+  compact = false,
+  pasteZoneRef,
 }: {
   ownerType: MediaOwnerType;
   ownerId: string;
@@ -108,6 +117,14 @@ export function ImageAttachments({
    *  it, plus a small badge on each thumbnail. */
   requireTimeframe?: boolean;
   timeframeOptions?: string[];
+  /** A small "Add images" link instead of the dashed drop zone, and nothing
+   *  at all in read-only mode while empty — for galleries tucked under notes. */
+  compact?: boolean;
+  /** An element (typically the note editor this gallery belongs to) where a
+   *  pasted image — one without text alongside it — is uploaded here instead
+   *  of reaching the editor. Pointing at or focusing it also routes plain
+   *  page-level pastes to this gallery. */
+  pasteZoneRef?: RefObject<HTMLElement | null>;
 }) {
   const acceptedMime = acceptDocuments ? ACCEPTED_DOCUMENT_MIME : ACCEPTED_IMAGE_MIME;
   const acceptedSet = new Set<string>(acceptedMime);
@@ -245,6 +262,36 @@ export function ImageAttachments({
     activePasteTarget = pasteId.current;
   };
 
+  // Paste zone: a capture listener on the zone runs before the editor inside
+  // it sees the paste, so an image goes to this gallery and nowhere else.
+  const canUploadRef = useRef(canUpload);
+  useEffect(() => {
+    canUploadRef.current = canUpload;
+  });
+  useEffect(() => {
+    const zone = pasteZoneRef?.current;
+    if (!zone) return;
+    const onZonePaste = (e: ClipboardEvent) => {
+      if (!canUploadRef.current || clipboardHasText(e.clipboardData)) return;
+      const files = clipboardImageFiles(e.clipboardData);
+      if (files.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      pasteHandler.current(files);
+    };
+    const claim = () => {
+      activePasteTarget = pasteId.current;
+    };
+    zone.addEventListener("paste", onZonePaste, true);
+    zone.addEventListener("pointerdown", claim);
+    zone.addEventListener("focusin", claim);
+    return () => {
+      zone.removeEventListener("paste", onZonePaste, true);
+      zone.removeEventListener("pointerdown", claim);
+      zone.removeEventListener("focusin", claim);
+    };
+  }, [pasteZoneRef]);
+
   function onFilesPicked(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
     beginUpload(Array.from(fileList));
@@ -370,7 +417,49 @@ export function ImageAttachments({
       )}
 
       {/* Drop zone / click-to-upload. */}
-      {canManage && (
+      {canManage && compact && (
+        <>
+          <input
+            ref={inputRef}
+            type="file"
+            accept={acceptedMime.join(",")}
+            multiple
+            className="hidden"
+            onChange={(e) => onFilesPicked(e.target.files)}
+          />
+          <button
+            type="button"
+            disabled={!canUpload}
+            onClick={() => inputRef.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (canUpload) setDragActive(true);
+            }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={onDrop}
+            className={cn(
+              "flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60",
+              dragActive && "bg-accent/40 text-foreground ring-1 ring-primary/60",
+            )}
+          >
+            {isUploading ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" />
+                <span className="tabular-nums">Uploading… {progress}%</span>
+              </>
+            ) : remaining > 0 ? (
+              <>
+                <ImagePlus className="size-3.5" />
+                {items.length > 0 ? "Add more" : "Add images"}
+                <span className="text-muted-foreground/60">· or paste</span>
+              </>
+            ) : (
+              <span>Limit reached ({max})</span>
+            )}
+          </button>
+        </>
+      )}
+      {canManage && !compact && (
         <>
           <input
             ref={inputRef}
@@ -425,7 +514,7 @@ export function ImageAttachments({
         </>
       )}
 
-      {!loading && items.length === 0 && !canManage && (
+      {!loading && items.length === 0 && !canManage && !compact && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground/60 italic">
           <ImageOff className="size-3.5" />
           {uploadsEnabled ? "No images." : "Image hosting isn't configured."}

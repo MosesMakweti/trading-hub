@@ -112,7 +112,8 @@ export type RecordRef =
   | { opportunity: string }
   | { analysis: string }
   | { evidence: string }
-  | { note: string };
+  | { note: string }
+  | { day: string };
 
 /** The run id (or null = LIVE) that owns a user's record; undefined when the
  *  record doesn't exist for this user. Soft-deleted records resolve too. */
@@ -133,6 +134,12 @@ async function environmentOfRecord(userId: string, ref: RecordRef): Promise<stri
     if ("note" in ref) {
       const rows = await prisma.$queryRaw<{ backtestRunId: string | null }[]>`
         SELECT "backtestRunId" FROM "DailyNote" WHERE "id" = ${ref.note} AND "userId" = ${userId}
+      `;
+      return rows.length ? rows[0].backtestRunId : undefined;
+    }
+    if ("day" in ref) {
+      const rows = await prisma.$queryRaw<{ backtestRunId: string | null }[]>`
+        SELECT "backtestRunId" FROM "TradingDay" WHERE "id" = ${ref.day} AND "userId" = ${userId}
       `;
       return rows.length ? rows[0].backtestRunId : undefined;
     }

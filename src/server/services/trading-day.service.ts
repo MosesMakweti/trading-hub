@@ -188,6 +188,7 @@ export function toTradingDayDTO(day: TradingDay): TradingDayDTO {
  */
 export function toTodaysPlanDTO(day: TradingDay): TodaysPlanDTO {
   return {
+    tradingDayId: day.id,
     bias: (day.bias as TodaysPlanDTO["bias"]) ?? null,
     conviction: day.conviction,
     keyLevels: day.keyLevels,

@@ -333,7 +333,7 @@ export interface DeleteBacktestRunResult {
  *
  * Media has no FK to its owner, so the run's screenshots are resolved first:
  * every MediaAttachment on the run's trades (TRADE), asset analyses
- * (DAILY_ASSET_ANALYSIS) and daily notes (DAILY_NOTE), plus the original/preview assets of its trades'
+ * (DAILY_ASSET_ANALYSIS), daily notes (DAILY_NOTE) and day plans (TRADING_DAY), plus the original/preview assets of its trades'
  * TradePlanScreenshots. Owner ids are read with raw SQL so SOFT-DELETED
  * trades/analyses are included — their screenshots would otherwise leak.
  *
@@ -378,11 +378,18 @@ export async function deleteBacktestRun(userId: string, runId: string): Promise<
       `
     ).map((r) => r.id);
 
+    const dayIds = (
+      await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "TradingDay" WHERE "backtestRunId" = ${run.id} AND "userId" = ${userId}
+      `
+    ).map((r) => r.id);
+
     const owners = [
       { ownerType: "TRADE" as const, ownerIds: tradeIds },
       { ownerType: "DAILY_ASSET_ANALYSIS" as const, ownerIds: analysisIds },
       { ownerType: "DAILY_NOTE" as const, ownerIds: noteIds },
       { ownerType: "OPPORTUNITY" as const, ownerIds: opportunityIds },
+      { ownerType: "TRADING_DAY" as const, ownerIds: dayIds },
     ];
     const candidateAssetIds = await collectMediaCandidates(tx, userId, owners, tradeIds);
     await removeOwnerAttachments(tx, userId, owners);

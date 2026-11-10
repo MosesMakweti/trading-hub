@@ -910,6 +910,9 @@ enum MediaOwnerType {
   // Chart screenshots of a missed setup, attached to its TradeOpportunity
   // (same environment as the opportunity — live or its Backtest Run).
   OPPORTUNITY
+  // Today Plan phase — screenshots attached to the day's plan notes. The
+  // section is the category: LOOKING_FOR, STAY_OUT, CONDITIONS, NEWS, MACRO.
+  TRADING_DAY
 }
 
 // ── Trade Idea Validation Shield (Stage 4) ──────────────────────────────────
