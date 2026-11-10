@@ -63,7 +63,7 @@ const STRATEGY_MEDIA_OWNERS: MediaOwnerType[] = [
  * wiped Backtest Runs' screenshots along with live trades.
  */
 async function liveOwnerIds(tx: TransactionClient, userId: string) {
-  const [trades, notes, analyses, opportunities] = await Promise.all([
+  const [trades, notes, analyses, opportunities, days] = await Promise.all([
     tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Trade" WHERE "userId" = ${userId} AND "backtestRunId" IS NULL`,
     tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "DailyNote" WHERE "userId" = ${userId} AND "backtestRunId" IS NULL`,
     tx.$queryRaw<{ id: string }[]>`
@@ -71,12 +71,14 @@ async function liveOwnerIds(tx: TransactionClient, userId: string) {
       WHERE a."userId" = ${userId} AND d."backtestRunId" IS NULL
     `,
     tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "TradeOpportunity" WHERE "userId" = ${userId} AND "backtestRunId" IS NULL`,
+    tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "TradingDay" WHERE "userId" = ${userId} AND "backtestRunId" IS NULL`,
   ]);
   return {
     tradeIds: trades.map((r) => r.id),
     noteIds: notes.map((r) => r.id),
     analysisIds: analyses.map((r) => r.id),
     opportunityIds: opportunities.map((r) => r.id),
+    dayIds: days.map((r) => r.id),
   };
 }
 
@@ -123,8 +125,11 @@ export async function deleteDataSection(userId: string, section: DataSection): P
     case "today-plans": {
       const keys = await runLive(() =>
         prisma.$transaction(async (tx) => {
-          const { analysisIds } = await liveOwnerIds(tx, userId);
-          const owners: MediaOwnerSet[] = [{ ownerType: "DAILY_ASSET_ANALYSIS", ownerIds: analysisIds }];
+          const { analysisIds, dayIds } = await liveOwnerIds(tx, userId);
+          const owners: MediaOwnerSet[] = [
+            { ownerType: "DAILY_ASSET_ANALYSIS", ownerIds: analysisIds },
+            { ownerType: "TRADING_DAY", ownerIds: dayIds },
+          ];
           const candidates = await collectMediaCandidates(tx, userId, owners, []);
           await removeOwnerAttachments(tx, userId, owners);
           await tx.tradingDay.deleteMany({ where: { userId } });

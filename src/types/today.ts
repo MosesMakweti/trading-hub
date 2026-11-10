@@ -85,6 +85,8 @@ export interface DailyAssetAnalysisDTO {
 
 /** Today's Trading Plan section data. State on TradingDay. */
 export interface TodaysPlanDTO {
+  /** The TradingDay id — owner of the plan's images (MediaOwnerType TRADING_DAY). */
+  tradingDayId: string;
   bias: "BULLISH" | "BEARISH" | "NEUTRAL" | null;
   conviction: number | null; // 1–5
   keyLevels: unknown; // Tiptap JSON or null

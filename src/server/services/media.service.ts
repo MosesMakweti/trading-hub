@@ -118,6 +118,13 @@ export async function assertOwnsMediaTarget(
           select: { id: true },
         }),
       );
+    case "TRADING_DAY":
+      return Boolean(
+        await prisma.tradingDay.findFirst({
+          where: { id: ownerId, userId },
+          select: { id: true },
+        }),
+      );
     case "OPPORTUNITY":
       return Boolean(
         await prisma.tradeOpportunity.findFirst({

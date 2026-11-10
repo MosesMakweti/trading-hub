@@ -2,6 +2,7 @@ import { CircleCheck, ListChecks } from "lucide-react";
 
 import { tiptapToPlainText } from "@/lib/tiptap-text";
 import { NoteBlock, WorkspaceField } from "@/components/journal/workspace/workspace-ui";
+import { ImageAttachments } from "@/components/media/image-attachments";
 import { TAG_STYLES, colorForName } from "@/components/ui/tag";
 import type { TodaysPlanDTO } from "@/types/today";
 
@@ -97,6 +98,9 @@ export function DailyMarketPlanRecap({
       <NoteBlock label="Stay-out conditions" text={stayOutConditions} />
       <NoteBlock label="News notes" text={newsNotes} />
       <NoteBlock label="General macro/fundamental outlook" text={fundamentalOutlook} />
+
+      {/* The plan's screenshots (every section), read-only; renders nothing when there are none. */}
+      <ImageAttachments ownerType="TRADING_DAY" ownerId={plan.tradingDayId} disabled compact />
 
       {/* Legacy-only — the pre-Stage-11 day-level bias/areas-of-interest.
           Never shown for a new-format day (these are simply never written to
