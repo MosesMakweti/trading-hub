@@ -433,3 +433,60 @@ describe("commitments as optional follow-through", () => {
     expect((await getActiveCommitmentsForToday(user.id)).weekly.map((c) => c.title)).toEqual(["Wait for confirmation"]);
   });
 });
+
+describe("pairing a missed setup with an actual trade (Gallery View comparisons)", () => {
+  it("pairs a valid setup with a same-day trade, exposes it in the workspace, and can be unpaired", async () => {
+    const user = await makeUser("pairing");
+    const strategy = await prisma.strategy.create({ data: { userId: user.id, name: "London Sweep" } });
+    const trade = await makeTrade(user.id, "2026-11-17");
+    const { id } = await createExpectedTrade(user.id, scope(), "2026-11-17", "client-key-pair-1", {
+      assetSymbol: "XAUUSD", direction: "SHORT", validityReason: "BOS + retest", linkedTradeId: trade.id, strategyId: strategy.id,
+    });
+    let day = (await loadAuditWorkspace(user.id, scope())).days.find((d) => d.dateKey === "2026-11-17")!;
+    expect(day.expectedTrades[0]).toMatchObject({ linkedTradeId: trade.id, strategyName: "London Sweep" });
+
+    await updateExpectedTrade(user.id, id, { linkedTradeId: null });
+    day = (await loadAuditWorkspace(user.id, scope())).days.find((d) => d.dateKey === "2026-11-17")!;
+    expect(day.expectedTrades[0].linkedTradeId).toBeNull();
+  });
+
+  it("refuses to pair across days, outside the audit's scope, or with another user's trade", async () => {
+    const user = await makeUser("pairing-guard");
+    const other = await makeUser("pairing-guard-other");
+    const tuesday = await makeTrade(user.id, "2026-11-17");
+    const gold = await makeTrade(user.id, "2026-11-18", { assetSymbol: "XAUUSD" });
+    const theirs = await makeTrade(other.id, "2026-11-18");
+    const base = { assetSymbol: "EURUSD", direction: "LONG" as const, validityReason: "valid" };
+
+    await expect(createExpectedTrade(user.id, scope(), "2026-11-18", "client-key-pair-2", { ...base, linkedTradeId: tuesday.id })).rejects.toThrow(/same day/);
+    await expect(createExpectedTrade(user.id, scope({ assetSymbols: ["EURUSD"] }), "2026-11-18", "client-key-pair-3", { ...base, linkedTradeId: gold.id })).rejects.toThrow(TradeAuditError);
+    await expect(createExpectedTrade(user.id, scope(), "2026-11-18", "client-key-pair-4", { ...base, linkedTradeId: theirs.id })).rejects.toThrow(TradeAuditError);
+
+    const { id } = await createExpectedTrade(user.id, scope(), "2026-11-18", "client-key-pair-5", base);
+    await expect(updateExpectedTrade(user.id, id, { linkedTradeId: tuesday.id })).rejects.toThrow(/same day/);
+    await expect(updateExpectedTrade(user.id, id, { linkedTradeId: theirs.id })).rejects.toThrow(TradeAuditError);
+    await updateExpectedTrade(user.id, id, { linkedTradeId: gold.id });
+    expect((await prisma.auditExpectedTrade.findUniqueOrThrow({ where: { id } })).linkedTradeId).toBe(gold.id);
+  });
+
+  it("feeds the gallery from the same workspace data the Audit View uses", async () => {
+    const { buildGalleryComparisons } = await import("@/domain/trade-audit/gallery");
+    const user = await makeUser("gallery-sync");
+    const trade = await makeTrade(user.id, "2026-11-17", { actualExit: 2390 });
+    await attachImage(user.id, "TRADE", trade.id, new Date("2026-11-17T12:00:00Z"));
+    await saveTradeAssessment(user.id, scope(), trade.id, { verdict: "INVALID" });
+    await createExpectedTrade(user.id, scope(), "2026-11-17", "client-key-pair-6", { assetSymbol: "XAUUSD", direction: "SHORT", validityReason: "valid", linkedTradeId: trade.id });
+    await createExpectedTrade(user.id, scope(), "2026-11-18", "client-key-pair-7", { assetSymbol: "XAUUSD", direction: "LONG", validityReason: "valid" });
+
+    const comps = buildGalleryComparisons((await loadAuditWorkspace(user.id, scope())).days);
+    expect(comps.map((c) => [c.kind, c.dateKey])).toEqual([
+      ["TRADE", "2026-11-17"],
+      ["MISSED_REVIEW", "2026-11-18"],
+    ]);
+    expect(comps[0]).toMatchObject({ expected: { source: "PAIRED_SETUP" }, actual: { verdict: "INVALID" } });
+    expect(comps[0].actual?.images).toHaveLength(1); // the trade record's own screenshot — nothing copied
+    expect(await prisma.mediaAttachment.count({ where: { ownerId: trade.id } })).toBe(1);
+    expect(comps[1].actual).toBeNull();
+  });
+});
+

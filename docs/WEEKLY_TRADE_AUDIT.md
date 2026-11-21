@@ -200,3 +200,49 @@ deleting them.
 * The weekly summary is deterministic (counts and patterns from your own
   entries). No AI text is generated and nothing is inferred from price moves
   after the fact.
+
+---
+
+## 9. Gallery View — visual comparison mode
+
+Edge Review has two views of the **same** audit: **Audit View** (the detailed
+daily review above) and **Gallery View**, a large, image-first, side-by-side
+ACTUAL ↔ EXPECTED comparison.
+
+**Data — no second model.** `buildGalleryComparisons(days)`
+(`src/domain/trade-audit/gallery.ts`) is a pure function over the exact
+`AuditDayDTO[]` the Audit View renders, so a change saved in either view
+appears in both after the shared refresh. Nothing is copied. Images are the
+existing `MediaAttachment` rows:
+
+| Side | Source |
+|---|---|
+| Actual | The trade record's own screenshots (`ownerType = TRADE`), **after-trade (`AFTER`) first**, then before-trade, with provenance labels. |
+| Expected | The setup explicitly paired with the trade (`TRADE_AUDIT_EXPECTED`) plus the trade's review screenshots (`TRADE_AUDIT_ASSESSMENT`), or the missed setup's own images (`TRADE_AUDIT_EXPECTED` / `OPPORTUNITY`). |
+
+**The one schema change.** `AuditExpectedTrade.linkedTradeId` (nullable FK,
+SetNull) records "I should have taken this setup *instead of* that trade". It
+is set from the Audit View, and the server only accepts a live, in-scope trade
+of the same audit on the same day. This is what lets an invalid trade be
+compared with the valid setup the trader should have taken.
+
+**Comparisons — nothing invented.**
+
+| Case | Actual | Expected |
+|---|---|---|
+| Valid trade | Trade screenshots | Paired setup if any, else the trade's own plan prices (labelled) with its review screenshots |
+| Invalid trade | Trade screenshots | Paired setup, or an empty state: "No valid setup recorded instead" |
+| Missed (review) | "No trade taken" | The missed setup and its chart evidence |
+| Missed (live) | "No trade taken" | The live opportunity, qualification as scored at the time |
+
+**Navigation & state.**
+- Prev/next comparison (←/→), prev/next day (Shift+←/→ or `[`/`]`), day chips with counts, and an "n / N" counter.
+- Filters by instrument, strategy, outcome and day; only values present this week are offered.
+- `F` toggles full screen and Esc leaves it.
+- The view, current comparison and filters live in the URL (`view`, `c`, `g_*`) via the History API, with no server round trip. Week navigation keeps the view and filters.
+- The Audit View stays mounted (hidden) while the Gallery is shown, so switching never loses scroll position, collapsed days or unsaved text.
+
+**Images.** Aspect ratio is always preserved (contain, fitted in pixels so
+review markers stay pinned to the chart). Supported: wheel/button/double-click
+zoom, drag to pan, reset, several screenshots per side, and click to open a
+full-screen inspector with arrow keys.

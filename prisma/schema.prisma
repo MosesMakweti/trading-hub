@@ -1187,6 +1187,7 @@ model Trade {
   behaviourLabels         TradeBehaviourLabel[]
   // Weekly Trade Audit — the trader's retrospective judgments of this trade.
   auditAssessments        TradeAuditAssessment[]
+  auditExpectedTrades     AuditExpectedTrade[]     @relation("AuditExpectedLinkedTrade")
 
   // Backtesting (Stage 1) — environment discriminator (see TradingDay's
   // identical field). NULL = LIVE trade. Non-null = a simulated trade that
@@ -4855,6 +4856,14 @@ model AuditExpectedTrade {
   setupName           String?
   timeframe           String?
 
+  // Optional explicit pairing: "this valid setup is what I should have taken
+  // INSTEAD of that actual trade" (same day, same audit — validated in the
+  // service). Drives the Gallery View's actual ↔ expected comparison for an
+  // invalid trade; null = a standalone missed opportunity. SetNull keeps the
+  // expected trade if the actual trade is ever hard-deleted.
+  linkedTradeId String?
+  linkedTrade   Trade?  @relation("AuditExpectedLinkedTrade", fields: [linkedTradeId], references: [id], onDelete: SetNull)
+
   validityReason String
   criteriaMet    String[]    @default([])
   missReason     MissReason?
@@ -4870,6 +4879,7 @@ model AuditExpectedTrade {
   @@unique([auditId, clientKey])
   @@index([userId])
   @@index([auditId, dateKey])
+  @@index([linkedTradeId])
 }
 
 // Review-time markers drawn over a screenshot (any screenshot visible in the

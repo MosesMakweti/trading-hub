@@ -134,6 +134,11 @@ export interface AuditTradeDTO {
   outcome: TradeOutcome;
   reasonForTrade: string | null;
   executionNotes: string | null;
+  /** Setup Validation Shield state at the time (null = no Setup Type used).
+   *  Optional: snapshots frozen before this field existed don't carry it. */
+  validationState?: "VALIDATED" | "NOT_VALIDATED" | "OVERRIDDEN" | null;
+  /** Strategy confluences the trader ticked when taking the trade. */
+  confluences?: string[];
   systemFlags: TradeSystemFlag[];
   images: AuditImageDTO[];
 }
@@ -164,8 +169,11 @@ export interface ExpectedTradeDTO {
   target: number | null;
   intendedRiskPercent: number | null;
   strategyId: string | null;
+  strategyName: string | null;
   setupName: string | null;
   timeframe: string | null;
+  /** The actual trade (same day) this setup should have been taken INSTEAD of. */
+  linkedTradeId: string | null;
   validityReason: string;
   criteriaMet: string[];
   missReason: MissReasonValue | null;
@@ -187,6 +195,9 @@ export interface LiveMissedOpportunityDTO {
   plannedStopLoss: number | null;
   plannedTarget: number | null;
   strategyName: string | null;
+  /** Scored at the time against the strategy (null = never scored). */
+  setupValid: boolean | null;
+  setupScore: number | null;
   missReason: MissReasonValue | null;
   missNote: string | null;
   images: AuditImageDTO[];
