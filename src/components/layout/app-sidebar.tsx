@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   PlaySquare,
   Settings,
+  Sprout,
   Sun,
   Target,
   TrendingUp,
@@ -43,6 +44,7 @@ const navItems = [
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/backtesting", label: "Backtesting", icon: History },
   { href: "/edge", label: "Edge Review", icon: TrendingUp },
+  { href: "/mindset", label: "Mindset", icon: Sprout },
   { href: "/prop-firms", label: "Prop Firms", icon: Wallet },
   { href: "/strategy-lab", label: "Strategy Lab", icon: FlaskConical },
 ];

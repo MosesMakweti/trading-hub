@@ -57,6 +57,9 @@ model User {
   aiReviewAnalystReports          AiReviewAnalystReport[]
   weeklyReviews                   WeeklyReview[]
   weeklyTradeAudits               WeeklyTradeAudit[]
+  mindsetMantras                  MindsetMantra[]
+  mindsetPreference               MindsetPreference?
+  mindsetSessions                 MindsetSession[]
   dailyTradeAudits                DailyTradeAudit[]
   tradeAuditAssessments           TradeAuditAssessment[]
   auditExpectedTrades             AuditExpectedTrade[]
@@ -4900,4 +4903,102 @@ model TradeAuditAnnotation {
 
   @@unique([auditId, mediaAttachmentId])
   @@index([userId])
+}
+
+// ── Mindset (pre-trading meditation & mental conditioning) ─────────────────
+//
+// A calm preparation space: personal trading mantras shown as a slow
+// slideshow over generated ambient audio, with an optional breathing
+// exercise. Recommendations are derived (never stored) from finalized
+// Weekly Trade Audits — see domain/mindset/recommendations.ts. Deliberately
+// NO streaks, scores or leaderboards.
+
+enum MindsetEnvironment {
+  NATURE
+  FOCUS
+}
+
+enum MindsetOrder {
+  SEQUENTIAL
+  RANDOM
+}
+
+enum MindsetSessionStatus {
+  STARTED
+  COMPLETED
+  INTERRUPTED
+}
+
+// One personal mantra. `category` is free text so traders can make their
+// own groups. Default mantras carry a stable `defaultKey`; the unique
+// (userId, defaultKey) index makes seeding idempotent, and a deleted default
+// is soft-deleted (deletedAt) so it is never re-seeded behind the user's back.
+model MindsetMantra {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text       String
+  category   String
+  enabled    Boolean   @default(true)
+  defaultKey String?
+  sortOrder  Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  @@unique([userId, defaultKey])
+  @@index([userId, deletedAt, sortOrder])
+}
+
+// The trader's last-used session settings (one row per user, created lazily).
+model MindsetPreference {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  environment        MindsetEnvironment @default(NATURE)
+  durationSeconds    Int                @default(300)
+  secondsPerMantra   Int                @default(10)
+  order              MindsetOrder       @default(SEQUENTIAL)
+  repeat             Boolean            @default(true)
+  // Selection: empty categories AND empty mantraIds = every enabled mantra.
+  selectedCategories String[]           @default([])
+  selectedMantraIds  String[]           @default([])
+  audioEnabled       Boolean            @default(true)
+  sound              String             @default("rain")
+  volume             Int                @default(60)
+  breathingEnabled   Boolean            @default(true)
+  breathingPattern   String             @default("calm")
+
+  // Set once, the first time defaults were offered — defaults are never
+  // re-seeded after that, even if the trader deletes them all.
+  defaultsSeededAt DateTime?
+
+  // A dismissed recommendation, identified by its evidence key; a NEW
+  // pattern (or new evidence) produces a new key and can surface again.
+  dismissedRecommendationKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One meditation session (history only — no scoring).
+model MindsetSession {
+  id                String               @id @default(cuid())
+  userId            String
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startedAt         DateTime             @default(now())
+  endedAt           DateTime?
+  plannedSeconds    Int
+  // Time actually spent (pauses excluded); set when the session ends.
+  activeSeconds     Int?
+  status            MindsetSessionStatus @default(STARTED)
+  environment       MindsetEnvironment
+  sound             String?
+  categories        String[]             @default([])
+  mantraCount       Int
+  // Set when the session was started from a recommendation.
+  recommendationKey String?
+
+  @@index([userId, startedAt])
 }
