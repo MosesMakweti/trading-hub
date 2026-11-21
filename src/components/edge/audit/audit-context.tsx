@@ -13,6 +13,8 @@ interface AuditContextValue {
   /** True when the week is finalized: everything renders read-only. */
   locked: boolean;
   uploadsEnabled: boolean;
+  /** The trader's strategies (for tagging a missed setup). */
+  strategies: { id: string; name: string }[];
 }
 
 const AuditContext = createContext<AuditContextValue | null>(null);

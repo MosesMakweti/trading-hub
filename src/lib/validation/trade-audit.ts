@@ -88,6 +88,7 @@ const expectedFields = {
   weaknesses: z.array(z.enum(AUDIT_WEAKNESSES)).max(AUDIT_WEAKNESSES.length),
   underlyingWeakness: text,
   improvement: text,
+  linkedTradeId: id.nullable(),
 };
 
 export const createExpectedTradeSchema = z.object({

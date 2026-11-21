@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { createExpectedTradeAction, deleteExpectedTradeAction, updateExpectedTradeAction } from "@/actions/trade-audit.actions";
 import { MISS_REASON_LABEL, WEAKNESS_LABEL } from "@/domain/trade-audit/labels";
-import { AUDIT_WEAKNESSES, MISS_REASONS, type ExpectedTradeDTO, type LiveMissedOpportunityDTO, type MissReasonValue } from "@/types/trade-audit";
+import { AUDIT_WEAKNESSES, MISS_REASONS, type AuditTradeDTO, type ExpectedTradeDTO, type LiveMissedOpportunityDTO, type MissReasonValue } from "@/types/trade-audit";
 import { fmtPrice, newClientKey, useAudit } from "@/components/edge/audit/audit-context";
 import { AutosaveText, ChipGroup } from "@/components/edge/audit/audit-fields";
 import { AuditEvidenceGallery } from "@/components/edge/audit/audit-evidence-gallery";
@@ -37,12 +37,37 @@ function PlanFacts({ entry, stop, target, risk }: { entry: number | null; stop: 
   );
 }
 
-/** LEFT cell for a decision row with no actual trade. */
-export function NotTakenCell() {
+/** LEFT cell for a decision row with no actual trade. When the missed setup
+ *  is paired with a trade ("should have taken this instead"), says so. */
+export function NotTakenCell({ insteadOf }: { insteadOf?: AuditTradeDTO | null }) {
   return (
-    <div className="flex h-full min-h-16 items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
-      No trade taken
+    <div className="flex h-full min-h-16 flex-col items-center justify-center gap-0.5 rounded-lg border border-dashed border-border px-3 text-center text-xs text-muted-foreground">
+      <span>No trade taken on this setup</span>
+      {insteadOf && (
+        <span>
+          Took <span className="font-medium text-foreground">{tradeOptionLabel(insteadOf)}</span> instead (above)
+        </span>
+      )}
     </div>
+  );
+}
+
+export function tradeOptionLabel(t: Pick<AuditTradeDTO, "tradeNumber" | "assetSymbol" | "direction" | "entryTime">): string {
+  return `${t.tradeNumber != null ? `#${t.tradeNumber} ` : ""}${t.assetSymbol} ${t.direction === "LONG" ? "long" : "short"}${t.entryTime ? ` ${t.entryTime}` : ""}`;
+}
+
+function StrategySelect({ id, value, onChange, disabled }: { id: string; value: string | null; onChange: (next: string | null) => void; disabled?: boolean }) {
+  const { strategies } = useAudit();
+  if (strategies.length === 0) return null;
+  return (
+    <select id={id} aria-label="Strategy" disabled={disabled} className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm" value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}>
+      <option value="">No strategy</option>
+      {strategies.map((s) => (
+        <option key={s.id} value={s.id}>
+          {s.name}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -75,9 +100,11 @@ export function LiveMissedCell({ opportunity }: { opportunity: LiveMissedOpportu
 }
 
 /** RIGHT cell — a trade the trader SHOULD have taken, recorded in review (editable while open). */
-export function ExpectedTradeCell({ expected }: { expected: ExpectedTradeDTO }) {
+export function ExpectedTradeCell({ expected, dayTrades }: { expected: ExpectedTradeDTO; dayTrades: AuditTradeDTO[] }) {
   const router = useRouter();
   const { locked } = useAudit();
+  const [linkedTradeId, setLinkedTradeId] = useState<string | null>(expected.linkedTradeId);
+  const [strategyId, setStrategyId] = useState<string | null>(expected.strategyId);
   const [weaknesses, setWeaknesses] = useState(expected.weaknesses);
   const [missReason, setMissReason] = useState<MissReasonValue | null>(expected.missReason);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -104,10 +131,53 @@ export function ExpectedTradeCell({ expected }: { expected: ExpectedTradeDTO }) 
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="font-semibold">{expected.assetSymbol}</span>
         <DirectionBadge direction={expected.direction} />
-        {expected.setupName && <span className="text-xs text-muted-foreground">{expected.setupName}</span>}
+        {expected.strategyName && <span className="text-xs text-muted-foreground">{expected.strategyName}</span>}
+        {expected.setupName && <span className="text-xs text-muted-foreground">· {expected.setupName}</span>}
         {expected.timeframe && <span className="text-xs text-muted-foreground">· {expected.timeframe}</span>}
       </div>
       <PlanFacts entry={expected.intendedEntry} stop={expected.stopLoss} target={expected.target} risk={expected.intendedRiskPercent} />
+
+      {!locked && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label className="text-xs font-medium" htmlFor={`strategy-${expected.id}`}>
+              Strategy
+            </label>
+            <StrategySelect
+              id={`strategy-${expected.id}`}
+              value={strategyId}
+              onChange={(next) => {
+                setStrategyId(next);
+                void saveAndRefresh({ strategyId: next });
+              }}
+            />
+          </div>
+          {dayTrades.length > 0 && (
+            <div className="space-y-1">
+              <label className="text-xs font-medium" htmlFor={`pair-${expected.id}`}>
+                Should have taken this instead of
+              </label>
+              <select
+                id={`pair-${expected.id}`}
+                className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm"
+                value={linkedTradeId ?? ""}
+                onChange={(e) => {
+                  const next = e.target.value || null;
+                  setLinkedTradeId(next);
+                  void saveAndRefresh({ linkedTradeId: next });
+                }}
+              >
+                <option value="">— (a separate missed setup)</option>
+                {dayTrades.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {tradeOptionLabel(t)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
 
       <AutosaveText
         label="Why it met my strategy criteria"
@@ -195,6 +265,7 @@ const num = (v: string) => (v.trim() === "" ? null : Number(v));
 export function AddExpectedTradeForm({ dateKey, defaultAsset, onDone }: { dateKey: string; defaultAsset?: string; onDone: () => void }) {
   const router = useRouter();
   const { scope } = useAudit();
+  const [strategyId, setStrategyId] = useState<string | null>(scope.strategyId);
   const [clientKey] = useState(newClientKey);
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({ assetSymbol: defaultAsset ?? "", direction: "LONG" as "LONG" | "SHORT", intendedEntry: "", stopLoss: "", target: "", intendedRiskPercent: "", setupName: "", validityReason: "", missReason: "" });
@@ -218,6 +289,7 @@ export function AddExpectedTradeForm({ dateKey, defaultAsset, onDone }: { dateKe
           target: prices[2],
           intendedRiskPercent: prices[3],
           setupName: form.setupName.trim() || null,
+          strategyId,
           validityReason: form.validityReason.trim(),
           missReason: (form.missReason || null) as MissReasonValue | null,
         },
@@ -251,6 +323,9 @@ export function AddExpectedTradeForm({ dateKey, defaultAsset, onDone }: { dateKe
           ))}
         </div>
         <Input aria-label="Setup" placeholder="Setup / model" value={form.setupName} onChange={set("setupName")} maxLength={300} className="col-span-2" />
+        <div className="col-span-2 sm:col-span-4">
+          <StrategySelect id={`new-strategy-${dateKey}`} value={strategyId} onChange={setStrategyId} />
+        </div>
         <Input aria-label="Intended entry" placeholder="Entry" inputMode="decimal" value={form.intendedEntry} onChange={set("intendedEntry")} />
         <Input aria-label="Stop loss" placeholder="Stop loss" inputMode="decimal" value={form.stopLoss} onChange={set("stopLoss")} />
         <Input aria-label="Target" placeholder="Target" inputMode="decimal" value={form.target} onChange={set("target")} />

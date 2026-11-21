@@ -213,7 +213,12 @@ export function AuditDaySection({ day, defaultOpen }: { day: AuditDayDTO; defaul
             <DecisionRow key={o.id} highlight="missed" actual={<NotTakenCell />} expected={<LiveMissedCell opportunity={o} />} />
           ))}
           {day.expectedTrades.map((e) => (
-            <DecisionRow key={e.id} highlight="missed" actual={<NotTakenCell />} expected={<ExpectedTradeCell expected={e} />} />
+            <DecisionRow
+              key={e.id}
+              highlight="missed"
+              actual={<NotTakenCell insteadOf={day.trades.find((t) => t.id === e.linkedTradeId) ?? null} />}
+              expected={<ExpectedTradeCell expected={e} dayTrades={day.trades} />}
+            />
           ))}
 
           {!locked &&

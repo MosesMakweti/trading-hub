@@ -219,6 +219,8 @@ async function loadWeekTrades(userId: string, week: AuditWeek, scope: { strategy
         outcome,
         reasonForTrade: t.reasonForTrade,
         executionNotes: t.executionNotes,
+        validationState: t.validationState,
+        confluences: row.confluences,
         systemFlags: systemFlagsOf(t),
         images: [],
       } satisfies AuditTradeDTO;
@@ -322,7 +324,11 @@ export async function loadAuditWorkspace(userId: string, input: AuditScope): Pro
     ? await Promise.all([
         prisma.dailyTradeAudit.findMany({ where: { auditId: audit.id, userId } }),
         prisma.tradeAuditAssessment.findMany({ where: { auditId: audit.id, userId } }),
-        prisma.auditExpectedTrade.findMany({ where: { auditId: audit.id, userId }, orderBy: { createdAt: "asc" } }),
+        prisma.auditExpectedTrade.findMany({
+          where: { auditId: audit.id, userId },
+          include: { strategy: { select: { name: true } } },
+          orderBy: { createdAt: "asc" },
+        }),
         prisma.tradeAuditAnnotation.findMany({ where: { auditId: audit.id, userId } }),
         prisma.edgeReviewCommitment.findMany({ where: { weeklyTradeAuditId: audit.id, userId }, orderBy: { createdAt: "asc" } }),
       ])
@@ -403,8 +409,10 @@ export async function loadAuditWorkspace(userId: string, input: AuditScope): Pro
     target: num(e.target),
     intendedRiskPercent: num(e.intendedRiskPercent),
     strategyId: e.strategyId,
+    strategyName: e.strategy?.name ?? null,
     setupName: e.setupName,
     timeframe: e.timeframe,
+    linkedTradeId: e.linkedTradeId,
     validityReason: e.validityReason,
     criteriaMet: e.criteriaMet,
     missReason: e.missReason as MissReasonValue | null,
@@ -426,6 +434,8 @@ export async function loadAuditWorkspace(userId: string, input: AuditScope): Pro
       plannedStopLoss: num(o.plannedStopLoss),
       plannedTarget: num(o.plannedTarget),
       strategyName: o.strategyNameSnapshot,
+      setupValid: o.setupValid,
+      setupScore: o.setupScore,
       missReason: o.missReason as MissReasonValue | null,
       missNote: o.missNote,
       images: sessionImages("OPPORTUNITY", o.id, dk),
@@ -640,7 +650,20 @@ type ExpectedData = {
   weaknesses?: AuditWeaknessValue[];
   underlyingWeakness?: string | null;
   improvement?: string | null;
+  linkedTradeId?: string | null;
 };
+
+/**
+ * A link "should have taken this instead of that trade" is only valid to a
+ * live, in-scope trade of THIS audit's week on the SAME day — never an
+ * arbitrary or another user's trade.
+ */
+async function assertLinkableTrade(userId: string, scope: AuditScope, tradeId: string | null | undefined, dateKey: string) {
+  if (!tradeId) return;
+  const trade = await liveTradeForAudit(userId, scope, tradeId).catch(() => null);
+  if (!trade) throw new TradeAuditError("That trade isn't part of this week's review.");
+  if (trade.dateKey !== dateKey) throw new TradeAuditError("A missed setup can only be paired with a trade from the same day.");
+}
 
 async function assertStrategyOwned(userId: string, strategyId: string | null | undefined) {
   if (!strategyId) return;
@@ -655,6 +678,7 @@ export async function createExpectedTrade(userId: string, scope: AuditScope, dat
   const audit = await mutableAudit(userId, scope);
   if (!isInWeek(auditWeekFor(scope.weekStart), dateKey)) throw new TradeAuditError("That day is not part of this week.");
   await assertStrategyOwned(userId, data.strategyId);
+  await assertLinkableTrade(userId, scope, data.linkedTradeId, dateKey);
   const row = await prisma.auditExpectedTrade.upsert({
     where: { auditId_clientKey: { auditId: audit.id, clientKey } },
     update: {},
@@ -676,15 +700,22 @@ export async function createExpectedTrade(userId: string, scope: AuditScope, dat
 }
 
 async function ownedExpected(userId: string, id: string) {
-  const row = await prisma.auditExpectedTrade.findFirst({ where: { id, userId }, include: { audit: { select: { status: true } } } });
+  const row = await prisma.auditExpectedTrade.findFirst({
+    where: { id, userId },
+    include: { audit: { select: { status: true, weekStart: true, strategyId: true, assetSymbols: true } } },
+  });
   if (!row) throw new TradeAuditError("Expected trade not found.");
   assertMutable(row.audit);
   return row;
 }
 
 export async function updateExpectedTrade(userId: string, id: string, patch: Partial<ExpectedData>): Promise<void> {
-  await ownedExpected(userId, id);
+  const existing = await ownedExpected(userId, id);
   await assertStrategyOwned(userId, patch.strategyId);
+  if (patch.linkedTradeId) {
+    const scope = { weekStart: utcDateToKey(existing.audit.weekStart), strategyId: existing.audit.strategyId, assetSymbols: existing.audit.assetSymbols };
+    await assertLinkableTrade(userId, scope, patch.linkedTradeId, utcDateToKey(existing.dateKey));
+  }
   const data: Prisma.AuditExpectedTradeUpdateInput = { ...patch };
   if (patch.assetSymbol) data.assetSymbol = patch.assetSymbol.toUpperCase();
   for (const k of ["intendedEntry", "stopLoss", "target", "intendedRiskPercent"] as const) {
@@ -693,6 +724,10 @@ export async function updateExpectedTrade(userId: string, id: string, patch: Par
   if ("strategyId" in patch) {
     delete (data as Record<string, unknown>).strategyId;
     data.strategy = patch.strategyId ? { connect: { id: patch.strategyId } } : { disconnect: true };
+  }
+  if ("linkedTradeId" in patch) {
+    delete (data as Record<string, unknown>).linkedTradeId;
+    data.linkedTrade = patch.linkedTradeId ? { connect: { id: patch.linkedTradeId } } : { disconnect: true };
   }
   await prisma.auditExpectedTrade.update({ where: { id }, data });
 }

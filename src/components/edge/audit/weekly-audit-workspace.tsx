@@ -1,7 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, ClipboardList, Lock } from "lucide-react";
+import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { CalendarDays, ChevronLeft, ChevronRight, ClipboardList, Images, ListChecks, Lock } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,36 @@ import type { AuditWorkspace } from "@/server/services/trade-audit.service";
 import { AuditProvider, dayLabel, fmtPnl, fmtR, toneOf } from "@/components/edge/audit/audit-context";
 import { AuditDaySection, DAY_STATUS } from "@/components/edge/audit/audit-day-section";
 import { WeeklyAssessmentSection } from "@/components/edge/audit/weekly-assessment-section";
+import { AuditGallery, type GalleryState } from "@/components/edge/audit/audit-gallery";
+import type { GalleryOutcome } from "@/domain/trade-audit/gallery";
+
+type ViewMode = "audit" | "gallery";
+
+const GALLERY_PARAMS = ["view", "c", "g_asset", "g_strategy", "g_outcome", "g_day"] as const;
+
+function galleryStateFrom(params: URLSearchParams | null): GalleryState {
+  return {
+    comparisonId: params?.get("c") ?? null,
+    filters: {
+      asset: params?.get("g_asset") ?? null,
+      strategy: params?.get("g_strategy") ?? null,
+      outcome: (params?.get("g_outcome") as GalleryOutcome | null) ?? null,
+      day: params?.get("g_day") ?? null,
+    },
+  };
+}
+
+/** View + gallery position/filters as URL params (bookmarkable, survives reload). */
+function viewParams(mode: ViewMode, g: GalleryState): [string, string][] {
+  if (mode !== "gallery") return [];
+  const out: [string, string][] = [["view", "gallery"]];
+  if (g.comparisonId) out.push(["c", g.comparisonId]);
+  if (g.filters.asset) out.push(["g_asset", g.filters.asset]);
+  if (g.filters.strategy) out.push(["g_strategy", g.filters.strategy]);
+  if (g.filters.outcome) out.push(["g_outcome", g.filters.outcome]);
+  if (g.filters.day) out.push(["g_day", g.filters.day]);
+  return out;
+}
 
 const ALL = "__all__";
 
@@ -43,8 +74,40 @@ export function WeeklyAuditWorkspace({
   assets: string[];
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { week, scope, audit, days, summary } = workspace;
   const locked = audit?.status === "FINALIZED";
+
+  // Both views stay mounted (Audit is only hidden), so switching never loses
+  // scroll position, collapsed days or a half-typed note. The mode and the
+  // gallery's position/filters are mirrored to the URL with the History API —
+  // no server round-trip, nothing re-fetched.
+  const [mode, setMode] = useState<ViewMode>(searchParams?.get("view") === "gallery" ? "gallery" : "audit");
+  const [galleryOpened, setGalleryOpened] = useState(mode === "gallery");
+  const [gallery, setGallery] = useState<GalleryState>(() => galleryStateFrom(searchParams));
+
+  function syncUrl(nextMode: ViewMode, g: GalleryState) {
+    const params = new URLSearchParams(window.location.search);
+    for (const k of GALLERY_PARAMS) params.delete(k);
+    for (const [k, v] of viewParams(nextMode, g)) params.set(k, v);
+    window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+  }
+
+  function switchMode(next: ViewMode) {
+    setMode(next);
+    if (next === "gallery") setGalleryOpened(true);
+    syncUrl(next, gallery);
+  }
+
+  function updateGallery(next: GalleryState) {
+    setGallery(next);
+    syncUrl(mode, next);
+  }
+
+  function openInAudit(dateKey: string) {
+    switchMode("audit");
+    requestAnimationFrame(() => document.getElementById(`day-${dateKey}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
 
   function navigate(next: { week?: string; strategy?: string | null; assets?: string[] }) {
     const params = new URLSearchParams();
@@ -53,6 +116,9 @@ export function WeeklyAuditWorkspace({
     if (strategy) params.set("strategy", strategy);
     const a = next.assets ?? scope.assetSymbols;
     if (a.length > 0) params.set("assets", a.join(","));
+    // Keep the current view and gallery filters across weeks (not the
+    // position — a comparison id belongs to one week).
+    for (const [k, v] of viewParams(mode, { ...gallery, comparisonId: null })) params.set(k, v);
     router.push(`/edge?${params.toString()}`);
   }
 
@@ -63,7 +129,7 @@ export function WeeklyAuditWorkspace({
   const t = summary.trades;
 
   return (
-    <AuditProvider value={{ scope: { weekStart: week.weekStart, strategyId: scope.strategyId, assetSymbols: scope.assetSymbols }, locked, uploadsEnabled: workspace.uploadsEnabled }}>
+    <AuditProvider value={{ scope: { weekStart: week.weekStart, strategyId: scope.strategyId, assetSymbols: scope.assetSymbols }, locked, uploadsEnabled: workspace.uploadsEnabled, strategies }}>
       <div className="space-y-4">
         <div className="glass space-y-3 rounded-2xl p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -107,6 +173,29 @@ export function WeeklyAuditWorkspace({
             </div>
           </div>
 
+          <div className="flex w-fit overflow-hidden rounded-lg border border-border" role="tablist" aria-label="Edge Review view">
+            {(
+              [
+                ["audit", "Audit View", ListChecks],
+                ["gallery", "Gallery View", Images],
+              ] as const
+            ).map(([m, label, Icon]) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={mode === m}
+                onClick={() => mode !== m && switchMode(m)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors",
+                  mode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+              >
+                <Icon className="size-3.5" /> {label}
+              </button>
+            ))}
+          </div>
+
           <div className="flex flex-wrap items-center gap-2">
             <Select
               items={[{ value: ALL, label: "All strategies" }, ...strategies.map((s) => ({ value: s.id, label: s.name }))]}
@@ -131,7 +220,7 @@ export function WeeklyAuditWorkspace({
             {(scope.strategyId || scope.assetSymbols.length > 0) && <span className="text-[11px] text-muted-foreground">Each filter combination is its own audit.</span>}
           </div>
 
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-9">
+          <div className={cn("grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-9", mode === "gallery" && "hidden")}>
             <Stat label="Trades" value={t.executed} />
             <Stat label="Profitable" value={t.wins} className={t.wins > 0 ? "text-success" : undefined} />
             <Stat label="Losing" value={t.losses} className={t.losses > 0 ? "text-danger" : undefined} />
@@ -146,42 +235,50 @@ export function WeeklyAuditWorkspace({
 
         {isFuture && <p className="rounded-lg border border-border p-3 text-sm text-muted-foreground">This week hasn&apos;t started yet.</p>}
 
-        {/* Day strip — jump between days without leaving the workspace */}
-        <nav aria-label="Days of the week" className="sticky top-2 z-10 flex gap-1.5 overflow-x-auto rounded-xl border border-border bg-background/90 p-1.5 backdrop-blur">
-          {days.map((d) => {
-            const s = DAY_STATUS[d.status];
-            const Icon = s.icon;
-            const l = dayLabel(d.dateKey);
-            const n = d.trades.filter((x) => x.outcome !== "CANCELLED").length;
-            return (
-              <a key={d.dateKey} href={`#day-${d.dateKey}`} className="flex min-w-fit flex-1 items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs whitespace-nowrap hover:bg-accent">
-                <Icon className={cn("size-3.5 shrink-0", s.className)} aria-label={s.label} />
-                <span className="font-medium">{l.short}</span>
-                <span className="text-muted-foreground">{l.date}</span>
-                <span className="ml-auto rounded bg-muted px-1 tabular-nums text-muted-foreground">{n}</span>
-              </a>
-            );
-          })}
-          <a href="#weekly-assessment" className="flex items-center rounded-lg px-2 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-accent">
-            Weekly assessment
-          </a>
-        </nav>
+        {galleryOpened && (
+          <div hidden={mode !== "gallery"}>
+            <AuditGallery days={days} state={gallery} onStateChange={updateGallery} onOpenInAudit={openInAudit} />
+          </div>
+        )}
 
-        {days.map((d) => (
-          <AuditDaySection key={`${d.dateKey}-${locked}`} day={d} defaultOpen={d.status !== "COMPLETED"} />
-        ))}
+        <div hidden={mode !== "audit"} className="space-y-4">
+          {/* Day strip — jump between days without leaving the workspace */}
+          <nav aria-label="Days of the week" className="sticky top-2 z-10 flex gap-1.5 overflow-x-auto rounded-xl border border-border bg-background/90 p-1.5 backdrop-blur">
+            {days.map((d) => {
+              const s = DAY_STATUS[d.status];
+              const Icon = s.icon;
+              const l = dayLabel(d.dateKey);
+              const n = d.trades.filter((x) => x.outcome !== "CANCELLED").length;
+              return (
+                <a key={d.dateKey} href={`#day-${d.dateKey}`} className="flex min-w-fit flex-1 items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs whitespace-nowrap hover:bg-accent">
+                  <Icon className={cn("size-3.5 shrink-0", s.className)} aria-label={s.label} />
+                  <span className="font-medium">{l.short}</span>
+                  <span className="text-muted-foreground">{l.date}</span>
+                  <span className="ml-auto rounded bg-muted px-1 tabular-nums text-muted-foreground">{n}</span>
+                </a>
+              );
+            })}
+            <a href="#weekly-assessment" className="flex items-center rounded-lg px-2 py-1.5 text-xs font-medium whitespace-nowrap hover:bg-accent">
+              Weekly assessment
+            </a>
+          </nav>
 
-        {days.length === 0 && <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">No trading days are scheduled this week and nothing was traded.</p>}
+          {days.map((d) => (
+            <AuditDaySection key={`${d.dateKey}-${locked}`} day={d} defaultOpen={d.status !== "COMPLETED"} />
+          ))}
 
-        <WeeklyAssessmentSection
-          key={`${audit?.id ?? "new"}-${audit?.status ?? ""}`}
-          audit={audit}
-          summary={summary}
-          unacknowledgedChanges={workspace.unacknowledgedChanges}
-          commitments={workspace.commitments}
-          carryForward={workspace.carryForward}
-          legacyReflection={workspace.legacyReflection}
-        />
+          {days.length === 0 && <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">No trading days are scheduled this week and nothing was traded.</p>}
+
+          <WeeklyAssessmentSection
+            key={`${audit?.id ?? "new"}-${audit?.status ?? ""}`}
+            audit={audit}
+            summary={summary}
+            unacknowledgedChanges={workspace.unacknowledgedChanges}
+            commitments={workspace.commitments}
+            carryForward={workspace.carryForward}
+            legacyReflection={workspace.legacyReflection}
+          />
+        </div>
       </div>
     </AuditProvider>
   );
