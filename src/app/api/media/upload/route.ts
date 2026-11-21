@@ -35,6 +35,13 @@ const OWNER_TYPES: MediaOwnerType[] = [
   "DAILY_ASSET_ANALYSIS",
   "OPPORTUNITY",
   "TRADING_DAY",
+  // Weekly Trade Audit review uploads. Deliberately NOT gated on the day
+  // being editable — a weekend review always happens after the day is
+  // archived; they are gated on the audit not being finalized instead
+  // (assertOwnsMediaTarget).
+  "TRADE_AUDIT_ASSESSMENT",
+  "TRADE_AUDIT_EXPECTED",
+  "TRADE_AUDIT_DAY",
 ];
 
 // Certificates/confirmation evidence accept PDFs too; every other owner type

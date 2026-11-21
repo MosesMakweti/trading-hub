@@ -4,10 +4,9 @@ import { requireUser } from "@/server/guards";
 import { getReplayReviewSession } from "@/server/services/replay-review.service";
 
 /**
- * Stage 12.5 — resolves a Stage 12 session link to its Edge Review home
- * (`/edge?period=...&type=...&tab=replay[&strategy=...&assets=...]`), so an
- * old bookmark/link still opens the exact same review, just inside its new
- * parent module instead of a second standalone product.
+ * Legacy Replay session links. Replay is no longer part of Edge Review (see
+ * docs/WEEKLY_TRADE_AUDIT.md §7); an old bookmark opens the Weekly Trade Audit
+ * for the same week and scope instead. The session's data is kept.
  */
 export default async function ReplaySessionRedirect({
   params,
@@ -20,11 +19,7 @@ export default async function ReplaySessionRedirect({
   const session = await getReplayReviewSession(user.id, sessionId);
   if (!session) notFound();
 
-  const search = new URLSearchParams({
-    period: session.startDate,
-    type: session.reviewType,
-    tab: "replay",
-  });
+  const search = new URLSearchParams({ week: session.startDate });
   if (session.strategyId) search.set("strategy", session.strategyId);
   if (session.assetSymbols.length > 0) search.set("assets", session.assetSymbols.join(","));
 

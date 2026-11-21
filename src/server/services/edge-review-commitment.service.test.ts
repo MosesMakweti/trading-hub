@@ -260,6 +260,16 @@ describe("daily acknowledgement (Stage 16 §18)", () => {
   });
 });
 
+/**
+ * The review a commitment is AUTHORED in. A commitment written while
+ * reviewing a week governs the FOLLOWING period (effectiveFrom = the day
+ * after the reviewed period — Edge Review audit finding #1), so evidence
+ * tests author it in the week before the one they then sync.
+ */
+function priorWeek(userId: string) {
+  return createReplayReviewSession(userId, { reviewType: "WEEKLY", startDate: "2026-07-27", endDate: "2026-08-02" });
+}
+
 function makeTrade(userId: string, dateKey: string, validationState: "VALIDATED" | "OVERRIDDEN") {
   return prisma.trade.create({
     data: {
@@ -276,6 +286,27 @@ function makeTrade(userId: string, dateKey: string, validationState: "VALIDATED"
 }
 
 describe("cross-period continuity — lineage, Continue, Refine (Stage 19 §3-14)", () => {
+  it("two concurrent Continue calls can never create two ACTIVE heads (audit finding #4)", async () => {
+    const user = await makeUser("continue-race");
+    const week1 = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    const original = await createManualCommitment(user.id, week1.id, { category: "EXECUTION", title: "No SL widening", description: null, priority: "HIGH" });
+    const week2 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-10", endDate: "2026-08-16" });
+
+    const results = await Promise.allSettled([continueCommitment(user.id, original.id, week2.id), continueCommitment(user.id, original.id, week2.id)]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const active = await prisma.edgeReviewCommitment.count({ where: { userId: user.id, status: "ACTIVE" } });
+    expect(active).toBe(1);
+  });
+
+  it("refuses to reactivate a commitment that was carried forward (audit finding #4)", async () => {
+    const user = await makeUser("reactivate-superseded");
+    const week1 = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    const original = await createManualCommitment(user.id, week1.id, { category: "EXECUTION", title: "No SL widening", description: null, priority: "HIGH" });
+    const week2 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-10", endDate: "2026-08-16" });
+    await continueCommitment(user.id, original.id, week2.id);
+    await expect(setCommitmentStatus(user.id, original.id, "ACTIVE")).rejects.toThrow(/carried forward/);
+  });
+
   it("Continue retires the previous commitment and creates a successor inheriting the lineage root", async () => {
     const user = await makeUser("continue-basic");
     const week1 = await finalizedSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
@@ -470,10 +501,67 @@ describe("getAdherenceSummaries — bulk, N+1-safe (Stage 19 §12)", () => {
 });
 
 describe("automatic system evidence (Stage 19 §10-11, §16, §21, §42)", () => {
+  it("never scores a commitment against the week whose review created it (audit finding #1)", async () => {
+    const user = await makeUser("system-evidence-no-self-penalty");
+    const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    const commitment = await acceptSuggestedCommitment(user.id, week1.id, {
+      category: "EXECUTION",
+      title: "Only take validated setups",
+      description: null,
+      priority: "HIGH",
+      ruleKey: "OVERRIDE_DISCIPLINE",
+      evidence: ["seed"],
+    });
+    expect(commitment.periodStart).toBe("2026-08-03");
+    await makeTrade(user.id, "2026-08-05", "OVERRIDDEN"); // the behaviour that triggered it
+    await syncSystemEvidenceForSession(user.id, week1.id);
+    expect(await prisma.edgeReviewCommitmentDailyState.count({ where: { commitmentId: commitment.id } })).toBe(0);
+
+    const week2 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-10", endDate: "2026-08-16" });
+    await makeTrade(user.id, "2026-08-11", "OVERRIDDEN");
+    await syncSystemEvidenceForSession(user.id, week2.id);
+    const states = await prisma.edgeReviewCommitmentDailyState.findMany({ where: { commitmentId: commitment.id } });
+    expect(states.map((s) => s.dateKey.toISOString().slice(0, 10))).toEqual(["2026-08-11"]);
+  });
+
+  it("never applies evidence across review types (audit finding #7)", async () => {
+    const user = await makeUser("system-evidence-cross-type");
+    const commitment = await acceptSuggestedCommitment(user.id, (await priorWeek(user.id)).id, {
+      category: "EXECUTION",
+      title: "Only take validated setups",
+      description: null,
+      priority: "HIGH",
+      ruleKey: "OVERRIDE_DISCIPLINE",
+      evidence: ["seed"],
+    });
+    await makeTrade(user.id, "2026-08-05", "OVERRIDDEN");
+    const month = await createReplayReviewSession(user.id, { reviewType: "MONTHLY", startDate: "2026-08-01", endDate: "2026-08-31" });
+    await syncSystemEvidenceForSession(user.id, month.id);
+    expect(await prisma.edgeReviewCommitmentDailyState.count({ where: { commitmentId: commitment.id } })).toBe(0);
+  });
+
+  it("upgrades a neutral ACKNOWLEDGED tap to the observed verdict, keeping the note (audit finding #2)", async () => {
+    const user = await makeUser("system-evidence-ack-upgrade");
+    const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
+    const commitment = await acceptSuggestedCommitment(user.id, (await priorWeek(user.id)).id, {
+      category: "EXECUTION",
+      title: "Only take validated setups",
+      description: null,
+      priority: "HIGH",
+      ruleKey: "OVERRIDE_DISCIPLINE",
+      evidence: ["seed"],
+    });
+    await setCommitmentDailyState(user.id, commitment.id, new Date("2026-08-05T00:00:00.000Z"), "ACKNOWLEDGED", "read it this morning");
+    await makeTrade(user.id, "2026-08-05", "OVERRIDDEN");
+    await syncSystemEvidenceForSession(user.id, week1.id);
+    const row = await prisma.edgeReviewCommitmentDailyState.findFirstOrThrow({ where: { commitmentId: commitment.id } });
+    expect(row).toMatchObject({ status: "BREACHED", source: "SYSTEM", note: "read it this morning" });
+  });
+
   it("derives OVERRIDE_DISCIPLINE daily states from real Trade.validationState at finalization, without any Replay dependency", async () => {
     const user = await makeUser("system-evidence-override");
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    await acceptSuggestedCommitment(user.id, week1.id, {
+    await acceptSuggestedCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "EXECUTION",
       title: "Only take validated setups",
       description: null,
@@ -499,7 +587,7 @@ describe("automatic system evidence (Stage 19 §10-11, §16, §21, §42)", () =>
   it("never overwrites an existing MANUAL entry for the same day (skipDuplicates)", async () => {
     const user = await makeUser("system-evidence-no-overwrite");
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    const commitment = await acceptSuggestedCommitment(user.id, week1.id, {
+    const commitment = await acceptSuggestedCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "EXECUTION",
       title: "Only take validated setups",
       description: null,
@@ -522,7 +610,7 @@ describe("automatic system evidence (Stage 19 §10-11, §16, §21, §42)", () =>
   it("a manual write after a SYSTEM entry always wins and clears the stale automated evidence", async () => {
     const user = await makeUser("system-evidence-manual-overwrite");
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    const commitment = await acceptSuggestedCommitment(user.id, week1.id, {
+    const commitment = await acceptSuggestedCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "EXECUTION",
       title: "Only take validated setups",
       description: null,
@@ -547,7 +635,7 @@ describe("automatic system evidence (Stage 19 §10-11, §16, §21, §42)", () =>
   it("never derives evidence for a commitment without a recognized automatic rule key (a plain manual commitment)", async () => {
     const user = await makeUser("system-evidence-manual-commitment");
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    await createManualCommitment(user.id, week1.id, { category: "EXECUTION", title: "No SL widening", description: null, priority: "HIGH" });
+    await createManualCommitment(user.id, (await priorWeek(user.id)).id, { category: "EXECUTION", title: "No SL widening", description: null, priority: "HIGH" });
     await makeTrade(user.id, "2026-08-05", "OVERRIDDEN");
 
     await syncSystemEvidenceForSession(user.id, week1.id);
@@ -559,7 +647,7 @@ describe("automatic system evidence (Stage 19 §10-11, §16, §21, §42)", () =>
   it("never backdates evidence to before the commitment's own periodStart", async () => {
     const user = await makeUser("system-evidence-no-backdate");
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-10", endDate: "2026-08-16" });
-    await acceptSuggestedCommitment(user.id, week1.id, {
+    await acceptSuggestedCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "EXECUTION",
       title: "Only take validated setups",
       description: null,
@@ -579,7 +667,7 @@ describe("automatic system evidence (Stage 19 §10-11, §16, §21, §42)", () =>
   it("is idempotent and safe to call twice — running finalization sync again does not error or duplicate rows", async () => {
     const user = await makeUser("system-evidence-idempotent");
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    await acceptSuggestedCommitment(user.id, week1.id, {
+    await acceptSuggestedCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "EXECUTION",
       title: "Only take validated setups",
       description: null,
@@ -599,7 +687,7 @@ describe("automatic system evidence (Stage 19 §10-11, §16, §21, §42)", () =>
   it("degrades gracefully when the comparison cannot be built (no ACTUAL baseline yet) instead of throwing", async () => {
     const user = await makeUser("system-evidence-degrade");
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    await acceptSuggestedCommitment(user.id, week1.id, {
+    await acceptSuggestedCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "EXECUTION",
       title: "No stop widening",
       description: null,
@@ -650,7 +738,7 @@ describe("automatic system evidence — Stage 19.1 additions (§25-29)", () => {
   it("BEHAVIOUR_LABEL_PATTERN is wired but produces no rows without a comparison, without throwing", async () => {
     const user = await makeUser("system-evidence-behaviour-label-degrade");
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    await acceptSuggestedCommitment(user.id, week1.id, {
+    await acceptSuggestedCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "BEHAVIOR",
       title: "Review flagged behaviour pattern",
       description: null,
@@ -667,7 +755,7 @@ describe("automatic system evidence — Stage 19.1 additions (§25-29)", () => {
   it("OVERTRADING_DISCIPLINE derives from the Daily Market Plan's own maxTradesPerDay vs. actual trade count", async () => {
     const user = await makeUser("system-evidence-overtrading");
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    const commitment = await createManualCommitment(user.id, week1.id, {
+    const commitment = await createManualCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "BEHAVIOR",
       title: "Respect the daily trade cap",
       description: null,
@@ -698,7 +786,7 @@ describe("automatic system evidence — Stage 19.1 additions (§25-29)", () => {
     const user = await makeUser("system-evidence-risk-limit");
     const account = await makePerformanceAccount(user.id);
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    const commitment = await createManualCommitment(user.id, week1.id, {
+    const commitment = await createManualCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "RISK",
       title: "Stay within the daily risk budget",
       description: null,
@@ -726,7 +814,7 @@ describe("automatic system evidence — Stage 19.1 additions (§25-29)", () => {
     const user = await makeUser("system-evidence-risk-unmeasurable");
     const account = await makePerformanceAccount(user.id);
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    const commitment = await createManualCommitment(user.id, week1.id, {
+    const commitment = await createManualCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "RISK",
       title: "Stay within the daily risk budget",
       description: null,
@@ -772,7 +860,7 @@ describe("automatic system evidence — Stage 19.1 additions (§25-29)", () => {
   it("is idempotent — re-running overtrading/risk-limit sync twice never duplicates rows", async () => {
     const user = await makeUser("system-evidence-idempotent-new-rules");
     const week1 = await createReplayReviewSession(user.id, { reviewType: "WEEKLY", startDate: "2026-08-03", endDate: "2026-08-09" });
-    await createManualCommitment(user.id, week1.id, {
+    await createManualCommitment(user.id, (await priorWeek(user.id)).id, {
       category: "BEHAVIOR",
       title: "Respect the daily trade cap",
       description: null,

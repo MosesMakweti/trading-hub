@@ -56,6 +56,11 @@ model User {
   edgeReviewCommitmentDailyStates EdgeReviewCommitmentDailyState[]
   aiReviewAnalystReports          AiReviewAnalystReport[]
   weeklyReviews                   WeeklyReview[]
+  weeklyTradeAudits               WeeklyTradeAudit[]
+  dailyTradeAudits                DailyTradeAudit[]
+  tradeAuditAssessments           TradeAuditAssessment[]
+  auditExpectedTrades             AuditExpectedTrade[]
+  tradeAuditAnnotations           TradeAuditAnnotation[]
   trades                          Trade[]
   opportunities                   TradeOpportunity[]
   strategies                      Strategy[]
@@ -913,6 +918,14 @@ enum MediaOwnerType {
   // Today Plan phase — screenshots attached to the day's plan notes. The
   // section is the category: LOOKING_FOR, STAY_OUT, CONDITIONS, NEWS, MACRO.
   TRADING_DAY
+  // Weekly Trade Audit — screenshots uploaded DURING the weekend review, kept
+  // off the Trade/Opportunity record on purpose: those owners mean "captured
+  // while trading", these mean "added in review" (provenance, see
+  // docs/WEEKLY_TRADE_AUDIT.md §5). ownerId = TradeAuditAssessment /
+  // AuditExpectedTrade / DailyTradeAudit id respectively.
+  TRADE_AUDIT_ASSESSMENT
+  TRADE_AUDIT_EXPECTED
+  TRADE_AUDIT_DAY
 }
 
 // ── Trade Idea Validation Shield (Stage 4) ──────────────────────────────────
@@ -1172,6 +1185,8 @@ model Trade {
   positionFills           PositionFill[]
   // Trade Review overhaul (Stage 7) — see BehaviourLabel below.
   behaviourLabels         TradeBehaviourLabel[]
+  // Weekly Trade Audit — the trader's retrospective judgments of this trade.
+  auditAssessments        TradeAuditAssessment[]
 
   // Backtesting (Stage 1) — environment discriminator (see TradingDay's
   // identical field). NULL = LIVE trade. Non-null = a simulated trade that
@@ -1809,6 +1824,8 @@ model Strategy {
   replayReviewSessions ReplayReviewSession[] // optional scope narrowing (Replay foundation, Stage 12)
   replayTrades         ReplayTrade[]
   backtestRuns         BacktestRun[] // experiments run against this strategy (SetNull on delete)
+  weeklyTradeAudits    WeeklyTradeAudit[]
+  auditExpectedTrades  AuditExpectedTrade[]
 
   @@index([userId, deletedAt, sortOrder])
 }
@@ -3935,6 +3952,19 @@ model EdgeReviewCommitment {
   reviewType            ReplayReviewType
   periodStart           DateTime             @db.Date
 
+  // Weekly Trade Audit — the audit this commitment was created from (the
+  // successor to replayReviewSessionId for new reviews). SetNull: a
+  // commitment survives its review being removed.
+  weeklyTradeAuditId String?
+  weeklyTradeAudit   WeeklyTradeAudit? @relation(fields: [weeklyTradeAuditId], references: [id], onDelete: SetNull)
+
+  // First trader-local date this commitment governs = the day AFTER the
+  // reviewed period ends. A commitment written while reviewing week N is
+  // about week N+1 onward, so automatic evidence must never score it
+  // against the week N behaviour that triggered it (audit finding #1).
+  // Backfilled for pre-existing rows from their review's end date.
+  effectiveFrom DateTime? @db.Date
+
   category    EdgeReviewCommitmentCategory
   title       String
   description String?
@@ -4606,4 +4636,258 @@ model ProgressEvent {
   @@unique([goalId], map: "ProgressEvent_goal_completed_key", where: raw("\"kind\" = 'GOAL_COMPLETED'"))
   @@index([userId, seenAt])
   @@index([userId, occurredOn])
+}
+
+// ── Weekly Trade Audit (Edge Review redesign) ───────────────────────────────
+//
+// A weekend review of one trading week: the trader's REAL trades (read live
+// from Trade — never copied into a second ledger) compared day by day with
+// what should have happened. See docs/WEEKLY_TRADE_AUDIT.md. Weekly only —
+// a monthly review stays a separate concept. Every row is user-owned and
+// LIVE-only (no backtest environment).
+
+enum TradeAuditStatus {
+  IN_PROGRESS
+  FINALIZED
+}
+
+// No row = NOT_STARTED; the row is created on the first save for that day.
+enum DailyTradeAuditStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+// Why a day has no trades — four genuinely different situations.
+enum NoTradeReason {
+  NO_VALID_SETUP
+  MISSED_OPPORTUNITY
+  STAYED_OUT
+  NOT_TRADING
+}
+
+// "Should this trade have been taken?" — judged against the strategy, never
+// against the outcome.
+enum TradeAuditVerdict {
+  VALID
+  INVALID
+  UNSURE
+}
+
+enum AuditInvalidReason {
+  NO_VALID_SETUP
+  EARLY_ENTRY
+  OUTSIDE_CONDITIONS
+  REVENGE
+  OVERTRADING
+  RISK_VIOLATION
+  OTHER
+}
+
+enum AuditExecutionIssue {
+  ENTRY_TIMING
+  NO_CONFIRMATION
+  STOP_PLACEMENT
+  TRADE_MANAGEMENT
+  EXIT_DECISION
+  PREMATURE_EXIT
+  INTERFERENCE
+  OTHER
+}
+
+// The underlying behavioural/strategic weakness — deliberately separate
+// from the mistake itself (the "what") and the improvement (the "next").
+enum AuditWeakness {
+  IMPATIENCE
+  FEAR_HESITATION
+  FOMO
+  REVENGE_EMOTION
+  OVERCONFIDENCE
+  LACK_OF_DISCIPLINE
+  STRATEGY_GAP
+  RISK_MANAGEMENT
+  FOCUS
+  OTHER
+}
+
+model WeeklyTradeAudit {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Monday-start week (lib/date weekStartKey), explicit start AND end.
+  weekStart DateTime @db.Date
+  weekEnd   DateTime @db.Date
+
+  // Scope. scopeKey is the normalized "<strategyId|*>|<SORTED,ASSETS|*>"
+  // and is part of the unique key, so two scopes of the same week are two
+  // audits and can never overwrite each other's work (audit finding #8).
+  strategyId   String?
+  strategy     Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  assetSymbols String[]  @default([])
+  scopeKey     String
+
+  status      TradeAuditStatus @default(IN_PROGRESS)
+  finalizedAt DateTime?
+  reopenedAt  DateTime?
+
+  // Weekly assessment — trader-edited text, prefilled from the generated summary.
+  executionSummary  String?
+  decisionSummary   String?
+  strongestArea     String?
+  biggestWeakness   String?
+  recurringPatterns String?
+  mainLesson        String?
+  nextWeekPriority  String?
+
+  // 1–5 self-ratings; null = not rated.
+  executionQualityRating  Int?
+  tradeSelectionRating    Int?
+  patienceRating          Int?
+  strategyAdherenceRating Int?
+  riskManagementRating    Int?
+  tradeManagementRating   Int?
+
+  // Deterministic weekly summary (domain/trade-audit/summary.ts), frozen at
+  // finalize so a later trade edit can never silently rewrite it.
+  summarySnapshot Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  days           DailyTradeAudit[]
+  assessments    TradeAuditAssessment[]
+  expectedTrades AuditExpectedTrade[]
+  annotations    TradeAuditAnnotation[]
+  commitments    EdgeReviewCommitment[]
+
+  @@unique([userId, weekStart, scopeKey])
+  @@index([userId, status])
+}
+
+model DailyTradeAudit {
+  id      String           @id @default(cuid())
+  userId  String
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auditId String
+  audit   WeeklyTradeAudit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  dateKey DateTime         @db.Date
+
+  status        DailyTradeAuditStatus @default(IN_PROGRESS)
+  completedAt   DateTime?
+  noTradeReason NoTradeReason?
+
+  wentWell      String?
+  wentWrong     String?
+  couldDoBetter String?
+  mainLesson    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([auditId, dateKey])
+  @@index([userId])
+}
+
+// The trader's judgment of ONE real trade within one audit. Upserted on
+// (auditId, tradeId), so re-opening a week never duplicates assessments.
+// tradeFingerprint = the decision-relevant facts when last assessed; a
+// mismatch with the live trade is surfaced as "changed since review", never
+// silently re-judged. tradeSnapshot = the display facts frozen at finalize.
+model TradeAuditAssessment {
+  id      String           @id @default(cuid())
+  userId  String
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auditId String
+  audit   WeeklyTradeAudit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  // SetNull: a hard-deleted trade leaves its assessment (and frozen snapshot)
+  // behind as history rather than erasing the review.
+  tradeId String?
+  trade   Trade?           @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+  // The trade's day when last assessed (a moved trade is detected, not followed silently).
+  dateKey DateTime         @db.Date
+
+  verdict          TradeAuditVerdict?
+  invalidReasons   AuditInvalidReason[]  @default([])
+  executionIssues  AuditExecutionIssue[] @default([])
+  executionQuality Int?
+
+  mistake            String?
+  weaknesses         AuditWeakness[] @default([])
+  underlyingWeakness String?
+  improvement        String?
+
+  tradeFingerprint String?
+  tradeSnapshot    Json?
+  assessedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([auditId, tradeId])
+  @@index([userId])
+  @@index([tradeId])
+}
+
+// A trade the trader SHOULD have taken but didn't, recorded retrospectively
+// during the review. Deliberately not a TradeOpportunity: those are live
+// records that feed missed-opportunity analytics; this is weekend hindsight
+// and is labelled as such. validityReason is required — a miss must be
+// justified by the strategy's criteria, not by where price went afterwards
+// (there is intentionally no "outcome R" field).
+model AuditExpectedTrade {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auditId   String
+  audit     WeeklyTradeAudit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  dateKey   DateTime         @db.Date
+  // Client-generated idempotency key — a double submit can't create two rows.
+  clientKey String
+
+  assetSymbol         String
+  direction           Direction
+  intendedEntry       Decimal?  @db.Decimal(18, 8)
+  stopLoss            Decimal?  @db.Decimal(18, 8)
+  target              Decimal?  @db.Decimal(18, 8)
+  intendedRiskPercent Decimal?  @db.Decimal(6, 2)
+  strategyId          String?
+  strategy            Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  setupName           String?
+  timeframe           String?
+
+  validityReason String
+  criteriaMet    String[]    @default([])
+  missReason     MissReason?
+  missNote       String?
+
+  weaknesses         AuditWeakness[] @default([])
+  underlyingWeakness String?
+  improvement        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([auditId, clientKey])
+  @@index([userId])
+  @@index([auditId, dateKey])
+}
+
+// Review-time markers drawn over a screenshot (any screenshot visible in the
+// audit, original or uploaded). Stored separately so the original image is
+// never altered; always presented as retrospective. markers =
+// [{ id, kind, x, y, note }] with x/y normalized 0–1.
+model TradeAuditAnnotation {
+  id                String           @id @default(cuid())
+  userId            String
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auditId           String
+  audit             WeeklyTradeAudit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  mediaAttachmentId String
+  markers           Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([auditId, mediaAttachmentId])
+  @@index([userId])
 }
