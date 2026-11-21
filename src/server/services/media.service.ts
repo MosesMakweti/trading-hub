@@ -145,6 +145,12 @@ export async function assertOwnsMediaTarget(
             select: { id: true },
           })),
       );
+    case "TRADE_AUDIT_ASSESSMENT":
+    case "TRADE_AUDIT_EXPECTED":
+    case "TRADE_AUDIT_DAY":
+      // Weekly Trade Audit review uploads: owned AND the audit still open
+      // (a finalized week's evidence is frozen — docs/WEEKLY_TRADE_AUDIT.md §6).
+      return (await auditOwnerStatus(userId, ownerType, ownerId)) === "OPEN";
     default: {
       // Exhaustiveness guard — a new MediaOwnerType must add a case above.
       const _never: never = ownerType;
@@ -152,6 +158,28 @@ export async function assertOwnsMediaTarget(
     }
   }
 }
+
+/**
+ * Weekly Trade Audit owner rows → whether the user owns one, and whether its
+ * audit is still open for changes. Kept here (not in trade-audit.service) so
+ * the media system has no import cycle with the audit service.
+ */
+async function auditOwnerStatus(userId: string, ownerType: MediaOwnerType, ownerId: string): Promise<"OPEN" | "FINALIZED" | "MISSING"> {
+  const where = { id: ownerId, userId };
+  const select = { audit: { select: { status: true } } } as const;
+  const row =
+    ownerType === "TRADE_AUDIT_ASSESSMENT"
+      ? await prisma.tradeAuditAssessment.findFirst({ where, select })
+      : ownerType === "TRADE_AUDIT_EXPECTED"
+        ? await prisma.auditExpectedTrade.findFirst({ where, select })
+        : ownerType === "TRADE_AUDIT_DAY"
+          ? await prisma.dailyTradeAudit.findFirst({ where, select })
+          : null;
+  if (!row) return "MISSING";
+  return row.audit.status === "FINALIZED" ? "FINALIZED" : "OPEN";
+}
+
+const AUDIT_OWNER_TYPES = new Set<MediaOwnerType>(["TRADE_AUDIT_ASSESSMENT", "TRADE_AUDIT_EXPECTED", "TRADE_AUDIT_DAY"]);
 
 /**
  * Creates the bare `MediaAsset` row for a just-saved file — no
@@ -474,6 +502,10 @@ export async function deleteMediaAttachment(
     include: { media: { select: { id: true, storageKey: true } } },
   });
   if (!attachment) throw new Error("Media not found.");
+  // Evidence on a finalized Weekly Trade Audit is frozen.
+  if (AUDIT_OWNER_TYPES.has(attachment.ownerType) && (await auditOwnerStatus(userId, attachment.ownerType, attachment.ownerId)) === "FINALIZED") {
+    throw new Error("This week is finalized. Reopen it to remove screenshots.");
+  }
 
   await deleteMediaFile(attachment.media.storageKey);
   // Deleting the asset cascades the attachment row (1 asset : 1 attachment here).

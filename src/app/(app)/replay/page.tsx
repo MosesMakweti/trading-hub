@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 
 /**
- * Stage 12.5 — Replay is no longer a standalone top-level module; it's the
- * "Replay" stage inside Edge Review. This route is kept only so old links/
- * bookmarks from Stage 12 still land somewhere sensible.
+ * Replay is no longer part of Edge Review (now the Weekly Trade Audit — see
+ * docs/WEEKLY_TRADE_AUDIT.md §7). Kept so old links still land somewhere.
  */
 export default function ReplayLandingRedirect() {
   redirect("/edge");

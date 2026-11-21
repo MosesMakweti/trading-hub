@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db";
-import { dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
+import { addDaysToKey, dateKeyToUtcDate, utcDateToKey } from "@/lib/date";
 import {
   computeAdherence,
   computeResolutionEligibility,
@@ -97,10 +97,16 @@ function evidenceDescriptionOf(evidence: Prisma.JsonValue | null): string | null
 async function ownedSession(userId: string, sessionId: string) {
   const session = await prisma.replayReviewSession.findFirst({
     where: { id: sessionId, userId },
-    select: { id: true, reviewType: true, startDate: true },
+    select: { id: true, reviewType: true, startDate: true, endDate: true },
   });
   if (!session) throw new Error("Review session not found.");
   return session;
+}
+
+/** A commitment governs the period AFTER the one it was written in
+ *  (audit finding #1) — the day after the reviewed period's end. */
+function effectiveFromFor(periodEnd: Date): Date {
+  return dateKeyToUtcDate(addDaysToKey(utcDateToKey(periodEnd), 1));
 }
 
 /**
@@ -131,6 +137,7 @@ export async function createManualCommitment(
       replayReviewSessionId: session.id,
       reviewType: session.reviewType,
       periodStart: session.startDate,
+      effectiveFrom: effectiveFromFor(session.endDate),
       category: input.category,
       title: input.title,
       description: input.description,
@@ -165,6 +172,7 @@ export async function acceptSuggestedCommitment(
       replayReviewSessionId: session.id,
       reviewType: session.reviewType,
       periodStart: session.startDate,
+      effectiveFrom: effectiveFromFor(session.endDate),
       category: input.category,
       title: input.title,
       description: input.description,
@@ -190,6 +198,13 @@ export async function updateCommitment(
  *  `retiredAt` to match; reactivating back to ACTIVE clears both (a
  *  commitment is never "completed and also currently active"). */
 export async function setCommitmentStatus(userId: string, id: string, status: EdgeReviewCommitmentStatus): Promise<void> {
+  // A commitment that was continued/refined has a successor carrying its
+  // lineage; reactivating it would give the lineage two ACTIVE heads (audit
+  // finding #4). The successor is the one to act on.
+  if (status === "ACTIVE") {
+    const successor = await prisma.edgeReviewCommitment.findFirst({ where: { userId, previousCommitmentId: id }, select: { id: true } });
+    if (successor) throw new Error("This commitment was carried forward — update its newer version instead.");
+  }
   const now = new Date();
   const result = await prisma.edgeReviewCommitment.updateMany({
     where: { id, userId },
@@ -210,21 +225,50 @@ export async function listCommitmentsForSession(userId: string, sessionId: strin
   return rows.map(toDTO);
 }
 
-async function latestFinalizedSessionId(userId: string, reviewType: ReplayReviewType): Promise<string | null> {
-  const session = await prisma.replayReviewSession.findFirst({
-    where: { userId, reviewType, reviewFinalizedAt: { not: null } },
-    orderBy: { startDate: "desc" },
-    select: { id: true },
-  });
-  return session?.id ?? null;
+/**
+ * The latest FINALIZED review of a type — a legacy Replay session
+ * (`reviewFinalizedAt`) or, for WEEKLY, a Weekly Trade Audit (`FINALIZED`).
+ * "Latest" = the most recent period; on the same period an audit wins (it is
+ * the current review surface). Its still-ACTIVE commitments are the ones
+ * Today surfaces.
+ */
+type ReviewSource = { kind: "SESSION" | "AUDIT"; id: string };
+
+async function latestFinalizedReview(userId: string, reviewType: ReplayReviewType): Promise<ReviewSource | null> {
+  const [session, audit] = await Promise.all([
+    prisma.replayReviewSession.findFirst({
+      where: { userId, reviewType, reviewFinalizedAt: { not: null } },
+      orderBy: [{ startDate: "desc" }, { reviewFinalizedAt: "desc" }],
+      select: { id: true, startDate: true },
+    }),
+    reviewType === "WEEKLY"
+      ? prisma.weeklyTradeAudit.findFirst({
+          where: { userId, status: "FINALIZED" },
+          orderBy: [{ weekStart: "desc" }, { finalizedAt: "desc" }],
+          select: { id: true, weekStart: true },
+        })
+      : Promise.resolve(null),
+  ]);
+  if (audit && (!session || audit.weekStart.getTime() >= session.startDate.getTime())) return { kind: "AUDIT", id: audit.id };
+  if (session) return { kind: "SESSION", id: session.id };
+  return null;
 }
 
-async function listActiveCommitmentsForSession(userId: string, sessionId: string): Promise<EdgeReviewCommitmentDTO[]> {
+async function latestFinalizedSessionId(userId: string, reviewType: ReplayReviewType): Promise<string | null> {
+  const source = await latestFinalizedReview(userId, reviewType);
+  return source?.kind === "SESSION" ? source.id : null;
+}
+
+async function listActiveCommitmentsForSource(userId: string, source: ReviewSource): Promise<EdgeReviewCommitmentDTO[]> {
   const rows = await prisma.edgeReviewCommitment.findMany({
-    where: { userId, replayReviewSessionId: sessionId, status: "ACTIVE" },
+    where: { userId, status: "ACTIVE", ...(source.kind === "SESSION" ? { replayReviewSessionId: source.id } : { weeklyTradeAuditId: source.id }) },
     orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
   });
   return rows.map(toDTO);
+}
+
+async function listActiveCommitmentsForSession(userId: string, sessionId: string): Promise<EdgeReviewCommitmentDTO[]> {
+  return listActiveCommitmentsForSource(userId, { kind: "SESSION", id: sessionId });
 }
 
 /**
@@ -260,13 +304,13 @@ export async function listCarryForwardCandidates(
  * separate groups, never merged (§16).
  */
 export async function getActiveCommitmentsForToday(userId: string): Promise<TodayCommitmentsDTO> {
-  const [weeklySessionId, monthlySessionId] = await Promise.all([
-    latestFinalizedSessionId(userId, "WEEKLY"),
-    latestFinalizedSessionId(userId, "MONTHLY"),
+  const [weeklySource, monthlySource] = await Promise.all([
+    latestFinalizedReview(userId, "WEEKLY"),
+    latestFinalizedReview(userId, "MONTHLY"),
   ]);
   const [weekly, monthly] = await Promise.all([
-    weeklySessionId ? listActiveCommitmentsForSession(userId, weeklySessionId) : Promise.resolve([]),
-    monthlySessionId ? listActiveCommitmentsForSession(userId, monthlySessionId) : Promise.resolve([]),
+    weeklySource ? listActiveCommitmentsForSource(userId, weeklySource) : Promise.resolve([]),
+    monthlySource ? listActiveCommitmentsForSource(userId, monthlySource) : Promise.resolve([]),
   ]);
 
   // Stage 19 §17/§27/§28 — a single continuation chain can only ever have
@@ -472,27 +516,63 @@ function jsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNu
  *  inherits the lineage root, carrying its category/source/ruleKey/evidence
  *  forward untouched (Refine only ever changes title/description/category/
  *  priority, never the rule identity a commitment was built from). */
+/** Where a continued/refined commitment lands: a legacy Replay session or a
+ *  Weekly Trade Audit. Always resolved server-side from an owned record. */
+type ContinueTarget = {
+  replayReviewSessionId: string | null;
+  weeklyTradeAuditId: string | null;
+  reviewType: ReplayReviewType;
+  startDate: Date;
+  endDate: Date;
+};
+
 async function continueOrRefine(
   userId: string,
   previousCommitmentId: string,
-  sessionId: string,
+  sessionOrTarget: string | ContinueTarget,
   overrides: { category?: EdgeReviewCommitmentCategory; title?: string; description?: string | null; priority?: EdgeReviewCommitmentPriority },
 ): Promise<EdgeReviewCommitmentDTO> {
   const previous = await prisma.edgeReviewCommitment.findFirst({ where: { id: previousCommitmentId, userId } });
   if (!previous) throw new Error("Commitment not found.");
   if (previous.status !== "ACTIVE") throw new Error("Only an active commitment can be continued.");
 
-  const session = await ownedSession(userId, sessionId);
+  const target: ContinueTarget =
+    typeof sessionOrTarget === "string"
+      ? await ownedSession(userId, sessionOrTarget).then((s) => ({
+          replayReviewSessionId: s.id,
+          weeklyTradeAuditId: null,
+          reviewType: s.reviewType,
+          startDate: s.startDate,
+          endDate: s.endDate,
+        }))
+      : sessionOrTarget;
+  // Carry-forward only moves forward in time (audit finding #5): the target
+  // period must reach past the period the commitment was written in (it may
+  // still overlap it — e.g. a weekly commitment continued into its month).
+  const governsFrom = previous.effectiveFrom ?? effectiveFromFor(previous.periodStart);
+  if (target.endDate.getTime() < governsFrom.getTime()) {
+    throw new Error("A commitment can only be carried into a later period.");
+  }
+  const session = target;
   const lineageId = effectiveLineageId(previous);
 
-  const [, created] = await prisma.$transaction([
-    prisma.edgeReviewCommitment.update({ where: { id: previous.id }, data: { status: "RETIRED", retiredAt: new Date() } }),
-    prisma.edgeReviewCommitment.create({
+  // Status-guarded retire inside one transaction: two concurrent
+  // Continue/Refine calls can't both pass, so a lineage can never end up with
+  // two ACTIVE heads (audit finding #4).
+  const created = await prisma.$transaction(async (tx) => {
+    const retired = await tx.edgeReviewCommitment.updateMany({
+      where: { id: previous.id, userId, status: "ACTIVE" },
+      data: { status: "RETIRED", retiredAt: new Date() },
+    });
+    if (retired.count === 0) throw new Error("Only an active commitment can be continued.");
+    return tx.edgeReviewCommitment.create({
       data: {
         userId,
-        replayReviewSessionId: session.id,
+        replayReviewSessionId: session.replayReviewSessionId,
+        weeklyTradeAuditId: session.weeklyTradeAuditId,
         reviewType: session.reviewType,
         periodStart: session.startDate,
+        effectiveFrom: effectiveFromFor(session.endDate),
         category: overrides.category ?? previous.category,
         title: overrides.title ?? previous.title,
         description: overrides.description !== undefined ? overrides.description : previous.description,
@@ -504,14 +584,58 @@ async function continueOrRefine(
         previousCommitmentId: previous.id,
         lineageId,
       },
-    }),
-  ]);
+    });
+  });
   return toDTO(created);
 }
 
 /** §4 "Continue" — the same objective, unchanged, carried into a new period. */
 export async function continueCommitment(userId: string, previousCommitmentId: string, sessionId: string): Promise<EdgeReviewCommitmentDTO> {
   return continueOrRefine(userId, previousCommitmentId, sessionId, {});
+}
+
+/**
+ * Weekly Trade Audit carry-forward: the still-ACTIVE commitments from the
+ * latest finalized WEEKLY review that is strictly BEFORE this week (a legacy
+ * Replay session or an earlier audit). Unlike the legacy candidates list, a
+ * later review is never offered for an earlier week (audit finding #5).
+ */
+export async function listCarryForwardForWeek(userId: string, weekStartKey: string, excludeAuditId: string | null): Promise<EdgeReviewCommitmentDTO[]> {
+  const before = dateKeyToUtcDate(weekStartKey);
+  const [session, audit] = await Promise.all([
+    prisma.replayReviewSession.findFirst({
+      where: { userId, reviewType: "WEEKLY", reviewFinalizedAt: { not: null }, startDate: { lt: before } },
+      orderBy: [{ startDate: "desc" }, { reviewFinalizedAt: "desc" }],
+      select: { id: true, startDate: true },
+    }),
+    prisma.weeklyTradeAudit.findFirst({
+      where: { userId, status: "FINALIZED", weekStart: { lt: before }, ...(excludeAuditId ? { id: { not: excludeAuditId } } : {}) },
+      orderBy: [{ weekStart: "desc" }, { finalizedAt: "desc" }],
+      select: { id: true, weekStart: true },
+    }),
+  ]);
+  const source: ReviewSource | null =
+    audit && (!session || audit.weekStart.getTime() >= session.startDate.getTime())
+      ? { kind: "AUDIT", id: audit.id }
+      : session
+        ? { kind: "SESSION", id: session.id }
+        : null;
+  return source ? listActiveCommitmentsForSource(userId, source) : [];
+}
+
+/** Continue (unchanged) or refine a commitment into a Weekly Trade Audit. */
+export async function continueCommitmentIntoAudit(
+  userId: string,
+  previousCommitmentId: string,
+  audit: { id: string; weekStart: Date; weekEnd: Date },
+  overrides: { category?: EdgeReviewCommitmentCategory; title?: string; description?: string | null; priority?: EdgeReviewCommitmentPriority } = {},
+): Promise<EdgeReviewCommitmentDTO> {
+  return continueOrRefine(
+    userId,
+    previousCommitmentId,
+    { replayReviewSessionId: null, weeklyTradeAuditId: audit.id, reviewType: "WEEKLY", startDate: audit.weekStart, endDate: audit.weekEnd },
+    overrides,
+  );
 }
 
 /** §4 "Refine" — the trader adjusts wording/scope while keeping the same
@@ -551,13 +675,42 @@ export async function refineCommitment(
 export async function syncSystemEvidenceForSession(userId: string, sessionId: string): Promise<void> {
   const session = await prisma.replayReviewSession.findFirst({
     where: { id: sessionId, userId },
-    select: { id: true, startDate: true, endDate: true },
+    select: { id: true, reviewType: true, startDate: true, endDate: true },
   });
   if (!session) return;
+  await syncSystemEvidenceForPeriod(userId, {
+    reviewType: session.reviewType,
+    startDate: utcDateToKey(session.startDate),
+    endDate: utcDateToKey(session.endDate),
+    replaySessionId: session.id,
+  });
+}
+
+/**
+ * The period-based core of automatic evidence (shared by legacy Replay
+ * finalization and Weekly Trade Audit finalization). Fixes from the Edge
+ * Review audit:
+ *  - #1: evidence is only recorded on/after a commitment's `effectiveFrom`
+ *    (the day after the period it was written in), so a commitment can never
+ *    be scored against the behaviour that triggered it;
+ *  - #7: only commitments of the SAME reviewType are touched;
+ *  - #2: a SYSTEM verdict replaces a trader's neutral ACKNOWLEDGED row for
+ *    that day (keeping their note) — a daily "seen it" tap must not hide an
+ *    actual breach. A trader's own FOLLOWED/BREACHED still always wins.
+ * Discrepancy-derived rules (stop widening, premature close, missed
+ * opportunity, behaviour label) need a Replay comparison and only run when
+ * `replaySessionId` is given.
+ */
+export async function syncSystemEvidenceForPeriod(
+  userId: string,
+  period: { reviewType: ReplayReviewType; startDate: string; endDate: string; replaySessionId?: string },
+): Promise<void> {
+  const session = { startDate: dateKeyToUtcDate(period.startDate), endDate: dateKeyToUtcDate(period.endDate) };
+  const sessionId = period.replaySessionId ?? null;
 
   const activeCommitments = await prisma.edgeReviewCommitment.findMany({
-    where: { userId, status: "ACTIVE", sourceFindingType: { not: null } },
-    select: { id: true, sourceFindingType: true, periodStart: true },
+    where: { userId, status: "ACTIVE", reviewType: period.reviewType, sourceFindingType: { not: null } },
+    select: { id: true, sourceFindingType: true, periodStart: true, effectiveFrom: true },
   });
   const automatic = activeCommitments.filter((c) => hasAutomaticEvidenceRule(c.sourceFindingType));
   if (automatic.length === 0) return;
@@ -566,13 +719,15 @@ export async function syncSystemEvidenceForSession(userId: string, sessionId: st
   const rows: PendingRow[] = [];
 
   function applyObservations(
-    commitments: { id: string; periodStart: Date }[],
+    commitments: { id: string; periodStart: Date; effectiveFrom: Date | null }[],
     observations: { dateKey: string; status: "FOLLOWED" | "BREACHED"; evidence: { description: string; category: string }; relatedTradeId: string | null }[],
   ) {
     for (const c of commitments) {
-      const periodStartKey = utcDateToKey(c.periodStart);
+      // effectiveFrom is backfilled for every pre-existing row; periodStart
+      // is only a defensive fallback.
+      const effectiveKey = utcDateToKey(c.effectiveFrom ?? c.periodStart);
       for (const o of observations) {
-        if (o.dateKey < periodStartKey) continue; // never backdate evidence to before the objective existed
+        if (o.dateKey < effectiveKey) continue; // never score a commitment before it governed (audit #1)
         rows.push({
           userId,
           commitmentId: c.id,
@@ -606,7 +761,7 @@ export async function syncSystemEvidenceForSession(userId: string, sessionId: st
   const behaviourLabelRules = automatic.filter((c) => c.sourceFindingType === "BEHAVIOUR_LABEL_PATTERN");
 
   if (stopWideningRules.length > 0 || prematureCloseRules.length > 0 || missedOpportunityRules.length > 0 || behaviourLabelRules.length > 0) {
-    const comparison = await getReplayComparison(userId, sessionId).catch(() => null);
+    const comparison = sessionId ? await getReplayComparison(userId, sessionId).catch(() => null) : null;
     if (comparison) {
       const executionEvents = comparison.discrepancy.executionDiscrepancy.events.map((e) => ({ dateKey: e.dateKey, category: e.category, description: e.description }));
       if (stopWideningRules.length > 0) applyObservations(stopWideningRules, deriveStopWideningObservations(executionEvents));
@@ -676,6 +831,16 @@ export async function syncSystemEvidenceForSession(userId: string, sessionId: st
 
   if (rows.length === 0) return;
   await prisma.edgeReviewCommitmentDailyState.createMany({ data: rows, skipDuplicates: true });
+
+  // Audit #2 — upgrade a neutral MANUAL ACKNOWLEDGED row to the observed
+  // verdict (the trader's note is kept). FOLLOWED/BREACHED self-reports and
+  // existing SYSTEM rows are never touched.
+  for (const r of rows) {
+    await prisma.edgeReviewCommitmentDailyState.updateMany({
+      where: { commitmentId: r.commitmentId, dateKey: r.dateKey, source: "MANUAL", status: "ACKNOWLEDGED" },
+      data: { status: r.status, source: "SYSTEM", evidence: r.evidence, relatedTradeId: r.relatedTradeId },
+    });
+  }
 }
 
 // ── Trade Idea contextual reminders (Stage 19.1 §3-7) ───────────────────────

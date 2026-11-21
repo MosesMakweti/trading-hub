@@ -1,135 +1,49 @@
 import { requireUser } from "@/server/guards";
-import { getWeeklyReview } from "@/server/services/edge.service";
 import { getAnalyticsFilterOptions } from "@/server/services/analytics.service";
-import {
-  buildActualBaseline,
-  findReplayReviewSessionForPeriod,
-  getHistoricalStrategyContext,
-} from "@/server/services/replay-review.service";
-import { listReplayTrades } from "@/server/services/replay-trade.service";
-import { getReplayComparison } from "@/server/services/replay-comparison.service";
-import { listMt5Imports } from "@/server/services/mt5-import.service";
-import { listStrategyVersions } from "@/server/services/strategies.service";
-import { listTradingDayKeysInRange } from "@/server/services/trading-day.service";
-import { computeReviewPeriod } from "@/domain/replay/review-period";
-import { buildActualVsReplayComparison } from "@/domain/replay-comparison/comparison";
-import { synthesizeImprovements } from "@/domain/replay-improvements/synthesis";
-import { listCarryForwardCandidates, listCommitmentsForSession } from "@/server/services/edge-review-commitment.service";
+import { getDefaultAuditWeekStart, loadAuditWorkspace } from "@/server/services/trade-audit.service";
+import { auditWeekFor, normalizeAssets } from "@/domain/trade-audit/week";
 import { isValidDateKey } from "@/lib/date";
-import { getTraderTodayKey } from "@/server/services/trader-time.service";
-import { EdgeReviewWorkspace } from "@/components/edge/edge-review-workspace";
+import { WeeklyAuditWorkspace } from "@/components/edge/audit/weekly-audit-workspace";
 import { FadeIn } from "@/components/shared/motion";
-import type { ReplayReviewType } from "@/types/replay";
 
 type Params = {
-  period?: string;
-  type?: string;
-  tab?: string;
+  week?: string;
   strategy?: string;
   assets?: string;
 };
 
 /**
- * Edge Review (Stage 12.5) — Overview / Replay / Comparison / Improvements,
- * one continuous review process over an explicit WEEKLY/MONTHLY period. The
- * period, type, and scope are all URL state (bookmarkable, shareable) so a
- * trader never has to separately "create a review" before seeing it — the
- * corresponding ReplayReviewSession (if any) is resolved automatically from
- * that exact period+scope (Stage 12.5 §7-8).
+ * Edge Review — the Weekly Trade Audit (docs/WEEKLY_TRADE_AUDIT.md).
+ *
+ * The week and scope live in the URL (bookmarkable). With no `week`, the page
+ * opens the most recently COMPLETED trading week, because this is a weekend
+ * review. Any date in a week resolves to that week's Monday. Nothing is
+ * created just by opening a week: the audit row appears on the first save.
  */
-export default async function EdgeReviewPage({
-  searchParams,
-}: {
-  searchParams: Promise<Params>;
-}) {
+export default async function EdgeReviewPage({ searchParams }: { searchParams: Promise<Params> }) {
   const user = await requireUser();
   const params = await searchParams;
 
-  const reviewType: ReplayReviewType = params.type === "MONTHLY" ? "MONTHLY" : "WEEKLY";
-  const anchor = params.period && isValidDateKey(params.period) ? params.period : await getTraderTodayKey(user.id);
-  const { startDate, endDate } = computeReviewPeriod(reviewType, anchor);
-
-  const strategyId = params.strategy || null;
-  const assetSymbols = params.assets ? params.assets.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean) : [];
-
-  const [filterOptions, weeklyReviewRow, session, mt5Imports] = await Promise.all([
+  const [{ weekStart: defaultWeek, todayKey }, filterOptions] = await Promise.all([
+    getDefaultAuditWeekStart(user.id),
     getAnalyticsFilterOptions(user.id),
-    getWeeklyReview(user.id, startDate, reviewType),
-    findReplayReviewSessionForPeriod(user.id, { reviewType, startDate, endDate, strategyId, assetSymbols }),
-    listMt5Imports(user.id),
   ]);
-  // Edge Review Replay Data Source §9 hardening — the first-fetch gate
-  // (ReplayMarketPanel) only needs to pause for an asset the trader
-  // actually has SOME MT5 data for; without this, a trader with a single
-  // unrelated-symbol import would be prompted for every asset they review,
-  // not just the one(s) that could plausibly use it.
-  const mt5ImportedSymbols = [...new Set(mt5Imports.map((i) => i.canonicalSymbol))];
+  const weekStart = params.week && isValidDateKey(params.week) ? auditWeekFor(params.week).weekStart : defaultWeek;
 
-  const [baseline, historicalStrategyContext, dailyPlanDateKeys, replayTrades, comparisonFromService] = await Promise.all([
-    session?.actualBaselineSnapshot
-      ? Promise.resolve(session.actualBaselineSnapshot)
-      : buildActualBaseline(user.id, { startDate, endDate, strategyId, assetSymbols }),
-    strategyId
-      ? listStrategyVersions(user.id, strategyId).then((versions) =>
-          versions[0] ? getHistoricalStrategyContext(user.id, strategyId, versions[0].version) : null,
-        )
-      : Promise.resolve(null),
-    listTradingDayKeysInRange(user.id, startDate, endDate),
-    session ? listReplayTrades(user.id, session.id) : Promise.resolve([]),
-    session ? getReplayComparison(user.id, session.id) : Promise.resolve(null),
-  ]);
+  // Only strategies the user owns are honoured; anything else falls back to "All".
+  const strategyId = params.strategy && filterOptions.strategies.some((s) => s.id === params.strategy) ? params.strategy : null;
+  const assetSymbols = normalizeAssets(params.assets ? params.assets.split(",").slice(0, 30) : []);
 
-  const isLive = session?.actualBaselineSnapshot == null;
-  // Comparison (Stage 15, upgraded Stage 15.1, completed Stage 15.2) —
-  // `getReplayComparison` already wires the frozen baseline + ReplayTrade
-  // list + manual links + missed-opportunity confirmations + session status
-  // together; for a not-yet-started review (no session/baseline frozen yet)
-  // fall back to the pure builder directly against the live preview
-  // baseline, with no matches to speak of yet.
-  const comparison = comparisonFromService ?? buildActualVsReplayComparison(baseline, replayTrades, [], [], new Map(), "DRAFT");
-  // Improvements (Stage 16) — findings/suggestions are DERIVED, never
-  // persisted (see synthesis.ts's own doc comment); commitments are the one
-  // durable record, fetched per-session.
-  const [improvementsSynthesis, commitments, carryForwardCandidates] = await Promise.all([
-    Promise.resolve(synthesizeImprovements(comparison)),
-    session ? listCommitmentsForSession(user.id, session.id) : Promise.resolve([]),
-    listCarryForwardCandidates(user.id, reviewType, session?.id ?? null),
-  ]);
-
-  const validTab = ["overview", "replay", "comparison", "improvements", "analyst"] as const;
-  const initialTab = validTab.includes(params.tab as (typeof validTab)[number])
-    ? (params.tab as (typeof validTab)[number])
-    : "overview";
+  const workspace = await loadAuditWorkspace(user.id, { weekStart, strategyId, assetSymbols });
 
   return (
-    <FadeIn className="mx-auto max-w-5xl">
-      <EdgeReviewWorkspace
-        reviewType={reviewType}
-        period={anchor}
-        startDate={startDate}
-        endDate={endDate}
-        session={session}
-        baseline={baseline}
-        isLive={isLive}
-        historicalStrategyContext={historicalStrategyContext}
-        dailyPlanDateKeys={dailyPlanDateKeys}
-        replayTradeCount={replayTrades.length}
-        replayTrades={replayTrades}
-        comparison={comparison}
-        improvementsSynthesis={improvementsSynthesis}
-        commitments={commitments}
-        carryForwardCandidates={carryForwardCandidates}
-        weeklyReview={{
-          wentWell: weeklyReviewRow?.wentWell ?? null,
-          toImprove: weeklyReviewRow?.toImprove ?? null,
-          focusNextWeek: weeklyReviewRow?.focusNextWeek ?? null,
-        }}
+    <FadeIn className="mx-auto max-w-7xl">
+      <WeeklyAuditWorkspace
+        workspace={workspace}
+        defaultWeekStart={defaultWeek}
+        todayKey={todayKey}
         strategies={filterOptions.strategies}
         assets={filterOptions.assets}
-        strategyId={strategyId}
-        assetSymbols={assetSymbols}
-        initialTab={initialTab}
-        mt5ImportedSymbols={mt5ImportedSymbols}
       />
     </FadeIn>
   );
