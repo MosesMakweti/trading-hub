@@ -1,6 +1,8 @@
 # Simulation Platform — Architecture Assessment & Plan
 
-**Status:** Phases 1–5 built and tested; Phase 6 (integration, docs) in progress.
+**Status:** Phases 1–6 built, tested and live. The terminal's charting
+workspace, drawings and Traditorium Script are documented in
+[CHARTING_AND_SCRIPTING.md](./CHARTING_AND_SCRIPTING.md).
 The "As built" section at the end describes what exists now; sections 1–9 are
 the original assessment and plan, kept for the record.
 **Scope:** Turning Backtesting into an independent trading simulation

@@ -109,6 +109,8 @@ model User {
   simStudies              SimStudy[]
   simFirmModels           SimFirmModel[]
   simChallenges           SimChallenge[]
+  chartWorkspaces         ChartWorkspace[]
+  userScripts             UserScript[]
   historicalImportUploads HistoricalImportUpload[]
 }
 
@@ -5095,11 +5097,11 @@ model SimAccount {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  product     SimProduct
-  kind        SimAccountKind
-  name        String
-  description String?
-  status      SimAccountStatus @default(CREATED)
+  product      SimProduct
+  kind         SimAccountKind
+  name         String
+  description  String?
+  status       SimAccountStatus @default(CREATED)
   statusReason String?
 
   currency        String  @default("USD")
@@ -5143,15 +5145,16 @@ model SimAccount {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  pins      SimDatasetPin[]
-  orders    SimOrder[]
-  positions SimPosition[]
-  fills     SimFill[]
-  ledger    SimLedgerEntry[]
-  events    SimEvent[]
-  observations SimObservation[]
-  breach       SimBreach?
-  payouts      SimPayout[]
+  pins          SimDatasetPin[]
+  orders        SimOrder[]
+  positions     SimPosition[]
+  fills         SimFill[]
+  ledger        SimLedgerEntry[]
+  events        SimEvent[]
+  observations  SimObservation[]
+  chartDrawings SimChartDrawing[]
+  breach        SimBreach?
+  payouts       SimPayout[]
 
   @@unique([challengeId, phaseIndex])
   @@index([userId, product, status])
@@ -5181,22 +5184,22 @@ model SimOrder {
   accountId String
   account   SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
-  symbol     String
-  side       SimSide
-  type       SimOrderType
-  status     SimOrderStatus @default(PENDING)
+  symbol            String
+  side              SimSide
+  type              SimOrderType
+  status            SimOrderStatus @default(PENDING)
   /// Prices in the dataset's integer points (price × 10^priceScale).
-  pricePoints Int?
-  stopLoss    Int?
-  takeProfit  Int?
-  priceScale  Int
-  quantity    Decimal @db.Decimal(24, 10)
+  pricePoints       Int?
+  stopLoss          Int?
+  takeProfit        Int?
+  priceScale        Int
+  quantity          Decimal        @db.Decimal(24, 10)
   /// Sizing inputs when sized by risk (null when a fixed quantity was entered).
-  riskPercent  Decimal? @db.Decimal(6, 3)
-  intendedRisk Decimal? @db.Decimal(14, 2)
+  riskPercent       Decimal?       @db.Decimal(6, 3)
+  intendedRisk      Decimal?       @db.Decimal(14, 2)
   /// Frozen economics: account value of a 1.0 price move per quantity unit, and the conversion used.
-  valuePerPriceUnit Decimal @db.Decimal(30, 12)
-  conversionRate    Decimal @db.Decimal(30, 12)
+  valuePerPriceUnit Decimal        @db.Decimal(30, 12)
+  conversionRate    Decimal        @db.Decimal(30, 12)
   specSnapshot      Json
 
   placedMinute    Int
@@ -5239,14 +5242,14 @@ model SimPosition {
   conversionRate    Decimal           @db.Decimal(30, 12)
   specSnapshot      Json
 
-  openedMinute Int
-  closedMinute Int?
-  realizedPnl  Decimal @default(0) @db.Decimal(14, 2)
-  commissions  Decimal @default(0) @db.Decimal(14, 2)
-  swaps        Decimal @default(0) @db.Decimal(14, 2)
-  closeReason  SimFillReason?
+  openedMinute  Int
+  closedMinute  Int?
+  realizedPnl   Decimal        @default(0) @db.Decimal(14, 2)
+  commissions   Decimal        @default(0) @db.Decimal(14, 2)
+  swaps         Decimal        @default(0) @db.Decimal(14, 2)
+  closeReason   SimFillReason?
   /// An exit where one bar reached both stop and target (stop assumed first).
-  ambiguousExit Boolean @default(false)
+  ambiguousExit Boolean        @default(false)
   note          String?
 
   createdAt DateTime @default(now())
@@ -5273,12 +5276,12 @@ model SimFill {
   reason      SimFillReason
   minute      Int
   pricePoints Int
-  quantity    Decimal @db.Decimal(24, 10)
-  grossPnl    Decimal @default(0) @db.Decimal(14, 2)
-  commission  Decimal @default(0) @db.Decimal(14, 2)
-  gapped      Boolean @default(false)
-  ambiguous   Boolean @default(false)
-  createdAt   DateTime @default(now())
+  quantity    Decimal       @db.Decimal(24, 10)
+  grossPnl    Decimal       @default(0) @db.Decimal(14, 2)
+  commission  Decimal       @default(0) @db.Decimal(14, 2)
+  gapped      Boolean       @default(false)
+  ambiguous   Boolean       @default(false)
+  createdAt   DateTime      @default(now())
 
   @@unique([positionId, sequence])
   @@index([accountId, minute])
@@ -5411,14 +5414,14 @@ model SimObservation {
   positionId String?
   position   SimPosition? @relation(fields: [positionId], references: [id], onDelete: SetNull)
 
-  kind      SimObservationKind
-  symbol    String
+  kind          SimObservationKind
+  symbol        String
   /// Replay time it was observed at (broker minute).
-  minute    Int
-  timeframe String?
+  minute        Int
+  timeframe     String?
   /// NOT_TRADED / MISSED only: the trader's own read of what happened and its R (self-reported).
-  outcome   SimObservationOutcome?
-  selfReportedR Decimal? @db.Decimal(8, 2)
+  outcome       SimObservationOutcome?
+  selfReportedR Decimal?               @db.Decimal(8, 2)
 
   setupTags        String[] @default([])
   confirmationTags String[] @default([])
@@ -5448,16 +5451,16 @@ enum SimChallengeStatus {
 /// `definition` is a validated FirmModel; editing bumps `version` and never
 /// touches challenges, which keep their own snapshot.
 model SimFirmModel {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   firmName   String
   modelName  String
   definition Json
-  version    Int      @default(1)
+  version    Int       @default(1)
   archivedAt DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   challenges SimChallenge[]
 
@@ -5480,17 +5483,17 @@ model SimChallenge {
   /// Frozen FirmModel at purchase.
   definitionSnapshot Json
 
-  accountSize Decimal            @db.Decimal(14, 2)
+  accountSize       Decimal            @db.Decimal(14, 2)
   /// Simulated fee — recorded for history and analytics; no real payment.
-  fee         Decimal            @db.Decimal(14, 2)
-  currency    String
-  status      SimChallengeStatus @default(IN_EVALUATION)
+  fee               Decimal            @db.Decimal(14, 2)
+  currency          String
+  status            SimChallengeStatus @default(IN_EVALUATION)
   /// Stage currently being traded (0-based; == phases.length means funded).
-  currentPhaseIndex Int          @default(0)
+  currentPhaseIndex Int                @default(0)
   /// Market data and the historical period the challenge plays through.
-  datasets    Json
-  periodStart DateTime @db.Date
-  periodEnd   DateTime @db.Date
+  datasets          Json
+  periodStart       DateTime           @db.Date
+  periodEnd         DateTime           @db.Date
 
   purchasedAt DateTime  @default(now())
   fundedAt    DateTime?
@@ -5504,23 +5507,23 @@ model SimChallenge {
 
 /// The breach report of an account (at most one: a breach ends trading).
 model SimBreach {
-  id            String     @id @default(cuid())
-  userId        String
-  accountId     String     @unique
-  account       SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  rule          String
-  minute        Int
-  balance       Decimal    @db.Decimal(14, 2)
-  equity        Decimal    @db.Decimal(14, 2)
+  id               String     @id @default(cuid())
+  userId           String
+  accountId        String     @unique
+  account          SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  rule             String
+  minute           Int
+  balance          Decimal    @db.Decimal(14, 2)
+  equity           Decimal    @db.Decimal(14, 2)
   /// The value compared with the floor (balance, or the minute's worst-price equity).
-  measured      Decimal    @db.Decimal(14, 2)
-  floor         Decimal?   @db.Decimal(14, 2)
-  basis         String?
-  detail        String
+  measured         Decimal    @db.Decimal(14, 2)
+  floor            Decimal?   @db.Decimal(14, 2)
+  basis            String?
+  detail           String
   /// Positions open at the breach and closed that trading day (ids, symbols, PnL).
-  contributors  Json
+  contributors     Json
   floatingInvolved Boolean
-  createdAt     DateTime   @default(now())
+  createdAt        DateTime   @default(now())
 }
 
 /// A funded-account payout (one ledger PAYOUT_WITHDRAWAL each).
@@ -5541,4 +5544,72 @@ model SimPayout {
   createdAt      DateTime   @default(now())
 
   @@unique([accountId, sequence])
+}
+
+// ── Charting workspace & Traditorium Script ────────────────────────────────
+// Per-user chart workspace (panel layout, chart layouts, indicators, chart
+// settings). `key` scopes it: "sim" for the simulation terminal, or a named
+// preset ("preset:<name>"). `data` is validated by lib/validation/charting.
+model ChartWorkspace {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String
+  data      Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@unique([userId, key])
+}
+
+// A user's Traditorium Script (Pine-style subset). Source is untrusted text:
+// it is only ever parsed and interpreted in the browser sandbox, never run on
+// the server. Each save creates an immutable version.
+model UserScript {
+  id         String              @id @default(cuid())
+  userId     String
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  /// "indicator" | "strategy" — from the declaration at the last save
+  kind       String              @default("indicator")
+  source     String
+  version    Int                 @default(1)
+  archivedAt DateTime?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  versions   UserScriptVersion[]
+
+  @@index([userId, archivedAt])
+}
+
+model UserScriptVersion {
+  id        String     @id @default(cuid())
+  scriptId  String
+  script    UserScript @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  version   Int
+  source    String
+  note      String?
+  createdAt DateTime   @default(now())
+
+  @@unique([scriptId, version])
+}
+
+// Chart drawings on a simulation account (Strategy Lab / Prop Firm terminal),
+// per instrument. Anchors are broker wall-clock minutes + prices.
+model SimChartDrawing {
+  id          String     @id
+  userId      String
+  accountId   String
+  account     SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  assetSymbol String
+  type        String
+  anchors     Json
+  style       Json
+  data        Json       @default("{}")
+  locked      Boolean    @default(false)
+  hidden      Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([accountId, assetSymbol])
 }

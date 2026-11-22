@@ -2,6 +2,14 @@
 
 import {
   ArrowRightToLine,
+  CalendarRange,
+  Circle,
+  Crosshair,
+  GitFork,
+  ChartSpline,
+  Triangle,
+  UnfoldVertical,
+  ChartNoAxesColumnIncreasing,
   ArrowUpRight,
   ChartNoAxesGantt,
   Layers,
@@ -44,14 +52,23 @@ export const TOOL_ICONS: Record<DrawingType, LucideIcon> = {
   FIB: ChartNoAxesGantt,
   LONG: TrendingUp,
   SHORT: TrendingDown,
+  FIB_EXT: ChartNoAxesColumnIncreasing,
+  PITCHFORK: GitFork,
+  TRIANGLE: Triangle,
+  ELLIPSE: Circle,
+  DATE_RANGE: CalendarRange,
+  PRICE_RANGE: UnfoldVertical,
+  REGRESSION: ChartSpline,
+  CROSS: Crosshair,
 };
 
 const GROUPS: { label: string; tools: DrawingType[] }[] = [
-  { label: "Lines", tools: ["TREND", "HLINE", "HRAY", "VLINE", "RAY", "EXTENDED"] },
-  { label: "Shapes", tools: ["RECT", "CHANNEL"] },
-  { label: "Fibonacci", tools: ["FIB"] },
+  { label: "Lines", tools: ["TREND", "HLINE", "HRAY", "VLINE", "CROSS", "RAY", "EXTENDED"] },
+  { label: "Channels & pitchforks", tools: ["CHANNEL", "REGRESSION", "PITCHFORK"] },
+  { label: "Shapes", tools: ["RECT", "ELLIPSE", "TRIANGLE"] },
+  { label: "Fibonacci", tools: ["FIB", "FIB_EXT"] },
   { label: "Annotations", tools: ["TEXT", "ARROW", "PRICE_LABEL"] },
-  { label: "Measure", tools: ["RULER"] },
+  { label: "Measure", tools: ["RULER", "DATE_RANGE", "PRICE_RANGE"] },
 ];
 
 const tip = (t: DrawingType) => `${TOOLS[t].label}${TOOLS[t].shortcut ? ` (${TOOLS[t].shortcut})` : ""}`;

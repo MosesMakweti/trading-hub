@@ -30,6 +30,14 @@ export const DRAWING_TYPES = [
   "FIB",
   "LONG",
   "SHORT",
+  "FIB_EXT",
+  "PITCHFORK",
+  "TRIANGLE",
+  "ELLIPSE",
+  "DATE_RANGE",
+  "PRICE_RANGE",
+  "REGRESSION",
+  "CROSS",
 ] as const;
 
 export type DrawingType = (typeof DRAWING_TYPES)[number];
@@ -99,6 +107,14 @@ export const TOOLS: Record<DrawingType, ToolMeta> = {
   FIB: { label: "Fibonacci retracement", anchors: 2, shortcut: "Alt+F", group: "fib" },
   LONG: { label: "Long position", anchors: 1, shortcut: "Alt+L", group: "trade" },
   SHORT: { label: "Short position", anchors: 1, shortcut: "Alt+S", group: "trade" },
+  FIB_EXT: { label: "Fibonacci extension", anchors: 3, group: "fib" },
+  PITCHFORK: { label: "Pitchfork", anchors: 3, group: "lines" },
+  TRIANGLE: { label: "Triangle", anchors: 3, group: "shapes" },
+  ELLIPSE: { label: "Ellipse", anchors: 2, group: "shapes" },
+  DATE_RANGE: { label: "Date range", anchors: 2, group: "measure" },
+  PRICE_RANGE: { label: "Price range", anchors: 2, group: "measure" },
+  REGRESSION: { label: "Regression channel", anchors: 2, group: "lines" },
+  CROSS: { label: "Cross line", anchors: 1, shortcut: "Alt+C", group: "lines" },
 };
 
 /** Stored anchor count per type (positions keep a left/right time span). */
@@ -107,13 +123,18 @@ export function storedAnchorCount(type: DrawingType): number {
 }
 
 export const DEFAULT_FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+/** Trend-based extension ratios (projected from C by the A→B move). */
+export const DEFAULT_FIB_EXT_LEVELS = [0, 0.618, 1, 1.272, 1.618, 2, 2.618];
 
 /** Restrained palette (hex — the chart's canvas parser rejects CSS Color 4). */
 export const DRAWING_COLORS = ["#8ab4f8", "#e0b35b", "#c4655f", "#4f9d86", "#b39ddb", "#d0d3da"] as const;
 
 export function defaultStyle(type: DrawingType): DrawingStyle {
   if (type === "RECT") return { color: "#8ab4f8", width: 1, dash: "solid", opacity: 0.9 };
-  if (type === "FIB") return { color: "#e0b35b", width: 1, dash: "solid", opacity: 0.9 };
+  if (type === "FIB" || type === "FIB_EXT") return { color: "#e0b35b", width: 1, dash: "solid", opacity: 0.9 };
+  if (type === "ELLIPSE" || type === "TRIANGLE") return { color: "#b39ddb", width: 1, dash: "solid", opacity: 0.9 };
+  if (type === "DATE_RANGE" || type === "PRICE_RANGE") return { color: "#8ab4f8", width: 1, dash: "solid", opacity: 0.9 };
+  if (type === "REGRESSION") return { color: "#4f9d86", width: 1, dash: "solid", opacity: 0.9 };
   if (type === "RULER") return { color: "#d0d3da", width: 1, dash: "dashed", opacity: 0.9 };
   return { color: "#8ab4f8", width: 2, dash: "solid", opacity: 1 };
 }
