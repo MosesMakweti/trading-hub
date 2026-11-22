@@ -83,7 +83,7 @@ export function parse(source: string): Program {
 
   function ifChain(): { cond: Expr | null; body: Stmt[] }[] {
     eat("kw", "if");
-    const branches = [{ cond: expr(), body: block() }];
+    const branches: { cond: Expr | null; body: Stmt[] }[] = [{ cond: expr(), body: block() }];
     skipNewlines();
     while (at("kw", "else")) {
       p++;

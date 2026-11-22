@@ -226,8 +226,8 @@ export function rangeBars(candles: OhlcCandle[], range: number): ChartCandle[] {
       if (!cur) cur = { time: at(c.time, k++), open: p, high: p, low: p, close: p, sourceMinute: c.time, synthetic: true, forming: true };
       let price = p;
       while (Math.max(cur.high, price) - Math.min(cur.low, price) > range) {
-        const up = price > cur.open;
-        const end = up ? cur.low + range : cur.high - range;
+        const up: boolean = price > cur.open;
+        const end: number = up ? cur.low + range : cur.high - range;
         cur.high = Math.max(cur.high, end);
         cur.low = Math.min(cur.low, end);
         cur.close = end;
