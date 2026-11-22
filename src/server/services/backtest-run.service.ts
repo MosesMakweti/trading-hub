@@ -19,7 +19,7 @@ import { captureStrategySnapshot } from "@/server/services/strategies.service";
 import { backtestScope, runInWorkspaceScope } from "@/server/workspace/scope";
 import { assertDatabaseSeesScope } from "@/server/workspace/scope-tripwire";
 import type { CreateBacktestRunInput } from "@/lib/validation/backtesting";
-import type { BacktestRunOverviewDTO, BacktestRunStatusValue } from "@/types/backtesting";
+import type { BacktestRunDetailDTO, BacktestRunOverviewDTO, BacktestRunStatusValue } from "@/types/backtesting";
 
 /**
  * Backtesting (Stage 1) — Backtest Run ownership and scope entry.
@@ -141,16 +141,6 @@ export async function runInBacktestRun<T>(
   });
 }
 
-/** Records the resume pointer (server-side, never only browser state). */
-export async function touchBacktestRunSession(userId: string, runId: string, dateKey: string): Promise<void> {
-  const run = await requireBacktestRun(userId, runId);
-  assertDateWithinRun(run, dateKey);
-  await prisma.backtestRun.update({
-    where: { id: run.id },
-    data: { lastSessionDate: dateKeyToUtcDate(dateKey), lastActiveAt: new Date() },
-  });
-}
-
 /** Records the resume pointer only for a run that's still in progress —
  *  viewing a completed or archived run never moves its historical position. */
 export async function recordBacktestPosition(userId: string, runId: string, dateKey: string): Promise<boolean> {
@@ -168,51 +158,28 @@ export async function recordBacktestPosition(userId: string, runId: string, date
 // ── Overview (Stage 2) ──────────────────────────────────────────────────────
 
 /**
- * Builds overview DTOs for many runs with a fixed number of queries
- * regardless of run count: one for completed days, one grouped count each for
- * executed and missed trades, and one strategy snapshot capture per DISTINCT
- * live strategy (for the drift indicator). These queries name
- * `backtestRunId` explicitly, which is the deliberate cross-run override of
- * the workspace-scope extension; `groupBy` isn't covered by the soft-delete
- * extension, so `deletedAt: null` is explicit too.
+ * Builds run DETAIL DTOs (everything but trade statistics) for many runs with
+ * a fixed number of queries regardless of run count: one for completed days
+ * and one strategy snapshot capture per DISTINCT live strategy (for the drift
+ * indicator). Deliberately loads no trades — this backs the per-request
+ * ownership gate of every run page. The completed-days query names
+ * `backtestRunId` explicitly, the deliberate cross-run override of the
+ * workspace-scope extension.
  */
-async function buildOverviews(userId: string, runs: BacktestRun[]): Promise<BacktestRunOverviewDTO[]> {
+async function buildDetails(userId: string, runs: BacktestRun[]): Promise<BacktestRunDetailDTO[]> {
   if (runs.length === 0) return [];
   const runIds = runs.map((r) => r.id);
 
-  const [completedDays, tradeRecords, missed] = await Promise.all([
-    prisma.tradingDay.findMany({
-      where: { userId, backtestRunId: { in: runIds }, status: "ARCHIVED" },
-      select: { backtestRunId: true, date: true },
-    }),
-    // One batched canonical load for every run (explicit backtestRunId = the
-    // deliberate cross-run override), mapped through the SAME canonical row
-    // builder + price-derived settlement as Backtesting Analytics.
-    prisma.trade.findMany({
-      where: { userId, backtestRunId: { in: runIds } },
-      include: canonicalTradeInclude,
-      orderBy: [{ tradeDate: "asc" }, { executionMinutes: "asc" }],
-    }),
-    prisma.tradeOpportunity.groupBy({
-      by: ["backtestRunId"],
-      where: { userId, backtestRunId: { in: runIds }, deletedAt: null, status: "MISSED" },
-      _count: { _all: true },
-    }),
-  ]);
-
+  const completedDays = await prisma.tradingDay.findMany({
+    where: { userId, backtestRunId: { in: runIds }, status: "ARCHIVED" },
+    select: { backtestRunId: true, date: true },
+  });
   const completedByRun = new Map<string, string[]>();
   for (const d of completedDays) {
     const list = completedByRun.get(d.backtestRunId!) ?? [];
     list.push(utcDateToKey(d.date));
     completedByRun.set(d.backtestRunId!, list);
   }
-  const rowsByRun = new Map<string, CanonicalAnalyticsTradeRow[]>();
-  for (const t of tradeRecords) {
-    const list = rowsByRun.get(t.backtestRunId!) ?? [];
-    list.push(toCanonicalRow(t, "PRICE_DERIVED"));
-    rowsByRun.set(t.backtestRunId!, list);
-  }
-  const missedByRun = new Map(missed.map((g) => [g.backtestRunId!, g._count._all]));
 
   const strategyIds = [...new Set(runs.map((r) => r.strategyId).filter((id): id is string => id != null))];
   const currentSnapshots = new Map(
@@ -247,7 +214,6 @@ async function buildOverviews(userId: string, runs: BacktestRun[]): Promise<Back
       currentPositionDateKey: position,
       resumeDateKey: resumeDateKey(period, position, position != null && completed.includes(position)),
       lastActiveAt: run.lastActiveAt?.toISOString() ?? null,
-      stats: runStats(rowsByRun.get(run.id) ?? [], missedByRun.get(run.id) ?? 0),
       simulation: {
         startingBalance: run.startingBalance?.toNumber() ?? null,
         riskPercentPerTrade: run.riskPercentPerTrade?.toNumber() ?? null,
@@ -257,6 +223,48 @@ async function buildOverviews(userId: string, runs: BacktestRun[]): Promise<Back
       archivedAt: run.archivedAt?.toISOString() ?? null,
     };
   });
+}
+
+/**
+ * Builds Overview DTOs (detail + trade statistics) for many runs with a fixed
+ * number of queries regardless of run count: the detail queries above, one
+ * batched canonical trade load and one grouped missed-trade count. These
+ * queries name `backtestRunId` explicitly (the deliberate cross-run
+ * override); `groupBy` isn't covered by the soft-delete extension, so
+ * `deletedAt: null` is explicit too.
+ */
+async function buildOverviews(userId: string, runs: BacktestRun[]): Promise<BacktestRunOverviewDTO[]> {
+  if (runs.length === 0) return [];
+  const runIds = runs.map((r) => r.id);
+
+  const [details, tradeRecords, missed] = await Promise.all([
+    buildDetails(userId, runs),
+    // One batched canonical load for every run, mapped through the SAME
+    // canonical row builder + price-derived settlement as Backtesting Analytics.
+    prisma.trade.findMany({
+      where: { userId, backtestRunId: { in: runIds } },
+      include: canonicalTradeInclude,
+      orderBy: [{ tradeDate: "asc" }, { executionMinutes: "asc" }],
+    }),
+    prisma.tradeOpportunity.groupBy({
+      by: ["backtestRunId"],
+      where: { userId, backtestRunId: { in: runIds }, deletedAt: null, status: "MISSED" },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const rowsByRun = new Map<string, CanonicalAnalyticsTradeRow[]>();
+  for (const t of tradeRecords) {
+    const list = rowsByRun.get(t.backtestRunId!) ?? [];
+    list.push(toCanonicalRow(t, "PRICE_DERIVED"));
+    rowsByRun.set(t.backtestRunId!, list);
+  }
+  const missedByRun = new Map(missed.map((g) => [g.backtestRunId!, g._count._all]));
+
+  return details.map((detail) => ({
+    ...detail,
+    stats: runStats(rowsByRun.get(detail.id) ?? [], missedByRun.get(detail.id) ?? 0),
+  }));
 }
 
 function runStats(rows: CanonicalAnalyticsTradeRow[], missedTrades: number): BacktestRunOverviewDTO["stats"] {
@@ -271,7 +279,6 @@ function runStats(rows: CanonicalAnalyticsTradeRow[], missedTrades: number): Bac
   };
 }
 
-/** Every run the user owns, most recently worked-on first. */
 /** The most recently worked-on ACTIVE run — what the Backtesting nav links
  *  Session/Journal/Analytics to outside a run's own pages. */
 export async function getCurrentActiveRunId(userId: string): Promise<string | null> {
@@ -283,12 +290,22 @@ export async function getCurrentActiveRunId(userId: string): Promise<string | nu
   return run?.id ?? null;
 }
 
+/** Every run the user owns, most recently worked-on first. */
 export async function listBacktestRunOverviews(userId: string): Promise<BacktestRunOverviewDTO[]> {
   const runs = await prisma.backtestRun.findMany({
     where: { userId },
     orderBy: [{ lastActiveAt: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }],
   });
   return buildOverviews(userId, runs);
+}
+
+/** One owned run's detail (no trade statistics) — the cheap gate for run
+ *  pages. Null when the run doesn't exist or isn't the user's. */
+export async function getBacktestRunDetail(userId: string, runId: string): Promise<BacktestRunDetailDTO | null> {
+  const run = await getBacktestRun(userId, runId);
+  if (!run) return null;
+  const [detail] = await buildDetails(userId, [run]);
+  return detail;
 }
 
 export async function getBacktestRunOverview(userId: string, runId: string): Promise<BacktestRunOverviewDTO | null> {

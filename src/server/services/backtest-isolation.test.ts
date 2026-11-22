@@ -17,7 +17,7 @@ import {
   BacktestRunNotFoundError,
   createBacktestRun,
   runInBacktestRun,
-  touchBacktestRunSession,
+  recordBacktestPosition,
   BacktestDateOutOfRangeError,
 } from "@/server/services/backtest-run.service";
 import { backtestScope, runInWorkspaceScope, runUnscoped } from "@/server/workspace/scope";
@@ -366,10 +366,10 @@ describe("Historical context — the simulation date is the effective date", () 
   });
 
   it("the resume pointer is stored server-side and stays inside the run", async () => {
-    await touchBacktestRunSession(userId, runId, "2024-05-14");
+    expect(await recordBacktestPosition(userId, runId, "2024-05-14")).toBe(true);
     const run = await prisma.backtestRun.findUniqueOrThrow({ where: { id: runId } });
     expect(run.lastSessionDate?.toISOString().slice(0, 10)).toBe("2024-05-14");
-    await expect(touchBacktestRunSession(userId, runId, "2024-07-01")).rejects.toBeInstanceOf(BacktestDateOutOfRangeError);
+    await expect(recordBacktestPosition(userId, runId, "2024-07-01")).rejects.toBeInstanceOf(BacktestDateOutOfRangeError);
   });
 });
 

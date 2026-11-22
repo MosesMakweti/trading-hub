@@ -23,6 +23,13 @@ function toUserError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Server-action arguments are untrusted: a run id must be a plain, bounded string. */
+function isRunId(runId: unknown): runId is string {
+  return typeof runId === "string" && runId.length > 0 && runId.length <= 64;
+}
+
+const INVALID_RUN = { success: false as const, error: "Backtest run not found." };
+
 function revalidateRun(runId: string) {
   revalidatePath("/backtesting");
   revalidatePath(`/backtesting/${runId}`, "layout");
@@ -43,8 +50,9 @@ export async function createBacktestRunAction(input: unknown): Promise<CreateRes
   }
 }
 
-export async function setBacktestRunStatusAction(runId: string, status: unknown): Promise<ActionResult> {
+export async function setBacktestRunStatusAction(runId: unknown, status: unknown): Promise<ActionResult> {
   const user = await requireUser();
+  if (!isRunId(runId)) return INVALID_RUN;
   const parsed = backtestRunStatusSchema.safeParse(status);
   if (!parsed.success) return { success: false, error: "Invalid status." };
   try {
@@ -57,9 +65,10 @@ export async function setBacktestRunStatusAction(runId: string, status: unknown)
 }
 
 export async function deleteBacktestRunAction(
-  runId: string,
+  runId: unknown,
 ): Promise<{ success: true; storageCleanupFailures: number } | { success: false; error: string }> {
   const user = await requireUser();
+  if (!isRunId(runId)) return INVALID_RUN;
   try {
     const result = await backtestRunService.deleteBacktestRun(user.id, runId);
     revalidatePath("/backtesting");
@@ -71,9 +80,10 @@ export async function deleteBacktestRunAction(
 
 /** Called by the Session shell once a date is actually open — the stored,
  *  server-side resume pointer. Never marks the day complete. */
-export async function recordBacktestPositionAction(runId: string, dateKey: string): Promise<ActionResult> {
+export async function recordBacktestPositionAction(runId: unknown, dateKey: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!isValidDateKey(dateKey)) return { success: false, error: "Invalid date." };
+  if (!isRunId(runId)) return INVALID_RUN;
+  if (typeof dateKey !== "string" || !isValidDateKey(dateKey)) return { success: false, error: "Invalid date." };
   try {
     const recorded = await backtestRunService.recordBacktestPosition(user.id, runId, dateKey);
     if (recorded) revalidatePath("/backtesting");

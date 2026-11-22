@@ -200,7 +200,12 @@ Live-vs-backtest comparison is ready at the data layer: both are the same
 
 - The external chart can't be controlled: Traditorium keeps future run
   outcomes out of the Session, but can't stop the trader scrolling ahead in
-  FX Replay.
+  FX Replay. Native Replay enforces this itself (see below).
+- Native Replay day order: a date's replay can't start once a later date has
+  been replayed, nor while an earlier replayed date is still open (not yet
+  closed with Close Trading Day). Dates never replayed may be skipped. The
+  Session itself (planning/trades without the native chart) is not gated by
+  replay order.
 - Completed/archived runs: trade sections render read-only; plan/pre-session
   inputs remain visible and saves are refused with a message.
 - TradingView extension, global search and Trades Album are LIVE-only by
@@ -211,11 +216,12 @@ Live-vs-backtest comparison is ready at the data layer: both are the same
 
 ## Native Replay V2 (next project)
 
-> **Progress:** the MT5 M1 historical-data foundation and candle engine are
-> built — see [NATIVE_REPLAY.md](./NATIVE_REPLAY.md) (`HistoricalDataset` /
-> `HistoricalBar`, validation, aggregation with progressively forming
-> candles). Not yet built: run↔dataset pin, replay clock, chart, drawings,
-> position tools.
+> **Progress:** built — see [NATIVE_REPLAY.md](./NATIVE_REPLAY.md): the MT5
+> M1 historical-data foundation (`HistoricalDataset` / `HistoricalBar`,
+> validation, aggregation with progressively forming candles), run↔dataset
+> pinning, the run-wide replay clock (forward-only within a day and across
+> days), the full-screen replay chart, drawings and the Long-Short Position
+> toolkit.
 
 Native Replay V2 replaces the external chart in the V1 flow with a
 Traditorium-native, full-screen replay workspace. It feeds the Backtesting

@@ -27,7 +27,7 @@
  * - no rewind; the date's last timeline minute is the end of the day;
  * - read-only (completed/archived) runs: readable, never moved.
  */
-import { Prisma, type BacktestRun } from "@prisma/client";
+import type { BacktestRun } from "@prisma/client";
 
 import { prisma, type TransactionClient } from "@/server/db";
 import { bucketEnd, bucketStart, isReplayTimeframe, type ReplayTimeframe } from "@/domain/native-replay/timeframes";
@@ -186,25 +186,65 @@ export async function getReplayState(userId: string, ref: ReplayClockRef): Promi
 }
 
 /**
+ * Replay moves FORWARD through the run, day by day — the cross-day
+ * counterpart of the in-day no-rewind rule. A date's clock may start only if:
+ *  - no LATER date of the run has been replayed (its cutoff would have
+ *    revealed this whole date, so replaying it "fresh" would be lookahead);
+ *  - every EARLIER date that was replayed has been closed (Close Trading
+ *    Day). Otherwise starting this date would reveal the open day's outcome
+ *    while its trades can still be edited.
+ * Dates never replayed may be skipped. Runs under a lock on the run row so
+ * two tabs can't start two dates out of order at once. Pure checks over the
+ * run's own rows (raw SQL scoped by run id).
+ */
+async function assertReplayOrder(tx: TransactionClient, runId: string, dateKey: string): Promise<void> {
+  const [later] = await tx.$queryRaw<{ d: string }[]>`
+    SELECT to_char("simulationDate", 'YYYY-MM-DD') AS d FROM "BacktestReplayPosition"
+    WHERE "backtestRunId" = ${runId} AND "simulationDate" > ${dateKey}::date
+    ORDER BY "simulationDate" DESC LIMIT 1
+  `;
+  if (later) {
+    throw new ReplayError(
+      `Replay has already reached ${later.d} — earlier days can't be replayed afterwards, because their candles have been revealed.`,
+    );
+  }
+  const [open] = await tx.$queryRaw<{ d: string }[]>`
+    SELECT to_char(p."simulationDate", 'YYYY-MM-DD') AS d FROM "BacktestReplayPosition" p
+    LEFT JOIN "TradingDay" t ON t."backtestRunId" = p."backtestRunId" AND t."date" = p."simulationDate"
+    WHERE p."backtestRunId" = ${runId} AND p."simulationDate" < ${dateKey}::date
+      AND (t."id" IS NULL OR t."status" <> 'ARCHIVED')
+    ORDER BY p."simulationDate" ASC LIMIT 1
+  `;
+  if (open) {
+    throw new ReplayError(`Close ${open.d} (Close Trading Day) before replaying a later day — replaying ahead would reveal its outcome.`);
+  }
+}
+
+/**
  * Starts the run's clock for a date at the earliest bar of that date across
  * its datasets. Idempotent. The run's first position freezes all its pins.
+ * Refused when it would break forward-only day order (assertReplayOrder).
  */
 export async function initializeReplay(userId: string, ref: ReplayClockRef): Promise<ReplayStateDTO> {
   const ctx = await resolve(userId, ref, "write");
+  if (await findPosition(userId, ctx)) return buildState(userId, ctx); // already started
   const seqs = await timelineSeqs(prisma, ctx.run.id);
   if (seqs.length === 0) throw new ReplayError("No historical dataset is attached to this run — attach MT5 M1 data on the Historical data page.");
   const [row] = await prisma.$queryRaw<{ first: number | null }[]>`
     SELECT min("minute") AS first FROM "HistoricalBar" WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" BETWEEN ${ctx.dayStart} AND ${ctx.dayEnd}
   `;
   if (row.first == null) throw new ReplayError(`None of this run's datasets has market data on ${ref.dateKey}.`);
-  try {
-    await prisma.backtestReplayPosition.create({
-      data: { userId, backtestRunId: ctx.run.id, simulationDate: new Date(`${ref.dateKey}T00:00:00Z`), currentMinute: row.first },
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "BacktestRun" WHERE "id" = ${ctx.run.id} AND "userId" = ${userId} FOR UPDATE`;
+    const [existing] = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "BacktestReplayPosition" WHERE "backtestRunId" = ${ctx.run.id} AND "simulationDate" = ${ref.dateKey}::date
+    `;
+    if (existing) return; // started meanwhile (e.g. two tabs at once) — keep it
+    await assertReplayOrder(tx, ctx.run.id, ref.dateKey);
+    await tx.backtestReplayPosition.create({
+      data: { userId, backtestRunId: ctx.run.id, simulationDate: new Date(`${ref.dateKey}T00:00:00Z`), currentMinute: row.first! },
     });
-  } catch (error) {
-    // Already started (e.g. two tabs at once) — keep the existing position.
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
-  }
+  });
   return buildState(userId, ctx);
 }
 

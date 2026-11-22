@@ -314,6 +314,11 @@ READY-only attach, and that the asset is one of the run's.
 - **Candles:** `getReplayCandles({run, date, asset}, {timeframe, limit, to?})` —
   asset and timeframe are the caller's view choice; the cutoff is the stored
   world time. `to` only pans back.
+- **Day order (forward-only across days):** a date's clock can start only if
+  no later date of the run has a position (its cutoff already revealed this
+  whole date) and every earlier date with a position has been closed (Close
+  Trading Day). Never-replayed dates may be skipped. Checked under a lock on
+  the run row (`assertReplayOrder`).
 - **Run status:** COMPLETED/ARCHIVED runs are readable, never moved.
 
 ## Replay workspace (/backtesting/[runId]/replay?date=)

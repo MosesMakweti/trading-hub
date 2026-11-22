@@ -6,10 +6,11 @@
  * server's local timezone can never shift a simulated date by one.
  *
  * A run's trading days are the dates in [startDate, endDate] whose UTC
- * weekday is in `tradingWeekdays` (default Mon–Fri). Weekends/non-trading
- * days never count toward progress, but the trader may still deliberately
- * open one (e.g. a Sunday futures open) — `isTradingDay` is for progress and
- * navigation defaults, not a hard gate.
+ * weekday is in `tradingWeekdays` (default Mon–Fri). Non-trading days never
+ * count toward progress, and the Session doesn't open them: a non-trading
+ * date in the URL is moved to the nearest trading day
+ * (`normalizeSessionDateKey`). To trade e.g. a Sunday futures open, include
+ * Sunday in the run's trading weekdays.
  */
 import { addDaysToKey, dateKeyToUtcDate, isValidDateKey } from "@/lib/date";
 

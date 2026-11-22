@@ -19,8 +19,10 @@ import { currentWorkspaceScope, scopeBacktestRunId } from "@/server/workspace/sc
  *
  * An explicit, defined `backtestRunId` in a root query's own `where`/`data`
  * wins over the ambient scope (a deliberate cross-scope query — e.g. the run
- * overview counting each run's trades). The one combination refused outright
- * is creating a LIVE root row while inside a BACKTEST scope.
+ * overview counting each run's trades, which runs outside any BACKTEST
+ * scope). Inside a BACKTEST scope the explicit value may only be `null`
+ * (pin LIVE) or the scope's own run; and creating a root row for any other
+ * environment is refused outright.
  *
  * Raw SQL ($queryRaw/$executeRaw) is NOT covered — every raw query touching
  * these tables must scope itself (see trades.service.ts's nextTradeNumber).
@@ -85,6 +87,22 @@ function hasExplicitRunId(obj: Record<string, unknown> | undefined): boolean {
   return obj != null && obj.backtestRunId !== undefined;
 }
 
+/**
+ * Inside a BACKTEST scope an explicit `backtestRunId` filter may only pin
+ * LIVE (`null` — e.g. live-only streaks read from a run page) or name the
+ * scope's own run. Anything else (another run's id, an `in`/`not` filter)
+ * would read or modify a different run from inside this one — refused, the
+ * read-side counterpart of the create check in `stampCreateData`.
+ */
+function assertExplicitRunIdAllowed(model: string, value: unknown): void {
+  const scope = currentWorkspaceScope();
+  if (scope.environment !== "BACKTEST") return;
+  if (value === null || value === scope.backtestRunId) return;
+  throw new WorkspaceScopeViolationError(
+    `refusing a ${model} query that targets another backtest environment while inside run ${scope.backtestRunId}`,
+  );
+}
+
 function stampCreateData(model: string, data: Record<string, unknown>, runId: string | null): Record<string, unknown> {
   const scope = currentWorkspaceScope();
   const explicit = data.backtestRunId !== undefined || data.backtestRun !== undefined;
@@ -130,6 +148,7 @@ export async function applyWorkspaceScope({ model, operation, args, query }: Que
     const where = args.where as Where | undefined;
     if (isRoot) {
       if (!hasExplicitRunId(where)) next.where = andInto(where, { backtestRunId: runId });
+      else assertExplicitRunIdAllowed(model, where!.backtestRunId);
     } else {
       next.where = andInto(where, childFilter(runId));
     }

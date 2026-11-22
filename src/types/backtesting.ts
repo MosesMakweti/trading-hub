@@ -3,9 +3,10 @@ import type { StrategyDriftState } from "@/domain/backtesting/strategy-drift";
 
 export type BacktestRunStatusValue = "ACTIVE" | "COMPLETED" | "ARCHIVED";
 
-/** One Backtest Run as the Overview / run header render it. Every number is
- *  derived from the run's own scoped rows — nothing is estimated. */
-export interface BacktestRunOverviewDTO {
+/** One Backtest Run as the run header and run pages render it — everything
+ *  except trade statistics, so the per-request ownership gate stays cheap
+ *  (no trade load). */
+export interface BacktestRunDetailDTO {
   id: string;
   name: string;
   description: string | null;
@@ -24,6 +25,16 @@ export interface BacktestRunOverviewDTO {
   /** Where "Continue" lands (see run-calendar.ts `resumeDateKey`). */
   resumeDateKey: string;
   lastActiveAt: string | null;
+  /** Optional simulation-only equity settings — never a trading account. */
+  simulation: { startingBalance: number | null; riskPercentPerTrade: number | null; currency: string | null };
+  createdAt: string;
+  archivedAt: string | null;
+}
+
+/** One Backtest Run as the Overview cards render it: the run detail plus its
+ *  trade statistics. Every number is derived from the run's own scoped rows —
+ *  nothing is estimated. */
+export interface BacktestRunOverviewDTO extends BacktestRunDetailDTO {
   /** Canonical, price-finalized figures (same engine as Backtesting Analytics). */
   stats: {
     /** Trades with an actual entry that weren't cancelled. */
@@ -36,10 +47,6 @@ export interface BacktestRunOverviewDTO {
     /** Valid setups recorded as missed. */
     missedTrades: number;
   };
-  /** Optional simulation-only equity settings — never a trading account. */
-  simulation: { startingBalance: number | null; riskPercentPerTrade: number | null; currency: string | null };
-  createdAt: string;
-  archivedAt: string | null;
 }
 
 /** Strategy option for the create dialog — Strategy Lab is the only source. */

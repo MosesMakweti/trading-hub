@@ -29,8 +29,9 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 import { prisma } from "@/server/db";
 import { createTestUser, deleteTestUsers } from "@/server/testing/cleanup";
 import { createBacktestRunSchema } from "@/lib/validation/backtesting";
-import { createBacktestRun } from "@/server/services/backtest-run.service";
+import { createBacktestRun, runInBacktestRun } from "@/server/services/backtest-run.service";
 import { runUnscoped } from "@/server/workspace/scope";
+import { WorkspaceScopeViolationError } from "@/server/workspace/prisma-scope";
 
 const userIds: string[] = [];
 afterAll(() => deleteTestUsers(...userIds));
@@ -215,5 +216,24 @@ describe("concurrency — request-local scope, process-wide store", () => {
       for (const r of [...rows.days, ...rows.trades, ...rows.opps]) expect(r.backtestRunId).toBe(lane.runId);
       expect(rows.trades.every((t) => t.reviewLifecycleStatus === "CANCELLED_NEVER_TRIGGERED")).toBe(true);
     }
+  });
+});
+
+describe("explicit run filters inside a BACKTEST scope", () => {
+  it("may pin LIVE or name the scope's own run, but never reach another run", async () => {
+    const userId = await user("explicit");
+    const a = await run(userId, "Explicit A");
+    const b = await run(userId, "Explicit B");
+    await runInBacktestRun(userId, a.id, async () => {
+      // Pinning LIVE (live-only reads from a run page) and naming its own run stay allowed.
+      await expect(prisma.trade.count({ where: { userId, backtestRunId: null } })).resolves.toBe(0);
+      await expect(prisma.trade.count({ where: { userId, backtestRunId: a.id } })).resolves.toBe(0);
+      // Another run — directly, or via an operator filter — is refused, for reads and writes alike.
+      await expect(prisma.trade.findMany({ where: { userId, backtestRunId: b.id } })).rejects.toBeInstanceOf(WorkspaceScopeViolationError);
+      await expect(prisma.tradingDay.count({ where: { userId, backtestRunId: { in: [a.id, b.id] } } })).rejects.toBeInstanceOf(WorkspaceScopeViolationError);
+      await expect(prisma.dailyNote.deleteMany({ where: { userId, backtestRunId: b.id } })).rejects.toBeInstanceOf(WorkspaceScopeViolationError);
+    });
+    // Outside any BACKTEST scope the explicit cross-run override still works (the run overview relies on it).
+    await expect(prisma.tradingDay.count({ where: { userId, backtestRunId: { in: [a.id, b.id] } } })).resolves.toBe(0);
   });
 });
