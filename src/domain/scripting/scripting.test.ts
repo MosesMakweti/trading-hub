@@ -174,3 +174,41 @@ if ta.crossunder(fast, slow)
     for (let i = 1; i < s.trades.length; i++) expect(s.trades[i].entryBar).toBeGreaterThanOrEqual(s.trades[i - 1].exitBar);
   });
 });
+
+describe("catalogue and templates", () => {
+  it("every templated script runs", async () => {
+    const { SCRIPT_TEMPLATES } = await import("./builtins");
+    for (const t of SCRIPT_TEMPLATES) expect(() => run(t.source, bars), t.key).not.toThrow();
+    const strat = run(SCRIPT_TEMPLATES.find((t) => t.key === "strategy")!.source, bars);
+    expect(strat.strategy!.totalTrades).toBeGreaterThan(0);
+  });
+
+  it("every catalogued function is accepted by the runtime (not 'Unknown function')", async () => {
+    const { BUILTINS } = await import("./builtins");
+    for (const b of BUILTINS.filter((x) => x.kind === "function" && !["indicator", "strategy"].includes(x.name))) {
+      const call = `${b.name}(close, 1, 1, 1)`;
+      try {
+        run(`strategy("x")\nx = ${call}`, bars.slice(0, 30));
+      } catch (e) {
+        expect((e as Error).message, b.name).not.toMatch(/Unknown function|not supported/);
+      }
+    }
+  });
+});
+
+describe("strategy point value", () => {
+  it("scales P&L by syminfo.pointvalue (e.g. 100 000 per lot on EURUSD)", () => {
+    const b = (i: number, o: number, c: number): ScriptBar => ({ time: i, open: o, high: Math.max(o, c), low: Math.min(o, c), close: c, volume: 1 });
+    const data = [b(0, 1.1, 1.1), b(1, 1.1, 1.1), b(2, 1.101, 1.101)];
+    const src = `strategy("s")
+if bar_index == 0
+    strategy.entry("L", strategy.long, qty = 1)
+if bar_index == 1
+    strategy.close("L")
+plot(syminfo.pointvalue)`;
+    const r = run(src, [...data, b(3, 1.1015, 1.1015)], { pointValue: 100_000 });
+    // Enter at bar 1 open (1.1), close at bar 2 open (1.101): 0.001 × 1 lot × 100 000 = 100.
+    expect(r.strategy!.trades[0].pnl).toBeCloseTo(100, 6);
+    expect(r.plots[0].values[0]).toBe(100_000);
+  });
+});

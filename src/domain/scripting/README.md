@@ -41,6 +41,7 @@ silently ignored or approximated.
 | Other `ta.*` | ❌ error |
 | `barstate.isfirst/islast/isconfirmed/ishistory`, `bar_index`, `last_bar_index`, `time`, `hour`, `minute`, `dayofweek` | ✅ (broker wall-clock) |
 | `strategy.entry` (market / limit / stop), `strategy.exit` (stop, limit, loss/profit in ticks), `strategy.close`, `strategy.close_all`, `strategy.cancel`, `strategy.cancel_all` | ✅ |
+| `syminfo.pointvalue` (other `syminfo.*` ❌) | ✅ |
 | `strategy.position_size`, `position_avg_price`, `equity`, `netprofit`, `openprofit`, `closedtrades`, `opentrades`, `wintrades`, `losstrades` | ✅ |
 | Pyramiding > 1, partial exits (`qty_percent`), trailing stops, OCA groups, `strategy.order`, margin calls | ❌ not simulated |
 | `calc_on_every_tick`, `process_orders_on_close`, bar magnifier | ❌ not supported |
@@ -62,8 +63,10 @@ silently ignored or approximated.
   (at the open if the bar gaps through the level).
 * If a bar touches both an exit's stop and its limit, the **stop** fills
   (OHLC can't tell which came first — conservative).
-* P&L = price difference × quantity (no contract size or currency
-  conversion). Commission: percent of value, cash per order or per contract.
+* P&L = price difference × quantity × `syminfo.pointvalue` (the value of a
+  1.0 move per lot/contract in the quote currency, taken from the account's
+  instrument specs; 1 when they are incomplete). No spread, swap or currency
+  conversion. Commission: percent of value, cash per order or per contract.
 * **Strategy scripts never place orders on a simulation account.** They run
   in the Strategy Tester only, on the candles you have already seen. They
   can't bypass Prop Firm Simulator rules because they never reach an account.

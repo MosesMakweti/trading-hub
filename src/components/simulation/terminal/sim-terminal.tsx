@@ -11,9 +11,11 @@ import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { parseWallClock } from "@/domain/native-replay/wall-clock";
 import { REPLAY_TIMEFRAMES, type ReplayTimeframe } from "@/domain/native-replay/timeframes";
-import { advanceSimClockAction, getSimAccountStateAction, startSimClockAction } from "@/actions/simulation.actions";
-import { getScriptSourcesAction } from "@/actions/charting.actions";
-import { applyToCharts, chartsFor, normalizeWorkspace, type ChartStudy, type Workspace } from "@/domain/charting/workspace";
+import { advanceSimClockAction, getSimAccountStateAction, getSimCandlesAction, startSimClockAction } from "@/actions/simulation.actions";
+import { fromWire } from "@/domain/native-replay/chart-model";
+import { ScriptWorkbench, type TestData } from "@/components/scripting/script-workbench";
+import { getInstrumentPointValueAction, getScriptSourcesAction } from "@/actions/charting.actions";
+import { applyToCharts, chartsFor, newUid, normalizeWorkspace, type ChartStudy, type Workspace } from "@/domain/charting/workspace";
 import type { ScriptState } from "@/domain/charting/render-model";
 import { INDICATOR_BY_ID, sanitizeInputs } from "@/domain/indicators/catalog";
 import { ChartGrid } from "@/components/charting/chart-grid";
@@ -69,6 +71,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editing, setEditing] = useState<{ chart: number; uid: string; script: ScriptState | null } | null>(null);
   const [scriptSources, setScriptSources] = useState(new Map<string, ScriptSource>());
+  const [bottomTab, setBottomTab] = useState<"trading" | "scripts">("trading");
   // Live sizes while dragging (committed to the workspace on release).
   const [rightWidth, setRightWidth] = useState(ws.panels.right.width);
   const [bottomHeight, setBottomHeight] = useState(ws.panels.bottom.height);
@@ -99,10 +102,34 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   // ── Script sources for every script study on screen ───────────────────────
   const scriptIds = useMemo(() => [...new Set(ws.charts.flatMap((c) => c.studies.flatMap((s) => (s.kind === "script" ? [s.scriptId] : []))))].sort(), [ws.charts]);
   const scriptKey = scriptIds.join(",");
+  const [scriptsVersion, setScriptsVersion] = useState(0); // bumped when a script is saved in the editor
   useEffect(() => {
     if (scriptIds.length) void getScriptSourcesAction({ ids: scriptIds }).then((res) => res.success && setScriptSources(new Map(res.scripts.map((s) => [s.id, s]))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scriptKey]);
+  }, [scriptKey, scriptsVersion]);
+
+  // Strategy Tester / script runs use the active chart's REAL candles (never a
+  // synthetic chart type), as far back as the server allows, up to the clock.
+  const loadTestData = useCallback(async (): Promise<TestData | null> => {
+    if (!started) {
+      toast.error("Start the replay first.");
+      return null;
+    }
+    const [res, pv] = await Promise.all([getSimCandlesAction({ accountId: state.id, symbol, timeframe, limit: 5000 }), getInstrumentPointValueAction({ accountId: state.id, symbol })]);
+    if (!res.success) {
+      toast.error(res.error);
+      return null;
+    }
+    const scale = 10 ** res.candles.priceScale;
+    const list = res.candles.candles.map((c) => fromWire(c, res.candles.priceScale));
+    return {
+      bars: list.map((c) => ({ time: c.time, open: c.open / scale, high: c.high / scale, low: c.low / scale, close: c.close / scale, volume: c.tickVolume ?? 0 })),
+      lastForming: list[list.length - 1]?.state === "FORMING",
+      priceDigits: res.candles.priceScale,
+      label: `${symbol} ${timeframe}`,
+      pointValue: pv.success && pv.value ? pv.value : null,
+    };
+  }, [started, state.id, symbol, timeframe]);
 
   // ── Account price lines (entries, SL/TP, pending orders) per instrument ──
   const linesBySymbol = useMemo(() => {
@@ -390,8 +417,29 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
       {showBottom && (
         <>
           <ResizeHandle direction="up" value={bottomHeight} min={120} max={640} label="Resize bottom panel" onChange={setBottomHeight} onCommit={(height) => updateWs((w) => ({ ...w, panels: { ...w.panels, bottom: { ...w.panels.bottom, height } } }))} />
-          <div style={{ height: bottomHeight }} className="shrink-0">
-            <TradeDock state={state} readOnly={!tradable} onState={setState} />
+          <div style={{ height: bottomHeight }} className="flex shrink-0 flex-col">
+            <div role="tablist" aria-label="Bottom panel" className="flex shrink-0 items-center gap-0.5 border-b border-border bg-muted/30 px-1.5">
+              {(["trading", "scripts"] as const).map((t) => (
+                <button key={t} role="tab" type="button" aria-selected={bottomTab === t} onClick={() => setBottomTab(t)} className={cn("px-2.5 py-1 text-[11px] font-medium", bottomTab === t ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+                  {t === "trading" ? "Trading" : "Scripts & Strategy Tester"}
+                </button>
+              ))}
+            </div>
+            <div className="min-h-0 flex-1">
+              {bottomTab === "trading" ? (
+                <TradeDock state={state} readOnly={!tradable} onState={setState} />
+              ) : (
+                <ScriptWorkbench
+                  loadTestData={loadTestData}
+                  onSaved={() => setScriptsVersion((v) => v + 1)}
+                  onAddToChart={(script) => {
+                    if (active.studies.length >= 12) return void toast.error("This chart has the maximum of 12 studies.");
+                    setStudies(ws.activeChart, [...active.studies, { uid: newUid(), kind: "script", scriptId: script.id, inputs: {}, visible: true }]);
+                    toast.success(`Added “${script.name}” to the ${symbol} ${timeframe} chart`);
+                  }}
+                />
+              )}
+            </div>
           </div>
         </>
       )}

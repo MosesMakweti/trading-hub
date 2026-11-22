@@ -143,8 +143,10 @@ export interface RunOptions {
   inputs?: Record<string, Value>;
   /** The last bar is still forming (replay): not confirmed, its orders never fill. */
   lastBarForming?: boolean;
-  /** Price precision for rounding strategy fills (optional). */
+  /** Override of the instruction budget (tests). */
   maxSteps?: number;
+  /** Value of a 1.0 price move per 1 quantity, in the quote currency (syminfo.pointvalue). Default 1. */
+  pointValue?: number;
 }
 
 export function compile(source: string): Program {
@@ -411,6 +413,7 @@ class Interpreter {
       case "strategy.fixed": return "fixed";
       case "strategy.cash": return "cash";
       case "strategy.percent_of_equity": return "percent_of_equity";
+      case "syminfo.pointvalue": return this.options.pointValue && this.options.pointValue > 0 ? this.options.pointValue : 1;
       case "math.pi": return Math.PI;
       case "math.e": return Math.E;
     }
@@ -503,6 +506,7 @@ class Interpreter {
               commissionValue: n(99, "commission_value", 0),
               pyramiding: n(99, "pyramiding", 1),
               lastBarForming: !!this.options.lastBarForming,
+              pointValue: this.options.pointValue && this.options.pointValue > 0 ? this.options.pointValue : 1,
             });
           }
         }
@@ -903,6 +907,7 @@ interface StrategySettings {
   commissionValue: number;
   pyramiding: number;
   lastBarForming: boolean;
+  pointValue: number;
 }
 
 interface PendingOrder {
@@ -924,8 +929,10 @@ interface PendingOrder {
  *     (a bar that opens through the level fills at the open);
  *   a bar touching both an exit's stop and its limit → the stop fills first
  *     (conservative; OHLC can't order them).
- * P&L = price difference × quantity (no contract multiplier). Commission:
- * percent of traded value, or cash per order / per contract.
+ * P&L = price difference × quantity × point value (syminfo.pointvalue: the
+ * value of a 1.0 move per lot/contract, from the account's instrument specs;
+ * 1 when unknown). Commission: percent of traded value, or cash per order /
+ * per contract.
  */
 class StrategyEngine {
   private cash: number;
@@ -950,12 +957,12 @@ class StrategyEngine {
     if (!(v > 0)) return 0;
     if (this.s.commissionType === "cash_per_order") return v;
     if (this.s.commissionType === "cash_per_contract") return v * qty;
-    return (price * qty * v) / 100;
+    return (price * qty * this.s.pointValue * v) / 100;
   }
 
   private openPnl(price: number): number {
     if (!this.pos) return 0;
-    return (this.pos.side === "long" ? price - this.pos.avg : this.pos.avg - price) * this.pos.qty;
+    return (this.pos.side === "long" ? price - this.pos.avg : this.pos.avg - price) * this.pos.qty * this.s.pointValue;
   }
 
   private closePosition(bar: number, price: number, reason: string) {
@@ -1038,8 +1045,8 @@ class StrategyEngine {
   }
 
   private qtyFor(price: number): number {
-    if (this.s.qtyType === "cash") return this.s.qtyValue / price;
-    if (this.s.qtyType === "percent_of_equity") return ((this.cash + this.openPnl(price)) * this.s.qtyValue) / 100 / price;
+    if (this.s.qtyType === "cash") return this.s.qtyValue / (price * this.s.pointValue);
+    if (this.s.qtyType === "percent_of_equity") return ((this.cash + this.openPnl(price)) * this.s.qtyValue) / 100 / (price * this.s.pointValue);
     return this.s.qtyValue;
   }
 

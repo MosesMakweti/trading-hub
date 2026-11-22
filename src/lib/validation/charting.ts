@@ -12,3 +12,4 @@ export const scriptVersionSchema = z.object({ id, version: z.number().int().min(
 export const renameScriptSchema = z.object({ id, name: scriptName });
 export const archiveScriptSchema = z.object({ id, archived: z.boolean() });
 export const scriptSourcesSchema = z.object({ ids: z.array(id).max(48) });
+export const pointValueSchema = z.object({ accountId: id, symbol: z.string().trim().toUpperCase().min(1).max(20) });

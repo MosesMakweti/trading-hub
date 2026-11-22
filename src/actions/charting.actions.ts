@@ -10,13 +10,16 @@ import {
   scriptRefSchema,
   scriptSourcesSchema,
   scriptVersionSchema,
+  pointValueSchema,
 } from "@/lib/validation/charting";
+import { SimNotFoundError } from "@/server/services/simulation/sim-account.service";
 import * as charting from "@/server/services/charting/charting.service";
 
 type Fail = { success: false; error: string };
 type Ok<T> = { success: true } & T;
 
 function fail(error: unknown, fallback: string): Fail {
+  if (error instanceof SimNotFoundError) return { success: false, error: error.message };
   if (error instanceof charting.ChartingError) return { success: false, error: error.message };
   console.error("[charting.actions]", error);
   return { success: false, error: fallback };
@@ -139,5 +142,16 @@ export async function archiveScriptAction(input: unknown): Promise<Ok<object> | 
     return { success: true };
   } catch (e) {
     return fail(e, "Couldn't archive the script.");
+  }
+}
+
+export async function getInstrumentPointValueAction(input: unknown): Promise<Ok<{ value: Awaited<ReturnType<typeof charting.instrumentPointValue>> }> | Fail> {
+  const user = await requireUser();
+  const p = pointValueSchema.safeParse(input);
+  if (!p.success) return invalid(p.error);
+  try {
+    return { success: true, value: await charting.instrumentPointValue(user.id, p.data.accountId, p.data.symbol) };
+  } catch (e) {
+    return fail(e, "Couldn't read the instrument's contract details.");
   }
 }

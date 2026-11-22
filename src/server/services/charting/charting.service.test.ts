@@ -1,12 +1,16 @@
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createTestUser, deleteTestUsers } from "@/server/testing/cleanup";
+import { importHistoricalDataset } from "@/server/services/native-replay/historical-dataset.service";
+import { mt5Text } from "@/domain/native-replay/testing/m1-fixtures";
+import { createLabAccount } from "@/server/services/simulation/sim-account.service";
 import {
   createScript,
   duplicateScript,
   getScript,
   getScriptSources,
   getWorkspace,
+  instrumentPointValue,
   listScripts,
   restoreScriptVersion,
   saveScript,
@@ -82,5 +86,18 @@ describe("script library", () => {
     await setScriptArchived(a, s.id, true);
     expect((await listScripts(a)).map((x) => x.id)).toEqual([copy.id]);
     await expect(saveScript(a, s.id, "y", 1)).rejects.toThrow(/archived/);
+  });
+});
+
+describe("instrument point value (Strategy Tester money)", () => {
+  it("reads the account's instrument spec and refuses other users / instruments", async () => {
+    const u = await user("pv");
+    const other = await user("pv-other");
+    const rows = [["2024.05.14", "09:00", "1.08000", "1.08000", "1.08000", "1.08000", "10", "0", "0"]];
+    const ds = await importHistoricalDataset(u, { bytes: new TextEncoder().encode(mt5Text(rows)), fileName: "EURUSD_M1_202405140900_202405140900.csv" });
+    const acct = await createLabAccount(u, { name: "PV", datasets: [{ assetSymbol: "EURUSD", datasetId: ds.id }], periodStart: "2024-05-14", periodEnd: "2024-05-14", startingBalance: 10000, currency: "USD" });
+    expect(await instrumentPointValue(u, acct.id, "EURUSD")).toEqual({ pointValue: 100000, currency: "USD", quantityUnit: "lot" });
+    await expect(instrumentPointValue(u, acct.id, "GBPUSD")).rejects.toThrow(/isn't one of this account/);
+    await expect(instrumentPointValue(other, acct.id, "EURUSD")).rejects.toThrow();
   });
 });

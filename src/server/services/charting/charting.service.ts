@@ -8,6 +8,9 @@
  * plain text match.
  */
 import { prisma } from "@/server/db";
+import { computeValuePerPriceUnit } from "@/domain/execution";
+import { resolveSpecForUser } from "@/server/services/instrument-spec.service";
+import { requireSimAccount } from "@/server/services/simulation/sim-account.service";
 import { DEFAULT_WORKSPACE, normalizeWorkspace, workspaceSchema, type Workspace } from "@/domain/charting/workspace";
 
 export class ChartingError extends Error {
@@ -150,4 +153,21 @@ export async function duplicateScript(userId: string, id: string): Promise<Scrip
 export async function setScriptArchived(userId: string, id: string, archived: boolean): Promise<void> {
   const r = await prisma.userScript.updateMany({ where: { id, userId }, data: { archivedAt: archived ? new Date() : null } });
   if (r.count !== 1) throw new ChartingError("Script not found.");
+}
+
+// ── Instrument value for the Strategy Tester ───────────────────────────────
+
+/**
+ * Value of a 1.0 price move for 1 unit of quantity (lots / contracts), in the
+ * instrument's quote currency — Pine's `syminfo.pointvalue`. From the same
+ * instrument specs the account trades with; null when they're incomplete.
+ */
+export async function instrumentPointValue(userId: string, accountId: string, symbol: string): Promise<{ pointValue: number; currency: string; quantityUnit: string } | null> {
+  const account = await requireSimAccount(userId, accountId);
+  if (!account.assets.includes(symbol)) throw new ChartingError(`${symbol} isn't one of this account's instruments.`);
+  const r = await resolveSpecForUser(userId, symbol);
+  if (r.status !== "RESOLVED") return null;
+  const v = computeValuePerPriceUnit(r.spec, r.spec.quoteCurrency);
+  if (v.status !== "OK") return null;
+  return { pointValue: v.quoteValuePerPriceUnit.toNumber(), currency: r.spec.quoteCurrency, quantityUnit: String(r.spec.quantityUnit).toLowerCase() };
 }
