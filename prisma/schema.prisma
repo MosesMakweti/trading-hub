@@ -107,6 +107,8 @@ model User {
   historicalDatasets      HistoricalDataset[]
   simAccounts             SimAccount[]
   simStudies              SimStudy[]
+  simFirmModels           SimFirmModel[]
+  simChallenges           SimChallenge[]
   historicalImportUploads HistoricalImportUpload[]
 }
 
@@ -5127,9 +5129,13 @@ model SimAccount {
   /// Sequence of the latest ledger entry (append position, checked under the row lock).
   ledgerSequence Int  @default(0)
 
-  /// Prop Firm Simulator grouping (Phase 5).
+  /// Prop Firm Simulator grouping (Phase 5): one account per stage of a challenge.
   challengeId String?
+  challenge   SimChallenge? @relation(fields: [challengeId], references: [id], onDelete: Cascade)
   phaseIndex  Int?
+  /// Prop rule engine state (domain/simulation/prop-rules.ts RuleState) — high-water marks,
+  /// day-start values, trading days. Derived bookkeeping; money stays in the ledger.
+  ruleState   Json?
 
   startedAt  DateTime?
   endedAt    DateTime?
@@ -5144,9 +5150,11 @@ model SimAccount {
   ledger    SimLedgerEntry[]
   events    SimEvent[]
   observations SimObservation[]
+  breach       SimBreach?
+  payouts      SimPayout[]
 
+  @@unique([challengeId, phaseIndex])
   @@index([userId, product, status])
-  @@index([challengeId])
 }
 
 /// account × asset → historical dataset. Frozen once the clock starts (trigger).
@@ -5424,4 +5432,113 @@ model SimObservation {
   @@index([studyId, minute])
   @@index([setupId])
   @@index([positionId])
+}
+
+// ── Prop Firm Simulator (Phase 5) ───────────────────────────────────────────
+
+enum SimChallengeStatus {
+  IN_EVALUATION
+  FUNDED
+  FAILED
+  BREACHED
+  ARCHIVED
+}
+
+/// A trader-defined prop-firm model (built-in templates live in code).
+/// `definition` is a validated FirmModel; editing bumps `version` and never
+/// touches challenges, which keep their own snapshot.
+model SimFirmModel {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firmName   String
+  modelName  String
+  definition Json
+  version    Int      @default(1)
+  archivedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  challenges SimChallenge[]
+
+  @@index([userId])
+}
+
+/// One simulated challenge purchase and its journey through the stages.
+model SimChallenge {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  firmModelId        String?
+  firmModel          SimFirmModel? @relation(fields: [firmModelId], references: [id], onDelete: SetNull)
+  /// Built-in template key when bought from a template.
+  templateKey        String?
+  firmName           String
+  modelName          String
+  modelVersion       Int
+  /// Frozen FirmModel at purchase.
+  definitionSnapshot Json
+
+  accountSize Decimal            @db.Decimal(14, 2)
+  /// Simulated fee — recorded for history and analytics; no real payment.
+  fee         Decimal            @db.Decimal(14, 2)
+  currency    String
+  status      SimChallengeStatus @default(IN_EVALUATION)
+  /// Stage currently being traded (0-based; == phases.length means funded).
+  currentPhaseIndex Int          @default(0)
+  /// Market data and the historical period the challenge plays through.
+  datasets    Json
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+
+  purchasedAt DateTime  @default(now())
+  fundedAt    DateTime?
+  endedAt     DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  accounts SimAccount[]
+
+  @@index([userId, status])
+}
+
+/// The breach report of an account (at most one: a breach ends trading).
+model SimBreach {
+  id            String     @id @default(cuid())
+  userId        String
+  accountId     String     @unique
+  account       SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  rule          String
+  minute        Int
+  balance       Decimal    @db.Decimal(14, 2)
+  equity        Decimal    @db.Decimal(14, 2)
+  /// The value compared with the floor (balance, or the minute's worst-price equity).
+  measured      Decimal    @db.Decimal(14, 2)
+  floor         Decimal?   @db.Decimal(14, 2)
+  basis         String?
+  detail        String
+  /// Positions open at the breach and closed that trading day (ids, symbols, PnL).
+  contributors  Json
+  floatingInvolved Boolean
+  createdAt     DateTime   @default(now())
+}
+
+/// A funded-account payout (one ledger PAYOUT_WITHDRAWAL each).
+model SimPayout {
+  id             String     @id @default(cuid())
+  userId         String
+  accountId      String
+  account        SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sequence       Int
+  minute         Int
+  eligibleProfit Decimal    @db.Decimal(14, 2)
+  grossPayout    Decimal    @db.Decimal(14, 2)
+  traderShare    Decimal    @db.Decimal(14, 2)
+  firmShare      Decimal    @db.Decimal(14, 2)
+  splitPercent   Decimal    @db.Decimal(5, 2)
+  balanceBefore  Decimal    @db.Decimal(14, 2)
+  balanceAfter   Decimal    @db.Decimal(14, 2)
+  createdAt      DateTime   @default(now())
+
+  @@unique([accountId, sequence])
 }

@@ -14,12 +14,13 @@ import { fromWire } from "@/domain/native-replay/chart-model";
 import type { EngineCandle } from "@/domain/native-replay/candle-engine";
 import { parseWallClock } from "@/domain/native-replay/wall-clock";
 import type { ReplayTimeframe } from "@/domain/native-replay/timeframes";
-import { advanceSimClockAction, getSimCandlesAction, startSimClockAction } from "@/actions/simulation.actions";
+import { advanceSimClockAction, getSimAccountStateAction, getSimCandlesAction, startSimClockAction } from "@/actions/simulation.actions";
 import type { SimAccountStateDTO } from "@/types/simulation";
 import { fmtMoney, fmtWallClock, pnlTone } from "../format";
 import { OrderTicket } from "./order-ticket";
 import { TradeDock } from "./trade-dock";
 import { QuickObservation, type StudyOption } from "../studies/quick-observation";
+import { PropRulesPanel } from "../prop/prop-rules-panel";
 
 const TIMEFRAMES: ReplayTimeframe[] = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"];
 const SPEEDS = [1, 5, 15, 60] as const;
@@ -110,6 +111,10 @@ export function SimTerminal({ initialState, backHref, studies, resultsHref }: { 
         return false;
       }
       setState(res.state);
+      if (res.outcome.halted) {
+        const msg = { PASSED: "Phase passed — the next stage is ready in the challenge history.", BREACHED: `Breached: ${res.state.statusReason ?? "a rule was broken"}`, FAILED: res.state.statusReason ?? "Phase failed." }[res.state.status as "PASSED" | "BREACHED" | "FAILED"];
+        if (msg) (res.state.status === "PASSED" ? toast.success : toast.error)(msg, { duration: 8000 });
+      }
       if (res.outcome.filledOrders > 0) toast.message(`${res.outcome.filledOrders} order${res.outcome.filledOrders === 1 ? "" : "s"} filled`);
       if (res.outcome.closedPositions > 0) toast.message(`${res.outcome.closedPositions} position${res.outcome.closedPositions === 1 ? "" : "s"} closed`);
       if (res.outcome.moved) await loadCandles(false);
@@ -146,6 +151,11 @@ export function SimTerminal({ initialState, backHref, studies, resultsHref }: { 
   }, [run]);
 
   useEffect(() => () => void (playingRef.current = false), []);
+
+  const refreshState = useCallback(async () => {
+    const res = await getSimAccountStateAction({ accountId: state.id });
+    if (res.success) setState(res.state);
+  }, [state.id]);
 
   const start = async () => {
     setBusy(true);
@@ -309,6 +319,7 @@ export function SimTerminal({ initialState, backHref, studies, resultsHref }: { 
         <aside data-sim-side aria-label="Trade" className="flex w-[19rem] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border p-3 max-md:hidden">
           <OrderTicket state={state} quote={quote} disabled={!tradable || playing} onPlaced={setState} />
           {studies && started && <QuickObservation state={state} studies={studies} timeframe={timeframe} />}
+          {state.product === "PROP_FIRM" && <PropRulesPanel state={state} onPaidOut={() => void refreshState()} />}
         </aside>
       </div>
 

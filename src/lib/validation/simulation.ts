@@ -113,3 +113,14 @@ export const observationSchema = z.object({
 
 export const setupSchema = z.object({ studyId: id, name: z.string().trim().min(1).max(80), description: text(1000) });
 export const studyStatusSchema = z.object({ studyId: id, status: z.enum(["PLANNED", "ACTIVE", "COMPLETED", "ARCHIVED"]) });
+
+// ── Prop Firm Simulator (Phase 5) ──────────────────────────────────────────
+export const purchaseChallengeSchema = z
+  .object({
+    modelRef: z.string().min(1).max(80),
+    accountSize: z.coerce.number().positive(),
+    datasets: z.array(z.object({ assetSymbol: z.string().trim().toUpperCase().min(1).max(20), datasetId: id })).min(1, "Pick at least one instrument with data.").max(10),
+    periodStart: dateKey,
+    periodEnd: dateKey,
+  })
+  .refine((v) => v.periodEnd >= v.periodStart, { message: "The end date must be on or after the start date.", path: ["periodEnd"] });

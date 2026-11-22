@@ -19,6 +19,7 @@ import { resolveSpecForUser } from "@/server/services/instrument-spec.service";
 import { accountRules, assertTradable, lockAccount, SimError } from "./sim-account.service";
 import { appendLedger, currentBalance } from "./sim-ledger";
 import { accountFeeds, latestBars, type SimFeed } from "./sim-market";
+import { notePropTradingDay } from "./sim-prop.service";
 
 export type SizingRequest =
   | { mode: "QUANTITY"; quantity: string }
@@ -245,6 +246,7 @@ export async function placeOrder(userId: string, accountId: string, req: OrderRe
       await tx.simPosition.update({ where: { id: position.id }, data: { commissions: commission.toFixed(2) } });
     }
     await tx.simEvent.create({ data: { userId, accountId: account.id, type: "POSITION_OPENED", minute, data: { positionId: position.id, symbol, side: req.side, quantity: quantity.toFixed() } } });
+    await notePropTradingDay(tx, account);
     return { orderId: order.id, positionId: position.id, status: "FILLED", duplicate: false };
   });
 }

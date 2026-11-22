@@ -98,6 +98,8 @@ export interface MinuteSnapshot {
   /** Balance + floating PnL at each position's worst price this minute (D6). */
   adverseEquity: Decimal;
   openPositions: number;
+  /** Positions opened by pending orders during this minute (market orders are counted by the execution service). */
+  openedThisMinute: number;
 }
 
 export interface StepInput {
@@ -256,7 +258,15 @@ export function runStep(input: StepInput): StepResult {
       adverseEquity = adverseEquity.plus(unrealized(p, adverse));
     }
     endMinute = minute;
-    const verdict = input.onMinute?.({ minute, tradingDay: day, balance, equity, adverseEquity: adverseEquity.lessThan(equity) ? adverseEquity : equity, openPositions: positions.length });
+    const verdict = input.onMinute?.({
+      minute,
+      tradingDay: day,
+      balance,
+      equity,
+      adverseEquity: adverseEquity.lessThan(equity) ? adverseEquity : equity,
+      openPositions: positions.length,
+      openedThisMinute: openedThisMinute.size,
+    });
     if (verdict === "HALT") {
       halted = true;
       break;

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, FlaskConical, History } from "lucide-react";
+import { ArrowRight, FlaskConical, History, Landmark } from "lucide-react";
 
 import { requireUser } from "@/server/guards";
 import { prisma } from "@/server/db";
@@ -23,6 +23,7 @@ export default async function BacktestingHomePage() {
   ]);
   const inProgress = accounts.filter((a) => a.status === "ACTIVE" || a.status === "CREATED").slice(0, 6);
   const lab = accounts.filter((a) => a.product === "STRATEGY_LAB");
+  const prop = accounts.filter((a) => a.product === "PROP_FIRM");
 
   return (
     <FadeIn className="mx-auto max-w-6xl space-y-8">
@@ -47,7 +48,18 @@ export default async function BacktestingHomePage() {
             {lab.length} backtest{lab.length === 1 ? "" : "s"} · {lab.filter((a) => a.status === "ACTIVE").length} active
           </p>
         </Link>
-        <div className="rounded-xl border border-dashed border-border p-5">
+        <Link href="/backtesting/prop" className="group rounded-xl border border-border bg-card p-5 shadow-sm transition-colors hover:border-foreground/20">
+          <div className="flex items-center gap-2">
+            <Landmark className="size-4 text-primary" aria-hidden />
+            <h2 className="font-semibold">Prop Firm Simulator</h2>
+            <ArrowRight className="ml-auto size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">Buy a simulated challenge, pass its phases under the firm&apos;s rules, trade the funded account, take payouts, or breach.</p>
+          <p className="mt-4 font-mono text-xs text-muted-foreground tabular-nums">
+            {prop.length} account{prop.length === 1 ? "" : "s"} · {prop.filter((a) => a.kind === "FUNDED" && a.status === "ACTIVE").length} funded
+          </p>
+        </Link>
+        <div className="rounded-xl border border-dashed border-border p-5 md:col-span-2">
           <div className="flex items-center gap-2">
             <History className="size-4 text-muted-foreground" aria-hidden />
             <h2 className="font-semibold">Historical data</h2>
@@ -67,7 +79,7 @@ export default async function BacktestingHomePage() {
         <h2 id="in-progress" className="text-lg font-semibold">In progress</h2>
         {inProgress.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border px-5 py-8 text-center text-sm text-muted-foreground">
-            No simulation accounts yet. Start a backtest in <Link href="/backtesting/lab" className="font-medium text-foreground underline-offset-4 hover:underline">Strategy Lab</Link>.
+            No simulation accounts yet. Start a backtest in <Link href="/backtesting/lab" className="font-medium text-foreground underline-offset-4 hover:underline">Strategy Lab</Link> or a challenge in the <Link href="/backtesting/prop" className="font-medium text-foreground underline-offset-4 hover:underline">Prop Firm Simulator</Link>.
           </p>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

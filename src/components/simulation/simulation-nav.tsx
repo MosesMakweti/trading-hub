@@ -13,13 +13,14 @@ const ITEMS: { label: string; href: string; match: (p: string) => boolean }[] = 
   { label: "Home", href: "/backtesting", match: (p) => p === "/backtesting" },
   { label: "Strategy Lab", href: "/backtesting/lab", match: (p) => p.startsWith("/backtesting/lab") && !p.startsWith("/backtesting/lab/studies") },
   { label: "Studies", href: "/backtesting/lab/studies", match: (p) => p.startsWith("/backtesting/lab/studies") },
+  { label: "Prop Firm", href: "/backtesting/prop", match: (p) => p.startsWith("/backtesting/prop") },
   { label: "Historical data", href: "/backtesting/data", match: (p) => p.startsWith("/backtesting/data") },
   { label: "Legacy runs", href: "/backtesting/legacy", match: (p) => p.startsWith("/backtesting/legacy") },
 ];
 
 export function SimulationNav({ extra = [] }: { extra?: { label: string; href: string }[] }) {
   const pathname = usePathname();
-  const items = [...ITEMS.slice(0, 3), ...extra.map((e) => ({ ...e, match: (p: string) => p.startsWith(e.href) })), ...ITEMS.slice(3)];
+  const items = [...ITEMS.slice(0, 4), ...extra.map((e) => ({ ...e, match: (p: string) => p.startsWith(e.href) })), ...ITEMS.slice(4)];
   return (
     <nav aria-label="Backtesting" className="-mx-1 overflow-x-auto">
       <ul className="flex min-w-max items-center gap-1 border-b border-border px-1">
