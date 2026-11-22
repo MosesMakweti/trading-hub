@@ -4,7 +4,7 @@ import { listDatasetPinsForUser } from "@/server/services/native-replay/backtest
 import { listBacktestRunOverviews } from "@/server/services/backtest-run.service";
 import { normalizeSymbol } from "@/domain/native-replay/import-analysis";
 import { FadeIn } from "@/components/shared/motion";
-import { BacktestingNav } from "@/components/backtesting/backtesting-nav";
+import { SimulationNav } from "@/components/simulation/simulation-nav";
 import { HistoricalDataPanel, type AttachOption } from "@/components/native-replay/historical-data-panel";
 
 // The import server action runs in this page's function: a 2M-bar (≈120MB)
@@ -19,7 +19,6 @@ export const maxDuration = 300;
 export default async function HistoricalDataPage() {
   const user = await requireUser();
   const [datasets, pins, runs] = await Promise.all([listHistoricalDatasets(user.id), listDatasetPinsForUser(user.id), listBacktestRunOverviews(user.id)]);
-  const currentRunId = runs.find((r) => r.status === "ACTIVE")?.id ?? null;
 
   // Where each READY dataset could be attached: active runs whose asset normalises to the dataset's symbol.
   const attachOptions: Record<string, AttachOption[]> = {};
@@ -36,10 +35,10 @@ export default async function HistoricalDataPage() {
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Historical data</h1>
         <p className="text-sm text-muted-foreground">
-          MT5 M1 bar history for Native Replay. Import M1 once — every higher timeframe is built from it.
+          MT5 M1 bar history for Strategy Lab and legacy runs. Import M1 once — every higher timeframe is built from it.
         </p>
       </div>
-      <BacktestingNav runId={currentRunId} />
+      <SimulationNav />
       <HistoricalDataPanel datasets={datasets} pins={pins} attachOptions={attachOptions} />
     </FadeIn>
   );

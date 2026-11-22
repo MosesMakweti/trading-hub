@@ -105,6 +105,10 @@ model User {
   backtestRuns            BacktestRun[]
   // Native Replay V2 — user-owned MT5 M1 datasets (independent of Edge Review's MarketDataImport)
   historicalDatasets      HistoricalDataset[]
+  simAccounts             SimAccount[]
+  simStudies              SimStudy[]
+  simFirmModels           SimFirmModel[]
+  simChallenges           SimChallenge[]
   historicalImportUploads HistoricalImportUpload[]
 }
 
@@ -1828,6 +1832,8 @@ model Strategy {
   replayReviewSessions ReplayReviewSession[] // optional scope narrowing (Replay foundation, Stage 12)
   replayTrades         ReplayTrade[]
   backtestRuns         BacktestRun[] // experiments run against this strategy (SetNull on delete)
+  simAccounts          SimAccount[] // simulation accounts testing this strategy (SetNull on delete)
+  simStudies           SimStudy[] // Strategy Lab studies of this strategy (SetNull on delete)
   weeklyTradeAudits    WeeklyTradeAudit[]
   auditExpectedTrades  AuditExpectedTrade[]
 
@@ -4276,6 +4282,7 @@ model HistoricalDataset {
   readyAt   DateTime?
 
   runPins BacktestRunDataset[]
+  simPins SimDatasetPin[]
 
   @@index([userId, status, createdAt])
   @@index([userId, symbol])
@@ -5001,4 +5008,537 @@ model MindsetSession {
   recommendationKey String?
 
   @@index([userId, startedAt])
+}
+
+// ── Simulation Platform (Phase 2) ───────────────────────────────────────────
+// Backtesting's own trading domain — independent of Today / Journal / live
+// accounts (docs/SIMULATION_PLATFORM.md). Nothing here references a live
+// table except User, Strategy (definition, SetNull) and HistoricalDataset
+// (shared market data). Money lives ONLY in SimLedgerEntry (append-only);
+// fills are append-only too; both are trigger-enforced. Every row carries
+// userId and triggers check it matches its account's owner.
+
+enum SimProduct {
+  STRATEGY_LAB
+  PROP_FIRM
+}
+
+enum SimAccountKind {
+  LAB // Strategy Lab backtest account
+  EVALUATION // prop-firm challenge phase
+  FUNDED // prop-firm funded account
+}
+
+enum SimAccountStatus {
+  CREATED // configured; clock not started
+  ACTIVE // trading
+  PASSED // evaluation phase passed (a next phase / funded account follows)
+  FAILED // objective not met (e.g. max days) without a rule breach
+  BREACHED // a hard rule was broken; trading stopped
+  COMPLETED // finished by the trader (lab) or by reaching the period end
+  SUSPENDED // trading paused by the system
+  ARCHIVED // hidden from active lists; history kept
+}
+
+enum SimSide {
+  BUY
+  SELL
+}
+
+enum SimOrderType {
+  MARKET
+  LIMIT
+  STOP
+}
+
+enum SimOrderStatus {
+  PENDING
+  FILLED
+  CANCELLED
+  EXPIRED
+  REJECTED
+}
+
+enum SimPositionStatus {
+  OPEN
+  CLOSED
+}
+
+enum SimFillKind {
+  OPEN
+  CLOSE
+}
+
+enum SimFillReason {
+  MARKET
+  PENDING_TRIGGERED
+  STOP_LOSS
+  TAKE_PROFIT
+  MANUAL
+  PARTIAL
+  LIQUIDATION
+}
+
+enum SimLedgerType {
+  INITIAL_BALANCE
+  REALIZED_PNL
+  COMMISSION
+  SWAP
+  PAYOUT_WITHDRAWAL
+  ADJUSTMENT
+}
+
+/// One tradable simulation account (a Strategy Lab backtest, a challenge
+/// phase, or a funded account). Its balance is the sum of its ledger.
+model SimAccount {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  product     SimProduct
+  kind        SimAccountKind
+  name        String
+  description String?
+  status      SimAccountStatus @default(CREATED)
+  statusReason String?
+
+  currency        String  @default("USD")
+  startingBalance Decimal @db.Decimal(14, 2)
+  /// Frozen SimRules snapshot (domain/simulation/rules.ts) — never re-read from a template.
+  rules           Json
+  rulesVersion    Int     @default(1)
+
+  /// Upper-case symbols this account trades (one dataset pin each).
+  assets      String[]
+  /// Inclusive historical period (date-only, broker clock).
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+
+  strategyId              String?
+  strategy                Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  strategyNameSnapshot    String?
+  strategyVersionSnapshot Int?
+  strategySnapshot        Json?
+
+  /// The continuous replay clock: a broker wall-clock minute (null = not started).
+  /// Only ever increases (trigger); moved under a row lock by the clock service.
+  currentMinute  Int?
+  clockVersion   Int  @default(0)
+  /// Recently applied clock/execution command ids (idempotent retries).
+  recentCommands Json @default("[]")
+  /// Sequence of the latest ledger entry (append position, checked under the row lock).
+  ledgerSequence Int  @default(0)
+
+  /// Prop Firm Simulator grouping (Phase 5): one account per stage of a challenge.
+  challengeId String?
+  challenge   SimChallenge? @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  phaseIndex  Int?
+  /// Prop rule engine state (domain/simulation/prop-rules.ts RuleState) — high-water marks,
+  /// day-start values, trading days. Derived bookkeeping; money stays in the ledger.
+  ruleState   Json?
+
+  startedAt  DateTime?
+  endedAt    DateTime?
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  pins      SimDatasetPin[]
+  orders    SimOrder[]
+  positions SimPosition[]
+  fills     SimFill[]
+  ledger    SimLedgerEntry[]
+  events    SimEvent[]
+  observations SimObservation[]
+  breach       SimBreach?
+  payouts      SimPayout[]
+
+  @@unique([challengeId, phaseIndex])
+  @@index([userId, product, status])
+}
+
+/// account × asset → historical dataset. Frozen once the clock starts (trigger).
+model SimDatasetPin {
+  id          String            @id @default(cuid())
+  userId      String
+  accountId   String
+  account     SimAccount        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  assetSymbol String
+  datasetId   String
+  /// NO ACTION: a dataset an account replays can't be deleted out from under it.
+  dataset     HistoricalDataset @relation(fields: [datasetId], references: [id], onDelete: NoAction)
+  createdAt   DateTime          @default(now())
+
+  @@unique([accountId, assetSymbol])
+  @@index([datasetId])
+}
+
+/// An order. Market orders are FILLED immediately; LIMIT/STOP stay PENDING
+/// until the clock reaches a bar that triggers them.
+model SimOrder {
+  id        String     @id @default(cuid())
+  userId    String
+  accountId String
+  account   SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  symbol     String
+  side       SimSide
+  type       SimOrderType
+  status     SimOrderStatus @default(PENDING)
+  /// Prices in the dataset's integer points (price × 10^priceScale).
+  pricePoints Int?
+  stopLoss    Int?
+  takeProfit  Int?
+  priceScale  Int
+  quantity    Decimal @db.Decimal(24, 10)
+  /// Sizing inputs when sized by risk (null when a fixed quantity was entered).
+  riskPercent  Decimal? @db.Decimal(6, 3)
+  intendedRisk Decimal? @db.Decimal(14, 2)
+  /// Frozen economics: account value of a 1.0 price move per quantity unit, and the conversion used.
+  valuePerPriceUnit Decimal @db.Decimal(30, 12)
+  conversionRate    Decimal @db.Decimal(30, 12)
+  specSnapshot      Json
+
+  placedMinute    Int
+  expiresMinute   Int?
+  resolvedMinute  Int?
+  rejectionReason String?
+  /// Browser-generated id: a retried submit returns the first result instead of placing twice.
+  clientRequestId String?
+  positionId      String? @unique
+  note            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([accountId, clientRequestId])
+  @@index([accountId, status])
+}
+
+/// A position. `remainingQuantity`/`realizedPnl` are projections of its fills.
+model SimPosition {
+  id        String     @id @default(cuid())
+  userId    String
+  accountId String
+  account   SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  orderId           String?           @unique
+  symbol            String
+  side              SimSide
+  status            SimPositionStatus @default(OPEN)
+  quantity          Decimal           @db.Decimal(24, 10)
+  remainingQuantity Decimal           @db.Decimal(24, 10)
+  priceScale        Int
+  entryPoints       Int
+  stopLoss          Int?
+  takeProfit        Int?
+  /// The stop at entry — the 1R basis; never moved by later stop changes.
+  initialStopLoss   Int?
+  intendedRisk      Decimal?          @db.Decimal(14, 2)
+  valuePerPriceUnit Decimal           @db.Decimal(30, 12)
+  conversionRate    Decimal           @db.Decimal(30, 12)
+  specSnapshot      Json
+
+  openedMinute Int
+  closedMinute Int?
+  realizedPnl  Decimal @default(0) @db.Decimal(14, 2)
+  commissions  Decimal @default(0) @db.Decimal(14, 2)
+  swaps        Decimal @default(0) @db.Decimal(14, 2)
+  closeReason  SimFillReason?
+  /// An exit where one bar reached both stop and target (stop assumed first).
+  ambiguousExit Boolean @default(false)
+  note          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fills        SimFill[]
+  observations SimObservation[]
+
+  @@index([accountId, status])
+  @@index([accountId, openedMinute])
+}
+
+/// Append-only execution history (UPDATE/DELETE refused by trigger).
+model SimFill {
+  id         String      @id @default(cuid())
+  userId     String
+  accountId  String
+  account    SimAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  positionId String
+  position   SimPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+
+  sequence    Int
+  kind        SimFillKind
+  reason      SimFillReason
+  minute      Int
+  pricePoints Int
+  quantity    Decimal @db.Decimal(24, 10)
+  grossPnl    Decimal @default(0) @db.Decimal(14, 2)
+  commission  Decimal @default(0) @db.Decimal(14, 2)
+  gapped      Boolean @default(false)
+  ambiguous   Boolean @default(false)
+  createdAt   DateTime @default(now())
+
+  @@unique([positionId, sequence])
+  @@index([accountId, minute])
+}
+
+/// Append-only money ledger. Balance = Σ amount; balanceAfter is an assertion.
+model SimLedgerEntry {
+  id             String        @id @default(cuid())
+  userId         String
+  accountId      String
+  account        SimAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sequence       Int
+  type           SimLedgerType
+  amount         Decimal       @db.Decimal(14, 2)
+  balanceAfter   Decimal       @db.Decimal(14, 2)
+  /// Replay time of the event (broker minute); null for setup entries.
+  minute         Int?
+  positionId     String?
+  idempotencyKey String
+  note           String?
+  createdAt      DateTime      @default(now())
+
+  @@unique([accountId, sequence])
+  @@unique([accountId, idempotencyKey])
+  @@index([accountId, minute])
+}
+
+/// The account's timeline: lifecycle, clock and trading events (append-only).
+model SimEvent {
+  id        String     @id @default(cuid())
+  userId    String
+  accountId String
+  account   SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type      String
+  minute    Int?
+  data      Json       @default("{}")
+  createdAt DateTime   @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([accountId, type])
+}
+
+// ── Strategy Lab knowledge base (Phase 4) ───────────────────────────────────
+// Studies of individual trading concepts, their setup variations, and quick
+// observations recorded while replaying — traded or not. An observation
+// linked to a simulated position derives its entry/exit/R/outcome from that
+// position on read (never copied), so it can't drift.
+
+enum SimStudyStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum SimObservationKind {
+  TRADED // a simulated position was taken (linked)
+  NOT_TRADED // studied without trading (market behaviour)
+  MISSED // a valid setup the trader didn't take
+}
+
+enum SimObservationOutcome {
+  WIN
+  LOSS
+  BREAKEVEN
+  UNRESOLVED
+}
+
+model SimStudy {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name                 String
+  description          String?
+  hypothesis           String?
+  category             String?
+  tags                 String[]       @default([])
+  status               SimStudyStatus @default(PLANNED)
+  instruments          String[]       @default([])
+  timeframes           String[]       @default([])
+  periodStart          DateTime?      @db.Date
+  periodEnd            DateTime?      @db.Date
+  marketConditions     String?
+  setupCriteria        String?
+  confirmationCriteria String?
+  entryRules           String?
+  exitRules            String?
+
+  strategyId String?
+  strategy   Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  setups       SimSetup[]
+  observations SimObservation[]
+
+  @@index([userId, status])
+}
+
+/// A variation of the studied setup (e.g. "sweep with displacement").
+model SimSetup {
+  id          String   @id @default(cuid())
+  userId      String
+  studyId     String
+  study       SimStudy @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  observations SimObservation[]
+
+  @@unique([studyId, name])
+}
+
+model SimObservation {
+  id      String    @id @default(cuid())
+  userId  String
+  studyId String
+  study   SimStudy  @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  setupId String?
+  setup   SimSetup? @relation(fields: [setupId], references: [id], onDelete: SetNull)
+
+  /// Where it was observed (both optional: an observation can be logged outside an account).
+  accountId  String?
+  account    SimAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  positionId String?
+  position   SimPosition? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  kind      SimObservationKind
+  symbol    String
+  /// Replay time it was observed at (broker minute).
+  minute    Int
+  timeframe String?
+  /// NOT_TRADED / MISSED only: the trader's own read of what happened and its R (self-reported).
+  outcome   SimObservationOutcome?
+  selfReportedR Decimal? @db.Decimal(8, 2)
+
+  setupTags        String[] @default([])
+  confirmationTags String[] @default([])
+  explanation      String?
+  lessons          String?
+  notes            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studyId, minute])
+  @@index([setupId])
+  @@index([positionId])
+}
+
+// ── Prop Firm Simulator (Phase 5) ───────────────────────────────────────────
+
+enum SimChallengeStatus {
+  IN_EVALUATION
+  FUNDED
+  FAILED
+  BREACHED
+  ARCHIVED
+}
+
+/// A trader-defined prop-firm model (built-in templates live in code).
+/// `definition` is a validated FirmModel; editing bumps `version` and never
+/// touches challenges, which keep their own snapshot.
+model SimFirmModel {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firmName   String
+  modelName  String
+  definition Json
+  version    Int      @default(1)
+  archivedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  challenges SimChallenge[]
+
+  @@index([userId])
+}
+
+/// One simulated challenge purchase and its journey through the stages.
+model SimChallenge {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  firmModelId        String?
+  firmModel          SimFirmModel? @relation(fields: [firmModelId], references: [id], onDelete: SetNull)
+  /// Built-in template key when bought from a template.
+  templateKey        String?
+  firmName           String
+  modelName          String
+  modelVersion       Int
+  /// Frozen FirmModel at purchase.
+  definitionSnapshot Json
+
+  accountSize Decimal            @db.Decimal(14, 2)
+  /// Simulated fee — recorded for history and analytics; no real payment.
+  fee         Decimal            @db.Decimal(14, 2)
+  currency    String
+  status      SimChallengeStatus @default(IN_EVALUATION)
+  /// Stage currently being traded (0-based; == phases.length means funded).
+  currentPhaseIndex Int          @default(0)
+  /// Market data and the historical period the challenge plays through.
+  datasets    Json
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+
+  purchasedAt DateTime  @default(now())
+  fundedAt    DateTime?
+  endedAt     DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  accounts SimAccount[]
+
+  @@index([userId, status])
+}
+
+/// The breach report of an account (at most one: a breach ends trading).
+model SimBreach {
+  id            String     @id @default(cuid())
+  userId        String
+  accountId     String     @unique
+  account       SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  rule          String
+  minute        Int
+  balance       Decimal    @db.Decimal(14, 2)
+  equity        Decimal    @db.Decimal(14, 2)
+  /// The value compared with the floor (balance, or the minute's worst-price equity).
+  measured      Decimal    @db.Decimal(14, 2)
+  floor         Decimal?   @db.Decimal(14, 2)
+  basis         String?
+  detail        String
+  /// Positions open at the breach and closed that trading day (ids, symbols, PnL).
+  contributors  Json
+  floatingInvolved Boolean
+  createdAt     DateTime   @default(now())
+}
+
+/// A funded-account payout (one ledger PAYOUT_WITHDRAWAL each).
+model SimPayout {
+  id             String     @id @default(cuid())
+  userId         String
+  accountId      String
+  account        SimAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sequence       Int
+  minute         Int
+  eligibleProfit Decimal    @db.Decimal(14, 2)
+  grossPayout    Decimal    @db.Decimal(14, 2)
+  traderShare    Decimal    @db.Decimal(14, 2)
+  firmShare      Decimal    @db.Decimal(14, 2)
+  splitPercent   Decimal    @db.Decimal(5, 2)
+  balanceBefore  Decimal    @db.Decimal(14, 2)
+  balanceAfter   Decimal    @db.Decimal(14, 2)
+  createdAt      DateTime   @default(now())
+
+  @@unique([accountId, sequence])
 }

@@ -1,0 +1,147 @@
+/**
+ * Market data for simulation accounts — every read is bounded by a minute
+ * the caller resolved from the account's own clock. Nothing here accepts a
+ * browser-chosen cutoff (docs/SIMULATION_PLATFORM.md §5).
+ */
+import { prisma, type TransactionClient } from "@/server/db";
+import { bucketEnd, bucketStart, type ReplayTimeframe } from "@/domain/native-replay/timeframes";
+import { MINUTES_PER_DAY, parseWallClock } from "@/domain/native-replay/wall-clock";
+import { utcDateToKey } from "@/lib/date";
+import type { SimBar } from "@/domain/simulation/market";
+
+type Db = TransactionClient | typeof prisma;
+
+export interface SimFeed {
+  symbol: string;
+  datasetId: string;
+  seq: number;
+  priceScale: number;
+}
+
+/** The account's pinned, READY datasets. */
+export async function accountFeeds(db: Db, accountId: string): Promise<SimFeed[]> {
+  return db.$queryRaw<SimFeed[]>`
+    SELECT p."assetSymbol" AS symbol, d."id" AS "datasetId", d."seq" AS seq, d."priceScale" AS "priceScale"
+    FROM "SimDatasetPin" p JOIN "HistoricalDataset" d ON d."id" = p."datasetId"
+    WHERE p."accountId" = ${accountId} AND d."status" = 'READY'
+    ORDER BY p."assetSymbol"
+  `;
+}
+
+/** First and last broker minute of an account's inclusive period. */
+export function periodMinutes(period: { periodStart: Date; periodEnd: Date }): { from: number; to: number } {
+  return {
+    from: parseWallClock(`${utcDateToKey(period.periodStart)}T00:00`)!,
+    to: parseWallClock(`${utcDateToKey(period.periodEnd)}T00:00`)! + MINUTES_PER_DAY - 1,
+  };
+}
+
+interface BarRow {
+  seq: number;
+  minute: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  spread: number | null;
+}
+
+const toBar = (r: BarRow): SimBar => ({ minute: r.minute, open: r.open, high: r.high, low: r.low, close: r.close, spread: r.spread ?? 0 });
+
+/** Bars of every feed in (fromExclusive, toInclusive], grouped by symbol, plus the union timeline. */
+export async function loadStepBars(db: Db, feeds: SimFeed[], fromExclusive: number, toInclusive: number): Promise<{ bars: Map<string, Map<number, SimBar>>; timeline: number[] }> {
+  const bars = new Map<string, Map<number, SimBar>>(feeds.map((f) => [f.symbol, new Map()]));
+  if (feeds.length === 0 || toInclusive <= fromExclusive) return { bars, timeline: [] };
+  const symbolBySeq = new Map(feeds.map((f) => [f.seq, f.symbol]));
+  const rows = await db.$queryRaw<BarRow[]>`
+    SELECT "datasetSeq" AS seq, "minute", "open", "high", "low", "close", "spread"
+    FROM "HistoricalBar"
+    WHERE "datasetSeq" = ANY(${feeds.map((f) => f.seq)}::int4[]) AND "minute" > ${fromExclusive} AND "minute" <= ${toInclusive}
+    ORDER BY "minute" ASC
+  `;
+  const minutes = new Set<number>();
+  for (const r of rows) {
+    bars.get(symbolBySeq.get(r.seq)!)!.set(r.minute, toBar(r));
+    minutes.add(r.minute);
+  }
+  return { bars, timeline: [...minutes].sort((a, b) => a - b) };
+}
+
+/** Each feed's latest bar at or before `minute` (its current quote). */
+export async function latestBars(db: Db, feeds: SimFeed[], minute: number): Promise<Map<string, SimBar>> {
+  const out = new Map<string, SimBar>();
+  if (feeds.length === 0) return out;
+  const rows = await db.$queryRaw<BarRow[]>`
+    SELECT DISTINCT ON ("datasetSeq") "datasetSeq" AS seq, "minute", "open", "high", "low", "close", "spread"
+    FROM "HistoricalBar"
+    WHERE "datasetSeq" = ANY(${feeds.map((f) => f.seq)}::int4[]) AND "minute" <= ${minute}
+    ORDER BY "datasetSeq", "minute" DESC
+  `;
+  const symbolBySeq = new Map(feeds.map((f) => [f.seq, f.symbol]));
+  for (const r of rows) out.set(symbolBySeq.get(r.seq)!, toBar(r));
+  return out;
+}
+
+/** The first timeline minute at or after `minute` (inclusive) and up to `limit`. */
+export async function firstMinuteFrom(db: Db, feeds: SimFeed[], minute: number, limit: number): Promise<number | null> {
+  if (feeds.length === 0) return null;
+  const [row] = await db.$queryRaw<{ m: number | null }[]>`
+    SELECT min("minute") AS m FROM "HistoricalBar"
+    WHERE "datasetSeq" = ANY(${feeds.map((f) => f.seq)}::int4[]) AND "minute" >= ${minute} AND "minute" <= ${limit}
+  `;
+  return row.m;
+}
+
+export type ClockCommand =
+  | { kind: "BARS"; count: number }
+  | { kind: "CANDLE"; timeframe: ReplayTimeframe }
+  | { kind: "SEEK"; to: number }
+  | { kind: "NEXT_DAY" };
+
+/** Largest single move: a +N step, or a seek / next-day jump, in timeline minutes or calendar span. */
+export const MAX_STEP_BARS = 1440;
+export const MAX_SEEK_MINUTES = 31 * MINUTES_PER_DAY;
+
+/**
+ * Target world minute for a command from `cur`, never past `limit` (the
+ * period end). Null = nothing to move to. Pure SQL over immutable bars.
+ */
+export async function targetMinute(db: Db, feeds: SimFeed[], cur: number, command: ClockCommand, limit: number, dailyResetHour: number): Promise<number | null> {
+  const seqs = feeds.map((f) => f.seq);
+  if (seqs.length === 0) return null;
+  if (command.kind === "BARS") {
+    const [row] = await db.$queryRaw<{ m: number | null }[]>`
+      SELECT max(m) AS m FROM (
+        SELECT DISTINCT "minute" AS m FROM "HistoricalBar"
+        WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" > ${cur} AND "minute" <= ${limit}
+        ORDER BY m LIMIT ${command.count}
+      ) s
+    `;
+    return row.m;
+  }
+  if (command.kind === "CANDLE") {
+    const next = await firstMinuteFrom(db, feeds, cur + 1, limit);
+    if (next == null) return null;
+    const candleLast = Math.min(bucketEnd(bucketStart(next, command.timeframe), command.timeframe) - 1, limit);
+    const [row] = await db.$queryRaw<{ m: number | null }[]>`
+      SELECT max("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" BETWEEN ${next} AND ${candleLast}
+    `;
+    return row.m;
+  }
+  const lastBarUpTo = async (to: number) => {
+    const bounded = Math.min(to, limit, cur + MAX_SEEK_MINUTES);
+    const [row] = await db.$queryRaw<{ m: number | null }[]>`
+      SELECT max("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" > ${cur} AND "minute" <= ${bounded}
+    `;
+    return row.m;
+  };
+  if (command.kind === "SEEK") return lastBarUpTo(command.to);
+
+  // NEXT_DAY: finish the current trading day (its last bar before the next
+  // daily reset); if it is already finished, finish the next day that has data.
+  const dayEnd = (m: number) => Math.floor((m - dailyResetHour * 60) / MINUTES_PER_DAY + 1) * MINUTES_PER_DAY + dailyResetHour * 60 - 1;
+  const inDay = await lastBarUpTo(dayEnd(cur));
+  if (inDay != null) return inDay;
+  const next = await firstMinuteFrom(db, feeds, cur + 1, Math.min(limit, cur + MAX_SEEK_MINUTES));
+  return next == null ? null : lastBarUpTo(dayEnd(next));
+}
