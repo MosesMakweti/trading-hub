@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 export function BacktestingNav({ runId }: { runId: string | null }) {
   const pathname = usePathname();
   const items = [
-    { label: "Overview", href: "/backtesting", active: pathname === "/backtesting" },
+    { label: "All runs", href: "/backtesting/legacy", active: pathname === "/backtesting/legacy" },
     ...(["session", "replay", "journal", "analytics"] as const).map((segment) => ({
       label: segment[0].toUpperCase() + segment.slice(1),
       href: runId ? `/backtesting/${runId}/${segment}` : null,

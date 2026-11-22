@@ -22,7 +22,7 @@ export default async function BacktestRunLayout({
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <header className="space-y-3">
-        <Link href="/backtesting" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+        <Link href="/backtesting/legacy" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
           <ChevronLeft className="size-3.5" />
           All backtest runs
         </Link>

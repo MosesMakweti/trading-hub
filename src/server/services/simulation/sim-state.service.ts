@@ -14,7 +14,7 @@ import { getHistoricalCandles, type CandlesResult } from "@/server/services/nati
 import { accountRules, requireSimAccount, SimError } from "./sim-account.service";
 import { verifyLedger } from "./sim-ledger";
 import { accountFeeds, latestBars, periodMinutes } from "./sim-market";
-import type { SimAccountStateDTO } from "@/types/simulation";
+import type { SimAccountStateDTO, SimAccountSummaryDTO } from "@/types/simulation";
 
 const price = (points: number | null, scale: number) => (points == null ? null : pointsToPrice(points, scale).toFixed(scale));
 
@@ -151,4 +151,53 @@ export async function getSimCandles(
     limit: query.limit ?? null,
   });
   return { ...result, clockMinute: cutoff };
+}
+
+/**
+ * Card-level summaries for many accounts with a fixed number of queries:
+ * latest ledger balance per account, closed-trade count and net result.
+ */
+export async function listSimAccountSummaries(userId: string, filter: { product?: SimAccountSummaryDTO["product"] } = {}): Promise<SimAccountSummaryDTO[]> {
+  const accounts = await prisma.simAccount.findMany({
+    where: { userId, ...(filter.product ? { product: filter.product } : {}) },
+    orderBy: [{ updatedAt: "desc" }],
+  });
+  if (accounts.length === 0) return [];
+  const ids = accounts.map((a) => a.id);
+  const [balances, trades] = await Promise.all([
+    prisma.$queryRaw<{ accountId: string; balance: string }[]>`
+      SELECT DISTINCT ON ("accountId") "accountId", "balanceAfter"::text AS balance
+      FROM "SimLedgerEntry" WHERE "accountId" = ANY(${ids}::text[]) AND "userId" = ${userId}
+      ORDER BY "accountId", "sequence" DESC
+    `,
+    prisma.simPosition.groupBy({
+      by: ["accountId", "status"],
+      where: { accountId: { in: ids }, userId },
+      _count: { _all: true },
+    }),
+  ]);
+  const balanceBy = new Map(balances.map((b) => [b.accountId, b.balance]));
+  return accounts.map((a) => {
+    const counts = trades.filter((t) => t.accountId === a.id);
+    const balance = balanceBy.get(a.id) ?? a.startingBalance.toString();
+    const period = periodMinutes(a);
+    return {
+      id: a.id,
+      name: a.name,
+      product: a.product,
+      kind: a.kind,
+      status: a.status,
+      currency: a.currency,
+      assets: a.assets,
+      period: { start: formatWallClock(period.from).slice(0, 10), end: formatWallClock(period.to).slice(0, 10) },
+      clockTime: a.currentMinute == null ? null : formatWallClock(a.currentMinute),
+      progressPercent: a.currentMinute == null ? 0 : Math.min(100, Math.max(0, ((a.currentMinute - period.from) / (period.to - period.from)) * 100)),
+      startingBalance: a.startingBalance.toString(),
+      balance,
+      netResult: dec(balance).minus(a.startingBalance.toString()).toFixed(2),
+      openPositions: counts.find((c) => c.status === "OPEN")?._count._all ?? 0,
+      closedTrades: counts.find((c) => c.status === "CLOSED")?._count._all ?? 0,
+      updatedAt: a.updatedAt.toISOString(),
+    };
+  });
 }

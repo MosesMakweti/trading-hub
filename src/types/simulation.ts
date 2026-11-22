@@ -84,3 +84,23 @@ export interface SimAccountStateDTO {
   orders: SimOrderDTO[];
   history: SimClosedPositionDTO[];
 }
+
+export interface SimAccountSummaryDTO {
+  id: string;
+  name: string;
+  product: SimProductValue;
+  kind: SimAccountKindValue;
+  status: SimAccountStatusValue;
+  currency: string;
+  assets: string[];
+  period: { start: string; end: string };
+  clockTime: string | null;
+  /** How far the clock is through the period (0–100). */
+  progressPercent: number;
+  startingBalance: string;
+  balance: string;
+  netResult: string;
+  openPositions: number;
+  closedTrades: number;
+  updatedAt: string;
+}
