@@ -1,4 +1,10 @@
-# Backtesting Environment — V1
+# Backtesting Environment — V1 (legacy)
+
+> **Superseded by the Simulation Platform** — see
+> [SIMULATION_PLATFORM.md](./SIMULATION_PLATFORM.md). Backtesting now has its
+> own domain (Strategy Lab, Prop Firm Simulator, simulated accounts, orders,
+> ledger) independent of Today. V1 runs described below remain fully readable
+> under `/backtesting/legacy`; their data and isolation are unchanged.
 
 **Status: V1 complete** (external-chart backtesting). The next project is
 **Traditorium Native Replay V2** — documented, not implemented (see

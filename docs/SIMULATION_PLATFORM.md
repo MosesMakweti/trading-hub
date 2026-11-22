@@ -1,6 +1,8 @@
 # Simulation Platform — Architecture Assessment & Plan
 
-**Status:** Phase 1 (assessment) complete; Phase 2 in progress.
+**Status:** Phases 1–5 built and tested; Phase 6 (integration, docs) in progress.
+The "As built" section at the end describes what exists now; sections 1–9 are
+the original assessment and plan, kept for the record.
 **Scope:** Turning Backtesting into an independent trading simulation
 environment with two products, **Strategy Lab** and **Prop Firm Simulator**,
 on a shared replay, chart and execution infrastructure.
@@ -203,3 +205,112 @@ server derives everything from bars at the account's clock.
 | Lookahead through new read paths | Every candle read resolves the owning clock's cutoff server-side; no endpoint accepts a cutoff. |
 | Concurrency (double submit, two tabs) | Account row lock (`FOR UPDATE`) around every clock move and execution; idempotency keys on ledger and commands. |
 | Scope of the full vision | Phased delivery; each phase leaves the app working and is merged separately. |
+
+---
+
+## As built (phases 2–5)
+
+### Routes
+
+| Route | What |
+|---|---|
+| `/backtesting` | Home: products, accounts in progress, legacy runs link |
+| `/backtesting/lab` | Strategy Lab backtest accounts; create dialog |
+| `/backtesting/lab/studies`, `/[studyId]` | Study library; study detail (criteria, evidence, variation comparison, breakdowns, observations) |
+| `/backtesting/lab/results/[accountId]` | A backtest's results: equity curve, KPIs, breakdowns |
+| `/backtesting/prop` | Prop Firm dashboard and challenge history list |
+| `/backtesting/prop/new` | Model catalog, rule review, purchase |
+| `/backtesting/prop/challenges/[id]` | Stages, breach report, payouts, timeline |
+| `/backtesting/prop/models/new` | Custom firm model builder |
+| `/backtesting/terminal/[accountId]` | The shared full-screen terminal (both products) |
+| `/backtesting/data` | Historical MT5 data (shared) |
+| `/backtesting/legacy`, `/backtesting/[runId]/…` | V1 Today-based runs, read as before |
+
+### Code
+
+```
+domain/simulation/   rules · market · money · ledger · engine · study-stats · prop-rules · firm-model   (pure, unit-tested)
+server/services/simulation/
+  sim-account   create / lock / start / status / delete
+  sim-market    clock-bounded bar reads, timeline targets
+  sim-clock     continuous clock; settles each step atomically; rule-hook registry
+  sim-execution market / limit / stop, sizing, close, partial close, modify, cancel
+  sim-ledger    the one money write path (+ verification)
+  sim-state     account read model, candles, summaries
+  sim-study     studies, variations, observations, study & backtest analytics
+  sim-prop      firm models, purchase, rule hook, breach / pass / fail, payouts, overview
+actions/simulation*.actions.ts   Zod-validated entry points (intentions only)
+components/simulation/           terminal, order ticket, dock, studies, prop, stats
+```
+
+### Account lifecycle
+
+```
+CREATED ──start replay──▶ ACTIVE ──┬─ (lab) trader completes ──▶ COMPLETED ──▶ ARCHIVED
+                                    ├─ (prop) every pass condition ──▶ PASSED ─▶ next stage ACTIVE
+                                    ├─ (prop) calendar limit ──────▶ FAILED
+                                    └─ (prop) rule broken ─────────▶ BREACHED (positions liquidated, report)
+```
+A challenge is IN_EVALUATION → FUNDED (funded stage reached) | FAILED | BREACHED.
+"FUNDED" is an account *kind* (`EVALUATION` / `FUNDED`), not an account status.
+Each stage is its own account with a fresh balance and its own frozen rule
+snapshot; the next stage opens in the same transaction as the pass, once
+(unique `challengeId × phaseIndex`), and continues from the pass minute on
+later history.
+
+### Clock and execution
+- One continuous clock per account across its period (days, weekends). Commands:
+  +N bars (≤ 1,440), finish candle, finish day, seek (≤ 31 days ahead), play.
+- Every move: row lock → bars of the step → step engine minute by minute →
+  orders/positions/fills/ledger/events written → rule hook finalises → clock moved.
+- Fills: bid bars, ask = bid + spread; pending triggers on the right side of the
+  spread; gaps fill at the open; same-bar stop & target → stop (flagged);
+  on a pending order's fill bar only the stop is checked.
+- Sizing: `domain/execution` (risk % / risk amount / lots; step, min, max).
+  Currency conversion only from pinned replay prices.
+- Commissions per lot per side; swaps per lot per night at the daily reset.
+
+### Rule engine (prop)
+See `domain/simulation/prop-rules.ts` header for the exact formulas. Summary:
+static / EOD-trailing / intraday-trailing maximum loss (optional lock at
+start; balance or equity basis; equity measured at the minute's worst
+price); daily loss from the initial balance, the day-start balance, or the
+higher of day-start balance and equity; resets on the broker clock at the
+model's hour. Pass needs target + flat + min trading days + consistency.
+Overnight/weekend holding breach at the reset that crosses them. Lot,
+position-count and risk-per-trade limits are enforced when an order is
+placed. News restrictions are recorded but not enforced (no calendar data).
+
+### Payouts
+Eligible profit = balance − start − buffer (realized only; floating never
+withdrawn), capped at the maximum, at least the minimum, after the waiting
+period and the cycle's trading days. Trader share = round2(gross × split),
+firm share = gross − trader. Booked as one `PAYOUT_WITHDRAWAL` ledger entry
+(balance after = before − gross) and a `SimPayout` row (CHECK: shares sum to
+gross, balance after = before − gross). A trailing high-water moves down by
+the withdrawal (otherwise the payout itself would breach the floor);
+consistency restarts each cycle.
+
+### Ledger and integrity
+Balance = Σ `SimLedgerEntry.amount`; `balanceAfter` is checked by trigger on
+insert and by `verifyLedger` on read. Idempotency key per entry. Fills,
+ledger, events, breach reports and payouts are append-only (triggers).
+Owner triggers fire only on owner-column changes so cascades can't trip
+them; the dataset FK is deferred so user deletion works in any cascade order.
+
+### Isolation
+Simulation tables never reference live trading tables (only User, Strategy
+as a definition, HistoricalDataset). Every service scopes by `userId`;
+triggers check each child row's owner. Tests assert that trading in a
+simulation leaves the live `Trade`, `TradingAccount`, `PositionFill`,
+`AccountLedgerEntry` and `TradingDay` tables untouched.
+
+### Known limitations / not yet built
+- Chart drawings and screenshots are not yet attached to simulation
+  accounts or observations (they remain on legacy runs).
+- Saved chart layouts; multi-chart synchronised view (one chart, instrument switcher today).
+- Cross-currency PnL converts at the entry-time rate (not re-converted at exit).
+- Intraday-trailing high-water uses minute-close equity (not the intra-minute peak).
+- Firm daily reset on the broker clock only (no timezone conversion — data has none).
+- Study fields can't be edited after creation in the UI yet (the service supports it).
+- Legacy V1 runs can still be created from `/backtesting/legacy`.
