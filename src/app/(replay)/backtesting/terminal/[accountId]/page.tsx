@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/server/guards";
 import { getSimAccountState } from "@/server/services/simulation/sim-state.service";
 import { SimNotFoundError } from "@/server/services/simulation/sim-account.service";
+import { listStudyOptions } from "@/server/services/simulation/sim-study.service";
 import { SimTerminal } from "@/components/simulation/terminal/sim-terminal";
 
 export const metadata: Metadata = { title: "Trading terminal · Backtesting" };
@@ -22,6 +23,14 @@ export default async function SimTerminalPage({ params }: { params: Promise<{ ac
     if (e instanceof SimNotFoundError) notFound();
     throw e;
   }
-  const backHref = state.product === "PROP_FIRM" ? "/backtesting/prop" : "/backtesting/lab";
-  return <SimTerminal initialState={state} backHref={backHref} />;
+  const lab = state.product === "STRATEGY_LAB";
+  const studies = lab ? await listStudyOptions(user.id) : undefined;
+  return (
+    <SimTerminal
+      initialState={state}
+      backHref={lab ? "/backtesting/lab" : "/backtesting/prop"}
+      studies={studies}
+      resultsHref={lab ? `/backtesting/lab/results/${state.id}` : undefined}
+    />
+  );
 }

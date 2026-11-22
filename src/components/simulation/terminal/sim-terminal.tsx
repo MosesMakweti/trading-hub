@@ -19,6 +19,7 @@ import type { SimAccountStateDTO } from "@/types/simulation";
 import { fmtMoney, fmtWallClock, pnlTone } from "../format";
 import { OrderTicket } from "./order-ticket";
 import { TradeDock } from "./trade-dock";
+import { QuickObservation, type StudyOption } from "../studies/quick-observation";
 
 const TIMEFRAMES: ReplayTimeframe[] = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"];
 const SPEEDS = [1, 5, 15, 60] as const;
@@ -42,7 +43,7 @@ const STATUS_TONE: Record<string, string> = {
  * computed or advanced optimistically in the browser, and the chart only
  * ever holds candles up to the account's clock.
  */
-export function SimTerminal({ initialState, backHref, sidePanel }: { initialState: SimAccountStateDTO; backHref: string; sidePanel?: React.ReactNode }) {
+export function SimTerminal({ initialState, backHref, studies, resultsHref }: { initialState: SimAccountStateDTO; backHref: string; studies?: StudyOption[]; resultsHref?: string }) {
   const { resolvedTheme } = useTheme();
   const [state, setState] = useState(initialState);
   const [symbol, setSymbol] = useState(initialState.assets[0]);
@@ -252,6 +253,7 @@ export function SimTerminal({ initialState, backHref, sidePanel }: { initialStat
             <Button type="submit" size="sm" variant="outline" disabled={!canMove || busy || playing || !jumpTo}>Jump</Button>
           </form>
           {busy && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Working" />}
+          {resultsHref && <ButtonLink href={resultsHref} size="sm" variant="ghost">Results</ButtonLink>}
         </div>
       </header>
 
@@ -306,7 +308,7 @@ export function SimTerminal({ initialState, backHref, sidePanel }: { initialStat
 
         <aside data-sim-side aria-label="Trade" className="flex w-[19rem] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border p-3 max-md:hidden">
           <OrderTicket state={state} quote={quote} disabled={!tradable || playing} onPlaced={setState} />
-          {sidePanel}
+          {studies && started && <QuickObservation state={state} studies={studies} timeframe={timeframe} />}
         </aside>
       </div>
 

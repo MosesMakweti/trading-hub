@@ -106,6 +106,7 @@ model User {
   // Native Replay V2 — user-owned MT5 M1 datasets (independent of Edge Review's MarketDataImport)
   historicalDatasets      HistoricalDataset[]
   simAccounts             SimAccount[]
+  simStudies              SimStudy[]
   historicalImportUploads HistoricalImportUpload[]
 }
 
@@ -1830,6 +1831,7 @@ model Strategy {
   replayTrades         ReplayTrade[]
   backtestRuns         BacktestRun[] // experiments run against this strategy (SetNull on delete)
   simAccounts          SimAccount[] // simulation accounts testing this strategy (SetNull on delete)
+  simStudies           SimStudy[] // Strategy Lab studies of this strategy (SetNull on delete)
   weeklyTradeAudits    WeeklyTradeAudit[]
   auditExpectedTrades  AuditExpectedTrade[]
 
@@ -5141,6 +5143,7 @@ model SimAccount {
   fills     SimFill[]
   ledger    SimLedgerEntry[]
   events    SimEvent[]
+  observations SimObservation[]
 
   @@index([userId, product, status])
   @@index([challengeId])
@@ -5241,7 +5244,8 @@ model SimPosition {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  fills SimFill[]
+  fills        SimFill[]
+  observations SimObservation[]
 
   @@index([accountId, status])
   @@index([accountId, openedMinute])
@@ -5307,4 +5311,117 @@ model SimEvent {
 
   @@index([accountId, createdAt])
   @@index([accountId, type])
+}
+
+// ── Strategy Lab knowledge base (Phase 4) ───────────────────────────────────
+// Studies of individual trading concepts, their setup variations, and quick
+// observations recorded while replaying — traded or not. An observation
+// linked to a simulated position derives its entry/exit/R/outcome from that
+// position on read (never copied), so it can't drift.
+
+enum SimStudyStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum SimObservationKind {
+  TRADED // a simulated position was taken (linked)
+  NOT_TRADED // studied without trading (market behaviour)
+  MISSED // a valid setup the trader didn't take
+}
+
+enum SimObservationOutcome {
+  WIN
+  LOSS
+  BREAKEVEN
+  UNRESOLVED
+}
+
+model SimStudy {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name                 String
+  description          String?
+  hypothesis           String?
+  category             String?
+  tags                 String[]       @default([])
+  status               SimStudyStatus @default(PLANNED)
+  instruments          String[]       @default([])
+  timeframes           String[]       @default([])
+  periodStart          DateTime?      @db.Date
+  periodEnd            DateTime?      @db.Date
+  marketConditions     String?
+  setupCriteria        String?
+  confirmationCriteria String?
+  entryRules           String?
+  exitRules            String?
+
+  strategyId String?
+  strategy   Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  setups       SimSetup[]
+  observations SimObservation[]
+
+  @@index([userId, status])
+}
+
+/// A variation of the studied setup (e.g. "sweep with displacement").
+model SimSetup {
+  id          String   @id @default(cuid())
+  userId      String
+  studyId     String
+  study       SimStudy @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  observations SimObservation[]
+
+  @@unique([studyId, name])
+}
+
+model SimObservation {
+  id      String    @id @default(cuid())
+  userId  String
+  studyId String
+  study   SimStudy  @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  setupId String?
+  setup   SimSetup? @relation(fields: [setupId], references: [id], onDelete: SetNull)
+
+  /// Where it was observed (both optional: an observation can be logged outside an account).
+  accountId  String?
+  account    SimAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  positionId String?
+  position   SimPosition? @relation(fields: [positionId], references: [id], onDelete: SetNull)
+
+  kind      SimObservationKind
+  symbol    String
+  /// Replay time it was observed at (broker minute).
+  minute    Int
+  timeframe String?
+  /// NOT_TRADED / MISSED only: the trader's own read of what happened and its R (self-reported).
+  outcome   SimObservationOutcome?
+  selfReportedR Decimal? @db.Decimal(8, 2)
+
+  setupTags        String[] @default([])
+  confirmationTags String[] @default([])
+  explanation      String?
+  lessons          String?
+  notes            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studyId, minute])
+  @@index([setupId])
+  @@index([positionId])
 }
