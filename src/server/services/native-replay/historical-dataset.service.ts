@@ -270,11 +270,23 @@ async function assertDatasetDeletable(dataset: HistoricalDataset): Promise<void>
     select: { assetSymbol: true, backtestRun: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
   });
-  if (pins.length === 0) return;
-  const runs = [...new Set(pins.map((p) => `"${p.backtestRun.name}"`))];
-  throw new HistoricalDatasetInUseError(
-    `This historical dataset is used by ${runs.length} Backtest Run${runs.length === 1 ? "" : "s"} (${runs.join(", ")}). Remove those references or delete the runs first.`,
-  );
+  if (pins.length > 0) {
+    const runs = [...new Set(pins.map((p) => `"${p.backtestRun.name}"`))];
+    throw new HistoricalDatasetInUseError(
+      `This historical dataset is used by ${runs.length} Backtest Run${runs.length === 1 ? "" : "s"} (${runs.join(", ")}). Remove those references or delete the runs first.`,
+    );
+  }
+  // Simulation accounts (Strategy Lab / Prop Firm) pin datasets too; the deferred FK backs this up.
+  const simPins = await prisma.simDatasetPin.findMany({
+    where: { datasetId: dataset.id, userId: dataset.userId },
+    select: { account: { select: { name: true } } },
+  });
+  if (simPins.length > 0) {
+    const accounts = [...new Set(simPins.map((p) => `"${p.account.name}"`))];
+    throw new HistoricalDatasetInUseError(
+      `This historical dataset is used by ${accounts.length} simulation account${accounts.length === 1 ? "" : "s"} (${accounts.join(", ")}). Delete those accounts first.`,
+    );
+  }
 }
 
 /** Deletes a dataset; the DB trigger `HistoricalDataset_delete_bars` removes its bars. */
