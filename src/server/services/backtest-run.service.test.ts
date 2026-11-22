@@ -10,6 +10,7 @@ import {
   BacktestRunValidationError,
   createBacktestRun,
   deleteBacktestRun,
+  getBacktestRunDetail,
   getBacktestRunOverview,
   listBacktestRunOverviews,
   recordBacktestPosition,
@@ -133,7 +134,7 @@ describe("Creation", () => {
       status: "TESTING",
     });
 
-    const run = await createBacktestRun(userId, runInput({ strategyId: strategy.id, startingBalance: 10_000, currency: "USD" }));
+    const run = await createBacktestRun(userId, runInput({ strategyId: strategy.id, startingBalance: 10_000, riskPercentPerTrade: 1, currency: "USD" }));
     const overview = await getBacktestRunOverview(userId, run.id);
 
     expect(run.strategyNameSnapshot).toBe("London Continuation");
@@ -142,7 +143,7 @@ describe("Creation", () => {
     expect(overview?.progress).toMatchObject({ totalTradingDays: 23, completedTradingDays: 0, percentComplete: 0 });
     expect(overview?.currentPositionDateKey).toBeNull();
     expect(overview?.resumeDateKey).toBe("2024-01-01");
-    expect(overview?.simulation).toEqual({ startingBalance: 10_000, riskPercentPerTrade: null, currency: "USD" });
+    expect(overview?.simulation).toEqual({ startingBalance: 10_000, riskPercentPerTrade: 1, currency: "USD" });
     expect(overview?.stats).toEqual({ executedTrades: 0, closedTrades: 0, netR: null, winRate: null, missedTrades: 0 });
   });
 
@@ -173,7 +174,7 @@ describe("Creation", () => {
   it("keeps the simulated balance isolated — creating/listing/updating runs writes no live rows", async () => {
     const userId = await user("iso");
     const before = await liveRowCounts(userId);
-    const run = await createBacktestRun(userId, runInput({ startingBalance: 25_000 }));
+    const run = await createBacktestRun(userId, runInput({ startingBalance: 25_000, riskPercentPerTrade: 0.5 }));
     await listBacktestRunOverviews(userId);
     await recordBacktestPosition(userId, run.id, "2024-01-10");
     await setBacktestRunStatus(userId, run.id, "COMPLETED");
@@ -189,6 +190,7 @@ describe("Ownership", () => {
     const run = await createBacktestRun(owner, runInput());
 
     expect(await getBacktestRunOverview(intruder, run.id)).toBeNull();
+    expect(await getBacktestRunDetail(intruder, run.id)).toBeNull();
     expect(await listBacktestRunOverviews(intruder)).toEqual([]);
     await expect(recordBacktestPosition(intruder, run.id, "2024-01-10")).rejects.toBeInstanceOf(BacktestRunNotFoundError);
     await expect(setBacktestRunStatus(intruder, run.id, "ARCHIVED")).rejects.toBeInstanceOf(BacktestRunNotFoundError);
@@ -408,5 +410,31 @@ describe("Delete", () => {
     expect(await prisma.backtestRun.findUnique({ where: { id: run.id } })).toBeNull();
     expect(await prisma.mediaAsset.count({ where: { userId } })).toBe(0);
     errorSpy.mockRestore();
+  });
+});
+
+describe("Run detail (the run-page ownership gate)", () => {
+  it("matches the overview minus statistics, and never loads the run's trades", async () => {
+    const userId = await user("detail");
+    const run = await createBacktestRun(userId, runInput({ startingBalance: 10_000, riskPercentPerTrade: 1, currency: "USD" }));
+    const overview = await getBacktestRunOverview(userId, run.id);
+    const spy = vi.spyOn(prisma.trade, "findMany");
+    const detail = await getBacktestRunDetail(userId, run.id);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+    const expected: Partial<typeof overview> = { ...overview! };
+    delete expected.stats;
+    expect(detail).toEqual(expected);
+    expect(detail).not.toHaveProperty("stats");
+  });
+});
+
+describe("Simulation settings", () => {
+  it("require a starting balance and a risk % together", () => {
+    const base = { name: "Sim", assets: ["EURUSD"], startDate: "2024-01-08", endDate: "2024-01-12" };
+    expect(createBacktestRunSchema.safeParse({ ...base, startingBalance: 10_000 }).success).toBe(false);
+    expect(createBacktestRunSchema.safeParse({ ...base, riskPercentPerTrade: 1 }).success).toBe(false);
+    expect(createBacktestRunSchema.safeParse({ ...base, startingBalance: 10_000, riskPercentPerTrade: 1 }).success).toBe(true);
+    expect(createBacktestRunSchema.safeParse(base).success).toBe(true);
   });
 });

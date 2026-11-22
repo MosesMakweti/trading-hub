@@ -15,6 +15,7 @@ import {
   ReplayNotFoundError,
   type ReplayRef,
 } from "@/server/services/native-replay/backtest-replay.service";
+import { runUnscoped } from "@/server/workspace/scope";
 import { formatWallClock } from "@/domain/native-replay/wall-clock";
 import { mt5Text, wc } from "@/domain/native-replay/testing/m1-fixtures";
 
@@ -61,6 +62,14 @@ async function setup(label: string, opts: { assets?: string[] } = {}) {
   const run = await createBacktestRun(u.id, createBacktestRunSchema.parse({ name: `Run ${label}`, assets: opts.assets ?? ["EURUSD"], startDate: "2024-05-13", endDate: "2024-05-24" }));
   const ds = await importHistoricalDataset(u.id, { bytes: enc(FIXTURE), fileName: "EURUSD_M1_202405140800_202405151000.csv" });
   return { userId: u.id, run, ds };
+}
+/** Marks a simulated day closed (as Close Trading Day leaves it: ARCHIVED). */
+async function closeSimulatedDay(userId: string, runId: string, dateKey: string) {
+  await runUnscoped("test: close a simulated day", () => prisma.tradingDay.upsert({
+    where: { backtestRunId_date: { backtestRunId: runId, date: new Date(`${dateKey}T00:00:00Z`) } },
+    create: { userId, backtestRunId: runId, date: new Date(`${dateKey}T00:00:00Z`), status: "ARCHIVED" },
+    update: { status: "ARCHIVED" },
+  }));
 }
 const ref = (runId: string, dateKey = "2024-05-14", assetSymbol = "EURUSD"): ReplayRef => ({ runId, dateKey, assetSymbol });
 const at = async (userId: string, r: ReplayRef) => (await getReplayState(userId, r)).position?.time;
@@ -338,6 +347,7 @@ describe("one world clock per run and date (multi-asset)", () => {
   });
 
   it("each simulation date keeps its own world time", async () => {
+    await closeSimulatedDay(userId, runId, "2024-05-14"); // forward-only day order
     await initializeReplay(userId, ref(runId, "2024-05-15"));
     expect(await at(userId, ref(runId, "2024-05-15"))).toBe("2024-05-15T08:12"); // its own first bar (EURUSD only that day)
     await adv(userId, ref(runId, "2024-05-15"), { kind: "BARS", count: 10 });
@@ -450,5 +460,30 @@ describe("ownership and run status", () => {
     }
     await setBacktestRunStatus(userId, run.id, "ACTIVE");
     expect((await advanceReplay(userId, ref(run.id), { kind: "BARS", count: 1 })).moved).toBe(true);
+  });
+});
+
+describe("forward-only day order (no cross-day lookahead)", () => {
+  it("refuses an earlier date once a later date has been replayed", async () => {
+    const { userId, run, ds } = await setup("order-back");
+    await attachDatasetToRun(userId, { runId: run.id, assetSymbol: "EURUSD", datasetId: ds.id });
+    await initializeReplay(userId, ref(run.id, "2024-05-15")); // 14 May skipped (never replayed) — allowed
+    await expect(initializeReplay(userId, ref(run.id, "2024-05-14"))).rejects.toThrow(/already reached 2024-05-15/);
+    await expect(initializeReplay(userId, ref(run.id, "2024-05-14"))).rejects.toBeInstanceOf(ReplayError);
+    expect(await prisma.backtestReplayPosition.count({ where: { backtestRunId: run.id } })).toBe(1);
+    // The already-started date stays idempotent.
+    expect((await initializeReplay(userId, ref(run.id, "2024-05-15"))).status).toBe("ACTIVE");
+  });
+
+  it("refuses a later date while an earlier replayed date is still open, then allows it once closed", async () => {
+    const { userId, run, ds } = await setup("order-open");
+    await attachDatasetToRun(userId, { runId: run.id, assetSymbol: "EURUSD", datasetId: ds.id });
+    await initializeReplay(userId, ref(run.id, "2024-05-14"));
+    await expect(initializeReplay(userId, ref(run.id, "2024-05-15"))).rejects.toThrow(/Close 2024-05-14/);
+    // An open (not ARCHIVED) day row still counts as open.
+    await prisma.tradingDay.create({ data: { userId, backtestRunId: run.id, date: new Date("2024-05-14T00:00:00Z") } });
+    await expect(initializeReplay(userId, ref(run.id, "2024-05-15"))).rejects.toThrow(/Close 2024-05-14/);
+    await closeSimulatedDay(userId, run.id, "2024-05-14");
+    expect((await initializeReplay(userId, ref(run.id, "2024-05-15"))).status).toBe("ACTIVE");
   });
 });

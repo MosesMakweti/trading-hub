@@ -42,7 +42,13 @@ export const createBacktestRunSchema = z
       daysBetweenInclusive(v.startDate, v.endDate) > MAX_RUN_LENGTH_DAYS ||
       listTradingDayKeys({ startDateKey: v.startDate, endDateKey: v.endDate, tradingWeekdays: v.tradingWeekdays }).length > 0,
     { message: "This period has no trading days for the selected weekdays.", path: ["tradingWeekdays"] },
-  );
+  )
+  // The fixed-risk simulation needs both numbers; one alone would be
+  // silently ignored by Analytics.
+  .refine((v) => (v.startingBalance == null) === (v.riskPercentPerTrade == null), {
+    message: "Set both a starting balance and a risk % per trade for the simulation, or leave both empty.",
+    path: ["riskPercentPerTrade"],
+  });
 
 export const backtestRunStatusSchema = z.enum(["ACTIVE", "COMPLETED", "ARCHIVED"]);
 
