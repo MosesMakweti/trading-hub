@@ -14,12 +14,18 @@ import { REPLAY_TIMEFRAMES, type ReplayTimeframe } from "@/domain/native-replay/
 import { advanceSimClockAction, getSimAccountStateAction, getSimCandlesAction, startSimClockAction } from "@/actions/simulation.actions";
 import { fromWire } from "@/domain/native-replay/chart-model";
 import { ScriptWorkbench, type TestData } from "@/components/scripting/script-workbench";
-import { getInstrumentPointValueAction, getScriptSourcesAction } from "@/actions/charting.actions";
+import { deleteSimDrawingAction, getInstrumentPointValueAction, getScriptSourcesAction, listSimDrawingsAction, saveSimDrawingAction } from "@/actions/charting.actions";
+import { TOOLS, type ChartDrawing, type DrawingType } from "@/domain/native-replay/drawings/model";
+import type { DrawingOp } from "@/domain/native-replay/drawings/history";
+import { lookupInstrument } from "@/domain/trade-plan/instrument-catalog";
+import { DrawingToolbar } from "@/components/native-replay/drawings/drawing-toolbar";
+import { DrawingManager } from "@/components/native-replay/drawings/drawing-manager";
+import { SelectionToolbar } from "@/components/native-replay/drawings/selection-toolbar";
 import { applyToCharts, chartsFor, newUid, normalizeWorkspace, type ChartStudy, type Workspace } from "@/domain/charting/workspace";
 import type { ScriptState } from "@/domain/charting/render-model";
 import { INDICATOR_BY_ID, sanitizeInputs } from "@/domain/indicators/catalog";
 import { ChartGrid } from "@/components/charting/chart-grid";
-import type { ChartPaneHandle, ScriptSource } from "@/components/charting/chart-pane";
+import { PRICE_DRIVEN_TYPES, type ChartPaneHandle, type DrawingStateEvent, type ScriptSource, type SharedDrawings } from "@/components/charting/chart-pane";
 import type { PriceLineSpec } from "@/components/charting/sim-chart";
 import { ChartSettingsMenu, ChartTypeMenu, LayoutMenu } from "@/components/charting/chart-menus";
 import { IndicatorPicker } from "@/components/charting/indicator-picker";
@@ -72,6 +78,14 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const [editing, setEditing] = useState<{ chart: number; uid: string; script: ScriptState | null } | null>(null);
   const [scriptSources, setScriptSources] = useState(new Map<string, ScriptSource>());
   const [bottomTab, setBottomTab] = useState<"trading" | "scripts">("trading");
+  // Drawings (per instrument, shared by every chart of it).
+  const [drawingsBySymbol, setDrawingsBySymbol] = useState(new Map<string, SharedDrawings>());
+  const [drawTool, setDrawTool] = useState<DrawingType | null>(null);
+  const [drawSelected, setDrawSelected] = useState<ChartDrawing | null>(null);
+  const [drawList, setDrawList] = useState<ChartDrawing[]>([]);
+  const [drawCanUndo, setDrawCanUndo] = useState(false);
+  const [managerOpen, setManagerOpen] = useState(false);
+  const [magnet, setMagnet] = useState(false);
   // Live sizes while dragging (committed to the workspace on release).
   const [rightWidth, setRightWidth] = useState(ws.panels.right.width);
   const [bottomHeight, setBottomHeight] = useState(ws.panels.bottom.height);
@@ -92,10 +106,27 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const tradable = started && state.status === "ACTIVE";
   const canMove = tradable && !state.clock?.atPeriodEnd;
   const focus = ws.focus;
+  const activeIndex = Math.min(ws.activeChart, chartsFor(ws.layout) - 1);
+  const activeCtl = useCallback(() => paneRefs.current[activeIndex]?.drawings() ?? null, [activeIndex]);
+  const drawingsReadOnly = !(state.status === "ACTIVE" || state.status === "CREATED");
+  const activePriceDriven = PRICE_DRIVEN_TYPES.has(active.chartType);
 
   // ── Workspace helpers ─────────────────────────────────────────────────────
   const patchChart = useCallback((index: number, patch: Partial<Workspace["charts"][number]>) => updateWs((w) => ({ ...w, charts: w.charts.map((c, i) => (i === index ? { ...c, ...patch } : c)) })), [updateWs]);
-  const setActive = useCallback((i: number) => updateWs((w) => ({ ...w, activeChart: i })), [updateWs]);
+  const setActive = useCallback(
+    (i: number) => {
+      // Drawing tool/selection belong to the active chart: hand over cleanly.
+      const prev = paneRefs.current[activeIndex]?.drawings();
+      prev?.setTool(null);
+      prev?.select(null);
+      const next = paneRefs.current[i]?.drawings();
+      setDrawSelected(null);
+      setDrawTool(null);
+      setDrawList(next ? [...next.getDrawings()] : []);
+      updateWs((w) => ({ ...w, activeChart: i }));
+    },
+    [updateWs, activeIndex],
+  );
   const setStudies = useCallback((i: number, list: ChartStudy[]) => patchChart(i, { studies: list }), [patchChart]);
   const onEditStudy = useCallback((chart: number, uid: string, script: ScriptState | null) => setEditing({ chart, uid, script }), []);
 
@@ -148,6 +179,69 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   }, [state.positions, state.orders]);
   const priceLinesFor = useCallback((sym: string) => linesBySymbol.get(sym) ?? NO_LINES, [linesBySymbol]);
   const digitsFor = useCallback((sym: string) => state.quotes.find((q) => q.symbol === sym)?.priceScale ?? 5, [state.quotes]);
+
+  // ── Drawings: load per instrument on screen; persist every edit ──────────
+  const shownSymbols = useMemo(() => [...new Set(ws.charts.slice(0, chartsFor(ws.layout)).map((c) => (c.symbol && state.assets.includes(c.symbol) ? c.symbol : state.assets[0])))].sort(), [ws.charts, ws.layout, state.assets]);
+  const loadedSymbols = useRef(new Set<string>());
+  const revRef = useRef(0);
+  const reloadDrawings = useCallback(
+    async (sym: string) => {
+      const res = await listSimDrawingsAction({ accountId: state.id, assetSymbol: sym });
+      if (!res.success) return void toast.error(res.error);
+      setDrawingsBySymbol((m) => new Map(m).set(sym, { list: res.drawings, origin: null, rev: ++revRef.current }));
+    },
+    [state.id],
+  );
+  const shownKey = shownSymbols.join(",");
+  useEffect(() => {
+    for (const sym of shownSymbols) {
+      if (loadedSymbols.current.has(sym)) continue;
+      loadedSymbols.current.add(sym);
+      void reloadDrawings(sym);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownKey, reloadDrawings]);
+
+  const onDrawingCommit = useCallback(
+    (index: number, sym: string, op: DrawingOp, list: ChartDrawing[]) => {
+      setDrawingsBySymbol((m) => new Map(m).set(sym, { list, origin: index, rev: ++revRef.current }));
+      const task =
+        op.kind === "delete"
+          ? deleteSimDrawingAction({ accountId: state.id, assetSymbol: sym, drawingId: op.drawing.id })
+          : (() => {
+              const d = op.kind === "create" ? op.drawing : op.after;
+              const { linkedTradeId: _ignored, ...rest } = d;
+              void _ignored;
+              return saveSimDrawingAction({ accountId: state.id, drawing: rest });
+            })();
+      void task.then((res) => {
+        if (!res.success) {
+          toast.error(res.error);
+          void reloadDrawings(sym); // the server's copy wins
+        }
+      });
+    },
+    [state.id, reloadDrawings],
+  );
+  const onDrawingState = useCallback(
+    (index: number, ev: DrawingStateEvent) => {
+      if (index !== activeIndex) return;
+      if ("selected" in ev) setDrawSelected(ev.selected);
+      else if ("tool" in ev) setDrawTool(ev.tool);
+      else {
+        setDrawList(ev.list);
+        setDrawCanUndo(!!paneRefs.current[index]?.drawings().canUndo());
+      }
+    },
+    [activeIndex],
+  );
+  useEffect(() => {
+    activeCtl()?.setMagnet(magnet);
+  }, [magnet, activeCtl]);
+  const pipSize = (() => {
+    const spec = lookupInstrument(symbol);
+    return spec?.pipSize ? Number(spec.pipSize) : null;
+  })();
 
   // ── Replay ────────────────────────────────────────────────────────────────
   const run = useCallback(
@@ -219,7 +313,37 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable || t.closest("[data-sim-side]") || t.closest(".cm-editor"))) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const ctl = activeCtl();
+      const mod = e.metaKey || e.ctrlKey;
+      if (ctl && mod && e.code === "KeyZ") {
+        e.preventDefault();
+        if (e.shiftKey) ctl.redo();
+        else ctl.undo();
+        return;
+      }
+      if (ctl && mod && e.code === "KeyD" && ctl.selected()) {
+        e.preventDefault();
+        ctl.duplicateSelected();
+        return;
+      }
+      if (ctl && e.altKey && !mod) {
+        const t = (Object.keys(TOOLS) as DrawingType[]).find((k) => TOOLS[k].shortcut && e.code === `Key${TOOLS[k].shortcut!.slice(-1)}`);
+        if (t) {
+          e.preventDefault();
+          if (!drawingsReadOnly && !activePriceDriven) ctl.setTool(t);
+          return;
+        }
+      }
+      if (mod || e.altKey) return;
+      if (e.key === "Escape" && ctl && (ctl.getTool() || ctl.selected())) {
+        ctl.cancel();
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && ctl?.selected()) {
+        e.preventDefault();
+        ctl.deleteSelected();
+        return;
+      }
       if (e.key === " ") {
         e.preventDefault();
         if (playingRef.current) pause();
@@ -367,6 +491,21 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
 
       {/* ── Charts + side panel ─────────────────────────────────────────── */}
       <div className="flex min-h-0 flex-1">
+        {ws.panels.left.visible && !focus && (
+          <DrawingToolbar
+            tool={drawTool}
+            onTool={(t) => activeCtl()?.setTool(t)}
+            magnet={magnet}
+            onMagnet={setMagnet}
+            readOnly={drawingsReadOnly || !started || activePriceDriven}
+            canUndo={drawList.length > 0 || drawCanUndo}
+            onUndo={() => activeCtl()?.undo()}
+            onRedo={() => activeCtl()?.redo()}
+            managerOpen={managerOpen}
+            onManager={() => setManagerOpen((o) => !o)}
+            drawingCount={drawList.length}
+          />
+        )}
         <main className="relative min-w-0 flex-1" aria-label="Charts">
           <ChartGrid
             ws={ws}
@@ -382,6 +521,52 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
             onStudiesChange={setStudies}
             onEditStudy={onEditStudy}
             paneRefs={paneRefs}
+            drawingsBySymbol={drawingsBySymbol}
+            drawingsReadOnly={drawingsReadOnly}
+            onDrawingCommit={onDrawingCommit}
+            onDrawingState={onDrawingState}
+            overlay={(i) =>
+              i !== activeIndex ? null : (
+                <>
+                  {activePriceDriven && started && (
+                    <p className="pointer-events-none absolute bottom-3 right-16 z-20 rounded-md border border-border bg-card/90 px-2 py-1 text-[11px] text-muted-foreground">Drawings are anchored to time, so they&apos;re hidden on price-driven chart types.</p>
+                  )}
+                  {drawSelected && !drawSelected.hidden && !activePriceDriven && (
+                    <SelectionToolbar
+                      drawing={drawSelected}
+                      priceScale={digitsFor(symbol)}
+                      pipSize={pipSize}
+                      readOnly={drawingsReadOnly}
+                      onChange={(mutate) => activeCtl()?.update(drawSelected.id, mutate)}
+                      onToggleLock={() => activeCtl()?.update(drawSelected.id, (d) => void (d.locked = !d.locked), { allowLocked: true })}
+                      onHide={() => {
+                        activeCtl()?.update(drawSelected.id, (d) => void (d.hidden = true), { allowLocked: true });
+                        activeCtl()?.select(null);
+                      }}
+                      onDuplicate={() => activeCtl()?.duplicateSelected()}
+                      onDelete={() => activeCtl()?.deleteSelected()}
+                    />
+                  )}
+                  {drawTool && (
+                    <div className="pointer-events-none absolute left-1/2 top-9 z-30 -translate-x-1/2 rounded-md border border-border bg-card/95 px-2 py-1 text-xs text-muted-foreground shadow-sm" role="status">
+                      {TOOLS[drawTool].label}: {TOOLS[drawTool].anchors === 1 ? "click to place" : TOOLS[drawTool].anchors === 3 ? "click three points" : "click twice, or drag"} · Esc to cancel
+                    </div>
+                  )}
+                  {managerOpen && (
+                    <DrawingManager
+                      drawings={drawList}
+                      selectedId={drawSelected?.id ?? null}
+                      readOnly={drawingsReadOnly}
+                      onSelect={(id) => activeCtl()?.select(id)}
+                      onToggleHidden={(id) => activeCtl()?.update(id, (d) => void (d.hidden = !d.hidden), { allowLocked: true })}
+                      onToggleLock={(id) => activeCtl()?.update(id, (d) => void (d.locked = !d.locked), { allowLocked: true })}
+                      onDelete={(id) => activeCtl()?.remove(id)}
+                      onClose={() => setManagerOpen(false)}
+                    />
+                  )}
+                </>
+              )
+            }
           />
           {state.clock?.atPeriodEnd && (
             <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-md border border-border bg-card px-3 py-1.5 text-xs shadow-sm" role="status">
@@ -417,7 +602,8 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
       {showBottom && (
         <>
           <ResizeHandle direction="up" value={bottomHeight} min={120} max={640} label="Resize bottom panel" onChange={setBottomHeight} onCommit={(height) => updateWs((w) => ({ ...w, panels: { ...w.panels, bottom: { ...w.panels.bottom, height } } }))} />
-          <div style={{ height: bottomHeight }} className="flex shrink-0 flex-col">
+          {/* Never squeeze the charts below ~240px, whatever height was saved. */}
+          <div style={{ height: bottomHeight, maxHeight: "calc(100dvh - 22rem)" }} className="flex shrink-0 flex-col">
             <div role="tablist" aria-label="Bottom panel" className="flex shrink-0 items-center gap-0.5 border-b border-border bg-muted/30 px-1.5">
               {(["trading", "scripts"] as const).map((t) => (
                 <button key={t} role="tab" type="button" aria-selected={bottomTab === t} onClick={() => setBottomTab(t)} className={cn("px-2.5 py-1 text-[11px] font-medium", bottomTab === t ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>

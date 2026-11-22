@@ -13,7 +13,25 @@ import { CHART_TYPES } from "@/domain/indicators/chart-types";
 import { buildDisplay, buildStudies, type ScriptState, type StudyRender } from "@/domain/charting/render-model";
 import type { ChartConfig, ChartSettings, ChartStudy } from "@/domain/charting/workspace";
 import { runScriptInWorker } from "@/components/scripting/run-script";
+import { DrawingController } from "@/components/native-replay/drawings/drawing-controller";
+import type { ChartDrawing, DrawingType } from "@/domain/native-replay/drawings/model";
+import type { DrawingOp } from "@/domain/native-replay/drawings/history";
+import { nominalMinutes } from "@/domain/native-replay/timeframes";
+import { lookupInstrument } from "@/domain/trade-plan/instrument-catalog";
+import type { IChartApi, ISeriesApi } from "lightweight-charts";
 import { SimChart, type PriceLineSpec, type SimChartHandle } from "./sim-chart";
+
+/** Chart types whose time axis is price-driven: drawings (anchored in time) can't be placed there. */
+export const PRICE_DRIVEN_TYPES = new Set(["renko", "linebreak", "kagi", "pointfigure", "range"]);
+
+export interface SharedDrawings {
+  list: ChartDrawing[];
+  /** Pane that produced this version (it already shows it), or null for a server load. */
+  origin: number | null;
+  rev: number;
+}
+
+export type DrawingStateEvent = { selected: ChartDrawing | null } | { tool: DrawingType | null } | { list: ChartDrawing[] };
 
 /** Candles per chart: enough warm-up for long indicators, small enough to stay fast. */
 const CANDLE_LIMIT = 1500;
@@ -27,6 +45,7 @@ export interface ScriptSource {
 
 export interface ChartPaneHandle {
   sim(): SimChartHandle | null;
+  drawings(): DrawingController;
 }
 
 interface Props {
@@ -53,6 +72,11 @@ interface Props {
   onTimeRange: (index: number, range: { from: number; to: number } | null) => void;
   /** Exposes the displayed candles (drawings, legend of other panels). */
   onCandles?: (candles: EngineCandle[]) => void;
+  /** Drawings of this chart's instrument (shared by every chart of it). */
+  drawings?: SharedDrawings;
+  drawingsReadOnly: boolean;
+  onDrawingCommit: (index: number, symbol: string, op: DrawingOp, list: ChartDrawing[]) => void;
+  onDrawingState: (index: number, event: DrawingStateEvent) => void;
   children?: React.ReactNode;
 }
 
@@ -70,7 +94,60 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
     viewRef.current = viewKey;
   }, [viewKey]);
 
-  useImperativeHandle(ref, () => ({ sim: () => simRef.current }));
+  // ── Drawings: one controller per chart, anchored in (wall-clock minute, price) ──
+  const latest = useRef(props);
+  useEffect(() => {
+    latest.current = props;
+  });
+  // Callbacks read the latest props when they fire (never during render).
+  const [ctl] = useState(
+    // eslint-disable-next-line react-hooks/refs
+    () =>
+      new DrawingController({
+        onSelection: (d) => latest.current.onDrawingState(latest.current.index, { selected: d }),
+        onToolChange: (t) => latest.current.onDrawingState(latest.current.index, { tool: t }),
+        onListChange: (list) => latest.current.onDrawingState(latest.current.index, { list: [...list] }),
+      }),
+  );
+  const drawable = !PRICE_DRIVEN_TYPES.has(config.chartType);
+  useEffect(() => {
+    ctl.setCommitHandler((op) => latest.current.onDrawingCommit(latest.current.index, latest.current.symbol, op, [...ctl.getDrawings()]));
+  }, [ctl]);
+  const onReady = useCallback(
+    (chart: IChartApi, series: ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area" | "Baseline" | "Histogram" | "Custom">, el: HTMLElement) => {
+      if (!PRICE_DRIVEN_TYPES.has(latest.current.config.chartType)) ctl.attach(chart, series as ISeriesApi<"Candlestick">, el);
+    },
+    [ctl],
+  );
+  const onDetach = useCallback(() => ctl.detach(), [ctl]);
+  // Candles ↔ Renko etc. keep the same series kind (no onReady): attach/detach here.
+  useEffect(() => {
+    const sim = simRef.current;
+    const chart = sim?.chart();
+    const series = sim?.mainSeries();
+    const el = sim?.element();
+    if (!drawable) ctl.detach();
+    else if (chart && series && el) ctl.attach(chart, series as ISeriesApi<"Candlestick">, el);
+  }, [ctl, drawable]);
+  useEffect(() => () => ctl.detach(), [ctl]);
+  const pipSize = (() => {
+    const spec = lookupInstrument(symbol);
+    return spec?.pipSize ? Number(spec.pipSize) : null;
+  })();
+  useEffect(() => {
+    ctl.setContext({ assetSymbol: symbol, priceScale: priceDigits, pipSize, tfMinutes: nominalMinutes(config.timeframe), dark: theme !== "light", readOnly: props.drawingsReadOnly || !drawable });
+  }, [ctl, symbol, priceDigits, pipSize, config.timeframe, theme, props.drawingsReadOnly, drawable]);
+  useEffect(() => {
+    if (drawable) ctl.setCandles(candles, priceDigits);
+  }, [ctl, candles, priceDigits, drawable]);
+  const shared = props.drawings;
+  useEffect(() => {
+    if (shared && shared.origin !== index) ctl.setDrawings(shared.list.filter((d) => d.assetSymbol === symbol));
+    else if (!shared) ctl.setDrawings([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the shared revision
+  }, [ctl, shared?.rev, symbol]);
+
+  useImperativeHandle(ref, () => ({ sim: () => simRef.current, drawings: () => ctl }));
 
   // ── Candles (server-bounded by the account clock: never future bars) ──────
   useEffect(() => {
@@ -186,6 +263,8 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
         onCrosshair={onChartCrosshair}
         onTimeRange={onChartRange}
         onFollowChange={onFollow}
+        onReady={onReady}
+        onDetach={onDetach}
       />
       {props.children}
       {!following && started && (

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { drawingSchema } from "@/lib/validation/native-replay";
+
 const id = z.string().min(1).max(64);
 export const scriptName = z.string().trim().min(1, "Name the script.").max(80);
 export const scriptSource = z.string().max(70_000);
@@ -13,3 +15,6 @@ export const renameScriptSchema = z.object({ id, name: scriptName });
 export const archiveScriptSchema = z.object({ id, archived: z.boolean() });
 export const scriptSourcesSchema = z.object({ ids: z.array(id).max(48) });
 export const pointValueSchema = z.object({ accountId: id, symbol: z.string().trim().toUpperCase().min(1).max(20) });
+export const simDrawingListSchema = z.object({ accountId: id, assetSymbol: z.string().trim().toUpperCase().min(1).max(20) });
+export const simDrawingSaveSchema = z.object({ accountId: id, drawing: drawingSchema });
+export const simDrawingDeleteSchema = simDrawingListSchema.extend({ drawingId: z.string().min(1).max(64) });

@@ -5,8 +5,8 @@
  * Every shape is projected from market coordinates (time, price) at draw time,
  * so zoom/pan/resize/timeframe changes need no stored pixels.
  */
-import { channelLines, computePosition, fibLevels, formatDuration, lineSegment, measure, type Pt } from "@/domain/native-replay/drawings/geometry";
-import { DEFAULT_FIB_LEVELS, type Anchor, type ChartDrawing } from "@/domain/native-replay/drawings/model";
+import { channelLines, computePosition, fibExtensionLevels, fibLevels, formatDuration, lineSegment, linearRegression, measure, pitchforkLines, type Pt } from "@/domain/native-replay/drawings/geometry";
+import { DEFAULT_FIB_EXT_LEVELS, DEFAULT_FIB_LEVELS, type Anchor, type ChartDrawing } from "@/domain/native-replay/drawings/model";
 
 export interface DrawView {
   width: number;
@@ -15,6 +15,8 @@ export interface DrawView {
   priceToY: (p: number) => number | null;
   /** Bars between two times on the current timeframe (for the ruler). */
   barsBetween: (a: number, b: number) => number | null;
+  /** Revealed candles (time, close) between two times, inclusive — for the regression channel. */
+  closesBetween: (a: number, b: number) => { time: number; close: number }[];
   priceScale: number;
   pipSize: number | null;
   dark: boolean;
@@ -229,6 +231,154 @@ function drawOne(ctx: CanvasRenderingContext2D, d: ChartDrawing, view: DrawView,
       ctx.lineWidth = 1;
       line(ctx, a, b);
       handles.push(a, b);
+      break;
+    }
+    case "FIB_EXT": {
+      const [a, b, c] = d.anchors.map((x) => pt(view, x));
+      if (!a || !b || !c) return;
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1;
+      line(ctx, a, b);
+      line(ctx, b, c);
+      ctx.setLineDash([]);
+      const x0 = c.x;
+      const x1 = Math.max(c.x + 80, Math.max(a.x, b.x, c.x) + 40);
+      for (const lv of fibExtensionLevels(d.anchors[0], d.anchors[1], d.anchors[2], d.data.levels ?? DEFAULT_FIB_EXT_LEVELS, view.priceScale)) {
+        const y = view.priceToY(lv.price);
+        if (y == null) continue;
+        ctx.globalAlpha = lv.level === 0 || lv.level === 1 ? 1 : 0.75;
+        line(ctx, { x: x0, y }, { x: x1, y });
+        ctx.globalAlpha = 1;
+        label(ctx, `${lv.level} (${fmt(lv.price, view.priceScale)})`, x0 + 2, y - 9, view, { color: d.style.color, bg: "rgba(0,0,0,0)" });
+      }
+      handles.push(a, b, c);
+      break;
+    }
+    case "PITCHFORK": {
+      const [a, b, c] = d.anchors.map((x) => pt(view, x));
+      if (!a || !b || !c) return;
+      const { median, upper, lower } = pitchforkLines(d.anchors[0], d.anchors[1], d.anchors[2]);
+      const ray = (l: [Anchor, Anchor]) => {
+        const p0 = pt(view, l[0]);
+        const p1 = pt(view, l[1]);
+        if (!p0 || !p1) return;
+        const [s0, e0] = lineSegment(p0, p1, "ray", W, H);
+        line(ctx, s0, e0);
+      };
+      ray(median);
+      ray(upper);
+      ray(lower);
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1;
+      line(ctx, b, c);
+      handles.push(a, b, c);
+      break;
+    }
+    case "TRIANGLE": {
+      const [a, b, c] = d.anchors.map((x) => pt(view, x));
+      if (!a || !b || !c) return;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.closePath();
+      ctx.fillStyle = rgba(d.style.color, 0.1 * d.style.opacity + 0.04);
+      ctx.fill();
+      ctx.stroke();
+      handles.push(a, b, c);
+      break;
+    }
+    case "ELLIPSE": {
+      const a = pt(view, d.anchors[0]);
+      const b = pt(view, d.anchors[1]);
+      if (!a || !b) return;
+      ctx.beginPath();
+      ctx.ellipse((a.x + b.x) / 2, (a.y + b.y) / 2, Math.abs(b.x - a.x) / 2, Math.abs(b.y - a.y) / 2, 0, 0, Math.PI * 2);
+      ctx.fillStyle = rgba(d.style.color, 0.1 * d.style.opacity + 0.04);
+      ctx.fill();
+      ctx.stroke();
+      handles.push(a, b);
+      break;
+    }
+    case "DATE_RANGE":
+    case "PRICE_RANGE": {
+      const a = pt(view, d.anchors[0]);
+      const b = pt(view, d.anchors[1]);
+      if (!a || !b) return;
+      const dateRange = d.type === "DATE_RANGE";
+      const m = measure(d.anchors[0], d.anchors[1], view.priceScale, { pipSize: view.pipSize, bars: view.barsBetween(d.anchors[0].time, d.anchors[1].time) });
+      ctx.fillStyle = rgba(d.style.color, 0.12);
+      if (dateRange) {
+        ctx.fillRect(Math.min(a.x, b.x), 0, Math.abs(b.x - a.x), H);
+        line(ctx, { x: a.x, y: 0 }, { x: a.x, y: H });
+        line(ctx, { x: b.x, y: 0 }, { x: b.x, y: H });
+        ctx.setLineDash([]);
+        line(ctx, { x: a.x, y: (a.y + b.y) / 2 }, { x: b.x, y: (a.y + b.y) / 2 });
+        label(ctx, `${m.bars != null ? `${m.bars} bars · ` : ""}${formatDuration(m.minutes)}`, (a.x + b.x) / 2, (a.y + b.y) / 2 - 12, view, { align: "center" });
+      } else {
+        ctx.fillRect(0, Math.min(a.y, b.y), W, Math.abs(b.y - a.y));
+        line(ctx, { x: 0, y: a.y }, { x: W, y: a.y });
+        line(ctx, { x: 0, y: b.y }, { x: W, y: b.y });
+        ctx.setLineDash([]);
+        line(ctx, { x: (a.x + b.x) / 2, y: a.y }, { x: (a.x + b.x) / 2, y: b.y });
+        label(ctx, `${signed(m.priceChange, view.priceScale)} (${m.percentChange >= 0 ? "+" : ""}${m.percentChange}%) · ${Math.abs(m.points)} pts${m.pips != null ? ` · ${Math.abs(m.pips)} pips` : ""}`, (a.x + b.x) / 2, Math.min(a.y, b.y) - 12, view, { align: "center", color: m.priceChange >= 0 ? GOOD : BAD });
+      }
+      handles.push(a, b);
+      break;
+    }
+    case "REGRESSION": {
+      const t0 = Math.min(d.anchors[0].time, d.anchors[1].time);
+      const t1 = Math.max(d.anchors[0].time, d.anchors[1].time);
+      const pts = view.closesBetween(t0, t1);
+      const reg = linearRegression(pts.map((q) => q.close));
+      const a = pt(view, d.anchors[0]);
+      const b = pt(view, d.anchors[1]);
+      if (!reg || pts.length < 2) {
+        if (a && b) {
+          ctx.setLineDash([3, 3]);
+          line(ctx, a, b);
+          label(ctx, "Needs at least 2 revealed candles", (a.x + b.x) / 2, Math.min(a.y, b.y) - 12, view, { align: "center" });
+          handles.push(a, b);
+        }
+        break;
+      }
+      const n = pts.length - 1;
+      const xs = view.timeToX(pts[0].time);
+      const xe = view.timeToX(pts[n].time);
+      if (xs == null || xe == null) return;
+      const at = (i: number, off: number) => view.priceToY(reg.intercept + reg.slope * i + off);
+      const dev = 2 * reg.stdev;
+      for (const [off, dash] of [[0, [6, 4]], [dev, []], [-dev, []]] as const) {
+        const y0 = at(0, off);
+        const y1 = at(n, off);
+        if (y0 == null || y1 == null) continue;
+        ctx.setLineDash(dash as unknown as number[]);
+        line(ctx, { x: xs, y: y0 }, { x: xe, y: y1 });
+      }
+      const up0 = at(0, dev), up1 = at(n, dev), lo0 = at(0, -dev), lo1 = at(n, -dev);
+      if (up0 != null && up1 != null && lo0 != null && lo1 != null) {
+        ctx.fillStyle = rgba(d.style.color, 0.08);
+        ctx.beginPath();
+        ctx.moveTo(xs, up0);
+        ctx.lineTo(xe, up1);
+        ctx.lineTo(xe, lo1);
+        ctx.lineTo(xs, lo0);
+        ctx.closePath();
+        ctx.fill();
+      }
+      const yl = at(n, dev);
+      if (yl != null) label(ctx, `Regression · ${pts.length} bars · ±2σ`, xe, yl - 12, view, { align: "right", color: d.style.color, bg: "rgba(0,0,0,0)" });
+      if (a) handles.push(a);
+      if (b) handles.push(b);
+      break;
+    }
+    case "CROSS": {
+      const x = view.timeToX(d.anchors[0].time);
+      const y = view.priceToY(d.anchors[0].price);
+      if (x == null || y == null) return;
+      line(ctx, { x: 0, y }, { x: W, y });
+      line(ctx, { x, y: 0 }, { x, y: H });
+      handles.push({ x, y });
       break;
     }
     case "LONG":

@@ -33,7 +33,8 @@ export function SelectionToolbar({
   onHide: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
-  onUseInTradeIdea: () => void;
+  /** Native Replay only: pre-fills the Trade Idea form. Omitted elsewhere. */
+  onUseInTradeIdea?: () => void;
 }) {
   const disabled = readOnly || drawing.locked;
   const isPosition = drawing.type === "LONG" || drawing.type === "SHORT";
@@ -110,9 +111,11 @@ export function SelectionToolbar({
               <Minus />
             </Button>
           )}
-          <Button type="button" size="xs" disabled={readOnly || !calc.valid} onClick={onUseInTradeIdea} title="Pre-fill the Backtesting Trade Idea form with this position">
-            Use in Trade Idea
-          </Button>
+          {onUseInTradeIdea && (
+            <Button type="button" size="xs" disabled={readOnly || !calc.valid} onClick={onUseInTradeIdea} title="Pre-fill the Backtesting Trade Idea form with this position">
+              Use in Trade Idea
+            </Button>
+          )}
         </>
       )}
       <span className="mx-0.5 h-4 w-px bg-border" aria-hidden />

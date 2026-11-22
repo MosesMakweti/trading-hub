@@ -165,3 +165,40 @@ describe("validation", () => {
     expect(validateDrawing({ type: "LONG", anchors: [{ time: 1, price: 2 }, { time: 2, price: 2 }], style: base.style, data: { position: { entry: 2, stop: 1, targets: [3] } } })).toEqual([]);
   });
 });
+
+describe("additional drawing geometry", () => {
+  it("Fib extension projects the A→B move from C", async () => {
+    const { fibExtensionLevels } = await import("./geometry");
+    const lv = fibExtensionLevels({ time: 0, price: 1.1 }, { time: 1, price: 1.2 }, { time: 2, price: 1.15 }, [0, 1, 1.618], 5);
+    expect(lv.map((l) => l.price)).toEqual([1.15, 1.25, 1.3118]);
+  });
+
+  it("pitchfork median runs from A through the B–C midpoint; tines are parallel", async () => {
+    const { pitchforkLines } = await import("./geometry");
+    const { median, upper, lower } = pitchforkLines({ time: 0, price: 1 }, { time: 10, price: 3 }, { time: 10, price: 1 });
+    expect(median[1]).toEqual({ time: 10, price: 2 });
+    const slope = (l: { time: number; price: number }[]) => (l[1].price - l[0].price) / (l[1].time - l[0].time);
+    expect(slope(upper)).toBeCloseTo(slope(median), 12);
+    expect(slope(lower)).toBeCloseTo(slope(median), 12);
+    expect(upper[0].price).toBe(3);
+    expect(lower[0].price).toBe(1);
+  });
+
+  it("linear regression fits a line and measures deviation", async () => {
+    const { linearRegression } = await import("./geometry");
+    const r = linearRegression([1, 2, 3, 4])!;
+    expect(r.slope).toBeCloseTo(1, 12);
+    expect(r.intercept).toBeCloseTo(1, 12);
+    expect(r.maxDev).toBeCloseTo(0, 12);
+    expect(linearRegression([1])).toBeNull();
+    expect(linearRegression([0, 2, 0, 2])!.maxDev).toBeGreaterThan(0);
+  });
+
+  it("new tools validate with their anchor counts", async () => {
+    const { validateDrawing, defaultStyle, storedAnchorCount } = await import("./model");
+    for (const [type, n] of [["FIB_EXT", 3], ["PITCHFORK", 3], ["TRIANGLE", 3], ["ELLIPSE", 2], ["DATE_RANGE", 2], ["PRICE_RANGE", 2], ["REGRESSION", 2], ["CROSS", 1]] as const) {
+      expect(storedAnchorCount(type)).toBe(n);
+      expect(validateDrawing({ type, anchors: Array.from({ length: n }, (_, i) => ({ time: 100 + i, price: 1.1 })), style: defaultStyle(type), data: {} })).toEqual([]);
+    }
+  });
+});

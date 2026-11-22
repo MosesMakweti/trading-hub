@@ -75,7 +75,9 @@ interface Props {
   onTimeRange: (range: { from: number; to: number } | null) => void;
   onFollowChange: (following: boolean) => void;
   /** The chart was rebuilt (theme/precision) or its main series replaced. */
-  onReady?: (chart: IChartApi, series: ISeriesApi<SeriesType>) => void;
+  onReady?: (chart: IChartApi, series: ISeriesApi<SeriesType>, element: HTMLElement) => void;
+  /** Called just before the main series (or the whole chart) is removed — detach primitives here. */
+  onDetach?: () => void;
 }
 
 const RIGHT_OFFSET_BARS = 10;
@@ -183,6 +185,7 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
     setGen((g) => g + 1);
 
     return () => {
+      callbacks.current.onDetach?.();
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange);
       chart.unsubscribeCrosshairMove(onMove);
       chart.remove();
@@ -215,6 +218,7 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
     const chart = chartRef.current;
     if (!chart) return;
     if (mainRef.current) {
+      callbacks.current.onDetach?.();
       markersRef.current?.detach();
       markersRef.current = null;
       chart.removeSeries(mainRef.current);
@@ -242,7 +246,7 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
     markersRef.current = createSeriesMarkers(s, []);
     lastFit.current = null;
     setMainGen((g) => g + 1);
-    callbacks.current.onReady?.(chart, s);
+    if (containerRef.current) callbacks.current.onReady?.(chart, s, containerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gen, mainKind, up, down]);
 

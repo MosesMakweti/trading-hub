@@ -99,6 +99,58 @@ export function fibLevels(a: Anchor, b: Anchor, levels: readonly number[], price
   return levels.map((level) => ({ level, price: Math.round(B + (A - B) * level) / s }));
 }
 
+/**
+ * Trend-based Fibonacci extension: the A→B move projected from C. Level 1
+ * is C + (B − A); 0 is C itself.
+ */
+export function fibExtensionLevels(a: Anchor, b: Anchor, c: Anchor, levels: readonly number[], priceScale: number): { level: number; price: number }[] {
+  const s = 10 ** priceScale;
+  const move = Math.round(b.price * s) - Math.round(a.price * s);
+  const C = Math.round(c.price * s);
+  return levels.map((level) => ({ level, price: Math.round(C + move * level) / s }));
+}
+
+/**
+ * Andrews' pitchfork: the median line from A through the midpoint M of B–C,
+ * and two parallel tines through B and C. Each line is returned as two
+ * anchors (start, a point one A→M span further) to be drawn as rays.
+ */
+export function pitchforkLines(a: Anchor, b: Anchor, c: Anchor): { median: [Anchor, Anchor]; upper: [Anchor, Anchor]; lower: [Anchor, Anchor] } {
+  const m: Anchor = { time: (b.time + c.time) / 2, price: (b.price + c.price) / 2 };
+  const dt = m.time - a.time;
+  const dp = m.price - a.price;
+  const along = (p: Anchor): [Anchor, Anchor] => [p, { time: p.time + dt, price: p.price + dp }];
+  const [hi, lo] = b.price >= c.price ? [b, c] : [c, b];
+  return { median: [a, m], upper: along(hi), lower: along(lo) };
+}
+
+/**
+ * Least-squares line of `points` (x = bar index, y = close) and the largest
+ * absolute deviation from it — the regression channel's half-width. Uses
+ * only the revealed candles the chart holds; null for fewer than 2 points.
+ */
+export function linearRegression(ys: readonly number[]): { slope: number; intercept: number; maxDev: number; stdev: number } | null {
+  const n = ys.length;
+  if (n < 2) return null;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) {
+    sx += i;
+    sy += ys[i];
+    sxx += i * i;
+    sxy += i * ys[i];
+  }
+  const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+  const intercept = (sy - slope * sx) / n;
+  let maxDev = 0;
+  let ss = 0;
+  for (let i = 0; i < n; i++) {
+    const r = ys[i] - (intercept + slope * i);
+    maxDev = Math.max(maxDev, Math.abs(r));
+    ss += r * r;
+  }
+  return { slope, intercept, maxDev, stdev: Math.sqrt(ss / n) };
+}
+
 // ── Measurement ───────────────────────────────────────────────────────────
 
 export interface Measurement {

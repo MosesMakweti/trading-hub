@@ -6,7 +6,9 @@ import { cn } from "@/lib/utils";
 import { chartsFor, type ChartStudy, type Workspace } from "@/domain/charting/workspace";
 import type { ScriptState } from "@/domain/charting/render-model";
 import type { EngineCandle } from "@/domain/native-replay/candle-engine";
-import { ChartPane, type ChartPaneHandle, type ScriptSource } from "./chart-pane";
+import type { ChartDrawing } from "@/domain/native-replay/drawings/model";
+import type { DrawingOp } from "@/domain/native-replay/drawings/history";
+import { ChartPane, type ChartPaneHandle, type DrawingStateEvent, type ScriptSource, type SharedDrawings } from "./chart-pane";
 import type { PriceLineSpec } from "./sim-chart";
 
 const GRID: Record<Workspace["layout"], string> = {
@@ -33,6 +35,10 @@ interface Props {
   /** Candles of the active chart (for drawings). */
   onActiveCandles?: (candles: EngineCandle[]) => void;
   paneRefs: React.RefObject<(ChartPaneHandle | null)[]>;
+  drawingsBySymbol: Map<string, SharedDrawings>;
+  drawingsReadOnly: boolean;
+  onDrawingCommit: (index: number, symbol: string, op: DrawingOp, list: ChartDrawing[]) => void;
+  onDrawingState: (index: number, event: DrawingStateEvent) => void;
   overlay?: (index: number) => React.ReactNode;
 }
 
@@ -43,7 +49,7 @@ interface Props {
  * account hasn't reached.
  */
 export function ChartGrid(props: Props) {
-  const { ws, accountId, defaultSymbol, digitsFor, priceLinesFor, theme, refreshKey, started, scripts, onActivate, onStudiesChange, onEditStudy, onActiveCandles, paneRefs, overlay } = props;
+  const { ws, accountId, defaultSymbol, digitsFor, priceLinesFor, theme, refreshKey, started, scripts, onActivate, onStudiesChange, onEditStudy, onActiveCandles, paneRefs, overlay, drawingsBySymbol, drawingsReadOnly, onDrawingCommit, onDrawingState } = props;
   const n = chartsFor(ws.layout);
   const syncRef = useRef(ws.sync);
   useEffect(() => {
@@ -94,6 +100,10 @@ export function ChartGrid(props: Props) {
               onCrosshair={crosshair}
               onTimeRange={timeRange}
               onCandles={i === ws.activeChart ? onActiveCandles : undefined}
+              drawings={drawingsBySymbol.get(symbol)}
+              drawingsReadOnly={drawingsReadOnly}
+              onDrawingCommit={onDrawingCommit}
+              onDrawingState={onDrawingState}
             >
               {overlay?.(i)}
             </ChartPane>

@@ -17,10 +17,10 @@
 import type { IChartApi, ISeriesApi, ISeriesPrimitive, ISeriesPrimitiveAxisView, IPrimitivePaneRenderer, IPrimitivePaneView, Logical, SeriesAttachedParameter, Time } from "lightweight-charts";
 
 import type { EngineCandle } from "@/domain/native-replay/candle-engine";
-import { channelLines, defaultPosition, distanceToSegment, lineSegment, logicalToTime, priceOnLine, timeToLogical, type Pt } from "@/domain/native-replay/drawings/geometry";
+import { channelLines, defaultPosition, distanceToSegment, lineSegment, logicalToTime, pitchforkLines, priceOnLine, timeToLogical, type Pt } from "@/domain/native-replay/drawings/geometry";
 import { applyOp, DrawingHistory, type DrawingOp } from "@/domain/native-replay/drawings/history";
 import { snapPrice, type SnapCandle } from "@/domain/native-replay/drawings/magnet";
-import { DEFAULT_FIB_LEVELS, defaultStyle, storedAnchorCount, TOOLS, type Anchor, type ChartDrawing, type DrawingType } from "@/domain/native-replay/drawings/model";
+import { DEFAULT_FIB_EXT_LEVELS, DEFAULT_FIB_LEVELS, defaultStyle, storedAnchorCount, TOOLS, type Anchor, type ChartDrawing, type DrawingType } from "@/domain/native-replay/drawings/model";
 import { renderDrawings, type DrawView } from "./drawing-renderer";
 
 export interface DrawingControllerCallbacks {
@@ -370,6 +370,7 @@ export class DrawingController {
       timeToX: this.timeToX,
       priceToY: this.priceToY,
       barsBetween: (a, b) => (this.times.length ? Math.round(Math.abs(this.logicalOf(b) - this.logicalOf(a))) : null),
+      closesBetween: (a, b) => this.snapCandles.filter((c) => c.time >= a && c.time <= b).map((c) => ({ time: c.time, close: c.close })),
       priceScale: this.priceScale,
       pipSize: this.pipSize,
       dark: this.dark,
@@ -402,7 +403,7 @@ export class DrawingController {
     };
     for (const d of this.drawings) {
       if (d.hidden) continue;
-      if (d.type === "HLINE" || d.type === "HRAY" || d.type === "PRICE_LABEL") add(d.anchors[0].price, d.style.color);
+      if (d.type === "HLINE" || d.type === "HRAY" || d.type === "PRICE_LABEL" || d.type === "CROSS") add(d.anchors[0].price, d.style.color);
       if ((d.type === "LONG" || d.type === "SHORT") && d.id === this.selectedId && d.data.position) {
         add(d.data.position.entry, "#a0a5af");
         add(d.data.position.stop, "#c4655f");
@@ -501,6 +502,49 @@ export class DrawingController {
         if (y1 != null && y2 != null && x0 != null && x1 != null && p.x >= x0 && p.x <= x1 && p.y >= Math.min(y1, y2) && p.y <= Math.max(y1, y2)) best = 0;
         return best;
       }
+      case "CROSS": {
+        if (!a) return Infinity;
+        return Math.min(Math.abs(p.x - a.x), Math.abs(p.y - a.y));
+      }
+      case "ELLIPSE": {
+        if (!a || !b) return Infinity;
+        const rx = Math.max(1, Math.abs(b.x - a.x) / 2);
+        const ry = Math.max(1, Math.abs(b.y - a.y) / 2);
+        const k = ((p.x - (a.x + b.x) / 2) / rx) ** 2 + ((p.y - (a.y + b.y) / 2) / ry) ** 2;
+        return k <= 1 ? 0 : Infinity;
+      }
+      case "DATE_RANGE": {
+        if (!a || !b) return Infinity;
+        return p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x) ? 0 : Infinity;
+      }
+      case "PRICE_RANGE": {
+        if (!a || !b) return Infinity;
+        return p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y) ? 0 : Infinity;
+      }
+      case "TRIANGLE":
+      case "FIB_EXT":
+      case "REGRESSION": {
+        const ps = d.anchors.map(pt).filter((q): q is Pt => q != null);
+        if (ps.length < 2) return Infinity;
+        let best = Infinity;
+        for (let i = 0; i < ps.length; i++) best = Math.min(best, distanceToSegment(p, ps[i], ps[(i + 1) % ps.length]));
+        const xs = ps.map((q) => q.x);
+        const ys = ps.map((q) => q.y);
+        if (d.type !== "TRIANGLE" && p.x >= Math.min(...xs) && p.x <= Math.max(...xs) + (d.type === "FIB_EXT" ? 80 : 0) && p.y >= Math.min(...ys) && p.y <= Math.max(...ys)) best = 0;
+        return best;
+      }
+      case "PITCHFORK": {
+        const { median, upper, lower } = pitchforkLines(d.anchors[0], d.anchors[1], d.anchors[2]);
+        let best = Infinity;
+        for (const l of [median, upper, lower]) {
+          const p0 = pt(l[0]);
+          const p1 = pt(l[1]);
+          if (!p0 || !p1) continue;
+          const [s0, e0] = lineSegment(p0, p1, "ray", width, height);
+          best = Math.min(best, distanceToSegment(p, s0, e0));
+        }
+        return best;
+      }
       case "TEXT":
       case "PRICE_LABEL":
         return a && p.x >= a.x - 4 && p.x <= a.x + 90 && p.y >= a.y - 24 && p.y <= a.y + 6 ? 0 : Infinity;
@@ -520,7 +564,7 @@ export class DrawingController {
 
   /** Screen area of a drawing's filled interior (for hit priority), or null for line-like drawings. */
   private areaOf(d: ChartDrawing): number | null {
-    if (!["RECT", "FIB", "CHANNEL", "LONG", "SHORT", "TEXT", "PRICE_LABEL"].includes(d.type)) return null;
+    if (!["RECT", "FIB", "CHANNEL", "LONG", "SHORT", "TEXT", "PRICE_LABEL", "ELLIPSE", "FIB_EXT", "REGRESSION", "DATE_RANGE", "PRICE_RANGE"].includes(d.type)) return null;
     const pts = d.anchors.map((a) => ({ x: this.timeToX(a.time), y: this.priceToY(a.price) }));
     const ys = d.data.position ? [d.data.position.entry, d.data.position.stop, ...d.data.position.targets].map((v) => this.priceToY(v)) : pts.map((q) => q.y);
     const xs = pts.map((q) => q.x).filter((v): v is number => v != null);
@@ -651,6 +695,7 @@ export class DrawingController {
     const anchors: Anchor[] = Array.from({ length: storedAnchorCount(type) }, () => ({ ...a }));
     const data: ChartDrawing["data"] = {};
     if (type === "FIB") data.levels = [...DEFAULT_FIB_LEVELS];
+    if (type === "FIB_EXT") data.levels = [...DEFAULT_FIB_EXT_LEVELS];
     if (type === "TEXT") data.text = "Note";
     if (type === "LONG" || type === "SHORT") {
       // Default risk: ~1.5× the average range of the latest revealed candles.

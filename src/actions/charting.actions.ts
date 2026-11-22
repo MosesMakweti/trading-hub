@@ -11,7 +11,12 @@ import {
   scriptSourcesSchema,
   scriptVersionSchema,
   pointValueSchema,
+  simDrawingDeleteSchema,
+  simDrawingListSchema,
+  simDrawingSaveSchema,
 } from "@/lib/validation/charting";
+import * as simDrawings from "@/server/services/charting/sim-drawing.service";
+import type { ChartDrawing } from "@/domain/native-replay/drawings/model";
 import { SimNotFoundError } from "@/server/services/simulation/sim-account.service";
 import * as charting from "@/server/services/charting/charting.service";
 
@@ -153,5 +158,39 @@ export async function getInstrumentPointValueAction(input: unknown): Promise<Ok<
     return { success: true, value: await charting.instrumentPointValue(user.id, p.data.accountId, p.data.symbol) };
   } catch (e) {
     return fail(e, "Couldn't read the instrument's contract details.");
+  }
+}
+
+export async function listSimDrawingsAction(input: unknown): Promise<Ok<{ drawings: ChartDrawing[] }> | Fail> {
+  const user = await requireUser();
+  const p = simDrawingListSchema.safeParse(input);
+  if (!p.success) return invalid(p.error);
+  try {
+    return { success: true, drawings: await simDrawings.listSimDrawings(user.id, p.data.accountId, p.data.assetSymbol) };
+  } catch (e) {
+    return fail(e, "Couldn't load drawings.");
+  }
+}
+
+export async function saveSimDrawingAction(input: unknown): Promise<Ok<{ drawing: ChartDrawing }> | Fail> {
+  const user = await requireUser();
+  const p = simDrawingSaveSchema.safeParse(input);
+  if (!p.success) return invalid(p.error);
+  try {
+    return { success: true, drawing: await simDrawings.saveSimDrawing(user.id, p.data.accountId, p.data.drawing) };
+  } catch (e) {
+    return fail(e, "Couldn't save the drawing.");
+  }
+}
+
+export async function deleteSimDrawingAction(input: unknown): Promise<Ok<object> | Fail> {
+  const user = await requireUser();
+  const p = simDrawingDeleteSchema.safeParse(input);
+  if (!p.success) return invalid(p.error);
+  try {
+    await simDrawings.deleteSimDrawing(user.id, p.data.accountId, p.data.assetSymbol, p.data.drawingId);
+    return { success: true };
+  } catch (e) {
+    return fail(e, "Couldn't delete the drawing.");
   }
 }
