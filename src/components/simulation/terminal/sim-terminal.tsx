@@ -32,7 +32,8 @@ import { IndicatorPicker } from "@/components/charting/indicator-picker";
 import { StudySettings } from "@/components/charting/study-settings";
 import { ResizeHandle } from "@/components/charting/resize-handle";
 import { useWorkspace } from "@/components/charting/use-workspace";
-import type { SimAccountStateDTO } from "@/types/simulation";
+import { applyStepPatch, type SimAccountStateDTO } from "@/types/simulation";
+import { noteStep } from "@/components/charting/replay-perf";
 import { fmtMoney, fmtWallClock, pnlTone } from "../format";
 import { OrderTicket } from "./order-ticket";
 import { TradeDock } from "./trade-dock";
@@ -40,7 +41,8 @@ import { QuickObservation, type StudyOption } from "../studies/quick-observation
 import { PropRulesPanel } from "../prop/prop-rules-panel";
 
 const NO_LINES: PriceLineSpec[] = [];
-const SPEEDS = [1, 5, 15, 60] as const;
+/** Playback speeds in M1 bars per second (1× = one broker minute per second). */
+const SPEEDS = [1, 2, 5, 10, 25, 50, 100, 250] as const;
 type Speed = (typeof SPEEDS)[number];
 type Command = { kind: "BARS"; count: number } | { kind: "CANDLE"; timeframe: ReplayTimeframe } | { kind: "SEEK"; to: number } | { kind: "NEXT_DAY" };
 
@@ -244,22 +246,56 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   })();
 
   // ── Replay ────────────────────────────────────────────────────────────────
+  // One replay step = one round trip: the server moves the clock, settles
+  // everything the move reveals, and returns either a small patch (nothing
+  // traded) or the full state, plus the M1 bars it revealed for the
+  // instruments on screen. Each chart folds those bars in locally — no
+  // candle refetch, no full chart rebuild.
+  const shownRef = useRef<string[]>([]);
+  useEffect(() => {
+    shownRef.current = shownSymbols;
+  }, [shownSymbols]);
   const run = useCallback(
     async (command: Command): Promise<boolean> => {
-      const res = await advanceSimClockAction({ accountId: state.id, command, commandId: crypto.randomUUID() });
+      const t0 = performance.now();
+      const res = await advanceSimClockAction({ accountId: state.id, command, commandId: crypto.randomUUID(), views: shownRef.current });
+      const tResponse = performance.now();
       if (!res.success) {
         toast.error(res.error);
+        setRefreshKey((k) => k + 1); // never assume what moved: reload the charts
         return false;
       }
-      setState(res.state);
-      if (res.outcome.halted) {
-        const msg = { PASSED: "Phase passed — the next stage is ready in the challenge history.", BREACHED: `Breached: ${res.state.statusReason ?? "a rule was broken"}`, FAILED: res.state.statusReason ?? "Phase failed." }[res.state.status as "PASSED" | "BREACHED" | "FAILED"];
-        if (msg) (res.state.status === "PASSED" ? toast.success : toast.error)(msg, { duration: 8000 });
+      const { outcome } = res;
+      if (res.state) setState(res.state);
+      else if (res.patch) setState((prev) => applyStepPatch(prev, res.patch!));
+      if (outcome.moved) {
+        const bySymbol = new Map(res.revealed.map((r) => [r.symbol, r]));
+        for (const pane of paneRefs.current) pane?.reveal(bySymbol.get(pane.symbol()), outcome.fromMinute, outcome.toMinute);
       }
-      if (res.outcome.filledOrders > 0) toast.message(`${res.outcome.filledOrders} order${res.outcome.filledOrders === 1 ? "" : "s"} filled`);
-      if (res.outcome.closedPositions > 0) toast.message(`${res.outcome.closedPositions} position${res.outcome.closedPositions === 1 ? "" : "s"} closed`);
-      if (res.outcome.moved) setRefreshKey((k) => k + 1);
-      return res.outcome.moved && res.state.status === "ACTIVE" && !res.state.clock?.atPeriodEnd;
+      // A halt is a trading change, so it always comes with the full state.
+      const after = res.state;
+      if (outcome.halted && after) {
+        const msg = { PASSED: "Phase passed — the next stage is ready in the challenge history.", BREACHED: `Breached: ${after.statusReason ?? "a rule was broken"}`, FAILED: after.statusReason ?? "Phase failed." }[after.status as "PASSED" | "BREACHED" | "FAILED"];
+        if (msg) (after.status === "PASSED" ? toast.success : toast.error)(msg, { duration: 8000 });
+      }
+      if (outcome.filledOrders > 0) toast.message(`${outcome.filledOrders} order${outcome.filledOrders === 1 ? "" : "s"} filled`);
+      if (outcome.closedPositions > 0) toast.message(`${outcome.closedPositions} position${outcome.closedPositions === 1 ? "" : "s"} closed`);
+      // Charts paint on the next frame: measure up to it.
+      requestAnimationFrame(() => {
+        const tPaint = performance.now();
+        noteStep({
+          command: command.kind === "CANDLE" ? `CANDLE ${command.timeframe}` : command.kind === "BARS" ? `BARS ${command.count}` : command.kind,
+          responseMs: tResponse - t0,
+          serverMs: res.serverMs,
+          applyMs: tPaint - tResponse,
+          totalMs: tPaint - t0,
+          kind: res.state ? "full" : "patch",
+          revealedBars: res.revealed.reduce((n, r) => n + (r.bars?.length ?? 0), 0),
+        });
+      });
+      const status = res.state?.status ?? res.patch?.status;
+      const atEnd = res.state?.clock?.atPeriodEnd ?? res.patch?.clock.atPeriodEnd ?? outcome.atPeriodEnd;
+      return outcome.moved && status === "ACTIVE" && !atEnd;
     },
     [state.id],
   );
@@ -280,12 +316,27 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
     if (playingRef.current) return;
     playingRef.current = true;
     setPlaying(true);
+    // Rate-based: `speed` M1 bars per second of real time. Each request asks
+    // for exactly the bars that are due (the server settles every one of them,
+    // in order — nothing is skipped), and the next request starts only after
+    // the previous one finished, so steps never overlap. If the server can't
+    // keep up, the backlog is capped and playback simply runs slower.
+    let start = performance.now();
+    let advanced = 0;
     while (playingRef.current) {
-      const t0 = performance.now();
-      const more = await run({ kind: "BARS", count: speedRef.current });
+      const rate = speedRef.current;
+      let due = Math.floor(((performance.now() - start) / 1000) * rate) - advanced;
+      if (due > 1440) {
+        start = performance.now() - (advanced / rate) * 1000; // drop the backlog, keep going
+        due = 1;
+      }
+      if (due < 1) {
+        await new Promise((r) => setTimeout(r, Math.max(4, ((advanced + 1) / rate) * 1000 - (performance.now() - start))));
+        continue;
+      }
+      const more = await run({ kind: "BARS", count: due });
+      advanced += due;
       if (!more) break;
-      const wait = 700 - (performance.now() - t0);
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     }
     playingRef.current = false;
     setPlaying(false);
@@ -450,10 +501,10 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
           <Button size="sm" variant={playing ? "secondary" : "outline"} disabled={!canMove && !playing} onClick={() => (playing ? pause() : void play())} aria-pressed={playing} title="Play / pause (Space)">
             {playing ? <Pause /> : <Play />} {playing ? "Pause" : "Play"}
           </Button>
-          <div role="group" aria-label="Replay speed (minutes per step)" className="flex items-center rounded-md border border-border">
+          <div role="group" aria-label="Playback speed (M1 bars per second)" title="Playback speed: broker minutes per second" className="flex items-center rounded-md border border-border">
             {SPEEDS.map((s) => (
               <button key={s} type="button" aria-pressed={speed === s} onClick={() => { speedRef.current = s; setSpeed(s); }} className={cn("h-6 px-1.5 text-[11px] tabular-nums first:rounded-l-md last:rounded-r-md", speed === s ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>
-                {s}m
+                {s}×
               </button>
             ))}
           </div>

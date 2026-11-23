@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 
 import { requireUser } from "@/server/guards";
 import type { ReplayTimeframe } from "@/domain/native-replay/timeframes";
@@ -19,9 +20,12 @@ import { CandleRangeTooLargeError } from "@/server/services/native-replay/histor
 import * as accounts from "@/server/services/simulation/sim-account.service";
 import { advanceSimClock, type AdvanceOutcome } from "@/server/services/simulation/sim-clock.service";
 import * as execution from "@/server/services/simulation/sim-execution.service";
-import { getSimAccountState, getSimCandles } from "@/server/services/simulation/sim-state.service";
+import { getRevealedBars, getSimAccountState, getSimCandles, getSimStepPatch } from "@/server/services/simulation/sim-state.service";
+import { accountFeedsCached } from "@/server/services/simulation/sim-market";
+import { prefetchAfter } from "@/server/services/market-data/bar-cache";
+import { prisma } from "@/server/db";
 import type { ClockCommand } from "@/server/services/simulation/sim-market";
-import type { SimAccountStateDTO } from "@/types/simulation";
+import type { SimAccountStateDTO, SimRevealedDTO, SimStepPatchDTO } from "@/types/simulation";
 
 type Fail = { success: false; error: string };
 type Ok<T> = { success: true } & T;
@@ -91,13 +95,37 @@ export async function getSimAccountStateAction(input: unknown): Promise<Ok<{ sta
   }
 }
 
-export async function advanceSimClockAction(input: unknown): Promise<Ok<{ outcome: AdvanceOutcome; state: SimAccountStateDTO }> | Fail> {
+export type StepOutcome = Omit<AdvanceOutcome, "snapshot">;
+
+/**
+ * One replay step, one round trip. Returns either a small patch (the step
+ * changed no trading state — the common case) or the full account state,
+ * plus the M1 bars the step revealed for the instruments on screen so the
+ * charts update incrementally instead of re-reading their history.
+ */
+export async function advanceSimClockAction(
+  input: unknown,
+): Promise<Ok<{ outcome: StepOutcome; state?: SimAccountStateDTO; patch?: SimStepPatchDTO; revealed: SimRevealedDTO[]; serverMs: number }> | Fail> {
+  const t0 = performance.now();
   const user = await requireUser();
   const parsed = advanceSchema.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
+  const { accountId, command, commandId, views } = parsed.data;
   try {
-    const outcome = await advanceSimClock(user.id, parsed.data.accountId, parsed.data.command as ClockCommand, parsed.data.commandId);
-    return { success: true, outcome, state: await getSimAccountState(user.id, parsed.data.accountId) };
+    const { snapshot, ...outcome } = await advanceSimClock(user.id, accountId, command as ClockCommand, commandId);
+    const [stateOrPatch, revealed] = await Promise.all([
+      snapshot ? getSimStepPatch(snapshot).then((patch) => ({ patch })) : getSimAccountState(user.id, accountId).then((state) => ({ state })),
+      outcome.moved && views?.length && snapshot
+        ? getRevealedBars(snapshot.feeds, views, outcome.fromMinute, outcome.toMinute)
+        : outcome.moved && views?.length
+          ? accountFeedsCached(prisma, accountId).then((feeds) => getRevealedBars(feeds, views, outcome.fromMinute, outcome.toMinute))
+          : Promise.resolve([] as SimRevealedDTO[]),
+    ]);
+    if (outcome.moved) {
+      // Preload the next days into the server's private buffer after replying.
+      after(async () => prefetchAfter((await accountFeedsCached(prisma, accountId)).map((f) => f.seq), outcome.toMinute + 1));
+    }
+    return { success: true, outcome, ...stateOrPatch, revealed, serverMs: Math.round(performance.now() - t0) };
   } catch (e) {
     return fail(e, "Couldn't move the replay.");
   }

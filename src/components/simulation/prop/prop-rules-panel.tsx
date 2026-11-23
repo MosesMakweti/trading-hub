@@ -37,13 +37,20 @@ export function PropRulesPanel({ state, onPaidOut }: { state: SimAccountStateDTO
   const [paying, setPaying] = useState(false);
   const version = `${state.clock?.version ?? 0}:${state.money.balance}:${state.status}`;
 
+  // Refreshed once stepping settles (debounced): server actions run one at a
+  // time, so a refresh after every step would queue in front of the next step
+  // during playback. The rules themselves are enforced on the server at every
+  // minute; this panel only displays them. Live equity below is always current.
   useEffect(() => {
     let live = true;
-    void getPropAccountStatusAction({ accountId: state.id }).then((res) => {
-      if (live && res.success) setStatus(res.status);
-    });
+    const t = setTimeout(() => {
+      void getPropAccountStatusAction({ accountId: state.id }).then((res) => {
+        if (live && res.success) setStatus(res.status);
+      });
+    }, 600);
     return () => {
       live = false;
+      clearTimeout(t);
     };
   }, [state.id, version]);
 

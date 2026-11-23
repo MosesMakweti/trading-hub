@@ -131,3 +131,18 @@ describe("chart-type transforms", () => {
     expect(out[0]).toMatchObject({ time: 600, synthetic: false, sourceMinute: 10 });
   });
 });
+
+describe("Ichimoku", () => {
+  it("matches the straightforward per-bar formulation", () => {
+    const bars: IndicatorBar[] = Array.from({ length: 300 }, (_, i) => {
+      const c = 1.08 + Math.sin(i / 11) * 0.01;
+      return { time: i, open: c, high: c + 0.0004 + (i % 5) * 0.0001, low: c - 0.0004, close: c, volume: 1 };
+    });
+    const out = INDICATOR_BY_ID.get("ichimoku")!.compute(bars, { conversion: 9, base: 26, spanB: 52, displacement: 26 });
+    const h = bars.map((b) => b.high);
+    const l = bars.map((b) => b.low);
+    const midRef = (p: number) => ta.highest(h, p).map((v, k) => (v + ta.lowest(l, p)[k]) / 2);
+    expect(out.conversion).toEqual(midRef(9));
+    expect(out.base).toEqual(midRef(26));
+  });
+});

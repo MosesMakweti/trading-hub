@@ -21,23 +21,38 @@ import { prisma, type TransactionClient } from "@/server/db";
 import { dec } from "@/domain/execution/precision";
 import { runStep, type EngineOrder, type EnginePosition, type MinuteSnapshot, type StepResult } from "@/domain/simulation/engine";
 import { isReplayTimeframe } from "@/domain/native-replay/timeframes";
-import { accountRules, lockAccount, SimError } from "./sim-account.service";
-import { appendLedger, currentBalance } from "./sim-ledger";
-import { accountFeeds, loadStepBars, MAX_STEP_BARS, periodMinutes, targetMinute, type ClockCommand } from "./sim-market";
+import { accountRules, lockAccountWithBalance, SimError } from "./sim-account.service";
+import { appendLedger } from "./sim-ledger";
+import { accountFeedsCached, loadStepBarsBuffered, MAX_STEP_BARS, periodMinutes, targetMinuteBuffered, type ClockCommand, type SimFeed } from "./sim-market";
 
 /** Per-minute rule evaluation supplied by a product (prop firm). */
 export interface StepRuleHook {
   onMinute: (snapshot: MinuteSnapshot) => "HALT" | void;
-  /** Persists what the evaluation concluded (breach, pass, day stats) after the step's trading writes. */
-  finalize: (tx: TransactionClient, result: StepResult) => Promise<void>;
+  /**
+   * Persists what the evaluation concluded (breach, pass, day stats) after the
+   * step's trading writes. Returns true when the account's status changed.
+   */
+  finalize: (tx: TransactionClient, result: StepResult) => Promise<boolean>;
 }
 
-type RuleHookFactory = (tx: TransactionClient, account: SimAccount, balance: Decimal) => Promise<StepRuleHook | null>;
+type RuleHookFactory = (tx: TransactionClient, account: SimAccount, balance: Decimal, openPositions: number) => Promise<StepRuleHook | null>;
 const ruleHookFactories: RuleHookFactory[] = [];
 
 /** Registers a product's rule hook factory (called once at module load by that product). */
 export function registerRuleHook(factory: RuleHookFactory): void {
   ruleHookFactories.push(factory);
+}
+
+/**
+ * What a step left in memory, so the caller can answer without re-reading
+ * the account (only when the step changed no trading state).
+ */
+export interface StepSnapshot {
+  account: SimAccount;
+  feeds: SimFeed[];
+  openPositions: PositionRow[];
+  pendingOrders: PendingRow[];
+  balance: Decimal;
 }
 
 export interface AdvanceOutcome {
@@ -49,6 +64,14 @@ export interface AdvanceOutcome {
   filledOrders: number;
   closedPositions: number;
   atPeriodEnd: boolean;
+  /**
+   * True when the step wrote any trading state (fills, closes, expiries,
+   * ledger entries, a rule verdict). False → positions, orders, ledger and
+   * status are exactly as before the step; only the clock (and marks) moved.
+   */
+  tradingChanged: boolean;
+  /** Present when nothing but the clock changed (see tradingChanged). */
+  snapshot?: StepSnapshot;
 }
 
 function validate(command: ClockCommand): void {
@@ -63,29 +86,30 @@ export async function advanceSimClock(userId: string, accountId: string, command
   validate(command);
   return prisma.$transaction(
     async (tx) => {
-      const account = await lockAccount(tx, userId, accountId);
+      // One statement: row lock + ledger balance. Feeds and bars come from
+      // server memory once warm (immutable data), so a step's database work
+      // is the lock, open positions, pending orders and the clock update.
+      const { account, balance } = await lockAccountWithBalance(tx, userId, accountId);
       const cur = account.currentMinute;
       if (cur == null) throw new SimError("Start the replay first.");
       const recent = (account.recentCommands as string[] | null) ?? [];
       if (commandId && recent.includes(commandId)) {
-        return { moved: false, duplicate: true, fromMinute: cur, toMinute: cur, halted: false, filledOrders: 0, closedPositions: 0, atPeriodEnd: false };
+        return { moved: false, duplicate: true, fromMinute: cur, toMinute: cur, halted: false, filledOrders: 0, closedPositions: 0, atPeriodEnd: false, tradingChanged: false };
       }
       if (account.status !== "ACTIVE") throw new SimError(`This account is ${account.status.toLowerCase()} — its replay can be viewed but not advanced.`);
       if (command.kind === "SEEK" && command.to < cur) throw new SimError("Replay only moves forward — scroll the chart back to review what's already revealed.");
 
       const rules = accountRules(account);
-      const feeds = await accountFeeds(tx, account.id);
+      const feeds = await accountFeedsCached(tx, account.id);
       const period = periodMinutes(account);
-      const target = await targetMinute(tx, feeds, cur, command, period.to, rules.dailyResetHour);
-      const noMove = { moved: false, duplicate: false, fromMinute: cur, toMinute: cur, halted: false, filledOrders: 0, closedPositions: 0 };
+      // Bounds come from the locked clock; the buffer only supplies bars.
+      const target = await targetMinuteBuffered(feeds, cur, command, period.to, rules.dailyResetHour);
+      const noMove = { moved: false, duplicate: false, fromMinute: cur, toMinute: cur, halted: false, filledOrders: 0, closedPositions: 0, tradingChanged: false };
       if (target == null || target <= cur) return { ...noMove, atPeriodEnd: true };
 
-      const { bars, timeline } = await loadStepBars(tx, feeds, cur, target);
-      const [openPositions, pendingOrders, balance] = await Promise.all([
-        tx.simPosition.findMany({ where: { accountId: account.id, status: "OPEN" } }),
-        tx.simOrder.findMany({ where: { accountId: account.id, status: "PENDING" } }),
-        currentBalance(tx, account.id, account.ledgerSequence),
-      ]);
+      const { bars, timeline } = await loadStepBarsBuffered(feeds, cur, target);
+      const openPositions = await tx.simPosition.findMany({ where: { accountId: account.id, status: "OPEN" } });
+      const pendingOrders = await tx.simOrder.findMany({ where: { accountId: account.id, status: "PENDING" } });
       const positions: EnginePosition[] = openPositions.map((p) => ({
         id: p.id,
         symbol: p.symbol,
@@ -113,7 +137,7 @@ export async function advanceSimClock(userId: string, accountId: string, command
       }));
 
       let hook: StepRuleHook | null = null;
-      for (const factory of ruleHookFactories) hook = hook ?? (await factory(tx, account, balance));
+      for (const factory of ruleHookFactories) hook = hook ?? (await factory(tx, account, balance, openPositions.length));
 
       const result = runStep({
         fromMinute: cur,
@@ -128,8 +152,10 @@ export async function advanceSimClock(userId: string, accountId: string, command
         onMinute: hook?.onMinute,
       });
 
-      await persistStep(tx, account, result, { pendingOrders, openPositions });
-      if (hook) await hook.finalize(tx, result);
+      const wroteTrading = result.events.some((e) => e.kind !== "DAY_ROLLOVER") || result.ledger.length > 0;
+      if (wroteTrading || result.events.length) await persistStep(tx, account, result, { pendingOrders, openPositions });
+      const statusChanged = hook ? await hook.finalize(tx, result) : false;
+      const tradingChanged = wroteTrading || statusChanged || result.halted;
 
       await tx.simAccount.update({
         where: { id: account.id },
@@ -150,6 +176,8 @@ export async function advanceSimClock(userId: string, accountId: string, command
         filledOrders: filled,
         closedPositions: closed,
         atPeriodEnd: result.endMinute >= period.to || (!result.halted && target >= period.to),
+        tradingChanged,
+        snapshot: tradingChanged ? undefined : { account: { ...account, currentMinute: result.endMinute, clockVersion: account.clockVersion + 1 }, feeds, openPositions, pendingOrders, balance },
       };
     },
     { timeout: 60_000 },

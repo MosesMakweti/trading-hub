@@ -141,12 +141,12 @@ export async function purchaseChallenge(userId: string, input: PurchaseInput): P
 const ruleStateOf = (account: SimAccount, rulesResetHour: number): RuleState =>
   (account.ruleState as RuleState | null) ?? initialRuleState(account.startingBalance.toString(), tradingDayOf(account.currentMinute!, rulesResetHour));
 
-registerRuleHook(async (tx, account) => {
+registerRuleHook(async (_tx, account, _balance, openPositions) => {
   if (account.product !== "PROP_FIRM" || account.status !== "ACTIVE") return null;
   const rules = parseRules(account.rules);
   const state = ruleStateOf(account, rules.dailyResetHour);
   let verdict: Verdict = { kind: "CONTINUE" };
-  let prevOpen = await tx.simPosition.count({ where: { accountId: account.id, status: "OPEN" } });
+  let prevOpen = openPositions;
   let last: MinuteSnapshot | null = null;
   return {
     onMinute: (snap) => {
@@ -162,6 +162,7 @@ registerRuleHook(async (tx, account) => {
       if (verdict.kind === "BREACH") await recordBreach(ftx, account, verdict, last!, result, state);
       else if (verdict.kind === "PASS") await passStage(ftx, account, verdict.minute);
       else if (verdict.kind === "FAIL") await failStage(ftx, account, verdict.minute, verdict.reason);
+      return verdict.kind !== "CONTINUE";
     },
   };
 });

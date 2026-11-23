@@ -8,8 +8,10 @@
  * two tabs or a double submit apply one after the other.
  */
 import { Prisma, type SimAccount } from "@prisma/client";
+import type { Decimal } from "decimal.js";
 
 import { prisma, type TransactionClient } from "@/server/db";
+import { dec } from "@/domain/execution/precision";
 import { normalizeSymbol } from "@/domain/native-replay/import-analysis";
 import { MINUTES_PER_DAY } from "@/domain/native-replay/wall-clock";
 import { dateKeyToUtcDate } from "@/lib/date";
@@ -39,10 +41,26 @@ export async function requireSimAccount(userId: string, accountId: string, db: T
 }
 
 /** Locks the account row for the rest of the transaction and returns it fresh. */
+/** Locks the user's account row for the transaction and returns it — one statement. */
 export async function lockAccount(tx: TransactionClient, userId: string, accountId: string): Promise<SimAccount> {
-  const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "SimAccount" WHERE "id" = ${accountId} AND "userId" = ${userId} FOR UPDATE`;
+  const rows = await tx.$queryRaw<SimAccount[]>`SELECT * FROM "SimAccount" WHERE "id" = ${accountId} AND "userId" = ${userId} FOR UPDATE`;
   if (rows.length === 0) throw new SimNotFoundError();
-  return tx.simAccount.findUniqueOrThrow({ where: { id: accountId } });
+  return rows[0];
+}
+
+/** `lockAccount` plus the ledger balance at the account's sequence, in the same statement. */
+export async function lockAccountWithBalance(tx: TransactionClient, userId: string, accountId: string): Promise<{ account: SimAccount; balance: Decimal }> {
+  const rows = await tx.$queryRaw<(SimAccount & { __balance: Prisma.Decimal | null })[]>`
+    SELECT a.*, l."balanceAfter" AS "__balance"
+    FROM "SimAccount" a
+    LEFT JOIN "SimLedgerEntry" l ON l."accountId" = a."id" AND l."sequence" = a."ledgerSequence"
+    WHERE a."id" = ${accountId} AND a."userId" = ${userId}
+    FOR UPDATE OF a
+  `;
+  if (rows.length === 0) throw new SimNotFoundError();
+  const { __balance, ...account } = rows[0];
+  if (__balance == null) throw new Error(`LEDGER_CORRUPT: account ${accountId} has no ledger entry ${account.ledgerSequence}`);
+  return { account, balance: dec(__balance.toString()) };
 }
 
 export function accountRules(account: Pick<SimAccount, "rules">): SimRules {

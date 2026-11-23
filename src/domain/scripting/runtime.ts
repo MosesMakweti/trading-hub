@@ -19,6 +19,7 @@
  * a clear error.
  */
 import * as ta from "@/domain/indicators/ta";
+import * as tas from "@/domain/indicators/ta-stream";
 import { ScriptSyntaxError } from "./lexer";
 import { parse, type Expr, type Program, type Stmt } from "./parser";
 
@@ -700,15 +701,57 @@ class Interpreter {
    */
   private stateful(e: Extract<Expr, { k: "call" }>, name: string): Value {
     const site = this.site(this.siteKey(e.id));
-    const st = site.state as { bufs?: number[][]; last?: number; prev?: number; win?: number[]; i?: number };
+    const st = site.state as {
+      bufs?: number[][];
+      last?: number;
+      prev?: number;
+      win?: number[];
+      i?: number;
+      stream?: unknown;
+      streamKey?: string;
+      lastBar?: number;
+      batch?: boolean;
+    };
     const a = (i: number, key: string, def?: Value) => this.arg(e, i, key, def);
+    /**
+     * Records this bar's inputs, bar-indexed (bars on which this call site
+     * didn't run are NaN — as before). Amortised O(1): only the new bars are
+     * filled, not the whole history on every call.
+     */
     const push = (...vals: number[]) => {
       st.bufs ??= vals.map(() => []);
+      for (const buf of st.bufs) for (let k = buf.length; k < this.bar; k++) buf[k] = NaN;
       vals.forEach((v, k) => (st.bufs![k][this.bar] = v));
-      return st.bufs.map((b) => {
-        for (let k = 0; k < this.bar; k++) if (b[k] === undefined) b[k] = NaN;
-        return b;
-      });
+      return st.bufs;
+    };
+    /**
+     * Streaming evaluation (O(1)/O(length) per bar) with the exact semantics
+     * of the batch function: the stream is fed the same bar-indexed inputs,
+     * NaN for skipped bars. If the parameters change it is rebuilt by
+     * replaying the recorded inputs; if the call site runs twice in one bar
+     * (inside a loop) it falls back to recomputing the batch function, which
+     * is what this always did.
+     */
+    const stream = <S, R>(params: number[], inputs: number[], make: () => S, step: (s: S, x: number[]) => R, batch: (bufs: number[][]) => R): R => {
+      const twice = st.lastBar === this.bar;
+      st.lastBar = this.bar;
+      const fedBefore = st.bufs?.[0]?.length ?? 0;
+      const bufs = push(...inputs);
+      if (twice || st.batch) {
+        st.batch = true;
+        return batch(bufs);
+      }
+      const key = params.join(",");
+      let from = fedBefore;
+      if (st.streamKey !== key || st.stream === undefined) {
+        st.stream = make();
+        st.streamKey = key;
+        from = 0;
+      }
+      const sObj = st.stream as S;
+      let out!: R;
+      for (let k = from; k <= this.bar; k++) out = step(sObj, bufs.map((b) => b[k]));
+      return out;
     };
     const len = (i: number) => {
       const v = num(a(i, "length"));
@@ -733,66 +776,101 @@ class Interpreter {
         } else if (Number.isFinite(v)) st.prev = alpha * v + (1 - alpha) * st.prev!;
         return st.prev ?? NaN;
       }
-      case "wma": return lastOf(ta.wma(push(num(a(0, "source")))[0], len(1)));
+      case "wma": {
+        const l = len(1);
+        return stream([l], [num(a(0, "source"))], () => new tas.WmaStream(l), (s, [x]) => s.next(x), ([x]) => lastOf(ta.wma(x, l)));
+      }
       case "vwma": {
-        const [s, vol] = push(num(a(0, "source")), b[this.bar].volume);
-        return lastOf(ta.vwma(s, vol, len(1)));
+        const l = len(1);
+        return stream([l], [num(a(0, "source")), b[this.bar].volume], () => new tas.VwmaStream(l), (s, [x, v]) => s.next(x, v), ([x, v]) => lastOf(ta.vwma(x, v, l)));
       }
-      case "stdev": return lastOf(ta.stdev(push(num(a(0, "source")))[0], len(1)));
-      case "highest": {
-        if (e.args.length === 1 && !e.named.source) return lastOf(ta.highest(push(b[this.bar].high)[0], len(0)));
-        return lastOf(ta.highest(push(num(a(0, "source")))[0], len(1)));
+      case "stdev": {
+        const l = len(1);
+        return stream([l], [num(a(0, "source"))], () => new tas.StdevStream(l), (s, [x]) => s.next(x), ([x]) => lastOf(ta.stdev(x, l)));
       }
+      case "highest":
       case "lowest": {
-        if (e.args.length === 1 && !e.named.source) return lastOf(ta.lowest(push(b[this.bar].low)[0], len(0)));
-        return lastOf(ta.lowest(push(num(a(0, "source")))[0], len(1)));
+        const implicit = e.args.length === 1 && !e.named.source;
+        const l = len(implicit ? 0 : 1);
+        const x = implicit ? (name === "highest" ? b[this.bar].high : b[this.bar].low) : num(a(0, "source"));
+        const kind = name as "highest" | "lowest";
+        return stream([l], [x], () => new tas.ExtremeStream(l, kind), (s, [v]) => s.next(v), ([v]) => lastOf(ta[kind](v, l)));
       }
-      case "change": return lastOf(ta.change(push(num(a(0, "source")))[0], num(a(1, "length", 1))));
-      case "mom": return lastOf(ta.mom(push(num(a(0, "source")))[0], len(1)));
-      case "roc": return lastOf(ta.roc(push(num(a(0, "source")))[0], len(1)));
-      case "rsi": return lastOf(ta.rsi(push(num(a(0, "source")))[0], len(1)));
-      case "cci": return lastOf(ta.cci(push(num(a(0, "source")))[0], len(1)));
+      case "change":
+      case "mom":
+      case "roc": {
+        const l = name === "change" ? num(a(1, "length", 1)) : len(1);
+        if (!Number.isInteger(l) || l < 0) return lastOf(ta.change(push(num(a(0, "source")))[0], l)); // unusual lengths: exact batch path
+        const f = (v: number, old: number) => (name === "roc" ? (old !== 0 ? (100 * (v - old)) / old : NaN) : v - old);
+        return stream([l], [num(a(0, "source"))], () => new tas.LagStream(l), (s, [v]) => f(v, s.next(v)), ([v]) => lastOf(name === "roc" ? ta.roc(v, l) : ta.change(v, l)));
+      }
+      case "rsi": {
+        const l = len(1);
+        return stream([l], [num(a(0, "source"))], () => new tas.RsiStream(l), (s, [x]) => s.next(x), ([x]) => lastOf(ta.rsi(x, l)));
+      }
+      case "cci": {
+        const l = len(1);
+        return stream([l], [num(a(0, "source"))], () => new tas.CciStream(l), (s, [x]) => s.next(x), ([x]) => lastOf(ta.cci(x, l)));
+      }
       case "tr": {
-        const [h, l, c] = push(b[this.bar].high, b[this.bar].low, b[this.bar].close);
-        return lastOf(ta.trueRange(h, l, c));
+        const bar = b[this.bar];
+        return stream([], [bar.high, bar.low, bar.close], () => new tas.TrueRangeStream(), (s, [h, l, c]) => s.next(h, l, c), ([h, l, c]) => lastOf(ta.trueRange(h, l, c)));
       }
       case "atr": {
-        const [h, l, c] = push(b[this.bar].high, b[this.bar].low, b[this.bar].close);
-        return lastOf(ta.atr(h, l, c, len(0)));
+        const p = len(0);
+        const bar = b[this.bar];
+        return stream([p], [bar.high, bar.low, bar.close], () => new tas.AtrStream(p), (s, [h, l, c]) => s.next(h, l, c), ([h, l, c]) => lastOf(ta.atr(h, l, c, p)));
       }
       case "stoch": {
-        const [c, h, l] = push(num(a(0, "source")), num(a(1, "high")), num(a(2, "low")));
-        return lastOf(ta.stoch(c, h, l, num(a(3, "length"))));
+        const p = num(a(3, "length"));
+        return stream([p], [num(a(0, "source")), num(a(1, "high")), num(a(2, "low"))], () => new tas.StochStream(p), (s, [c, h, l]) => s.next(c, h, l), ([c, h, l]) => lastOf(ta.stoch(c, h, l, p)));
       }
       case "macd": {
-        const r = ta.macd(push(num(a(0, "source")))[0], num(a(1, "fastlen")), num(a(2, "slowlen")), num(a(3, "siglen")));
-        return [lastOf(r.macd), lastOf(r.signal), lastOf(r.histogram)];
+        const f = num(a(1, "fastlen"));
+        const sl = num(a(2, "slowlen"));
+        const sg = num(a(3, "siglen"));
+        return stream([f, sl, sg], [num(a(0, "source"))], () => new tas.MacdStream(f, sl, sg), (s, [x]) => s.next(x), ([x]) => {
+          const r = ta.macd(x, f, sl, sg);
+          return [lastOf(r.macd), lastOf(r.signal), lastOf(r.histogram)] as [number, number, number];
+        });
       }
       case "bb": {
-        const [s] = push(num(a(0, "series")));
         const l = len(1);
         const mult = num(a(2, "mult"));
-        const basis = lastOf(ta.sma(s, l));
-        const dev = lastOf(ta.stdev(s, l));
+        const [basis, dev] = stream(
+          [l],
+          [num(a(0, "series"))],
+          () => ({ sma: new tas.SmaStream(l), sd: new tas.StdevStream(l) }),
+          (s, [x]) => [s.sma.next(x), s.sd.next(x)] as [number, number],
+          ([x]) => [lastOf(ta.sma(x, l)), lastOf(ta.stdev(x, l))] as [number, number],
+        );
         return [basis, basis + mult * dev, basis - mult * dev];
       }
       case "dmi": {
-        const [h, l, c] = push(b[this.bar].high, b[this.bar].low, b[this.bar].close);
-        const r = ta.dmi(h, l, c, num(a(0, "diLength")), num(a(1, "adxSmoothing")));
-        return [lastOf(r.plus), lastOf(r.minus), lastOf(r.adx)];
+        const di = num(a(0, "diLength"));
+        const sm = num(a(1, "adxSmoothing"));
+        const bar = b[this.bar];
+        return stream([di, sm], [bar.high, bar.low, bar.close], () => new tas.DmiStream(di, sm), (s, [h, l, c]) => s.next(h, l, c), ([h, l, c]) => {
+          const r = ta.dmi(h, l, c, di, sm);
+          return [lastOf(r.plus), lastOf(r.minus), lastOf(r.adx)] as [number, number, number];
+        });
       }
       case "supertrend": {
-        const [h, l, c] = push(b[this.bar].high, b[this.bar].low, b[this.bar].close);
-        const r = ta.supertrend(h, l, c, num(a(0, "factor")), num(a(1, "atrPeriod")));
-        return [lastOf(r.line), lastOf(r.direction)];
+        const factor = num(a(0, "factor"));
+        const p = num(a(1, "atrPeriod"));
+        const bar = b[this.bar];
+        return stream([factor, p], [bar.high, bar.low, bar.close], () => new tas.SupertrendStream(factor, p), (s, [h, l, c]) => s.next(h, l, c), ([h, l, c]) => {
+          const r = ta.supertrend(h, l, c, factor, p);
+          return [lastOf(r.line), lastOf(r.direction)] as [number, number];
+        });
       }
       case "vwap": {
-        const [s, v, d] = push(num(a(0, "source")), b[this.bar].volume, Math.floor(b[this.bar].time / 1440));
-        return lastOf(ta.vwap(s, v, d));
+        const bar = b[this.bar];
+        return stream([], [num(a(0, "source")), bar.volume, Math.floor(bar.time / 1440)], () => new tas.VwapStream(), (s, [x, v, d]) => s.next(x, v, d), ([x, v, d]) => lastOf(ta.vwap(x, v, d)));
       }
       case "obv": {
-        const [c, v] = push(b[this.bar].close, b[this.bar].volume);
-        return lastOf(ta.obv(c, v));
+        const bar = b[this.bar];
+        return stream([], [bar.close, bar.volume], () => new tas.ObvStream(), (s, [c, v]) => s.next(c, v), ([c, v]) => lastOf(ta.obv(c, v)));
       }
       case "crossover":
       case "crossunder":

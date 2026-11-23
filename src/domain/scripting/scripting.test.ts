@@ -212,3 +212,78 @@ plot(syminfo.pointvalue)`;
     expect(r.plots[0].values[0]).toBe(100_000);
   });
 });
+
+describe("streaming ta.* in scripts (exactly the batch results)", () => {
+  it("every streamed function, conditional calls (skipped bars) and calls inside loops", () => {
+    const src = `indicator("t", overlay = false)
+plot(ta.wma(close, 9))
+plot(ta.stdev(close, 20))
+plot(ta.highest(high, 10) - ta.lowest(low, 10))
+plot(ta.highest(close, 5))
+plot(ta.change(close, 3))
+plot(ta.roc(close, 4))
+plot(ta.rsi(close, 14))
+plot(ta.cci(close, 20))
+plot(ta.tr())
+plot(ta.atr(14))
+plot(ta.stoch(close, high, low, 14))
+[m, s, h] = ta.macd(close, 12, 26, 9)
+plot(h)
+[bb, bu, bl] = ta.bb(close, 20, 2)
+plot(bu)
+[dp, dm, adx] = ta.dmi(14, 14)
+plot(adx)
+[stl, std] = ta.supertrend(3, 10)
+plot(stl)
+plot(ta.vwap(hlc3))
+plot(ta.obv())
+plot(ta.vwma(close, 10))
+x = 0.0
+if bar_index % 3 != 0
+    x := ta.rsi(close, 7)
+plot(x)
+y = 0.0
+for i = 0 to 1
+    y := ta.wma(close + i, 5)
+plot(y)`;
+    const r = run(src, bars);
+    const H = bars.map((b) => b.high), L = bars.map((b) => b.low), C = closes, V = bars.map((b) => b.volume);
+    const last = (s: number[]) => s;
+    const p = (i: number) => r.plots[i].values;
+    const eq = (a: number[], b: number[], label: string) => expect(a.map((v) => (Number.isFinite(v) ? v : NaN)), label).toEqual(b.map((v) => (Number.isFinite(v) ? v : NaN)));
+    eq(p(0), ta.wma(C, 9), "wma");
+    eq(p(1), ta.stdev(C, 20), "stdev");
+    eq(p(2), ta.highest(H, 10).map((v, i) => v - ta.lowest(L, 10)[i]), "highest-lowest");
+    eq(p(3), ta.highest(C, 5), "highest(close)");
+    eq(p(4), ta.change(C, 3), "change");
+    eq(p(5), ta.roc(C, 4), "roc");
+    eq(p(6), ta.rsi(C, 14), "rsi");
+    eq(p(7), ta.cci(C, 20), "cci");
+    eq(p(8), ta.trueRange(H, L, C), "tr");
+    eq(p(9), ta.atr(H, L, C, 14), "atr");
+    eq(p(10), ta.stoch(C, H, L, 14), "stoch");
+    eq(p(11), ta.macd(C, 12, 26, 9).histogram, "macd hist");
+    eq(p(12), ta.sma(C, 20).map((b, i) => b + 2 * ta.stdev(C, 20)[i]), "bb upper");
+    eq(p(13), ta.dmi(H, L, C, 14, 14).adx, "adx");
+    eq(p(14), ta.supertrend(H, L, C, 3, 10).line, "supertrend");
+    eq(p(15), ta.vwap(bars.map((b) => (b.high + b.low + b.close) / 3), V, bars.map((b) => Math.floor(b.time / 1440))), "vwap");
+    eq(p(16), ta.obv(C, V), "obv");
+    eq(p(17), ta.vwma(C, V, 10), "vwma");
+    // Conditional call: skipped bars are NaN inputs (as before); plotted x is 0 on skipped bars.
+    const masked = C.map((c, i) => (i % 3 !== 0 ? c : NaN));
+    const rsi7 = ta.rsi(masked, 7);
+    eq(p(18), C.map((_, i) => (i % 3 !== 0 ? rsi7[i] : 0)), "conditional rsi");
+    // Called twice per bar inside a loop: the last call's input (close + 1) wins on every bar.
+    eq(p(19), last(ta.wma(C.map((c) => c + 1), 5)), "loop wma");
+  });
+
+  it("is fast: all rolling functions on 5,000 bars well under the sandbox limit", () => {
+    const many: ScriptBar[] = Array.from({ length: 5000 }, (_, i) => ({ ...bars[i % bars.length], time: 28_000_000 + i }));
+    const t0 = performance.now();
+    run(`indicator("x")
+plot(ta.atr(14) + ta.rsi(close, 14) + ta.stdev(close, 20) + ta.wma(close, 20) + ta.cci(close, 20))
+[a, b, c] = ta.dmi(14, 14)
+plot(c)`, many);
+    expect(performance.now() - t0).toBeLessThan(1500);
+  });
+});

@@ -30,7 +30,13 @@ export const clockCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("NEXT_DAY") }),
 ]);
 
-export const advanceSchema = z.object({ accountId: id, command: clockCommandSchema, commandId: id.nullish() });
+export const advanceSchema = z.object({
+  accountId: id,
+  command: clockCommandSchema,
+  commandId: id.nullish(),
+  /** Instruments on screen: their newly revealed M1 bars come back with the step. */
+  views: z.array(z.string().trim().toUpperCase().min(1).max(20)).max(4).optional(),
+});
 
 export const orderSchema = z
   .object({

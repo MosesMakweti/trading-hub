@@ -147,7 +147,10 @@ export const INDICATORS: IndicatorDef[] = [
     compute: (bars, i) => {
       const h = bars.map((b) => b.high);
       const l = bars.map((b) => b.low);
-      const mid = (p: number) => ta.highest(h, p).map((v, k) => (v + ta.lowest(l, p)[k]) / 2);
+      const mid = (p: number) => {
+        const lo = ta.lowest(l, p); // once per length — not once per bar (that was O(n²))
+        return ta.highest(h, p).map((v, k) => (v + lo[k]) / 2);
+      };
       const conv = mid(n(i.conversion));
       const base = mid(n(i.base));
       const d = n(i.displacement) - 1;
