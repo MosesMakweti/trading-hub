@@ -89,8 +89,8 @@ export const PLAYBACK_TIMEFRAMES = ["M1", "M2", "M3", "M5", "M10", "M15", "M30",
 export type PlaybackTimeframe = (typeof PLAYBACK_TIMEFRAMES)[number];
 
 /** Milliseconds between consecutive playback bars. */
-export const PLAYBACK_SPEEDS_MS = [100, 250, 500, 750, 1000, 2000, 3000, 5000, 10000] as const;
-export const MIN_SPEED_MS = 50;
+export const PLAYBACK_SPEEDS_MS = [10, 25, 50, 100, 250, 500, 750, 1000, 2000, 3000, 5000, 10000] as const;
+export const MIN_SPEED_MS = 5;
 export const MAX_SPEED_MS = 60_000;
 
 export const replayBarSchema = z.object({

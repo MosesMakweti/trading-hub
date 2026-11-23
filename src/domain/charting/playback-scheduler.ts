@@ -1,35 +1,34 @@
 /**
- * Playback scheduling (pure). Bar k (0-based) is due at start + k·interval —
- * a fixed timeline, so processing time never accumulates as drift. The player
- * asks for every bar that is due in one request (never overlapping requests;
- * the server settles each bar in order, so nothing is skipped). If it falls
- * more than `maxBatch` bars behind, the backlog is dropped by re-anchoring:
- * playback runs slower than asked instead of jumping ahead.
+ * Playback pacing (pure): when to show the next playback step on the chart.
+ *
+ * Steps come from the server slightly ahead of time; the pacer shows them one
+ * at a time, `intervalMs` apart:
+ *  - the next step is due one CURRENT interval after the last one shown, so a
+ *    speed change applies at once (no restart, no wait at the old speed);
+ *  - while waiting on the server nothing accumulates: when steps arrive the
+ *    first shows at once and the rest follow at the normal pace (no burst);
+ *  - if the device falls far behind, playback slows down instead of jumping.
  */
-export interface PlaybackClock {
-  start: number; // ms timestamp of bar 0
-  done: number; // bars already requested
-  intervalMs: number;
+export interface Pacer {
+  /** When the last step was shown (ms), or null before the first. */
+  last: number | null;
+  /** Ran dry since (waited on the server): the next step starts a fresh timeline. */
+  idle?: boolean;
 }
 
-export type PlaybackPlan = { kind: "wait"; ms: number } | { kind: "step"; count: number; clock: PlaybackClock };
+export type PaceDecision = { kind: "wait"; ms: number } | { kind: "show"; pacer: Pacer };
 
-export function startPlayback(now: number, intervalMs: number): PlaybackClock {
-  return { start: now, done: 0, intervalMs };
+export const startPacer = (): Pacer => ({ last: null });
+
+/** A step is ready: show it now, or wait. */
+export function pace(p: Pacer, now: number, intervalMs: number, maxLagMs = 250): PaceDecision {
+  const due = p.last == null ? now : p.last + intervalMs;
+  if (now < due) return { kind: "wait", ms: due - now };
+  // Keep the timeline (no drift) unless it ran dry or is hopelessly behind.
+  return { kind: "show", pacer: { last: p.idle || now - due > maxLagMs ? now : due } };
 }
 
-/** Change speed mid-playback: the next bar comes one new interval from now. */
-export function changeSpeed(c: PlaybackClock, now: number, intervalMs: number): PlaybackClock {
-  return { start: now - (c.done - 1) * intervalMs, done: c.done, intervalMs };
-}
-
-export function planPlayback(c: PlaybackClock, now: number, maxBatch = 120): PlaybackPlan {
-  const due = Math.floor((now - c.start) / c.intervalMs) + 1 - c.done;
-  if (due < 1) return { kind: "wait", ms: c.start + c.done * c.intervalMs - now };
-  const count = Math.min(due, maxBatch);
-  const behind = due > maxBatch;
-  const done = c.done + count;
-  // Too far behind: re-anchor so the next bar is due one interval from now.
-  const start = behind ? now - (done - 1) * c.intervalMs : c.start;
-  return { kind: "step", count, clock: { start, done, intervalMs: c.intervalMs } };
+/** Nothing to show (waiting on the server): don't let time owed pile up. */
+export function paceIdle(p: Pacer, now: number, intervalMs: number): Pacer {
+  return p.last == null ? p : { last: Math.max(p.last, now - intervalMs), idle: true };
 }

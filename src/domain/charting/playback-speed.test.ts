@@ -16,7 +16,7 @@ describe("speed slider scale", () => {
     for (const p of PLAYBACK_SPEEDS_MS) expect(positionToSpeed(speedToPosition(p))).toBe(p);
     expect(positionToSpeed(speedToPosition(480))).toBe(500);
     expect(positionToSpeed(speedToPosition(1_100))).toBe(1000);
-    expect(positionToSpeed(speedToPosition(1))).toBe(50); // clamped
+    expect(positionToSpeed(speedToPosition(1))).toBe(5); // clamped
     expect(positionToSpeed(99)).toBe(60_000);
   });
 
@@ -25,7 +25,8 @@ describe("speed slider scale", () => {
     expect(formatSpeed(1000)).toBe("1 s");
     expect(formatSpeed(1500)).toBe("1.5 s");
     expect(formatSpeed(60_000)).toBe("1 min");
-    expect(clampSpeed(10)).toBe(50);
+    expect(clampSpeed(1)).toBe(5);
+    expect(clampSpeed(10)).toBe(10);
     expect(clampSpeed(999_999)).toBe(60_000);
   });
 });

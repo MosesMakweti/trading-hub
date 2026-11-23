@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { CalendarClock, ChevronDown, ChevronLast, ChevronLeft, ChevronRight, ChevronUp, Footprints, Gauge, GripVertical, Loader2, MoreHorizontal, Pause, Pin, PinOff, Play, Radio } from "lucide-react";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -16,6 +16,13 @@ import { barFractions, barPosition } from "./replay-bar-layout";
 /** MT5 exports are 1-minute bars: the finest playback interval the data supports. */
 const DATA_RESOLUTION_SECONDS = 60;
 
+/** The minute on screen while playing (ahead of renders: steps update it directly). */
+export interface MinuteStore {
+  get: () => number | null;
+  set: (minute: number | null) => void;
+  subscribe: (listener: () => void) => () => void;
+}
+
 export interface ReplayBarProps {
   /** The chart area the toolbar floats in (positions are relative to it). */
   areaRef: React.RefObject<HTMLElement | null>;
@@ -23,6 +30,8 @@ export interface ReplayBarProps {
   onSettings: (patch: Partial<Omit<ReplaySettings, "bar">>) => void;
   onBar: (patch: Partial<ReplayBarSettings>) => void;
   clockMinute: number | null;
+  /** While playing: the minute currently shown on the charts. */
+  liveMinute?: MinuteStore;
   /** Review position (≤ clock) or null when following the live replay. */
   reviewMinute: number | null;
   chartTf: ReplayTimeframe;
@@ -145,7 +154,7 @@ export function ReplayBar(p: ReplayBarProps) {
         <>
           <PlayPause {...p} />
           <SpeedValue ms={settings.speedMs} onChange={(speedMs) => p.onSettings({ speedMs })} compact />
-          {view != null && <TimeLabel minute={view} reviewing={reviewing} />}
+          {view != null && <TimeLabel minute={view} live={p.liveMinute} reviewing={reviewing} />}
           <button type="button" className={ICON_BTN} onClick={() => onBar({ collapsed: false })} aria-label="Expand replay controls" title="Expand">
             <ChevronUp className="size-4" />
           </button>
@@ -172,7 +181,7 @@ export function ReplayBar(p: ReplayBarProps) {
           <span className={DIVIDER} aria-hidden />
           {p.extra}
           <JumpTo {...p} />
-          {view != null && <TimeLabel minute={view} reviewing={reviewing} />}
+          {view != null && <TimeLabel minute={view} live={p.liveMinute} reviewing={reviewing} />}
           {reviewing && (
             <button type="button" onClick={p.onLive} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-sky-600 px-2 text-[11px] font-semibold text-white hover:bg-sky-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300" title="Back to the live replay position">
               <Radio className="size-3" /> Live
@@ -256,7 +265,7 @@ function SpeedValue({ ms, onChange, compact = false }: { ms: number; onChange: (
       </PopoverTrigger>
       <PopoverContent side="top" align="center" className="w-56 p-2">
         <p className="pb-1 text-xs font-semibold">Playback speed: {formatSpeed(ms)}/bar</p>
-        <p className="pb-2 text-[11px] text-muted-foreground">Real time between steps. How much market time a step reveals is set by Step.</p>
+        <p className="pb-2 text-[11px] text-muted-foreground">Real time between steps. How much market time a step reveals is set by Step. Steps appear one at a time, so the fastest settings run at one step per screen refresh (about 16 ms on a 60 Hz display).</p>
         <div className="grid grid-cols-3 gap-1">
           {PLAYBACK_SPEEDS_MS.map((s) => (
             <button key={s} type="button" onClick={() => onChange(s)} aria-pressed={ms === s} className={cn("rounded px-1 py-1 font-mono text-xs", ms === s ? "bg-sky-600 text-white" : "hover:bg-muted")}>
@@ -273,7 +282,7 @@ function SpeedValue({ ms, onChange, compact = false }: { ms: number; onChange: (
             setCustom("");
           }}
         >
-          <input value={custom} onChange={(e) => setCustom(e.target.value)} inputMode="numeric" placeholder="Custom ms (50–60000)" aria-label="Custom speed in milliseconds" className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs tabular-nums" />
+          <input value={custom} onChange={(e) => setCustom(e.target.value)} inputMode="numeric" placeholder="Custom ms (5–60000)" aria-label="Custom speed in milliseconds" className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs tabular-nums" />
           <button type="submit" className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">Set</button>
         </form>
       </PopoverContent>
@@ -307,7 +316,12 @@ function StepSelect({ value, onChange }: { value: PlaybackTimeframe; onChange: (
   );
 }
 
-function TimeLabel({ minute, reviewing }: { minute: number; reviewing: boolean }) {
+const noStore = { subscribe: () => () => {}, get: () => null };
+
+function TimeLabel({ minute: settled, live, reviewing }: { minute: number; live?: MinuteStore; reviewing: boolean }) {
+  const store = live ?? noStore;
+  const playing = useSyncExternalStore(store.subscribe, store.get, () => null);
+  const minute = playing ?? settled;
   return (
     <span className={cn("hidden shrink-0 whitespace-nowrap px-1 font-mono text-[11px] font-medium tabular-nums md:inline", reviewing ? "text-sky-700 dark:text-sky-300" : "text-zinc-800 dark:text-zinc-100")} aria-live="polite" title={reviewing ? "Reviewing (the live replay is further on)" : "Replay time (broker server clock)"}>
       {formatReplayTime(minute)}

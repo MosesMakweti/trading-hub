@@ -15,8 +15,8 @@ import { advanceSimClockAction, cancelSimOrderAction, getSimAccountStateAction, 
 import { isPositionDrawing, linkStatus, positionFromTicket, samePosition, LINK_LABEL } from "@/domain/charting/order-sync";
 import type { InstrumentEconomics, TicketLink } from "./order-ticket";
 import { formatReplayTime } from "@/domain/native-replay/chart-time";
-import { changeSpeed, planPlayback, startPlayback } from "@/domain/charting/playback-scheduler";
-import { ReplayBar } from "@/components/charting/replay-bar";
+import { pace, paceIdle, startPacer } from "@/domain/charting/playback-scheduler";
+import { ReplayBar, type MinuteStore } from "@/components/charting/replay-bar";
 import { SessionNavigator, type SessionJump } from "@/components/charting/session-navigator";
 import { SessionEditor } from "@/components/charting/session-editor";
 import { BUILTIN_SESSIONS, type SessionDef } from "@/domain/charting/sessions";
@@ -42,6 +42,7 @@ import { StudySettings } from "@/components/charting/study-settings";
 import { ResizeHandle } from "@/components/charting/resize-handle";
 import { useWorkspace } from "@/components/charting/use-workspace";
 import { applyStepPatch, type SimAccountStateDTO } from "@/types/simulation";
+import { splitRevealed, type RevealStep } from "@/domain/charting/reveal-steps";
 import { noteStep } from "@/components/charting/replay-perf";
 import { fmtMoney, fmtWallClock, pnlTone } from "../format";
 import { OrderTicket } from "./order-ticket";
@@ -341,50 +342,77 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   useEffect(() => {
     shownRef.current = shownSymbols;
   }, [shownSymbols]);
-  const run = useCallback(
-    async (command: Command): Promise<boolean> => {
+  /** One server step: the clock moves and the response carries the bars it revealed. */
+  const fetchStep = useCallback(
+    async (command: Command) => {
       const t0 = performance.now();
       const res = await advanceSimClockAction({ accountId: state.id, command, commandId: crypto.randomUUID(), views: shownRef.current });
       const tResponse = performance.now();
       if (!res.success) {
         toast.error(res.error);
         setRefreshKey((k) => k + 1); // never assume what moved: reload the charts
-        return false;
+        return null;
       }
-      const { outcome } = res;
-      lastMoveRef.current = { moved: outcome.moved, toMinute: outcome.toMinute };
-      if (res.state) setState(res.state);
-      else if (res.patch) setState((prev) => applyStepPatch(prev, res.patch!));
-      if (outcome.moved) {
-        const bySymbol = new Map(res.revealed.map((r) => [r.symbol, r]));
-        for (const pane of paneRefs.current) pane?.reveal(bySymbol.get(pane.symbol()), outcome.fromMinute, outcome.toMinute);
-      }
-      // A halt is a trading change, so it always comes with the full state.
-      const after = res.state;
-      if (outcome.halted && after) {
-        const msg = { PASSED: "Phase passed — the next stage is ready in the challenge history.", BREACHED: `Breached: ${after.statusReason ?? "a rule was broken"}`, FAILED: after.statusReason ?? "Phase failed." }[after.status as "PASSED" | "BREACHED" | "FAILED"];
-        if (msg) (after.status === "PASSED" ? toast.success : toast.error)(msg, { duration: 8000 });
-      }
-      if (outcome.filledOrders > 0) toast.message(`${outcome.filledOrders} order${outcome.filledOrders === 1 ? "" : "s"} filled`);
-      if (outcome.closedPositions > 0) toast.message(`${outcome.closedPositions} position${outcome.closedPositions === 1 ? "" : "s"} closed`);
-      // Charts paint on the next frame: measure up to it.
-      requestAnimationFrame(() => {
-        const tPaint = performance.now();
-        noteStep({
-          command: command.kind === "CANDLE" ? `CANDLE ${command.timeframe}` : command.kind === "BARS" ? `BARS ${command.count}` : command.kind,
-          responseMs: tResponse - t0,
-          serverMs: res.serverMs,
-          applyMs: tPaint - tResponse,
-          totalMs: tPaint - t0,
-          kind: res.state ? "full" : "patch",
-          revealedBars: res.revealed.reduce((n, r) => n + (r.bars?.length ?? 0), 0),
-        });
-      });
-      const status = res.state?.status ?? res.patch?.status;
-      const atEnd = res.state?.clock?.atPeriodEnd ?? res.patch?.clock.atPeriodEnd ?? outcome.atPeriodEnd;
-      return outcome.moved && status === "ACTIVE" && !atEnd;
+      return { res, command, t0, tResponse };
     },
     [state.id],
+  );
+  type Fetched = NonNullable<Awaited<ReturnType<typeof fetchStep>>>;
+
+  /** Whether the replay can go on after this response. */
+  const canContinue = (res: Fetched["res"]) => {
+    const status = res.state?.status ?? res.patch?.status;
+    const atEnd = res.state?.clock?.atPeriodEnd ?? res.patch?.clock.atPeriodEnd ?? res.outcome.atPeriodEnd;
+    return res.outcome.moved && status === "ACTIVE" && !atEnd;
+  };
+
+  /** Folds revealed bars (from, to] into every chart. */
+  const revealOnCharts = (revealed: Fetched["res"]["revealed"], from: number, to: number) => {
+    const bySymbol = new Map(revealed.map((r) => [r.symbol, r]));
+    for (const pane of paneRefs.current) pane?.reveal(bySymbol.get(pane.symbol()), from, to);
+  };
+
+  /** Account side of a response: state, notices, timing. */
+  const applyResult = useCallback((f: Fetched) => {
+    const { res, command, t0, tResponse } = f;
+    const { outcome } = res;
+    lastMoveRef.current = { moved: outcome.moved, toMinute: outcome.toMinute };
+    if (res.state) setState(res.state);
+    else if (res.patch) setState((prev) => applyStepPatch(prev, res.patch!));
+    // A halt is a trading change, so it always comes with the full state.
+    const after = res.state;
+    if (outcome.halted && after) {
+      const msg = { PASSED: "Phase passed — the next stage is ready in the challenge history.", BREACHED: `Breached: ${after.statusReason ?? "a rule was broken"}`, FAILED: after.statusReason ?? "Phase failed." }[after.status as "PASSED" | "BREACHED" | "FAILED"];
+      if (msg) (after.status === "PASSED" ? toast.success : toast.error)(msg, { duration: 8000 });
+    }
+    if (outcome.filledOrders > 0) toast.message(`${outcome.filledOrders} order${outcome.filledOrders === 1 ? "" : "s"} filled`);
+    if (outcome.closedPositions > 0) toast.message(`${outcome.closedPositions} position${outcome.closedPositions === 1 ? "" : "s"} closed`);
+    // Charts paint on the next frame: measure up to it.
+    requestAnimationFrame(() => {
+      const tPaint = performance.now();
+      noteStep({
+        command: command.kind === "CANDLE" ? `CANDLE ${command.timeframe}` : command.kind === "BARS" ? `BARS ${command.count}` : command.kind,
+        responseMs: tResponse - t0,
+        serverMs: res.serverMs,
+        applyMs: tPaint - tResponse,
+        totalMs: tPaint - t0,
+        kind: res.state ? "full" : "patch",
+        revealedBars: res.revealed.reduce((n, r) => n + (r.bars?.length ?? 0), 0),
+      });
+    });
+  }, []);
+
+  /** A single step (buttons, keys, jumps): reveal everything at once, then apply. */
+  const run = useCallback(
+    async (command: Command): Promise<boolean> => {
+      const f = await fetchStep(command);
+      if (!f) return false;
+      if (f.res.outcome.moved) revealOnCharts(f.res.revealed, f.res.outcome.fromMinute, f.res.outcome.toMinute);
+      applyResult(f);
+      return canContinue(f.res);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fetchStep, applyResult],
   );
 
   const step = async (command: Command) => {
@@ -402,35 +430,107 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
     setPlaying(false);
   }, []);
 
-  // ── Playback (bars of the playback timeframe, `speedMs` apart) ───────────
-  // The schedule is a fixed timeline (domain/charting/playback-scheduler):
-  // processing time doesn't drift it, a slow response is caught up by
-  // requesting every bar that is due (the server settles each one in order),
-  // and a speed change takes effect on the next bar without restarting.
+  // ── Playback: one playback step on the chart every `speedMs` ─────────────
+  // Two loops. The PRODUCER asks the server for the next steps a little ahead
+  // of time (the server settles every bar in order: fills, stops and rules
+  // are exactly as without pacing). The CONSUMER shows those steps one at a
+  // time at the chosen speed — with Step = 1m, one 1-minute bar per tick,
+  // never a burst. Trading is closed while playing, and pausing shows every
+  // step already settled, so what's on screen matches the account again.
+  // The minute on screen while playing — a tiny store only the toolbar clock
+  // subscribes to, so a step doesn't re-render the whole terminal.
+  const liveClock = useMemo(() => createMinuteStore(), []);
   const play = useCallback(async () => {
     if (playingRef.current) return;
     if (reviewRef.current != null) setReview(null); // playing always continues from the live position
     playingRef.current = true;
     setPlaying(true);
-    let clock = startPlayback(performance.now(), replayRef.current.speedMs);
+    type Pending = { f: Fetched; steps: RevealStep[] };
+    const queue: Pending[] = [];
+    const queued = () => queue.reduce((n, p) => n + p.steps.length, 0);
+    let producing = true;
+    let rttMs = 150;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    const producer = (async () => {
+      try {
+        while (playingRef.current) {
+          const { speedMs, playbackTf } = replayRef.current;
+          // Keep about two round trips of steps ready (at least 2, at most 240).
+          const want = Math.min(240, Math.max(2, Math.ceil((2 * rttMs) / speedMs)));
+          const have = queued();
+          if (have >= want) {
+            await sleep(Math.min(20, speedMs));
+            continue;
+          }
+          const t = performance.now();
+          const f = await fetchStep({ kind: "CANDLE", timeframe: playbackTf, count: Math.min(120, want - have) });
+          rttMs = rttMs * 0.7 + (performance.now() - t) * 0.3;
+          if (!f) break;
+          const o = f.res.outcome;
+          queue.push({ f, steps: o.moved ? splitRevealed(f.res.revealed, o.fromMinute, o.toMinute, playbackTf) : [] });
+          if (!canContinue(f.res)) break;
+        }
+      } finally {
+        producing = false;
+      }
+    })();
+
+    // Consumer: shows one step per `speedMs` (re-read every tick: speed changes apply at once).
+    let pacer = startPacer();
+    // Frame counter: at most one step per painted frame (faster than the
+    // display refreshes, steps would share a paint and appear several at once).
+    let frameNo = 0;
+    let shownFrame = -1;
+    let raf = requestAnimationFrame(function tick() {
+      frameNo++;
+      raf = requestAnimationFrame(tick);
+    });
+    const show = (step: RevealStep) => {
+      revealOnCharts(step.revealed, step.from, step.to);
+      liveClock.set(step.to);
+    };
+    const settleHead = () => {
+      // A response is applied (account state, notices) once all its steps are on screen.
+      while (queue.length && queue[0].steps.length === 0) applyResult(queue.shift()!.f);
+    };
     try {
-      while (playingRef.current) {
-        const { speedMs, playbackTf } = replayRef.current;
-        if (speedMs !== clock.intervalMs) clock = changeSpeed(clock, performance.now(), speedMs);
-        const plan = planPlayback(clock, performance.now());
-        if (plan.kind === "wait") {
-          await new Promise((r) => setTimeout(r, Math.min(plan.ms, 50))); // re-check pause / speed often
+      while (playingRef.current && (producing || queued() > 0)) {
+        settleHead();
+        const now = performance.now();
+        const speedMs = replayRef.current.speedMs;
+        if (queued() === 0) {
+          pacer = paceIdle(pacer, now, speedMs); // waiting on the server: no catch-up burst afterwards
+          await sleep(4);
           continue;
         }
-        clock = plan.clock;
-        const more = await run({ kind: "CANDLE", timeframe: playbackTf, count: plan.count });
-        if (!more) break;
+        if (shownFrame === frameNo) {
+          await sleep(2); // this frame already has its step
+          continue;
+        }
+        const d = pace(pacer, now, speedMs);
+        if (d.kind === "wait") {
+          await sleep(Math.max(1, Math.min(d.ms, 25))); // re-check often: pause / speed changes apply at once
+          continue;
+        }
+        pacer = d.pacer;
+        show(queue.find((p) => p.steps.length)!.steps.shift()!);
+        shownFrame = frameNo;
       }
     } finally {
       playingRef.current = false;
+      cancelAnimationFrame(raf);
+      setBusy(true); // no manual step until the last responses are on screen
+      await producer;
+      // Paused or ended: put every settled step on the charts and apply its state.
+      for (const p of queue) for (const step of p.steps.splice(0)) revealOnCharts(step.revealed, step.from, step.to);
+      settleHead();
+      liveClock.set(null);
       setPlaying(false);
+      setBusy(false);
     }
-  }, [run]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchStep, applyResult, liveClock]);
 
   /**
    * Session jump. Within what's revealed → review there. Later → move the
@@ -779,6 +879,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
               onSettings={(patch) => updateWs((w) => ({ ...w, replay: { ...w.replay, ...patch } }))}
               onBar={(patch) => updateWs((w) => ({ ...w, replay: { ...w.replay, bar: { ...w.replay.bar, ...patch } } }))}
               clockMinute={state.clock?.minute ?? null}
+              liveMinute={liveClock}
               reviewMinute={review}
               chartTf={timeframe}
               playing={playing}
@@ -928,3 +1029,22 @@ function TimeframeMore({ current, favorites, onPick, onToggleFavorite }: { curre
     </Popover>
   );
 }
+
+/** A minute value with subscribers (useSyncExternalStore-compatible). */
+function createMinuteStore(): MinuteStore {
+  let value: number | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (v) => {
+      if (v === value) return;
+      value = v;
+      listeners.forEach((l) => l());
+    },
+    subscribe: (l) => {
+      listeners.add(l);
+      return () => void listeners.delete(l);
+    },
+  };
+}
+
