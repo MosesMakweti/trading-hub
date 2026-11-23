@@ -6,7 +6,7 @@ import { importHistoricalDataset } from "@/server/services/native-replay/histori
 import { mt5Text } from "@/domain/native-replay/testing/m1-fixtures";
 import { createLabAccount } from "@/server/services/simulation/sim-account.service";
 import type { ChartDrawing } from "@/domain/native-replay/drawings/model";
-import { deleteSimDrawing, listSimDrawings, saveSimDrawing } from "./sim-drawing.service";
+import { deleteSimDrawing, linkDrawingToOrder, listSimDrawings, requireOrderDrawing, saveSimDrawing } from "./sim-drawing.service";
 
 const userIds: string[] = [];
 afterAll(() => deleteTestUsers(...userIds));
@@ -57,5 +57,31 @@ describe("simulation chart drawings", () => {
     await prisma.simAccount.update({ where: { id: a.accountId }, data: { status: "COMPLETED" } });
     await expect(saveSimDrawing(a.userId, a.accountId, line("draw-0006"))).rejects.toThrow(/ended/);
     expect(await listSimDrawings(a.userId, a.accountId, "EURUSD")).toHaveLength(1);
+  });
+
+  it("links a position drawing to an order server-side; clients can't forge or clear the link", async () => {
+    const a = await account("link-a");
+    const b = await account("link-b");
+    const long: Omit<ChartDrawing, "linkedTradeId"> = { ...line("draw-l001"), type: "LONG", anchors: [{ time: 100, price: 1.08 }, { time: 200, price: 1.08 }], data: { position: { entry: 1.08, stop: 1.079, targets: [1.082] } } };
+    await saveSimDrawing(a.userId, a.accountId, long);
+    await saveSimDrawing(a.userId, a.accountId, line("draw-t001"));
+    // Side must match direction; only position drawings; only the owner's.
+    await expect(requireOrderDrawing(a.userId, a.accountId, "EURUSD", "draw-l001", "SELL")).rejects.toThrow(/long position drawing can't place a sell/);
+    await expect(requireOrderDrawing(a.userId, a.accountId, "EURUSD", "draw-t001", "BUY")).rejects.toThrow(/Only long or short/);
+    await expect(requireOrderDrawing(b.userId, a.accountId, "EURUSD", "draw-l001", "BUY")).rejects.toThrow();
+    await expect(requireOrderDrawing(b.userId, b.accountId, "EURUSD", "draw-l001", "BUY")).rejects.toThrow(/wasn't found/);
+    expect((await requireOrderDrawing(a.userId, a.accountId, "EURUSD", "draw-l001", "BUY")).id).toBe("draw-l001");
+
+    // A client trying to set orderRef itself: dropped.
+    const forged = { ...long, data: { ...long.data, orderRef: { orderId: "forged", positionId: null, side: "BUY" as const, status: "FILLED" as const, minute: 1 } } };
+    expect((await saveSimDrawing(a.userId, a.accountId, forged)).data.orderRef).toBeUndefined();
+
+    const ref = { orderId: "order-1", positionId: "pos-1", side: "BUY" as const, status: "FILLED" as const, minute: 42 };
+    expect((await linkDrawingToOrder(a.userId, a.accountId, "draw-l001", ref)).data.orderRef).toEqual(ref);
+    // Moving the drawing afterwards keeps the link; the client can't clear it.
+    const moved = await saveSimDrawing(a.userId, a.accountId, { ...long, data: { position: { entry: 1.081, stop: 1.079, targets: [1.083] } } });
+    expect(moved.data.orderRef).toEqual(ref);
+    expect(moved.data.position?.entry).toBe(1.081);
+    await expect(linkDrawingToOrder(b.userId, a.accountId, "draw-l001", ref)).rejects.toThrow();
   });
 });

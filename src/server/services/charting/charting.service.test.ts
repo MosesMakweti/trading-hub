@@ -96,7 +96,7 @@ describe("instrument point value (Strategy Tester money)", () => {
     const rows = [["2024.05.14", "09:00", "1.08000", "1.08000", "1.08000", "1.08000", "10", "0", "0"]];
     const ds = await importHistoricalDataset(u, { bytes: new TextEncoder().encode(mt5Text(rows)), fileName: "EURUSD_M1_202405140900_202405140900.csv" });
     const acct = await createLabAccount(u, { name: "PV", datasets: [{ assetSymbol: "EURUSD", datasetId: ds.id }], periodStart: "2024-05-14", periodEnd: "2024-05-14", startingBalance: 10000, currency: "USD" });
-    expect(await instrumentPointValue(u, acct.id, "EURUSD")).toEqual({ pointValue: 100000, currency: "USD", quantityUnit: "lot" });
+    expect(await instrumentPointValue(u, acct.id, "EURUSD")).toMatchObject({ pointValue: 100000, currency: "USD", quantityUnit: "lot" });
     await expect(instrumentPointValue(u, acct.id, "GBPUSD")).rejects.toThrow(/isn't one of this account/);
     await expect(instrumentPointValue(other, acct.id, "EURUSD")).rejects.toThrow();
   });

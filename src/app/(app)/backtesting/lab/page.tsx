@@ -19,9 +19,9 @@ export default async function StrategyLabPage() {
   const datasetOptions = datasets.filter((d) => d.status === "READY").map((d) => ({ id: d.id, symbol: d.symbol, firstBar: d.firstBar, lastBar: d.lastBar }));
   const strategyOptions = strategies.filter((s) => s.status !== "ARCHIVED").map((s) => ({ id: s.id, name: s.name, version: s.version }));
   const groups = [
-    { title: "Active", items: accounts.filter((a) => a.status === "ACTIVE" || a.status === "CREATED") },
-    { title: "Completed", items: accounts.filter((a) => a.status === "COMPLETED") },
-    { title: "Archived", items: accounts.filter((a) => a.status === "ARCHIVED") },
+    { title: "Active", items: accounts.filter((a) => !a.archived && (a.status === "ACTIVE" || a.status === "CREATED")) },
+    { title: "Completed", items: accounts.filter((a) => !a.archived && a.status === "COMPLETED") },
+    { title: "Archived", items: accounts.filter((a) => a.archived) },
   ].filter((g) => g.items.length > 0);
 
   return (

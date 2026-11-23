@@ -237,6 +237,8 @@ export async function setLabAccountStatus(userId: string, accountId: string, sta
 /** Permanently deletes an account and its whole history (cascade). */
 export async function deleteSimAccount(userId: string, accountId: string): Promise<void> {
   const account = await requireSimAccount(userId, accountId);
+  // Prop Firm accounts carry fees, breaches and payouts: financial records, archived but never deleted.
+  if (account.product === "PROP_FIRM") throw new SimError("Prop Firm accounts are financial records and can be archived but not deleted.");
   await prisma.simAccount.delete({ where: { id: account.id } });
 }
 

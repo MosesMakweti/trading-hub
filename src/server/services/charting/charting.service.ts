@@ -162,12 +162,12 @@ export async function setScriptArchived(userId: string, id: string, archived: bo
  * instrument's quote currency — Pine's `syminfo.pointvalue`. From the same
  * instrument specs the account trades with; null when they're incomplete.
  */
-export async function instrumentPointValue(userId: string, accountId: string, symbol: string): Promise<{ pointValue: number; currency: string; quantityUnit: string } | null> {
+export async function instrumentPointValue(userId: string, accountId: string, symbol: string): Promise<{ pointValue: number; currency: string; quantityUnit: string; quantityStep?: number; minQuantity?: number } | null> {
   const account = await requireSimAccount(userId, accountId);
   if (!account.assets.includes(symbol)) throw new ChartingError(`${symbol} isn't one of this account's instruments.`);
   const r = await resolveSpecForUser(userId, symbol);
   if (r.status !== "RESOLVED") return null;
   const v = computeValuePerPriceUnit(r.spec, r.spec.quoteCurrency);
   if (v.status !== "OK") return null;
-  return { pointValue: v.quoteValuePerPriceUnit.toNumber(), currency: r.spec.quoteCurrency, quantityUnit: String(r.spec.quantityUnit).toLowerCase() };
+  return { pointValue: v.quoteValuePerPriceUnit.toNumber(), currency: r.spec.quoteCurrency, quantityUnit: String(r.spec.quantityUnit).toLowerCase(), quantityStep: Number(r.spec.quantityStep), minQuantity: Number(r.spec.minQuantity) };
 }

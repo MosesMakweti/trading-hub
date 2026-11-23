@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
-import { ArrowLeft, FastForward, LineChart, Loader2, Minimize2, Pause, Play, SkipForward, Star, StepForward } from "lucide-react";
+import { ArrowLeft, LineChart, Loader2, Minimize2, Star } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ButtonLink } from "@/components/backtesting/button-link";
@@ -11,7 +11,16 @@ import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { parseWallClock } from "@/domain/native-replay/wall-clock";
 import { REPLAY_TIMEFRAMES, type ReplayTimeframe } from "@/domain/native-replay/timeframes";
-import { advanceSimClockAction, getSimAccountStateAction, getSimCandlesAction, startSimClockAction } from "@/actions/simulation.actions";
+import { advanceSimClockAction, cancelSimOrderAction, getSimAccountStateAction, getSimCandlesAction, reviewTargetAction, startSimClockAction } from "@/actions/simulation.actions";
+import { isPositionDrawing, linkStatus, positionFromTicket, samePosition, LINK_LABEL } from "@/domain/charting/order-sync";
+import type { InstrumentEconomics, TicketLink } from "./order-ticket";
+import { formatReplayTime } from "@/domain/native-replay/chart-time";
+import { changeSpeed, planPlayback, startPlayback } from "@/domain/charting/playback-scheduler";
+import { ReplayBar } from "@/components/charting/replay-bar";
+import { SessionNavigator, type SessionJump } from "@/components/charting/session-navigator";
+import { SessionEditor } from "@/components/charting/session-editor";
+import { BUILTIN_SESSIONS, type SessionDef } from "@/domain/charting/sessions";
+import { listTradingSessionsAction } from "@/actions/charting.actions";
 import { fromWire } from "@/domain/native-replay/chart-model";
 import { ScriptWorkbench, type TestData } from "@/components/scripting/script-workbench";
 import { deleteSimDrawingAction, getInstrumentPointValueAction, getScriptSourcesAction, listSimDrawingsAction, saveSimDrawingAction } from "@/actions/charting.actions";
@@ -41,10 +50,7 @@ import { QuickObservation, type StudyOption } from "../studies/quick-observation
 import { PropRulesPanel } from "../prop/prop-rules-panel";
 
 const NO_LINES: PriceLineSpec[] = [];
-/** Playback speeds in M1 bars per second (1× = one broker minute per second). */
-const SPEEDS = [1, 2, 5, 10, 25, 50, 100, 250] as const;
-type Speed = (typeof SPEEDS)[number];
-type Command = { kind: "BARS"; count: number } | { kind: "CANDLE"; timeframe: ReplayTimeframe } | { kind: "SEEK"; to: number } | { kind: "NEXT_DAY" };
+type Command = { kind: "BARS"; count: number } | { kind: "CANDLE"; timeframe: ReplayTimeframe; count?: number } | { kind: "SEEK"; to: number; align?: "AT_OR_BEFORE" | "AT_OR_AFTER"; until?: number } | { kind: "NEXT_DAY" };
 
 const STATUS_TONE: Record<string, string> = {
   ACTIVE: "border-emerald-500/40 text-emerald-500",
@@ -70,11 +76,19 @@ const STATUS_TONE: Record<string, string> = {
 export function SimTerminal({ initialState, initialWorkspace, backHref, studies, resultsHref }: { initialState: SimAccountStateDTO; initialWorkspace: Workspace; backHref: string; studies?: StudyOption[]; resultsHref?: string }) {
   const { resolvedTheme } = useTheme();
   const [state, setState] = useState(initialState);
+  const stateRef = useRef(initialState);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
   const [ws, updateWs] = useWorkspace(initialWorkspace);
   const [busy, setBusy] = useState(false);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<Speed>(1);
-  const [jumpTo, setJumpTo] = useState("");
+  /** Review position (≤ the clock) while looking back; null = following the live replay. */
+  const [review, setReview] = useState<number | null>(null);
+  const reviewRef = useRef<number | null>(null);
+  useEffect(() => {
+    reviewRef.current = review;
+  }, [review]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editing, setEditing] = useState<{ chart: number; uid: string; script: ScriptState | null } | null>(null);
@@ -88,12 +102,22 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const [drawCanUndo, setDrawCanUndo] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
   const [magnet, setMagnet] = useState(false);
+  const [customSessions, setCustomSessions] = useState<SessionDef[]>([]);
+  const [sessionEditor, setSessionEditor] = useState(false);
+  const lastMoveRef = useRef<{ moved: boolean; toMinute: number } | null>(null);
+  /** The position drawing linked to the order ticket (stable across selection changes). */
+  const [linkedId, setLinkedId] = useState<string | null>(null);
+  const linkedIdRef = useRef(linkedId);
+  useEffect(() => {
+    linkedIdRef.current = linkedId;
+  }, [linkedId]);
+  const [economics, setEconomics] = useState<{ symbol: string; value: InstrumentEconomics | null } | null>(null);
   // Live sizes while dragging (committed to the workspace on release).
   const [rightWidth, setRightWidth] = useState(ws.panels.right.width);
   const [bottomHeight, setBottomHeight] = useState(ws.panels.bottom.height);
   const paneRefs = useRef<(ChartPaneHandle | null)[]>([]);
   const playingRef = useRef(false);
-  const speedRef = useRef<Speed>(1);
+  const replayRef = useRef(initialWorkspace.replay);
 
   const active = ws.charts[Math.min(ws.activeChart, chartsFor(ws.layout) - 1)] ?? ws.charts[0];
   const symbol = active.symbol && state.assets.includes(active.symbol) ? active.symbol : state.assets[0];
@@ -104,10 +128,32 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   }, [timeframe]);
 
   const quote = state.quotes.find((q) => q.symbol === symbol);
+  useEffect(() => {
+    let live = true;
+    void getInstrumentPointValueAction({ accountId: state.id, symbol }).then((r) => live && setEconomics({ symbol, value: r.success && r.value ? r.value : null }));
+    return () => {
+      live = false;
+    };
+  }, [state.id, symbol]);
   const started = state.clock != null;
   const tradable = started && state.status === "ACTIVE";
   const canMove = tradable && !state.clock?.atPeriodEnd;
   const focus = ws.focus;
+  useEffect(() => {
+    replayRef.current = ws.replay;
+  }, [ws.replay]);
+  const periodFrom = parseWallClock(`${state.period.start}T00:00`) ?? 0;
+  const periodTo = (parseWallClock(`${state.period.end}T00:00`) ?? 0) + 1439;
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    void listTradingSessionsAction().then((r) => r.success && setCustomSessions(r.sessions));
+  }, []);
+  const allSessions = useMemo(() => [...BUILTIN_SESSIONS, ...customSessions], [customSessions]);
+  const sessionOverlay = useMemo(() => {
+    const ss = ws.sessions;
+    const defs = allSessions.filter((d) => d.enabled && ss.show.includes(d.id));
+    return { defs, all: allSessions, dataTimeZone: ss.dataTimeZone, shading: ss.shading, highLow: ss.highLow, labels: ss.labels };
+  }, [allSessions, ws.sessions]);
   const activeIndex = Math.min(ws.activeChart, chartsFor(ws.layout) - 1);
   const activeCtl = useCallback(() => paneRefs.current[activeIndex]?.drawings() ?? null, [activeIndex]);
   const drawingsReadOnly = !(state.status === "ACTIVE" || state.status === "CREATED");
@@ -207,6 +253,21 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const onDrawingCommit = useCallback(
     (index: number, sym: string, op: DrawingOp, list: ChartDrawing[]) => {
       setDrawingsBySymbol((m) => new Map(m).set(sym, { list, origin: index, rev: ++revRef.current }));
+      if (op.kind === "delete") {
+        if (op.drawing.id === linkedIdRef.current) setLinkedId(null);
+        const ref = op.drawing.data.orderRef;
+        // Deleting the plan never touches the order it became — but offer it.
+        if (ref && stateRef.current.orders.some((o) => o.id === ref.orderId)) {
+          toast.message("The drawing is gone; its pending order is still working.", {
+            duration: 10_000,
+            action: {
+              label: "Cancel order",
+              onClick: () =>
+                void cancelSimOrderAction({ accountId: stateRef.current.id, orderId: ref.orderId }).then((r) => (r.success ? (setState(r.state), toast.success("Order cancelled")) : toast.error(r.error))),
+            },
+          });
+        }
+      }
       const task =
         op.kind === "delete"
           ? deleteSimDrawingAction({ accountId: state.id, assetSymbol: sym, drawingId: op.drawing.id })
@@ -228,7 +289,11 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const onDrawingState = useCallback(
     (index: number, ev: DrawingStateEvent) => {
       if (index !== activeIndex) return;
-      if ("selected" in ev) setDrawSelected(ev.selected);
+      if ("selected" in ev) {
+        setDrawSelected(ev.selected);
+        // Selecting a long/short drawing links it to the ticket; it stays linked until another is selected or it's unlinked.
+        if (isPositionDrawing(ev.selected)) setLinkedId(ev.selected.id);
+      }
       else if ("tool" in ev) setDrawTool(ev.tool);
       else {
         setDrawList(ev.list);
@@ -240,6 +305,28 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   useEffect(() => {
     activeCtl()?.setMagnet(magnet);
   }, [magnet, activeCtl]);
+  const live = useMemo(() => ({ orderIds: new Set(state.orders.map((o) => o.id)), positionIds: new Set(state.positions.map((p) => p.id)) }), [state.orders, state.positions]);
+  const syncOn = ws.trading.syncPositionDrawing;
+  const linkedDrawing = syncOn && linkedId ? (drawList.find((d) => d.id === linkedId && d.assetSymbol === symbol) ?? null) : null;
+  const ticketLink: TicketLink | null =
+    linkedDrawing && isPositionDrawing(linkedDrawing)
+      ? {
+          drawing: linkedDrawing,
+          status: linkStatus(linkedDrawing.data.orderRef, true, live),
+          onEdit: (edit) =>
+            activeCtl()?.update(linkedDrawing.id, (d) => {
+              if (!d.data.position) return;
+              const next = positionFromTicket(d.data.position, edit);
+              if (!samePosition(next, d.data.position)) d.data.position = next;
+            }),
+          onUnlink: () => setLinkedId(null),
+        }
+      : null;
+  const badgeFor = (d: ChartDrawing) => {
+    if (!isPositionDrawing(d)) return null;
+    const st = linkStatus(d.data.orderRef, syncOn && d.id === linkedId, live);
+    return { label: LINK_LABEL[st], tone: st === "draft" ? ("muted" as const) : st === "linked" ? ("info" as const) : ("good" as const) };
+  };
   const pipSize = (() => {
     const spec = lookupInstrument(symbol);
     return spec?.pipSize ? Number(spec.pipSize) : null;
@@ -266,6 +353,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
         return false;
       }
       const { outcome } = res;
+      lastMoveRef.current = { moved: outcome.moved, toMinute: outcome.toMinute };
       if (res.state) setState(res.state);
       else if (res.patch) setState((prev) => applyStepPatch(prev, res.patch!));
       if (outcome.moved) {
@@ -315,35 +403,113 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
     setPlaying(false);
   }, []);
 
+  // ── Playback (bars of the playback timeframe, `speedMs` apart) ───────────
+  // The schedule is a fixed timeline (domain/charting/playback-scheduler):
+  // processing time doesn't drift it, a slow response is caught up by
+  // requesting every bar that is due (the server settles each one in order),
+  // and a speed change takes effect on the next bar without restarting.
   const play = useCallback(async () => {
     if (playingRef.current) return;
+    if (reviewRef.current != null) setReview(null); // playing always continues from the live position
     playingRef.current = true;
     setPlaying(true);
-    // Rate-based: `speed` M1 bars per second of real time. Each request asks
-    // for exactly the bars that are due (the server settles every one of them,
-    // in order — nothing is skipped), and the next request starts only after
-    // the previous one finished, so steps never overlap. If the server can't
-    // keep up, the backlog is capped and playback simply runs slower.
-    let start = performance.now();
-    let advanced = 0;
-    while (playingRef.current) {
-      const rate = speedRef.current;
-      let due = Math.floor(((performance.now() - start) / 1000) * rate) - advanced;
-      if (due > 1440) {
-        start = performance.now() - (advanced / rate) * 1000; // drop the backlog, keep going
-        due = 1;
+    let clock = startPlayback(performance.now(), replayRef.current.speedMs);
+    try {
+      while (playingRef.current) {
+        const { speedMs, playbackTf } = replayRef.current;
+        if (speedMs !== clock.intervalMs) clock = changeSpeed(clock, performance.now(), speedMs);
+        const plan = planPlayback(clock, performance.now());
+        if (plan.kind === "wait") {
+          await new Promise((r) => setTimeout(r, Math.min(plan.ms, 50))); // re-check pause / speed often
+          continue;
+        }
+        clock = plan.clock;
+        const more = await run({ kind: "CANDLE", timeframe: playbackTf, count: plan.count });
+        if (!more) break;
       }
-      if (due < 1) {
-        await new Promise((r) => setTimeout(r, Math.max(4, ((advanced + 1) / rate) * 1000 - (performance.now() - start))));
-        continue;
-      }
-      const more = await run({ kind: "BARS", count: due });
-      advanced += due;
-      if (!more) break;
+    } finally {
+      playingRef.current = false;
+      setPlaying(false);
     }
-    playingRef.current = false;
-    setPlaying(false);
   }, [run]);
+
+  /**
+   * Session jump. Within what's revealed → review there. Later → move the
+   * replay forward to the first bar inside the session; if the session has
+   * no data, nothing moves and the trader is told (never a silent jump to an
+   * unrelated time).
+   */
+  const jumpToSession = useCallback(
+    async (j: SessionJump) => {
+      const now = stateRef.current.clock?.minute;
+      if (now == null) return;
+      if (j.to <= now) {
+        const res = await reviewTargetAction({ accountId: stateRef.current.id, from: reviewRef.current ?? now, move: { kind: "SEEK", to: j.to, align: j.align, until: j.until } });
+        if (!res.success) return void toast.error(res.error);
+        if (res.minute == null || (j.until != null && res.minute >= j.until)) return void toast.message(`No market data for ${j.label}.`);
+        setReview(res.minute >= res.clock ? null : res.minute);
+        return;
+      }
+      setReview(null);
+      lastMoveRef.current = null;
+      setBusy(true);
+      try {
+        await run({ kind: "SEEK", to: j.to, align: j.align, until: j.until });
+      } finally {
+        setBusy(false);
+      }
+      const last = lastMoveRef.current as { moved: boolean } | null;
+      if (last && !last.moved) toast.message(`No market data for ${j.label} — the replay didn't move.`);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  // ── Review: step back over what's already revealed (never past the clock) ──
+  const reviewMove = useCallback(
+    async (move: { kind: "BACK" | "FORWARD"; timeframe: ReplayTimeframe } | { kind: "SEEK"; to: number }) => {
+      const from = reviewRef.current ?? state.clock?.minute;
+      if (from == null) return;
+      setBusy(true);
+      try {
+        const res = await reviewTargetAction({ accountId: state.id, from, move });
+        if (!res.success) return void toast.error(res.error);
+        if (res.minute == null) return void toast.message(move.kind === "BACK" ? "That's the start of the revealed data." : "Nothing there.");
+        setReview(res.minute >= res.clock ? null : res.minute);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [state.id, state.clock?.minute],
+  );
+  const nextBar = useCallback(() => {
+    const tf = replayRef.current.playbackTf;
+    if (reviewRef.current != null) void reviewMove({ kind: "FORWARD", timeframe: tf });
+    else void step({ kind: "CANDLE", timeframe: tf });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewMove]);
+  const nextCandle = useCallback(() => {
+    const tf = timeframeRef.current;
+    if (reviewRef.current != null) void reviewMove({ kind: "FORWARD", timeframe: tf });
+    else void step({ kind: "CANDLE", timeframe: tf });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewMove]);
+  const prevBar = useCallback(() => void reviewMove({ kind: "BACK", timeframe: replayRef.current.playbackTf }), [reviewMove]);
+  const prevCandle = useCallback(() => void reviewMove({ kind: "BACK", timeframe: timeframeRef.current }), [reviewMove]);
+  /** Timeline / jump: within what's revealed → review there; later → move the replay forward. */
+  const goTo = useCallback(
+    (minute: number) => {
+      const now = state.clock?.minute;
+      if (now == null) return;
+      if (minute <= now) void reviewMove({ kind: "SEEK", to: minute });
+      else {
+        setReview(null);
+        void step({ kind: "SEEK", to: minute });
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.clock?.minute, reviewMove],
+  );
 
   useEffect(() => () => void (playingRef.current = false), []);
 
@@ -401,10 +567,15 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
       if (e.key === " ") {
         e.preventDefault();
         if (playingRef.current) pause();
-        else if (canMove) void play();
-      } else if (e.key === "ArrowRight" && canMove) {
+        else if (canMove || reviewRef.current != null) void play();
+      } else if (e.key === "ArrowRight" && (canMove || reviewRef.current != null) && !playingRef.current) {
         e.preventDefault();
-        void step(e.shiftKey ? { kind: "CANDLE", timeframe: timeframeRef.current } : { kind: "BARS", count: 1 });
+        if (e.shiftKey) nextCandle();
+        else nextBar();
+      } else if (e.key === "ArrowLeft" && started && !playingRef.current) {
+        e.preventDefault();
+        if (e.shiftKey) prevCandle();
+        else prevBar();
       } else if (e.key === "r" || e.key === "R") {
         paneRefs.current.forEach((p) => p?.sim()?.scrollToLatest());
       } else if (e.key === "F" && e.shiftKey) {
@@ -497,33 +668,10 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
           <span className="rounded-md bg-muted px-2 py-1 font-mono text-xs tabular-nums" aria-live="polite" title="Replay time (broker server clock)">
             {state.clock ? fmtWallClock(state.clock.time) : "Not started"}
           </span>
-          <Button size="sm" variant="ghost" disabled={!canMove || busy || playing} onClick={() => void step({ kind: "BARS", count: 1 })} title="Advance one minute (→)"><StepForward /> 1m</Button>
-          <Button size="sm" variant="ghost" disabled={!canMove || busy || playing} onClick={() => void step({ kind: "BARS", count: 5 })} className="max-lg:hidden">5m</Button>
-          <Button size="sm" variant="ghost" disabled={!canMove || busy || playing} onClick={() => void step({ kind: "CANDLE", timeframe })} title={`Finish the current ${timeframe} candle (Shift+→)`}><SkipForward /> Candle</Button>
-          <Button size="sm" variant="ghost" disabled={!canMove || busy || playing} onClick={() => void step({ kind: "NEXT_DAY" })} title="Finish the trading day" className="max-lg:hidden"><FastForward /> Day</Button>
-          <Button size="sm" variant={playing ? "secondary" : "outline"} disabled={!canMove && !playing} onClick={() => (playing ? pause() : void play())} aria-pressed={playing} title="Play / pause (Space)">
-            {playing ? <Pause /> : <Play />} {playing ? "Pause" : "Play"}
-          </Button>
-          <div role="group" aria-label="Playback speed (M1 bars per second)" title="Playback speed: broker minutes per second" className="flex items-center rounded-md border border-border">
-            {SPEEDS.map((s) => (
-              <button key={s} type="button" aria-pressed={speed === s} onClick={() => { speedRef.current = s; setSpeed(s); }} className={cn("h-6 px-1.5 text-[11px] tabular-nums first:rounded-l-md last:rounded-r-md", speed === s ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}>
-                {s}×
-              </button>
-            ))}
-          </div>
-          {!focus && (
-            <form
-              className="flex items-center gap-1 max-xl:hidden"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const to = parseWallClock(jumpTo);
-                if (to == null) return toast.error("Pick a date and time to jump to.");
-                void step({ kind: "SEEK", to });
-              }}
-            >
-              <input type="datetime-local" aria-label="Jump to (server time)" value={jumpTo} onChange={(e) => setJumpTo(e.target.value)} className="h-7 rounded-md border border-border bg-background px-1.5 text-xs tabular-nums" />
-              <Button type="submit" size="sm" variant="outline" disabled={!canMove || busy || playing || !jumpTo}>Jump</Button>
-            </form>
+          {review != null && (
+            <span className="rounded-md bg-sky-500/15 px-2 py-1 text-xs text-sky-300" role="status">
+              Reviewing {formatReplayTime(review)} — trading paused
+            </span>
           )}
           {busy && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Working" />}
           {resultsHref && !focus && <ButtonLink href={resultsHref} size="sm" variant="ghost">Results</ButtonLink>}
@@ -560,7 +708,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
             drawingCount={drawList.length}
           />
         )}
-        <main className="relative min-w-0 flex-1" aria-label="Charts">
+        <main ref={mainRef} className="relative min-w-0 flex-1" aria-label="Charts">
           <ChartGrid
             ws={ws}
             accountId={state.id}
@@ -569,6 +717,8 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
             priceLinesFor={priceLinesFor}
             theme={resolvedTheme}
             refreshKey={refreshKey}
+            asOf={review}
+            sessionOverlay={sessionOverlay}
             started={started}
             scripts={scriptSources}
             onActivate={setActive}
@@ -616,12 +766,52 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
                       onToggleLock={(id) => activeCtl()?.update(id, (d) => void (d.locked = !d.locked), { allowLocked: true })}
                       onDelete={(id) => activeCtl()?.remove(id)}
                       onClose={() => setManagerOpen(false)}
+                      badgeFor={badgeFor}
                     />
                   )}
                 </>
               )
             }
           />
+          {started && (
+            <ReplayBar
+              areaRef={mainRef}
+              settings={ws.replay}
+              onSettings={(patch) => updateWs((w) => ({ ...w, replay: { ...w.replay, ...patch } }))}
+              onBar={(patch) => updateWs((w) => ({ ...w, replay: { ...w.replay, bar: { ...w.replay.bar, ...patch } } }))}
+              clockMinute={state.clock?.minute ?? null}
+              periodFrom={periodFrom}
+              periodTo={periodTo}
+              reviewMinute={review}
+              chartTf={timeframe}
+              playing={playing}
+              busy={busy}
+              canMove={canMove}
+              onPlay={() => void play()}
+              onPause={pause}
+              onNextBar={nextBar}
+              onNextCandle={nextCandle}
+              onPrevBar={prevBar}
+              onPrevCandle={prevCandle}
+              onGoTo={goTo}
+              onLive={() => setReview(null)}
+              onNextDay={() => {
+                setReview(null);
+                void step({ kind: "NEXT_DAY" });
+              }}
+              extra={
+                <SessionNavigator
+                  sessions={allSessions}
+                  settings={ws.sessions}
+                  onSettings={(patch) => updateWs((w) => ({ ...w, sessions: { ...w.sessions, ...patch } }))}
+                  viewMinute={review ?? state.clock?.minute ?? periodFrom}
+                  disabled={playing || busy}
+                  onJump={(j) => void jumpToSession(j)}
+                  onManage={() => setSessionEditor(true)}
+                />
+              }
+            />
+          )}
           {state.clock?.atPeriodEnd && (
             <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-md border border-border bg-card px-3 py-1.5 text-xs shadow-sm" role="status">
               End of this account&apos;s historical period.
@@ -644,7 +834,23 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
           <>
             <ResizeHandle direction="left" value={rightWidth} min={240} max={560} label="Resize order panel" onChange={setRightWidth} onCommit={(width) => updateWs((w) => ({ ...w, panels: { ...w.panels, right: { ...w.panels.right, width } } }))} />
             <aside data-sim-side aria-label="Trade" style={{ width: rightWidth }} className="flex shrink-0 flex-col gap-4 overflow-y-auto p-3 max-md:hidden">
-              <OrderTicket state={state} quote={quote} disabled={!tradable || playing} onPlaced={setState} />
+              {review != null && <p className="rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-xs text-sky-300">Reviewing earlier bars. Return to live to trade.</p>}
+              <OrderTicket
+                state={state}
+                quote={quote}
+                disabled={!tradable || playing || review != null}
+                link={ticketLink}
+                economics={economics?.symbol === symbol ? economics.value : null}
+                confirmAll={ws.trading.confirmOrders}
+                onPlaced={(next, drawing) => {
+                  setState(next);
+                  if (drawing) void reloadDrawings(drawing.assetSymbol);
+                }}
+              />
+              <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <input type="checkbox" className="size-3.5" checked={syncOn} onChange={(e) => updateWs((w) => ({ ...w, trading: { ...w.trading, syncPositionDrawing: e.target.checked } }))} />
+                Sync position drawing with order entry
+              </label>
               {studies && started && <QuickObservation state={state} studies={studies} timeframe={timeframe} />}
               {state.product === "PROP_FIRM" && <PropRulesPanel state={state} onPaidOut={() => void refreshState()} />}
             </aside>
@@ -684,6 +890,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
         </>
       )}
 
+      <SessionEditor open={sessionEditor} onOpenChange={setSessionEditor} sessions={allSessions} onChanged={setCustomSessions} />
       <IndicatorPicker open={pickerOpen} onOpenChange={setPickerOpen} count={active.studies.length} onAdd={(s) => setStudies(ws.activeChart, [...active.studies, s])} />
       <StudySettings
         study={editingStudy}

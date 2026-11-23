@@ -54,11 +54,16 @@ export async function saveSimDrawing(userId: string, accountId: string, drawing:
   if (issues.length) throw new ChartingError(issues[0]);
   const existing = await prisma.simChartDrawing.findUnique({ where: { id: drawing.id } });
   if (existing && (existing.userId !== userId || existing.accountId !== account.id || existing.assetSymbol !== drawing.assetSymbol)) throw new ChartingError("Drawing not found.");
+  // The order link is the server's: a client can neither forge nor clear it.
+  const { orderRef: _ignored, ...clientData } = drawing.data;
+  void _ignored;
+  const storedRef = existing ? (existing.data as ChartDrawing["data"] | null)?.orderRef : undefined;
+  const data: ChartDrawing["data"] = storedRef ? { ...clientData, orderRef: storedRef } : clientData;
   const fields = {
     type: drawing.type,
     anchors: drawing.anchors as unknown as Prisma.InputJsonValue,
     style: drawing.style as unknown as Prisma.InputJsonValue,
-    data: drawing.data as unknown as Prisma.InputJsonValue,
+    data: data as unknown as Prisma.InputJsonValue,
     locked: drawing.locked,
     hidden: drawing.hidden,
   };
@@ -80,4 +85,27 @@ export async function deleteSimDrawing(userId: string, accountId: string, assetS
   const account = await resolve(userId, accountId, assetSymbol, "write");
   const r = await prisma.simChartDrawing.deleteMany({ where: { id: drawingId, userId, accountId: account.id, assetSymbol } });
   if (r.count === 0) throw new ChartingError("Drawing not found.");
+}
+
+/**
+ * Before an order is placed from a position drawing: the drawing must be the
+ * trader's, on this account and instrument, and its direction must match the
+ * order's side. Returns the drawing.
+ */
+export async function requireOrderDrawing(userId: string, accountId: string, symbol: string, drawingId: string, side: "BUY" | "SELL"): Promise<ChartDrawing> {
+  const account = await resolve(userId, accountId, symbol, "write");
+  const row = await prisma.simChartDrawing.findFirst({ where: { id: drawingId, userId, accountId: account.id, assetSymbol: symbol } });
+  if (!row) throw new ChartingError("The linked position drawing wasn't found.");
+  if (row.type !== "LONG" && row.type !== "SHORT") throw new ChartingError("Only long or short position drawings can be linked to an order.");
+  if ((row.type === "LONG") !== (side === "BUY")) throw new ChartingError(`A ${row.type === "LONG" ? "long" : "short"} position drawing can't place a ${side === "BUY" ? "buy" : "sell"} order.`);
+  return toDTO(row);
+}
+
+/** After the order is accepted: record it on the drawing (server-side only). */
+export async function linkDrawingToOrder(userId: string, accountId: string, drawingId: string, ref: NonNullable<ChartDrawing["data"]["orderRef"]>): Promise<ChartDrawing> {
+  const account = await requireSimAccount(userId, accountId);
+  const row = await prisma.simChartDrawing.findFirst({ where: { id: drawingId, userId, accountId: account.id } });
+  if (!row) throw new ChartingError("Drawing not found.");
+  const data = { ...((row.data as ChartDrawing["data"] | null) ?? {}), orderRef: ref };
+  return toDTO(await prisma.simChartDrawing.update({ where: { id: row.id }, data: { data: data as unknown as Prisma.InputJsonValue } }));
 }

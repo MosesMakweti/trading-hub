@@ -27,6 +27,8 @@ interface Props {
   priceLinesFor: (symbol: string) => PriceLineSpec[];
   theme: string | undefined;
   refreshKey: number;
+  asOf: number | null;
+  sessionOverlay?: import("./chart-pane").ChartPaneProps["sessionOverlay"];
   started: boolean;
   scripts: Map<string, ScriptSource>;
   onActivate: (index: number) => void;
@@ -49,7 +51,7 @@ interface Props {
  * account hasn't reached.
  */
 export function ChartGrid(props: Props) {
-  const { ws, accountId, defaultSymbol, digitsFor, priceLinesFor, theme, refreshKey, started, scripts, onActivate, onStudiesChange, onEditStudy, onActiveCandles, paneRefs, overlay, drawingsBySymbol, drawingsReadOnly, onDrawingCommit, onDrawingState } = props;
+  const { ws, accountId, defaultSymbol, digitsFor, priceLinesFor, theme, refreshKey, asOf, sessionOverlay, started, scripts, onActivate, onStudiesChange, onEditStudy, onActiveCandles, paneRefs, overlay, drawingsBySymbol, drawingsReadOnly, onDrawingCommit, onDrawingState } = props;
   const n = chartsFor(ws.layout);
   const syncRef = useRef(ws.sync);
   useEffect(() => {
@@ -88,6 +90,8 @@ export function ChartGrid(props: Props) {
               theme={theme}
               priceDigits={digitsFor(symbol)}
               refreshKey={refreshKey}
+              asOf={asOf}
+              sessionOverlay={sessionOverlay}
               started={started}
               active={i === ws.activeChart}
               multi={n > 1}

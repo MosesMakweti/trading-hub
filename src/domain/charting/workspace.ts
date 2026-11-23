@@ -12,6 +12,7 @@ import { z } from "zod";
 import { CHART_TYPES, type ChartTypeKey } from "@/domain/indicators/chart-types";
 import { INDICATOR_BY_ID, sanitizeInputs } from "@/domain/indicators/catalog";
 import { REPLAY_TIMEFRAMES, type ReplayTimeframe } from "@/domain/native-replay/timeframes";
+import { isValidTimeZone } from "./sessions";
 
 export const CHART_LAYOUTS = [
   { key: "1", label: "Single chart", charts: 1 },
@@ -67,12 +68,61 @@ export const chartSettingsSchema = z.object({
 });
 export type ChartSettings = z.infer<typeof chartSettingsSchema>;
 
+/** Order entry preferences. */
+export const tradingSettingsSchema = z.object({
+  /** "Sync Position Drawing with Order Entry": the selected long/short drawing drafts the ticket, and ticket edits move it. Never places an order by itself. */
+  syncPositionDrawing: z.boolean().default(true),
+  /** Ask before placing an order drafted from a drawing. Always on for drafted orders; this covers typed ones too. */
+  confirmOrders: z.boolean().default(false),
+});
+export type TradingSettings = z.infer<typeof tradingSettingsSchema>;
+
 export const panelsSchema = z.object({
   left: z.object({ visible: z.boolean().default(true) }).prefault({}),
   right: z.object({ visible: z.boolean().default(true), width: z.number().int().min(240).max(560).default(304) }).prefault({}),
   bottom: z.object({ visible: z.boolean().default(true), height: z.number().int().min(120).max(640).default(224) }).prefault({}),
 });
 export type Panels = z.infer<typeof panelsSchema>;
+
+/** Playback intervals the data supports: MT5 M1 bars → whole minutes only (no ticks / seconds). */
+export const PLAYBACK_TIMEFRAMES = ["M1", "M2", "M3", "M5", "M10", "M15", "M30", "H1"] as const satisfies readonly ReplayTimeframe[];
+export type PlaybackTimeframe = (typeof PLAYBACK_TIMEFRAMES)[number];
+
+/** Milliseconds between consecutive playback bars. */
+export const PLAYBACK_SPEEDS_MS = [100, 250, 500, 750, 1000, 2000, 3000, 5000, 10000] as const;
+export const MIN_SPEED_MS = 50;
+export const MAX_SPEED_MS = 60_000;
+
+export const replayBarSchema = z.object({
+  mode: z.enum(["floating", "top", "bottom"]).default("floating"),
+  /** Floating position as fractions of the free space in the chart area (survives resizes). */
+  x: z.number().min(0).max(1).default(0.5),
+  y: z.number().min(0).max(1).default(0.9),
+  pinned: z.boolean().default(false),
+  collapsed: z.boolean().default(false),
+  visible: z.boolean().default(true),
+});
+export type ReplayBarSettings = z.infer<typeof replayBarSchema>;
+
+export const replaySettingsSchema = z.object({
+  playbackTf: z.enum(PLAYBACK_TIMEFRAMES).default("M1"),
+  speedMs: z.number().int().min(MIN_SPEED_MS).max(MAX_SPEED_MS).default(500),
+  bar: replayBarSchema.prefault({}),
+});
+export type ReplaySettings = z.infer<typeof replaySettingsSchema>;
+
+export const sessionSettingsSchema = z.object({
+  /** The time zone the market data's wall clock is in (MT5 servers: usually GMT+2/+3 on New York close). */
+  dataTimeZone: z.string().max(64).refine(isValidTimeZone, "Unknown time zone.").default("NYC+7"),
+  /** Session ids drawn on the charts (built-in ids or custom session ids). */
+  show: z.array(z.string().max(64)).max(20).default([]),
+  shading: z.boolean().default(true),
+  highLow: z.boolean().default(true),
+  labels: z.boolean().default(true),
+  /** Last session used in the navigator. */
+  selected: z.string().max(64).default("london"),
+});
+export type SessionSettings = z.infer<typeof sessionSettingsSchema>;
 
 export const presetSchema = z.object({ name: z.string().trim().min(1).max(40), panels: panelsSchema, layout: z.enum(CHART_LAYOUTS.map((l) => l.key) as [ChartLayoutKey, ...ChartLayoutKey[]]) });
 export type WorkspacePreset = z.infer<typeof presetSchema>;
@@ -88,6 +138,9 @@ export const workspaceSchema = z.object({
   favoriteTimeframes: z.array(tf).max(16).default(["M1", "M5", "M15", "H1", "H4", "D1"]),
   settings: chartSettingsSchema.prefault({}),
   presets: z.array(presetSchema).max(12).default([]),
+  replay: replaySettingsSchema.prefault({}),
+  sessions: sessionSettingsSchema.prefault({}),
+  trading: tradingSettingsSchema.prefault({}),
 });
 export type Workspace = z.infer<typeof workspaceSchema>;
 

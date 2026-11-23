@@ -64,8 +64,24 @@ export interface PositionData {
   targets: number[];
 }
 
+/**
+ * Set by the SERVER when an order is placed from a position drawing (never
+ * by the client): which order it became and when. The drawing is a plan; the
+ * order is the record.
+ */
+export interface DrawingOrderRef {
+  orderId: string;
+  positionId: string | null;
+  side: "BUY" | "SELL";
+  /** How the order was accepted: filled at market, or resting. */
+  status: "FILLED" | "PENDING";
+  /** Account clock minute when it was placed. */
+  minute: number;
+}
+
 export interface DrawingData {
   text?: string;
+  orderRef?: DrawingOrderRef;
   /** Fibonacci ratios (defaults when absent) — custom levels later need no rewrite. */
   levels?: number[];
   position?: PositionData;

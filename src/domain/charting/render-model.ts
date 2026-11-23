@@ -74,6 +74,8 @@ export interface StudyRender {
   error: string | null;
   kind: "indicator" | "script";
   scriptKind?: "indicator" | "strategy";
+  /** A session overlay (not listed in the indicator legend). */
+  session?: boolean;
 }
 
 export type ScriptState = { status: "running" } | { status: "ok"; result: RunResult; name: string } | { status: "error"; message: string; name: string };
@@ -177,4 +179,81 @@ export function barIndexAt(bars: { time: number }[], t: number): number {
     } else hi = mid - 1;
   }
   return ans;
+}
+
+// ── Session overlays ────────────────────────────────────────────────────────
+
+/**
+ * Session visualisation as chart "studies": background shading of bars
+ * inside each occurrence, the session's high and low SO FAR (running — never
+ * the final range before it has happened), and a label at its first bar.
+ * Computed only from the displayed (revealed) bars.
+ */
+export function buildSessionStudies(
+  display: Display,
+  sessions: { def: import("./sessions").SessionDef; all: import("./sessions").SessionDef[] }[],
+  dataTz: string,
+  opts: { shading: boolean; highLow: boolean; labels: boolean },
+  occurrences: (def: import("./sessions").SessionDef, from: number, to: number) => { start: number; end: number }[],
+): StudyRender[] {
+  const bars = display.inputs;
+  if (!bars.length || !sessions.length || display.synthetic) return [];
+  const from = bars[0].time;
+  const to = bars[bars.length - 1].time + 1;
+  const out: StudyRender[] = [];
+  for (const { def } of sessions) {
+    const occ = occurrences(def, from, to);
+    const bg: (string | null)[] = new Array(bars.length).fill(null);
+    const hi: number[] = new Array(bars.length).fill(NaN);
+    const lo: number[] = new Array(bars.length).fill(NaN);
+    const markers: StudyRender["markers"] = [];
+    let k = 0;
+    let curHi = NaN;
+    let curLo = NaN;
+    let curOcc = -1;
+    for (let i = 0; i < bars.length; i++) {
+      const m = bars[i].time;
+      while (k < occ.length && occ[k].end <= m) k++;
+      const o = occ[k];
+      if (!o || m < o.start) {
+        curOcc = -1;
+        continue;
+      }
+      if (curOcc !== k) {
+        curOcc = k;
+        curHi = -Infinity;
+        curLo = Infinity;
+        if (opts.labels) markers.push({ bar: i, position: "aboveBar", shape: "square", color: def.color, text: def.name });
+      }
+      curHi = Math.max(curHi, bars[i].high);
+      curLo = Math.min(curLo, bars[i].low);
+      if (opts.shading) bg[i] = `${def.color}1f`;
+      if (opts.highLow) {
+        hi[i] = curHi;
+        lo[i] = curLo;
+      }
+    }
+    out.push({
+      uid: `session:${def.id}`,
+      name: def.name,
+      params: "",
+      overlay: true,
+      visible: true,
+      digits: 5,
+      plots: opts.highLow
+        ? [
+            { key: "high", title: `${def.name} high`, kind: "step", color: def.color, width: 1, values: hi },
+            { key: "low", title: `${def.name} low`, kind: "step", color: def.color, width: 1, values: lo },
+          ]
+        : [],
+      levels: [],
+      markers,
+      bgcolor: opts.shading ? bg : null,
+      barcolor: null,
+      error: null,
+      kind: "indicator",
+      session: true,
+    });
+  }
+  return out;
 }
