@@ -25,8 +25,8 @@ export const createLabAccountSchema = z
 
 export const clockCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("BARS"), count: z.number().int().min(1).max(1440) }),
-  z.object({ kind: z.literal("CANDLE"), timeframe: z.enum(REPLAY_TIMEFRAMES as unknown as [string, ...string[]]) }),
-  z.object({ kind: z.literal("SEEK"), to: z.number().int() }),
+  z.object({ kind: z.literal("CANDLE"), timeframe: z.enum(REPLAY_TIMEFRAMES as unknown as [string, ...string[]]), count: z.number().int().min(1).max(1440).optional() }),
+  z.object({ kind: z.literal("SEEK"), to: z.number().int(), align: z.enum(["AT_OR_BEFORE", "AT_OR_AFTER"]).optional() }),
   z.object({ kind: z.literal("NEXT_DAY") }),
 ]);
 
@@ -66,6 +66,8 @@ export const candlesSchema = z.object({
   symbol: z.string().trim().toUpperCase().min(1).max(20),
   timeframe: z.enum(REPLAY_TIMEFRAMES as unknown as [string, ...string[]]),
   limit: z.number().int().min(1).max(5000).nullish(),
+  /** Review: show the chart as of an earlier minute (clamped to the account clock — never later). */
+  asOf: z.number().int().nullish(),
   to: z.number().int().nullish(),
   from: z.number().int().nullish(),
 });
@@ -130,3 +132,12 @@ export const purchaseChallengeSchema = z
     periodEnd: dateKey,
   })
   .refine((v) => v.periodEnd >= v.periodStart, { message: "The end date must be on or after the start date.", path: ["periodEnd"] });
+
+export const reviewTargetSchema = z.object({
+  accountId: id,
+  from: z.number().int(),
+  move: z.discriminatedUnion("kind", [
+    z.object({ kind: z.enum(["BACK", "FORWARD"]), timeframe: z.enum(REPLAY_TIMEFRAMES as unknown as [string, ...string[]]) }),
+    z.object({ kind: z.literal("SEEK"), to: z.number().int() }),
+  ]),
+});

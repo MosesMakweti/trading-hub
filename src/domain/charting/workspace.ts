@@ -74,6 +74,33 @@ export const panelsSchema = z.object({
 });
 export type Panels = z.infer<typeof panelsSchema>;
 
+/** Playback intervals the data supports: MT5 M1 bars → whole minutes only (no ticks / seconds). */
+export const PLAYBACK_TIMEFRAMES = ["M1", "M2", "M3", "M5", "M10", "M15", "M30", "H1"] as const satisfies readonly ReplayTimeframe[];
+export type PlaybackTimeframe = (typeof PLAYBACK_TIMEFRAMES)[number];
+
+/** Milliseconds between consecutive playback bars. */
+export const PLAYBACK_SPEEDS_MS = [100, 250, 500, 750, 1000, 2000, 3000, 5000, 10000] as const;
+export const MIN_SPEED_MS = 50;
+export const MAX_SPEED_MS = 60_000;
+
+export const replayBarSchema = z.object({
+  mode: z.enum(["floating", "top", "bottom"]).default("floating"),
+  /** Floating position as fractions of the free space in the chart area (survives resizes). */
+  x: z.number().min(0).max(1).default(0.5),
+  y: z.number().min(0).max(1).default(0.9),
+  pinned: z.boolean().default(false),
+  collapsed: z.boolean().default(false),
+  visible: z.boolean().default(true),
+});
+export type ReplayBarSettings = z.infer<typeof replayBarSchema>;
+
+export const replaySettingsSchema = z.object({
+  playbackTf: z.enum(PLAYBACK_TIMEFRAMES).default("M1"),
+  speedMs: z.number().int().min(MIN_SPEED_MS).max(MAX_SPEED_MS).default(500),
+  bar: replayBarSchema.prefault({}),
+});
+export type ReplaySettings = z.infer<typeof replaySettingsSchema>;
+
 export const presetSchema = z.object({ name: z.string().trim().min(1).max(40), panels: panelsSchema, layout: z.enum(CHART_LAYOUTS.map((l) => l.key) as [ChartLayoutKey, ...ChartLayoutKey[]]) });
 export type WorkspacePreset = z.infer<typeof presetSchema>;
 
@@ -88,6 +115,7 @@ export const workspaceSchema = z.object({
   favoriteTimeframes: z.array(tf).max(16).default(["M1", "M5", "M15", "H1", "H4", "D1"]),
   settings: chartSettingsSchema.prefault({}),
   presets: z.array(presetSchema).max(12).default([]),
+  replay: replaySettingsSchema.prefault({}),
 });
 export type Workspace = z.infer<typeof workspaceSchema>;
 

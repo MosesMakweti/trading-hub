@@ -70,6 +70,8 @@ interface Props {
   priceDigits: number;
   /** Bumped after every replay step / order: reload candles. */
   refreshKey: number;
+  /** Review mode: show the chart as of this earlier minute (the server clamps it to the clock). */
+  asOf: number | null;
   started: boolean;
   active: boolean;
   /** More than one chart is shown (draws the active outline). */
@@ -94,7 +96,7 @@ interface Props {
 }
 
 export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(props, ref) {
-  const { accountId, symbol, config, settings, theme, priceDigits, refreshKey, started, active, multi, priceLines, scripts, onActivate, onStudiesChange, onEditStudy, index, onCrosshair, onTimeRange, onCandles } = props;
+  const { accountId, symbol, config, settings, theme, priceDigits, refreshKey, asOf, started, active, multi, priceLines, scripts, onActivate, onStudiesChange, onEditStudy, index, onCrosshair, onTimeRange, onCandles } = props;
   const [candles, setCandles] = useState<EngineCandle[]>([]);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   /** Bumped to reload the window from the server (a step this chart couldn't fold in). */
@@ -172,6 +174,7 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
     reveal(revealed, fromMinute, toMinute) {
       const t0 = performance.now();
       const list = candlesRef.current;
+      if (latest.current.asOf != null) return false; // reviewing: live steps don't apply
       if (!revealed || revealed.symbol !== latest.current.symbol || !revealed.bars || clockRef.current !== fromMinute || list.length === 0) {
         clockRef.current = null;
         setReloadNonce((n) => n + 1);
@@ -195,9 +198,9 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
     let cancelled = false;
     const key = viewKey;
     clockRef.current = null; // nothing can be folded in until this load lands
-    void getSimCandlesAction({ accountId, symbol, timeframe: config.timeframe, limit: CANDLE_LIMIT }).then((res) => {
+    void getSimCandlesAction({ accountId, symbol, timeframe: config.timeframe, limit: CANDLE_LIMIT, asOf }).then((res) => {
       if (cancelled || viewRef.current !== key) return;
-      setLoadedKey(`${key}|${refreshKey}|${reloadNonce}`);
+      setLoadedKey(`${key}|${refreshKey}|${reloadNonce}|${asOf}`);
       if (!res.success) return void toast.error(res.error);
       const list = res.candles.candles.map((c) => fromWire(c, res.candles.priceScale));
       candlesRef.current = list;
@@ -209,9 +212,9 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, symbol, config.timeframe, refreshKey, reloadNonce, started]);
+  }, [accountId, symbol, config.timeframe, refreshKey, reloadNonce, started, asOf]);
 
-  const loading = started && loadedKey !== `${viewKey}|${refreshKey}|${reloadNonce}`;
+  const loading = started && loadedKey !== `${viewKey}|${refreshKey}|${reloadNonce}|${asOf}`;
   const display = useMemo(() => buildDisplay(candles, priceDigits, config.chartType, config.chartParam), [candles, priceDigits, config.chartType, config.chartParam]);
 
   // ── Scripts: run each in its own sandboxed worker when its inputs change ──

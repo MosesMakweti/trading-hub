@@ -15,13 +15,14 @@ import {
   labStatusSchema,
   modifyPositionSchema,
   orderSchema,
+  reviewTargetSchema,
 } from "@/lib/validation/simulation";
 import { CandleRangeTooLargeError } from "@/server/services/native-replay/historical-candles.service";
 import * as accounts from "@/server/services/simulation/sim-account.service";
 import { advanceSimClock, type AdvanceOutcome } from "@/server/services/simulation/sim-clock.service";
 import * as execution from "@/server/services/simulation/sim-execution.service";
 import { getRevealedBars, getSimAccountState, getSimCandles, getSimStepPatch } from "@/server/services/simulation/sim-state.service";
-import { accountFeedsCached } from "@/server/services/simulation/sim-market";
+import { accountFeedsCached, periodMinutes, reviewTarget } from "@/server/services/simulation/sim-market";
 import { prefetchAfter } from "@/server/services/market-data/bar-cache";
 import { prisma } from "@/server/db";
 import type { ClockCommand } from "@/server/services/simulation/sim-market";
@@ -218,5 +219,27 @@ export async function deleteSimAccountAction(input: unknown): Promise<Ok<object>
     return { success: true };
   } catch (e) {
     return fail(e, "Couldn't delete the account.");
+  }
+}
+
+/**
+ * Review navigation: where one step back/forward (or a seek) lands within
+ * what the account has already revealed. Read-only — never moves the clock,
+ * never returns a minute after it.
+ */
+export async function reviewTargetAction(input: unknown): Promise<Ok<{ minute: number | null; clock: number }> | Fail> {
+  const user = await requireUser();
+  const parsed = reviewTargetSchema.safeParse(input);
+  if (!parsed.success) return invalid(parsed.error);
+  try {
+    const account = await accounts.requireSimAccount(user.id, parsed.data.accountId);
+    if (account.currentMinute == null) return { success: false, error: "Start the replay first." };
+    const feeds = await accountFeedsCached(prisma, account.id);
+    const period = periodMinutes(account);
+    const move = parsed.data.move as Parameters<typeof reviewTarget>[4];
+    const minute = await reviewTarget(feeds, parsed.data.from, account.currentMinute, period.from, move);
+    return { success: true, minute, clock: account.currentMinute };
+  } catch (e) {
+    return fail(e, "Couldn't move the review position.");
   }
 }

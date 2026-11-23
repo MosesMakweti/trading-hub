@@ -183,7 +183,7 @@ export async function getRevealedBars(feeds: SimFeed[], symbols: string[], fromM
 export async function getSimCandles(
   userId: string,
   accountId: string,
-  query: { symbol: string; timeframe: ReplayTimeframe; limit?: number | null; to?: number | null; from?: number | null },
+  query: { symbol: string; timeframe: ReplayTimeframe; limit?: number | null; to?: number | null; from?: number | null; asOf?: number | null },
 ): Promise<CandlesResult & { clockMinute: number }> {
   if (!isReplayTimeframe(query.timeframe)) throw new SimError("Unknown timeframe.");
   const account = await requireSimAccount(userId, accountId);
@@ -191,7 +191,8 @@ export async function getSimCandles(
   const feeds = await accountFeeds(prisma, account.id);
   const feed = feeds.find((f) => f.symbol === query.symbol.toUpperCase());
   if (!feed) throw new SimError(`${query.symbol} isn't one of this account's instruments.`);
-  const cutoff = account.currentMinute;
+  // Review mode may ask for an earlier view; it can only ever be earlier.
+  const cutoff = query.asOf == null ? account.currentMinute : Math.min(query.asOf, account.currentMinute);
   const result = await getHistoricalCandles(userId, {
     datasetId: feed.datasetId,
     timeframe: query.timeframe,
