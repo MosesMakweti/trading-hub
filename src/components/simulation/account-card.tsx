@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { DeleteSessionButton } from "./delete-session-button";
+
 import { cn } from "@/lib/utils";
 import type { SimAccountSummaryDTO } from "@/types/simulation";
 import { fmtMoney, fmtWallClock, pnlTone } from "./format";
@@ -23,9 +25,10 @@ export function SimStatusPill({ status }: { status: SimAccountSummaryDTO["status
 /** One simulation account in a list: where its clock is, and where its money is. */
 export function SimAccountCard({ account }: { account: SimAccountSummaryDTO }) {
   return (
+    <div className="relative">
     <Link
       href={`/backtesting/terminal/${account.id}`}
-      className="group block rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-foreground/20 focus-visible:outline-2 focus-visible:outline-primary"
+      className="group block rounded-xl border border-border bg-card p-4 pb-10 shadow-sm transition-colors hover:border-foreground/20 focus-visible:outline-2 focus-visible:outline-primary"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -60,5 +63,13 @@ export function SimAccountCard({ account }: { account: SimAccountSummaryDTO }) {
         <p className="font-mono text-[11px] text-muted-foreground tabular-nums">{account.clockTime ? `At ${fmtWallClock(account.clockTime)}` : "Replay not started"}</p>
       </div>
     </Link>
+    <DeleteSessionButton
+      kind={account.product === "PROP_FIRM" ? "PROP" : "LAB"}
+      id={account.id}
+      name={account.name}
+      label={account.product === "PROP_FIRM" ? "Delete challenge" : "Delete"}
+      className="absolute bottom-2 right-2 h-7 px-2 text-xs"
+    />
+    </div>
   );
 }

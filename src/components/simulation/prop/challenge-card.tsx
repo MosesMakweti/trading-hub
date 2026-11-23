@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import type { ChallengeSummaryDTO } from "@/server/services/simulation/sim-prop.service";
 import { SimStatusPill } from "../account-card";
 import { fmtMoney, pnlTone } from "../format";
+import { DeleteSessionButton } from "../delete-session-button";
 
 const CHALLENGE_TONE: Record<ChallengeSummaryDTO["status"], string> = {
   IN_EVALUATION: "border-border text-muted-foreground",
@@ -18,7 +19,8 @@ export function ChallengeCard({ challenge: c }: { challenge: ChallengeSummaryDTO
   const current = c.stages[c.stages.length - 1];
   const result = current ? Number(current.balance) - Number(current.startingBalance) : 0;
   return (
-    <Link href={`/backtesting/prop/challenges/${c.id}`} className="block rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-foreground/20">
+    <div className="relative">
+    <Link href={`/backtesting/prop/challenges/${c.id}`} className="block rounded-xl border border-border bg-card p-4 pb-10 shadow-sm transition-colors hover:border-foreground/20">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="truncate font-medium">{c.modelName} · {fmtMoney(c.accountSize, c.currency)}</h3>
@@ -44,5 +46,7 @@ export function ChallengeCard({ challenge: c }: { challenge: ChallengeSummaryDTO
       {c.breach && <p className="mt-2 text-xs text-red-400">{c.breach.detail}</p>}
       {c.payouts.count > 0 && <p className="mt-2 text-xs text-muted-foreground">{c.payouts.count} payout{c.payouts.count === 1 ? "" : "s"} · {fmtMoney(c.payouts.trader, c.currency)} to you</p>}
     </Link>
+    {c.stages[0] && <DeleteSessionButton kind="PROP" id={c.stages[0].accountId} name={`${c.modelName} · ${c.firmName}`} label="Delete challenge" className="absolute bottom-2 right-2 h-7 px-2 text-xs" />}
+    </div>
   );
 }

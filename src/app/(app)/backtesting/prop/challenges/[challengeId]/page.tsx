@@ -8,6 +8,7 @@ import { getPropOverview } from "@/server/services/simulation/sim-prop.service";
 import { formatWallClock } from "@/domain/native-replay/wall-clock";
 import { FadeIn } from "@/components/shared/motion";
 import { ButtonLink } from "@/components/backtesting/button-link";
+import { DeleteSessionButton } from "@/components/simulation/delete-session-button";
 import { SimStatusPill } from "@/components/simulation/account-card";
 import { fmtMoney, fmtWallClock, pnlTone } from "@/components/simulation/format";
 import { cn } from "@/lib/utils";
@@ -35,7 +36,10 @@ export default async function ChallengePage({ params }: { params: Promise<{ chal
     <FadeIn className="mx-auto max-w-5xl space-y-8">
       <header className="space-y-2">
         <Link href="/backtesting/prop" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"><ChevronLeft className="size-3.5" /> Prop Firm Simulator</Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{c.modelName} · {fmtMoney(c.accountSize, c.currency)}</h1>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">{c.modelName} · {fmtMoney(c.accountSize, c.currency)}</h1>
+          {c.stages[0] && <DeleteSessionButton kind="PROP" id={c.stages[0].accountId} name={`${c.modelName} · ${fmtMoney(c.accountSize, c.currency)}`} label="Delete challenge" redirectTo="/backtesting/prop" className="border border-red-500/30 text-red-500" />}
+        </div>
         <p className="text-sm text-muted-foreground">{c.firmName} · model version {c.modelVersion} (frozen at purchase) · simulated fee {fmtMoney(c.fee, c.currency)}</p>
       </header>
 

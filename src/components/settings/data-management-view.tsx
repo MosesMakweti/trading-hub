@@ -57,12 +57,12 @@ const SECTIONS: SectionMeta[] = [
     icon: History,
     title: "Backtesting",
     description:
-      "Every Backtest Run — its simulated days, trades, reviews, notes, and screenshots. Live trading data is kept.",
+      "Every backtesting session — Strategy Lab backtests, Prop Firm challenges and legacy Backtest Runs, with their trades, drawings and history. Live trading data is kept.",
     detail: (
-      <p>This permanently deletes all of your Backtest Runs and everything recorded inside them — simulated days, trades, missed setups, reviews, notes and images. Your live Journal, trades, analytics and accounts are not affected.</p>
+      <p>This permanently deletes all of your backtesting sessions and everything recorded inside them — Strategy Lab backtests and Prop Firm challenges (orders, trades, balances, drawings), and legacy Backtest Runs (simulated days, trades, missed setups, reviews, notes and images). Your historical datasets, strategies, studies, live Journal, trades, analytics and accounts are not affected. To delete only some sessions, use Backtesting → Sessions.</p>
     ),
-    count: (c) => c.backtestRuns,
-    noun: "runs",
+    count: (c) => c.backtestRuns + c.simSessions,
+    noun: "sessions",
   },
   {
     key: "today-plans",
@@ -266,7 +266,7 @@ export function DataManagementView({ counts }: { counts: DataCounts }) {
             <p>This permanently deletes <span className="font-medium text-foreground">everything you have created</span>:</p>
             <ul className="ml-4 list-disc space-y-0.5">
               <li>All trades, journal entries, and psychology</li>
-              <li>All Backtest Runs and their simulated days, trades and notes</li>
+              <li>All backtesting sessions — Strategy Lab, Prop Firm challenges and Backtest Runs</li>
               <li>Today sessions, trade plans, and weekly reviews</li>
               <li>All strategies and Strategy Lab data</li>
               <li>Prop-firm &amp; brokerage accounts</li>
