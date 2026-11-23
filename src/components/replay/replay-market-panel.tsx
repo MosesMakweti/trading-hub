@@ -33,7 +33,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/shared/empty-state";
 import { RichTextEditor } from "@/components/plan/rich-text-editor";
 import { TAG_STYLES, colorForName } from "@/components/ui/tag";
@@ -1160,7 +1160,9 @@ export function ReplayMarketPanel({
                 <span className="text-[10px] font-semibold">{annotations.length}</span>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" side="right">
-                <DropdownMenuLabel>Drawings on {clock.asset}</DropdownMenuLabel>
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Drawings on {clock.asset}</DropdownMenuLabel>
+                </DropdownMenuGroup>
                 {annotations.length === 0 && <div className="px-2 py-1.5 text-xs text-muted-foreground">None yet</div>}
                 {annotations.map((a) => (
                   <DropdownMenuItem

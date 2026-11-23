@@ -3,7 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { CalendarClock, ChevronDown, ChevronLast, ChevronLeft, ChevronRight, ChevronUp, Footprints, Gauge, GripVertical, Loader2, MoreHorizontal, Pause, Pin, PinOff, Play, Radio } from "lucide-react";
 
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { formatReplayTime } from "@/domain/native-replay/chart-time";
@@ -291,14 +291,14 @@ function StepSelect({ value, onChange }: { value: PlaybackTimeframe; onChange: (
         aria-label="Playback interval (market time per step)"
         value={value}
         onChange={(e) => onChange(e.target.value as PlaybackTimeframe)}
-        className="h-full cursor-pointer rounded-r-md bg-transparent pr-1 font-mono text-[11px] font-semibold text-inherit outline-none"
+        className="h-full w-[3.25rem] cursor-pointer rounded-r-md bg-transparent pr-1 font-mono text-[11px] font-semibold text-inherit outline-none"
       >
         {PLAYBACK_INTERVALS.map((i) => {
           const ok = intervalAvailable(i, DATA_RESOLUTION_SECONDS);
           return (
             <option key={i.id} value={i.timeframe ?? i.id} disabled={!ok} className="bg-white text-zinc-900 dark:bg-[#262a31] dark:text-zinc-100">
               {i.label}
-              {ok ? "" : " — needs second data"}
+              {ok ? "" : " (no second data)"}
             </option>
           );
         })}
@@ -362,14 +362,17 @@ function MoreMenu(p: ReplayBarProps) {
         </DropdownMenuItem>
         <DropdownMenuItem disabled={!p.canMove || p.playing} onClick={p.onNextDay}>Finish the trading day</DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Toolbar</DropdownMenuLabel>
-        <DropdownMenuRadioGroup value={p.settings.bar.mode} onValueChange={(v) => p.onBar({ mode: v as ReplayBarSettings["mode"] })}>
-          <DropdownMenuRadioItem value="floating">Floating</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="top">Docked top</DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="bottom">Docked bottom</DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-        <DropdownMenuItem onClick={() => p.onBar({ mode: "floating", x: 0.5, y: 0.9, pinned: false, collapsed: false })}>Reset position</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => p.onBar({ visible: false })}>Hide toolbar</DropdownMenuItem>
+        {/* Base UI: a menu label must live inside a group. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Toolbar</DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={p.settings.bar.mode} onValueChange={(v) => p.onBar({ mode: v as ReplayBarSettings["mode"] })}>
+            <DropdownMenuRadioItem value="floating">Floating</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="top">Docked top</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="bottom">Docked bottom</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+          <DropdownMenuItem onClick={() => p.onBar({ mode: "floating", x: 0.5, y: 0.9, pinned: false, collapsed: false })}>Reset position</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => p.onBar({ visible: false })}>Hide toolbar</DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

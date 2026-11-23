@@ -61,7 +61,7 @@ export function SessionNavigator({
 
   return (
     <Popover>
-      <PopoverTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-white/10 hover:text-foreground" aria-label="Sessions" title="Jump to a trading session">
+      <PopoverTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-900/10 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 disabled:text-zinc-400 dark:text-zinc-100 dark:hover:bg-white/15 dark:hover:text-white dark:disabled:text-zinc-500" aria-label="Sessions" title="Jump to a trading session">
         <Clock3 className="size-3.5" /> <span className="max-lg:hidden">{def?.name ?? "Sessions"}</span>
       </PopoverTrigger>
       <PopoverContent side="top" align="center" className="w-80 space-y-2.5 p-3">
