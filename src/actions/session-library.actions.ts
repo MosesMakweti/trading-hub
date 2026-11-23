@@ -81,9 +81,14 @@ export async function sessionDeletionImpactAction(input: unknown): Promise<Ok<{ 
   }
 }
 
-export async function deleteSessionAction(input: unknown): Promise<Ok<object> | Fail> {
+/**
+ * Permanent delete. Ownership, kind and the Prop Firm rule are enforced by
+ * the service (the confirmation is only a UI guard). A second request for a
+ * session that's already gone answers `gone` — the same answer as for a
+ * session that never was the user's, so nothing leaks.
+ */
+export async function deleteSessionAction(input: unknown): Promise<Ok<object> | (Fail & { gone?: true })> {
   const user = await requireUser();
-  // The typed name is a client-side guard; ownership and the Prop rule are enforced by the service.
   const p = parse(ref.extend({ confirm: z.literal(true) }), input);
   if (isFail(p)) return p;
   try {
@@ -91,6 +96,38 @@ export async function deleteSessionAction(input: unknown): Promise<Ok<object> | 
     done();
     return { success: true };
   } catch (e) {
-    return fail(e, "Couldn't delete it.");
+    if (e instanceof SimNotFoundError || e instanceof BacktestRunNotFoundError) {
+      done();
+      return { success: false, error: "This session no longer exists — it may already have been deleted.", gone: true };
+    }
+    return fail(e, "Couldn't delete it — nothing was removed.");
+  }
+}
+
+const refs = z.array(ref).min(1).max(library.MAX_BULK);
+
+export async function bulkArchiveSessionsAction(input: unknown): Promise<Ok<{ count: number }> | Fail> {
+  const user = await requireUser();
+  const p = parse(z.object({ refs, archived: z.boolean() }), input);
+  if (isFail(p)) return p;
+  try {
+    const count = await library.bulkSetArchived(user.id, p.refs, p.archived);
+    done();
+    return { success: true, count };
+  } catch (e) {
+    return fail(e, p.archived ? "Couldn't archive them — nothing was changed." : "Couldn't restore them — nothing was changed.");
+  }
+}
+
+export async function bulkDeleteSessionsAction(input: unknown): Promise<Ok<{ count: number }> | Fail> {
+  const user = await requireUser();
+  const p = parse(z.object({ refs, confirm: z.literal(true) }), input);
+  if (isFail(p)) return p;
+  try {
+    const count = await library.bulkDelete(user.id, p.refs);
+    done();
+    return { success: true, count };
+  } catch (e) {
+    return fail(e, "Couldn't delete them.");
   }
 }

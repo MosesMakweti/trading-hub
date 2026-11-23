@@ -76,7 +76,12 @@ export default async function BacktestingHomePage() {
       </section>
 
       <section aria-labelledby="in-progress" className="space-y-3">
-        <h2 id="in-progress" className="text-lg font-semibold">In progress</h2>
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="in-progress" className="text-lg font-semibold">In progress</h2>
+          <Link href="/backtesting/sessions" className="text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+            All sessions — manage, archive or delete →
+          </Link>
+        </div>
         {inProgress.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border px-5 py-8 text-center text-sm text-muted-foreground">
             No simulation accounts yet. Start a backtest in <Link href="/backtesting/lab" className="font-medium text-foreground underline-offset-4 hover:underline">Strategy Lab</Link> or a challenge in the <Link href="/backtesting/prop" className="font-medium text-foreground underline-offset-4 hover:underline">Prop Firm Simulator</Link>.

@@ -46,6 +46,7 @@ import { splitRevealed, type RevealStep } from "@/domain/charting/reveal-steps";
 import { noteStep } from "@/components/charting/replay-perf";
 import { fmtMoney, fmtWallClock, pnlTone } from "../format";
 import { OrderTicket } from "./order-ticket";
+import { SessionMenu } from "./session-menu";
 import { TradeDock } from "./trade-dock";
 import { QuickObservation, type StudyOption } from "../studies/quick-observation";
 import { PropRulesPanel } from "../prop/prop-rules-panel";
@@ -118,6 +119,12 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const [bottomHeight, setBottomHeight] = useState(ws.panels.bottom.height);
   const paneRefs = useRef<(ChartPaneHandle | null)[]>([]);
   const playingRef = useRef(false);
+  /** The running play loop (awaited before leaving the session). */
+  const playLoopRef = useRef<Promise<void> | null>(null);
+  /** Drawing saves still in flight. */
+  const savesRef = useRef(new Set<Promise<unknown>>());
+  /** Archiving / deleting this session: no new steps, late errors are silenced. */
+  const leavingRef = useRef(false);
   const replayRef = useRef(initialWorkspace.replay);
 
   const active = ws.charts[Math.min(ws.activeChart, chartsFor(ws.layout) - 1)] ?? ws.charts[0];
@@ -277,12 +284,14 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
               void _ignored;
               return saveSimDrawingAction({ accountId: state.id, drawing: rest });
             })();
-      void task.then((res) => {
-        if (!res.success) {
+      const tracked = task.then((res) => {
+        if (!res.success && !leavingRef.current) {
           toast.error(res.error);
           void reloadDrawings(sym); // the server's copy wins
         }
       });
+      savesRef.current.add(tracked);
+      void tracked.finally(() => savesRef.current.delete(tracked));
     },
     [state.id, reloadDrawings],
   );
@@ -345,14 +354,17 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   /** One server step: the clock moves and the response carries the bars it revealed. */
   const fetchStep = useCallback(
     async (command: Command) => {
+      if (leavingRef.current) return null; // the session is being archived / deleted
       const t0 = performance.now();
       const res = await advanceSimClockAction({ accountId: state.id, command, commandId: crypto.randomUUID(), views: shownRef.current });
       const tResponse = performance.now();
       if (!res.success) {
+        if (leavingRef.current) return null;
         toast.error(res.error);
         setRefreshKey((k) => k + 1); // never assume what moved: reload the charts
         return null;
       }
+      if (leavingRef.current) return null; // never apply a late response to a session being removed
       return { res, command, t0, tResponse };
     },
     [state.id],
@@ -440,8 +452,8 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   // The minute on screen while playing — a tiny store only the toolbar clock
   // subscribes to, so a step doesn't re-render the whole terminal.
   const liveClock = useMemo(() => createMinuteStore(), []);
-  const play = useCallback(async () => {
-    if (playingRef.current) return;
+  const playLoop = useCallback(async () => {
+    if (playingRef.current || leavingRef.current) return;
     if (reviewRef.current != null) setReview(null); // playing always continues from the live position
     playingRef.current = true;
     setPlaying(true);
@@ -531,6 +543,28 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchStep, applyResult, liveClock]);
+  const play = useCallback(() => {
+    const loop = playLoop();
+    playLoopRef.current = loop;
+    return loop;
+  }, [playLoop]);
+
+  /**
+   * Before archiving / deleting this session: stop playback and let it
+   * settle, block new steps, wait (briefly) for drawing saves. Returns how
+   * many saves were still running.
+   */
+  const prepareToLeave = useCallback(async () => {
+    leavingRef.current = true;
+    playingRef.current = false;
+    await playLoopRef.current;
+    const saves = [...savesRef.current];
+    await Promise.race([Promise.allSettled(saves), new Promise((r) => setTimeout(r, 3000))]);
+    return { unsaved: savesRef.current.size };
+  }, []);
+  const releaseLeave = useCallback(() => {
+    leavingRef.current = false;
+  }, []);
 
   /**
    * Session jump. Within what's revealed → review there. Later → move the
@@ -774,6 +808,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
           )}
           {busy && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Working" />}
           {resultsHref && !focus && <ButtonLink href={resultsHref} size="sm" variant="ghost">Results</ButtonLink>}
+          <SessionMenu session={{ id: state.id, name: state.name, kind: state.product === "PROP_FIRM" ? "PROP" : "LAB" }} prepare={prepareToLeave} release={releaseLeave} />
         </div>
       </header>
 

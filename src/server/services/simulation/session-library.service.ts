@@ -19,13 +19,13 @@
 import type { BacktestRun, SimAccount } from "@prisma/client";
 
 import { prisma } from "@/server/db";
-import { createSimAccount, requireSimAccount, SimError } from "./sim-account.service";
+import { createSimAccount, requireSimAccount, SimError, SimNotFoundError } from "./sim-account.service";
 import { parseRules } from "@/domain/simulation/rules";
 import { formatWallClock } from "@/domain/native-replay/wall-clock";
 import { deleteBacktestRun, requireBacktestRun } from "@/server/services/backtest-run.service";
 
-export { applyLibraryQuery, type LibraryQuery, type LibrarySession, type SessionCounts, type SessionKind } from "@/domain/simulation/session-library";
-import type { LibraryQuery, LibrarySession, SessionCounts, SessionKind } from "@/domain/simulation/session-library";
+export { applyLibraryQuery, type LibraryQuery, type LibrarySession, type SessionCounts, type SessionKind, type SessionPerformance } from "@/domain/simulation/session-library";
+import type { LibraryQuery, LibrarySession, SessionCounts, SessionKind, SessionPerformance } from "@/domain/simulation/session-library";
 import { applyLibraryQuery } from "@/domain/simulation/session-library";
 
 const dateKey = (d: Date) => d.toISOString().slice(0, 10);
@@ -61,7 +61,35 @@ async function runCounts(userId: string, ids: string[]): Promise<Map<string, Ses
   return m;
 }
 
-function fromAccount(a: SimAccount, counts: SessionCounts): LibrarySession {
+/** Net result (ledger), closed trades, wins and open positions per account. */
+async function simPerformance(userId: string, accounts: SimAccount[]): Promise<Map<string, SessionPerformance>> {
+  const m = new Map<string, SessionPerformance>();
+  const ids = accounts.map((a) => a.id);
+  if (!ids.length) return m;
+  const [balances, byStatus, wins] = await Promise.all([
+    prisma.$queryRaw<{ accountId: string; balance: string }[]>`
+      SELECT DISTINCT ON ("accountId") "accountId", "balanceAfter"::text AS balance
+      FROM "SimLedgerEntry" WHERE "accountId" = ANY(${ids}::text[]) AND "userId" = ${userId}
+      ORDER BY "accountId", "sequence" DESC`,
+    prisma.simPosition.groupBy({ by: ["accountId", "status"], where: { userId, accountId: { in: ids } }, _count: { _all: true } }),
+    prisma.simPosition.groupBy({ by: ["accountId"], where: { userId, accountId: { in: ids }, status: "CLOSED", realizedPnl: { gt: 0 } }, _count: { _all: true } }),
+  ]);
+  const bal = new Map(balances.map((b) => [b.accountId, Number(b.balance)]));
+  for (const a of accounts) {
+    const start = Number(a.startingBalance);
+    const rows = byStatus.filter((r) => r.accountId === a.id);
+    m.set(a.id, {
+      currency: a.currency,
+      netResult: Math.round(((bal.get(a.id) ?? start) - start) * 100) / 100,
+      closedTrades: rows.find((r) => r.status === "CLOSED")?._count._all ?? 0,
+      openPositions: rows.find((r) => r.status === "OPEN")?._count._all ?? 0,
+      wins: wins.find((w) => w.accountId === a.id)?._count._all ?? 0,
+    });
+  }
+  return m;
+}
+
+function fromAccount(a: SimAccount, counts: SessionCounts, performance: SessionPerformance | null = null): LibrarySession {
   const prop = a.product === "PROP_FIRM";
   return {
     kind: prop ? "PROP" : "LAB",
@@ -76,6 +104,7 @@ function fromAccount(a: SimAccount, counts: SessionCounts): LibrarySession {
     createdAt: a.createdAt.toISOString(),
     updatedAt: a.updatedAt.toISOString(),
     counts,
+    performance,
     href: `/backtesting/terminal/${a.id}`,
     can: { rename: true, duplicate: !prop, archive: true, delete: !prop },
     deleteNote: prop ? PROP_DELETE_NOTE : null,
@@ -96,6 +125,7 @@ function fromRun(r: BacktestRun, counts: SessionCounts): LibrarySession {
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
     counts,
+    performance: null,
     href: `/backtesting/${r.id}`,
     can: { rename: true, duplicate: false, archive: true, delete: true },
     deleteNote: null,
@@ -104,8 +134,8 @@ function fromRun(r: BacktestRun, counts: SessionCounts): LibrarySession {
 
 export async function listLibrary(userId: string, query: LibraryQuery = {}): Promise<LibrarySession[]> {
   const [accounts, runs] = await Promise.all([prisma.simAccount.findMany({ where: { userId } }), prisma.backtestRun.findMany({ where: { userId } })]);
-  const [ac, rc] = await Promise.all([simCounts(userId, accounts.map((a) => a.id)), runCounts(userId, runs.map((r) => r.id))]);
-  const all = [...accounts.map((a) => fromAccount(a, ac.get(a.id)!)), ...runs.map((r) => fromRun(r, rc.get(r.id)!))];
+  const [ac, rc, perf] = await Promise.all([simCounts(userId, accounts.map((a) => a.id)), runCounts(userId, runs.map((r) => r.id)), simPerformance(userId, accounts)]);
+  const all = [...accounts.map((a) => fromAccount(a, ac.get(a.id)!, perf.get(a.id) ?? null)), ...runs.map((r) => fromRun(r, rc.get(r.id)!))];
   return applyLibraryQuery(all, query);
 }
 
@@ -180,5 +210,66 @@ export async function deleteSession(userId: string, kind: SessionKind, id: strin
     await deleteBacktestRun(userId, id);
     return;
   }
-  await prisma.simAccount.delete({ where: { id } });
+  // Owner in the WHERE as well: even a race can't delete someone else's row.
+  // One statement; the database cascades orders, fills, positions, ledger,
+  // events, pins and drawings atomically (observations are unlinked, kept).
+  const r = await prisma.simAccount.deleteMany({ where: { id, userId, product: "STRATEGY_LAB" } });
+  if (r.count !== 1) throw new SimNotFoundError();
+}
+
+export interface SessionRef {
+  kind: SessionKind;
+  id: string;
+}
+
+export const MAX_BULK = 100;
+
+/** Every ref must be the user's (and match its kind) — checked before anything changes. */
+async function requireAll(userId: string, refs: SessionRef[]): Promise<SessionRef[]> {
+  const unique = [...new Map(refs.map((r) => [`${r.kind}:${r.id}`, r])).values()];
+  if (unique.length === 0) throw new SimError("Select at least one session.");
+  if (unique.length > MAX_BULK) throw new SimError(`Select at most ${MAX_BULK} sessions at a time.`);
+  for (const r of unique) await requireKind(userId, r.kind, r.id);
+  return unique;
+}
+
+/** Archive or restore several sessions — all or nothing. */
+export async function bulkSetArchived(userId: string, refs: SessionRef[], archived: boolean): Promise<number> {
+  const list = await requireAll(userId, refs);
+  const sim = list.filter((r) => r.kind !== "LEGACY").map((r) => r.id);
+  const runs = list.filter((r) => r.kind === "LEGACY").map((r) => r.id);
+  await prisma.$transaction(async (tx) => {
+    if (archived) {
+      await tx.simAccount.updateMany({ where: { userId, id: { in: sim }, archivedAt: null }, data: { archivedAt: new Date() } });
+      await tx.backtestRun.updateMany({ where: { userId, id: { in: runs } }, data: { status: "ARCHIVED", archivedAt: new Date() } });
+      return;
+    }
+    // Restore: clear the flag; older status-based archives get a status that fits the account's history.
+    for (const a of await tx.simAccount.findMany({ where: { userId, id: { in: sim } } })) {
+      const status = a.status === "ARCHIVED" ? (a.endedAt ? "COMPLETED" : a.currentMinute != null ? "ACTIVE" : "CREATED") : a.status;
+      await tx.simAccount.update({ where: { id: a.id }, data: { archivedAt: null, status } });
+    }
+    await tx.backtestRun.updateMany({ where: { userId, id: { in: runs }, status: "ARCHIVED" }, data: { status: "COMPLETED", archivedAt: null } });
+    await tx.backtestRun.updateMany({ where: { userId, id: { in: runs } }, data: { archivedAt: null } });
+  });
+  return list.length;
+}
+
+/**
+ * Delete several sessions. Refused as a whole if any isn't the user's or
+ * can't be deleted (Prop Firm). Lab accounts go in one transaction; legacy
+ * runs then each in their own (their media files are removed after commit).
+ */
+export async function bulkDelete(userId: string, refs: SessionRef[]): Promise<number> {
+  const list = await requireAll(userId, refs);
+  if (list.some((r) => r.kind === "PROP")) throw new SimError(`${PROP_DELETE_NOTE} Remove them from the selection or archive them.`);
+  const lab = list.filter((r) => r.kind === "LAB").map((r) => r.id);
+  if (lab.length) {
+    await prisma.$transaction(async (tx) => {
+      const r = await tx.simAccount.deleteMany({ where: { userId, id: { in: lab }, product: "STRATEGY_LAB" } });
+      if (r.count !== lab.length) throw new SimError("Some of these sessions changed meanwhile — nothing was deleted. Refresh and try again.");
+    });
+  }
+  for (const r of list.filter((x) => x.kind === "LEGACY")) await deleteBacktestRun(userId, r.id);
+  return list.length;
 }
