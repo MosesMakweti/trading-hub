@@ -15,6 +15,10 @@ import { advanceSimClockAction, getSimAccountStateAction, getSimCandlesAction, r
 import { formatReplayTime } from "@/domain/native-replay/chart-time";
 import { changeSpeed, planPlayback, startPlayback } from "@/domain/charting/playback-scheduler";
 import { ReplayBar } from "@/components/charting/replay-bar";
+import { SessionNavigator, type SessionJump } from "@/components/charting/session-navigator";
+import { SessionEditor } from "@/components/charting/session-editor";
+import { BUILTIN_SESSIONS, type SessionDef } from "@/domain/charting/sessions";
+import { listTradingSessionsAction } from "@/actions/charting.actions";
 import { fromWire } from "@/domain/native-replay/chart-model";
 import { ScriptWorkbench, type TestData } from "@/components/scripting/script-workbench";
 import { deleteSimDrawingAction, getInstrumentPointValueAction, getScriptSourcesAction, listSimDrawingsAction, saveSimDrawingAction } from "@/actions/charting.actions";
@@ -44,7 +48,7 @@ import { QuickObservation, type StudyOption } from "../studies/quick-observation
 import { PropRulesPanel } from "../prop/prop-rules-panel";
 
 const NO_LINES: PriceLineSpec[] = [];
-type Command = { kind: "BARS"; count: number } | { kind: "CANDLE"; timeframe: ReplayTimeframe; count?: number } | { kind: "SEEK"; to: number; align?: "AT_OR_BEFORE" | "AT_OR_AFTER" } | { kind: "NEXT_DAY" };
+type Command = { kind: "BARS"; count: number } | { kind: "CANDLE"; timeframe: ReplayTimeframe; count?: number } | { kind: "SEEK"; to: number; align?: "AT_OR_BEFORE" | "AT_OR_AFTER"; until?: number } | { kind: "NEXT_DAY" };
 
 const STATUS_TONE: Record<string, string> = {
   ACTIVE: "border-emerald-500/40 text-emerald-500",
@@ -70,6 +74,10 @@ const STATUS_TONE: Record<string, string> = {
 export function SimTerminal({ initialState, initialWorkspace, backHref, studies, resultsHref }: { initialState: SimAccountStateDTO; initialWorkspace: Workspace; backHref: string; studies?: StudyOption[]; resultsHref?: string }) {
   const { resolvedTheme } = useTheme();
   const [state, setState] = useState(initialState);
+  const stateRef = useRef(initialState);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
   const [ws, updateWs] = useWorkspace(initialWorkspace);
   const [busy, setBusy] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -92,6 +100,9 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const [drawCanUndo, setDrawCanUndo] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
   const [magnet, setMagnet] = useState(false);
+  const [customSessions, setCustomSessions] = useState<SessionDef[]>([]);
+  const [sessionEditor, setSessionEditor] = useState(false);
+  const lastMoveRef = useRef<{ moved: boolean; toMinute: number } | null>(null);
   // Live sizes while dragging (committed to the workspace on release).
   const [rightWidth, setRightWidth] = useState(ws.panels.right.width);
   const [bottomHeight, setBottomHeight] = useState(ws.panels.bottom.height);
@@ -118,6 +129,15 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const periodFrom = parseWallClock(`${state.period.start}T00:00`) ?? 0;
   const periodTo = (parseWallClock(`${state.period.end}T00:00`) ?? 0) + 1439;
   const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    void listTradingSessionsAction().then((r) => r.success && setCustomSessions(r.sessions));
+  }, []);
+  const allSessions = useMemo(() => [...BUILTIN_SESSIONS, ...customSessions], [customSessions]);
+  const sessionOverlay = useMemo(() => {
+    const ss = ws.sessions;
+    const defs = allSessions.filter((d) => d.enabled && ss.show.includes(d.id));
+    return { defs, all: allSessions, dataTimeZone: ss.dataTimeZone, shading: ss.shading, highLow: ss.highLow, labels: ss.labels };
+  }, [allSessions, ws.sessions]);
   const activeIndex = Math.min(ws.activeChart, chartsFor(ws.layout) - 1);
   const activeCtl = useCallback(() => paneRefs.current[activeIndex]?.drawings() ?? null, [activeIndex]);
   const drawingsReadOnly = !(state.status === "ACTIVE" || state.status === "CREATED");
@@ -276,6 +296,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
         return false;
       }
       const { outcome } = res;
+      lastMoveRef.current = { moved: outcome.moved, toMinute: outcome.toMinute };
       if (res.state) setState(res.state);
       else if (res.patch) setState((prev) => applyStepPatch(prev, res.patch!));
       if (outcome.moved) {
@@ -354,6 +375,38 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
       setPlaying(false);
     }
   }, [run]);
+
+  /**
+   * Session jump. Within what's revealed → review there. Later → move the
+   * replay forward to the first bar inside the session; if the session has
+   * no data, nothing moves and the trader is told (never a silent jump to an
+   * unrelated time).
+   */
+  const jumpToSession = useCallback(
+    async (j: SessionJump) => {
+      const now = stateRef.current.clock?.minute;
+      if (now == null) return;
+      if (j.to <= now) {
+        const res = await reviewTargetAction({ accountId: stateRef.current.id, from: reviewRef.current ?? now, move: { kind: "SEEK", to: j.to, align: j.align, until: j.until } });
+        if (!res.success) return void toast.error(res.error);
+        if (res.minute == null || (j.until != null && res.minute >= j.until)) return void toast.message(`No market data for ${j.label}.`);
+        setReview(res.minute >= res.clock ? null : res.minute);
+        return;
+      }
+      setReview(null);
+      lastMoveRef.current = null;
+      setBusy(true);
+      try {
+        await run({ kind: "SEEK", to: j.to, align: j.align, until: j.until });
+      } finally {
+        setBusy(false);
+      }
+      const last = lastMoveRef.current as { moved: boolean } | null;
+      if (last && !last.moved) toast.message(`No market data for ${j.label} — the replay didn't move.`);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   // ── Review: step back over what's already revealed (never past the clock) ──
   const reviewMove = useCallback(
@@ -608,6 +661,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
             theme={resolvedTheme}
             refreshKey={refreshKey}
             asOf={review}
+            sessionOverlay={sessionOverlay}
             started={started}
             scripts={scriptSources}
             onActivate={setActive}
@@ -687,6 +741,17 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
                 setReview(null);
                 void step({ kind: "NEXT_DAY" });
               }}
+              extra={
+                <SessionNavigator
+                  sessions={allSessions}
+                  settings={ws.sessions}
+                  onSettings={(patch) => updateWs((w) => ({ ...w, sessions: { ...w.sessions, ...patch } }))}
+                  viewMinute={review ?? state.clock?.minute ?? periodFrom}
+                  disabled={playing || busy}
+                  onJump={(j) => void jumpToSession(j)}
+                  onManage={() => setSessionEditor(true)}
+                />
+              }
             />
           )}
           {state.clock?.atPeriodEnd && (
@@ -752,6 +817,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
         </>
       )}
 
+      <SessionEditor open={sessionEditor} onOpenChange={setSessionEditor} sessions={allSessions} onChanged={setCustomSessions} />
       <IndicatorPicker open={pickerOpen} onOpenChange={setPickerOpen} count={active.studies.length} onAdd={(s) => setStudies(ws.activeChart, [...active.studies, s])} />
       <StudySettings
         study={editingStudy}

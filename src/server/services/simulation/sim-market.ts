@@ -115,7 +115,7 @@ export type ClockCommand =
   /** Finish the current `timeframe` candle, then `count - 1` more (default 1). */
   | { kind: "CANDLE"; timeframe: ReplayTimeframe; count?: number }
   /** AT_OR_BEFORE (default): the last bar ≤ `to`. AT_OR_AFTER: the first bar ≥ `to` (session starts). */
-  | { kind: "SEEK"; to: number; align?: "AT_OR_BEFORE" | "AT_OR_AFTER" }
+  | { kind: "SEEK"; to: number; align?: "AT_OR_BEFORE" | "AT_OR_AFTER"; until?: number }
   | { kind: "NEXT_DAY" };
 
 /** Largest single move: a +N step, or a seek / next-day jump, in timeline minutes or calendar span. */
@@ -198,7 +198,8 @@ export async function targetMinuteBuffered(feeds: SimFeed[], cur: number, comman
   if (command.kind === "SEEK") {
     if (command.align === "AT_OR_AFTER") {
       // First bar at or after `to` — never before the clock, never past the period or the seek window.
-      return firstFrom(Math.max(command.to, cur + 1), Math.min(limit, cur + MAX_SEEK_MINUTES));
+      // `until` (exclusive) keeps a session jump inside the session: no bar there → no move.
+      return firstFrom(Math.max(command.to, cur + 1), Math.min(limit, cur + MAX_SEEK_MINUTES, (command.until ?? Infinity) - 1));
     }
     return lastBarUpTo(command.to);
   }
@@ -264,11 +265,23 @@ export async function revealedWireBars(feed: SimFeed, fromExclusive: number, toI
  *  - FORWARD: the end of the next `timeframe` bucket after `from`, capped at the clock.
  *  - SEEK: the last bar ≤ min(to, clock).
  */
-export async function reviewTarget(feeds: SimFeed[], from: number, clock: number, periodFrom: number, move: { kind: "BACK" | "FORWARD"; timeframe: ReplayTimeframe } | { kind: "SEEK"; to: number }): Promise<number | null> {
+export async function reviewTarget(
+  feeds: SimFeed[],
+  from: number,
+  clock: number,
+  periodFrom: number,
+  move: { kind: "BACK" | "FORWARD"; timeframe: ReplayTimeframe } | { kind: "SEEK"; to: number; align?: "AT_OR_BEFORE" | "AT_OR_AFTER"; until?: number },
+): Promise<number | null> {
   const seqs = feeds.map((f) => f.seq);
   if (!seqs.length) return null;
   const at = Math.min(from, clock);
-  if (move.kind === "SEEK") return lastMinuteIn(seqs, periodFrom - 1, Math.min(move.to, clock));
+  if (move.kind === "SEEK") {
+    if (move.align === "AT_OR_AFTER") {
+      const upTo = Math.min(clock, (move.until ?? Infinity) - 1);
+      return upTo < move.to ? null : ((await minutesAfter(seqs, move.to - 1, upTo, 1))[0] ?? null);
+    }
+    return lastMinuteIn(seqs, periodFrom - 1, Math.min(move.to, clock));
+  }
   if (move.kind === "FORWARD") return targetMinuteBuffered(feeds, at, { kind: "CANDLE", timeframe: move.timeframe }, clock, 0);
   // Whether the current bucket is complete or still forming, one step back ends
   // at the last bar before it starts (for M1: the previous minute).

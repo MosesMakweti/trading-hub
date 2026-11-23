@@ -111,6 +111,7 @@ model User {
   simChallenges           SimChallenge[]
   chartWorkspaces         ChartWorkspace[]
   userScripts             UserScript[]
+  tradingSessions         UserTradingSession[]
   historicalImportUploads HistoricalImportUpload[]
 }
 
@@ -5612,4 +5613,27 @@ model SimChartDrawing {
   updatedAt   DateTime   @updatedAt
 
   @@index([accountId, assetSymbol])
+}
+
+// A trader's own session definition (e.g. "London Killzone"), in its own
+// timezone. Built-in sessions (Asian, Tokyo, London, New York, overlap) live
+// in code (domain/charting/sessions.ts).
+model UserTradingSession {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  /// "HH:mm" in timeZone; end <= start means the session runs overnight
+  start       String
+  end         String
+  timeZone    String
+  /// 0 = Sunday … 6 = Saturday (the day the session starts)
+  days        Int[]
+  color       String   @default("#8ab4f8")
+  description String?
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
 }

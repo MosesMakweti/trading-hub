@@ -96,3 +96,22 @@ describe("review (backward) navigation never passes the clock", () => {
     expect(future.candles).toEqual(live.candles); // clamped to the clock
   });
 });
+
+describe("session jumps", () => {
+  it("AT_OR_AFTER with `until`: lands inside the window or doesn't move; review never passes the clock", async () => {
+    const feeds = await accountFeedsCached(prisma, accountId);
+    const now = await clock();
+    const end = parseWallClock("2024-05-24T23:59")!;
+    // A window with no data (Sunday) → no target, so the clock wouldn't move.
+    const sunday = parseWallClock("2024-05-19T08:00")!;
+    expect(await targetMinuteBuffered(feeds, now, { kind: "SEEK", to: sunday, align: "AT_OR_AFTER", until: sunday + 540 }, end, 0)).toBeNull();
+    // A window with data → its first bar.
+    const tue = parseWallClock("2024-05-21T08:00")!;
+    expect(await targetMinuteBuffered(feeds, now, { kind: "SEEK", to: tue, align: "AT_OR_AFTER", until: tue + 540 }, end, 0)).toBe(tue);
+    // Review: an earlier session start, never past the clock.
+    const acc = await prisma.simAccount.findUniqueOrThrow({ where: { id: accountId } });
+    const earlier = parseWallClock("2024-05-14T08:00")!;
+    expect(await reviewTarget(feeds, now, now, periodMinutes(acc).from, { kind: "SEEK", to: earlier, align: "AT_OR_AFTER", until: earlier + 540 })).toBe(earlier);
+    expect(await reviewTarget(feeds, now, now, periodMinutes(acc).from, { kind: "SEEK", to: now + 10, align: "AT_OR_AFTER" })).toBeNull();
+  });
+});

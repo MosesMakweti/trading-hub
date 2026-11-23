@@ -64,3 +64,24 @@ describe("study precision", () => {
     expect(digitsFor([{ values: [NaN] }])).toBe(2);
   });
 });
+
+describe("session overlays", () => {
+  it("shades bars inside occurrences, running high/low only (no look-ahead), label at the first bar", async () => {
+    const { buildSessionStudies } = await import("./render-model");
+    const d = buildDisplay(candles, 5, "candles", null); // minutes 1000…1119
+    const def = { id: "x", name: "Test", start: "00:00", end: "01:00", timeZone: "UTC", days: [0, 1, 2, 3, 4, 5, 6], color: "#112233", enabled: true };
+    const occ = () => [{ start: 1010, end: 1020 }, { start: 1050, end: 1060 }];
+    const [s] = buildSessionStudies(d, [{ def, all: [def] }], "UTC", { shading: true, highLow: true, labels: true }, occ);
+    expect(s.bgcolor!.filter(Boolean)).toHaveLength(20);
+    expect(s.bgcolor![10]).toBe("#1122331f");
+    expect(s.bgcolor![9]).toBeNull();
+    expect(s.markers.map((m) => m.bar)).toEqual([10, 50]);
+    const highs = d.inputs.map((b) => b.high);
+    // Running high within the first occurrence: max of bars 10..i — never later bars.
+    for (let i = 10; i < 20; i++) expect(s.plots[0].values[i]).toBe(Math.max(...highs.slice(10, i + 1)));
+    expect(Number.isNaN(s.plots[0].values[25])).toBe(true);
+    // Appending bars never changes earlier values.
+    const shorter = buildSessionStudies(buildDisplay(candles.slice(0, 15), 5, "candles", null), [{ def, all: [def] }], "UTC", { shading: true, highLow: true, labels: true }, occ)[0];
+    expect(shorter.plots[0].values.slice(0, 15)).toEqual(s.plots[0].values.slice(0, 15));
+  });
+});

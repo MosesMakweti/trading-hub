@@ -14,7 +14,12 @@ import {
   simDrawingDeleteSchema,
   simDrawingListSchema,
   simDrawingSaveSchema,
+  tradingSessionRefSchema,
+  tradingSessionSchema,
+  updateTradingSessionSchema,
 } from "@/lib/validation/charting";
+import * as sessions from "@/server/services/charting/trading-session.service";
+import type { SessionDef } from "@/domain/charting/sessions";
 import * as simDrawings from "@/server/services/charting/sim-drawing.service";
 import type { ChartDrawing } from "@/domain/native-replay/drawings/model";
 import { SimNotFoundError } from "@/server/services/simulation/sim-account.service";
@@ -192,5 +197,48 @@ export async function deleteSimDrawingAction(input: unknown): Promise<Ok<object>
     return { success: true };
   } catch (e) {
     return fail(e, "Couldn't delete the drawing.");
+  }
+}
+
+export async function listTradingSessionsAction(): Promise<Ok<{ sessions: SessionDef[] }> | Fail> {
+  const user = await requireUser();
+  try {
+    return { success: true, sessions: await sessions.listTradingSessions(user.id) };
+  } catch (e) {
+    return fail(e, "Couldn't load your sessions.");
+  }
+}
+
+export async function createTradingSessionAction(input: unknown): Promise<Ok<{ session: SessionDef }> | Fail> {
+  const user = await requireUser();
+  const p = tradingSessionSchema.safeParse(input);
+  if (!p.success) return invalid(p.error);
+  try {
+    return { success: true, session: await sessions.createTradingSession(user.id, p.data) };
+  } catch (e) {
+    return fail(e, "Couldn't save the session.");
+  }
+}
+
+export async function updateTradingSessionAction(input: unknown): Promise<Ok<{ session: SessionDef }> | Fail> {
+  const user = await requireUser();
+  const p = updateTradingSessionSchema.safeParse(input);
+  if (!p.success) return invalid(p.error);
+  try {
+    return { success: true, session: await sessions.updateTradingSession(user.id, p.data.id, p.data.session) };
+  } catch (e) {
+    return fail(e, "Couldn't save the session.");
+  }
+}
+
+export async function deleteTradingSessionAction(input: unknown): Promise<Ok<object> | Fail> {
+  const user = await requireUser();
+  const p = tradingSessionRefSchema.safeParse(input);
+  if (!p.success) return invalid(p.error);
+  try {
+    await sessions.deleteTradingSession(user.id, p.data.id);
+    return { success: true };
+  } catch (e) {
+    return fail(e, "Couldn't delete the session.");
   }
 }

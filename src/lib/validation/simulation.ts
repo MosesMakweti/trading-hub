@@ -26,7 +26,7 @@ export const createLabAccountSchema = z
 export const clockCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("BARS"), count: z.number().int().min(1).max(1440) }),
   z.object({ kind: z.literal("CANDLE"), timeframe: z.enum(REPLAY_TIMEFRAMES as unknown as [string, ...string[]]), count: z.number().int().min(1).max(1440).optional() }),
-  z.object({ kind: z.literal("SEEK"), to: z.number().int(), align: z.enum(["AT_OR_BEFORE", "AT_OR_AFTER"]).optional() }),
+  z.object({ kind: z.literal("SEEK"), to: z.number().int(), align: z.enum(["AT_OR_BEFORE", "AT_OR_AFTER"]).optional(), until: z.number().int().optional() }),
   z.object({ kind: z.literal("NEXT_DAY") }),
 ]);
 
@@ -138,6 +138,6 @@ export const reviewTargetSchema = z.object({
   from: z.number().int(),
   move: z.discriminatedUnion("kind", [
     z.object({ kind: z.enum(["BACK", "FORWARD"]), timeframe: z.enum(REPLAY_TIMEFRAMES as unknown as [string, ...string[]]) }),
-    z.object({ kind: z.literal("SEEK"), to: z.number().int() }),
+    z.object({ kind: z.literal("SEEK"), to: z.number().int(), align: z.enum(["AT_OR_BEFORE", "AT_OR_AFTER"]).optional(), until: z.number().int().optional() }),
   ]),
 });

@@ -12,6 +12,7 @@ import { z } from "zod";
 import { CHART_TYPES, type ChartTypeKey } from "@/domain/indicators/chart-types";
 import { INDICATOR_BY_ID, sanitizeInputs } from "@/domain/indicators/catalog";
 import { REPLAY_TIMEFRAMES, type ReplayTimeframe } from "@/domain/native-replay/timeframes";
+import { isValidTimeZone } from "./sessions";
 
 export const CHART_LAYOUTS = [
   { key: "1", label: "Single chart", charts: 1 },
@@ -101,6 +102,19 @@ export const replaySettingsSchema = z.object({
 });
 export type ReplaySettings = z.infer<typeof replaySettingsSchema>;
 
+export const sessionSettingsSchema = z.object({
+  /** The time zone the market data's wall clock is in (MT5 servers: usually GMT+2/+3 on New York close). */
+  dataTimeZone: z.string().max(64).refine(isValidTimeZone, "Unknown time zone.").default("NYC+7"),
+  /** Session ids drawn on the charts (built-in ids or custom session ids). */
+  show: z.array(z.string().max(64)).max(20).default([]),
+  shading: z.boolean().default(true),
+  highLow: z.boolean().default(true),
+  labels: z.boolean().default(true),
+  /** Last session used in the navigator. */
+  selected: z.string().max(64).default("london"),
+});
+export type SessionSettings = z.infer<typeof sessionSettingsSchema>;
+
 export const presetSchema = z.object({ name: z.string().trim().min(1).max(40), panels: panelsSchema, layout: z.enum(CHART_LAYOUTS.map((l) => l.key) as [ChartLayoutKey, ...ChartLayoutKey[]]) });
 export type WorkspacePreset = z.infer<typeof presetSchema>;
 
@@ -116,6 +130,7 @@ export const workspaceSchema = z.object({
   settings: chartSettingsSchema.prefault({}),
   presets: z.array(presetSchema).max(12).default([]),
   replay: replaySettingsSchema.prefault({}),
+  sessions: sessionSettingsSchema.prefault({}),
 });
 export type Workspace = z.infer<typeof workspaceSchema>;
 

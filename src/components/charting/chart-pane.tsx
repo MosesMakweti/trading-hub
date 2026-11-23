@@ -10,7 +10,8 @@ import { getSimCandlesAction } from "@/actions/simulation.actions";
 import { applyRevealed, fromWire, wireToBars } from "@/domain/native-replay/chart-model";
 import type { EngineCandle } from "@/domain/native-replay/candle-engine";
 import { CHART_TYPES } from "@/domain/indicators/chart-types";
-import { buildDisplay, buildStudies, type ScriptState, type StudyRender } from "@/domain/charting/render-model";
+import { buildDisplay, buildSessionStudies, buildStudies, type ScriptState, type StudyRender } from "@/domain/charting/render-model";
+import { occurrencesBetween, type SessionDef } from "@/domain/charting/sessions";
 import type { ChartConfig, ChartSettings, ChartStudy } from "@/domain/charting/workspace";
 import { runScriptInWorker } from "@/components/scripting/run-script";
 import { DrawingController } from "@/components/native-replay/drawings/drawing-controller";
@@ -61,7 +62,7 @@ export interface ChartPaneHandle {
   symbol(): string;
 }
 
-interface Props {
+export interface ChartPaneProps {
   accountId: string;
   symbol: string;
   config: ChartConfig;
@@ -72,6 +73,8 @@ interface Props {
   refreshKey: number;
   /** Review mode: show the chart as of this earlier minute (the server clamps it to the clock). */
   asOf: number | null;
+  /** Sessions drawn on the chart (shading / high-low / labels). */
+  sessionOverlay?: { defs: SessionDef[]; all: SessionDef[]; dataTimeZone: string; shading: boolean; highLow: boolean; labels: boolean };
   started: boolean;
   active: boolean;
   /** More than one chart is shown (draws the active outline). */
@@ -95,7 +98,7 @@ interface Props {
   children?: React.ReactNode;
 }
 
-export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(props, ref) {
+export const ChartPane = forwardRef<ChartPaneHandle, ChartPaneProps>(function ChartPane(props, ref) {
   const { accountId, symbol, config, settings, theme, priceDigits, refreshKey, asOf, started, active, multi, priceLines, scripts, onActivate, onStudiesChange, onEditStudy, index, onCrosshair, onTimeRange, onCandles } = props;
   const [candles, setCandles] = useState<EngineCandle[]>([]);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
@@ -240,7 +243,16 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [display, scriptRunKey]);
 
-  const studies = useMemo(() => buildStudies(display, config, scriptStates, priceDigits), [display, config, scriptStates, priceDigits]);
+  const indicatorStudies = useMemo(() => buildStudies(display, config, scriptStates, priceDigits), [display, config, scriptStates, priceDigits]);
+  const so = props.sessionOverlay;
+  const sessionStudies = useMemo(
+    () =>
+      so && so.defs.length
+        ? buildSessionStudies(display, so.defs.map((def) => ({ def, all: so.all })), so.dataTimeZone, so, (def, from, to) => occurrencesBetween(def, from, to, so.dataTimeZone, so.all))
+        : [],
+    [display, so],
+  );
+  const studies = useMemo(() => [...sessionStudies, ...indicatorStudies], [sessionStudies, indicatorStudies]);
 
   const onChartCrosshair = useCallback(
     (i: number | null, t: number | null, local?: boolean) => {
@@ -291,7 +303,7 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
               {typeDef.label} values are calculated, not market prices{config.chartType !== "heikinashi" ? "; the time axis is price-driven" : ""}. Indicators use these values.
             </p>
           )}
-          {studies.map((st) => (
+          {indicatorStudies.map((st) => (
             <StudyLegendRow key={st.uid} study={st} index={i} onToggle={() => setStudy(st.uid, { visible: !st.visible })} onRemove={() => setStudy(st.uid, null)} onEdit={() => onEditStudy(st.uid, scriptStates.get(st.uid) ?? null)} />
           ))}
         </div>
