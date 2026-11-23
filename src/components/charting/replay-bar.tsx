@@ -1,32 +1,20 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import {
-  ChevronDown,
-  ChevronFirst,
-  ChevronLast,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  Gauge,
-  GripVertical,
-  Loader2,
-  MoreHorizontal,
-  Pause,
-  Pin,
-  PinOff,
-  Play,
-  Radio,
-} from "lucide-react";
+import { CalendarClock, ChevronDown, ChevronLast, ChevronLeft, ChevronRight, ChevronUp, Footprints, Gauge, GripVertical, Loader2, MoreHorizontal, Pause, Pin, PinOff, Play, Radio } from "lucide-react";
 
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { formatReplayTime } from "@/domain/native-replay/chart-time";
-import { parseWallClock } from "@/domain/native-replay/wall-clock";
-import { MAX_SPEED_MS, MIN_SPEED_MS, PLAYBACK_SPEEDS_MS, PLAYBACK_TIMEFRAMES, type PlaybackTimeframe, type ReplayBarSettings, type ReplaySettings } from "@/domain/charting/workspace";
+import { formatWallClock, parseWallClock } from "@/domain/native-replay/wall-clock";
+import { PLAYBACK_SPEEDS_MS, type PlaybackTimeframe, type ReplayBarSettings, type ReplaySettings } from "@/domain/charting/workspace";
+import { clampSpeed, formatSpeed, intervalAvailable, intervalLabel, PLAYBACK_INTERVALS, positionToSpeed, speedToPosition, SPEED_STOPS_MS } from "@/domain/charting/playback-speed";
 import type { ReplayTimeframe } from "@/domain/native-replay/timeframes";
 import { barFractions, barPosition } from "./replay-bar-layout";
+
+/** MT5 exports are 1-minute bars: the finest playback interval the data supports. */
+const DATA_RESOLUTION_SECONDS = 60;
 
 export interface ReplayBarProps {
   /** The chart area the toolbar floats in (positions are relative to it). */
@@ -35,8 +23,6 @@ export interface ReplayBarProps {
   onSettings: (patch: Partial<Omit<ReplaySettings, "bar">>) => void;
   onBar: (patch: Partial<ReplayBarSettings>) => void;
   clockMinute: number | null;
-  periodFrom: number;
-  periodTo: number;
   /** Review position (≤ clock) or null when following the live replay. */
   reviewMinute: number | null;
   chartTf: ReplayTimeframe;
@@ -49,7 +35,7 @@ export interface ReplayBarProps {
   onNextCandle: () => void;
   onPrevBar: () => void;
   onPrevCandle: () => void;
-  /** Slider released / jump chosen at `minute` (≤ clock → review; > clock → seek forward). */
+  /** Jump to a date/time (≤ clock → review; > clock → move forward). Historical navigation only. */
   onGoTo: (minute: number) => void;
   onLive: () => void;
   onNextDay: () => void;
@@ -57,13 +43,18 @@ export interface ReplayBarProps {
   extra?: React.ReactNode;
 }
 
-const fmtSpeed = (ms: number) => (ms >= 1000 ? `${+(ms / 1000).toFixed(2)}s` : `${ms}ms`);
-const btn = "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground disabled:pointer-events-none disabled:opacity-35";
+// High-contrast tokens for both themes: primary icons near-white on the dark
+// toolbar (near-black on the light one), secondary a step softer, accent sky.
+const ICON_BTN =
+  "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-700 transition-colors hover:bg-zinc-900/10 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 disabled:cursor-not-allowed disabled:text-zinc-400 disabled:hover:bg-transparent dark:text-zinc-100 dark:hover:bg-white/15 dark:hover:text-white dark:disabled:text-zinc-500";
+const DIVIDER = "mx-0.5 h-5 w-px shrink-0 bg-zinc-300 dark:bg-white/15";
 
 /**
- * The floating replay toolbar: playback controls over the chart. Floating
- * (draggable, clamped to the chart area), or docked top/bottom; pin,
- * collapse and position are saved with the workspace.
+ * The floating replay toolbar. Two independent playback controls:
+ *  - Step (playback interval): how much market time each step reveals.
+ *  - Speed (slider): real time between steps. It only paces playback — it is
+ *    not a timeline and never moves the replay position.
+ * Historical navigation (jump to date/time, sessions) has its own controls.
  */
 export function ReplayBar(p: ReplayBarProps) {
   const { settings, onBar } = p;
@@ -71,14 +62,10 @@ export function ReplayBar(p: ReplayBarProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
-  const [scrub, setScrub] = useState<number | null>(null);
 
-  /** The area to float in. The toolbar's own parent is the chart area; the ref
-   *  prop can still be null during the first commit (parent refs attach after
-   *  children's layout effects), so fall back to the DOM parent. */
+  /** The area to float in (the DOM parent if the ref isn't attached yet). */
   const areaOf = () => p.areaRef.current ?? ref.current?.parentElement ?? null;
 
-  // Place within the chart area; re-place on area / toolbar resize.
   useLayoutEffect(() => {
     const area = areaOf();
     const el = ref.current;
@@ -95,10 +82,10 @@ export function ReplayBar(p: ReplayBarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- areaOf reads refs
   }, [bar]);
 
-  const view = p.reviewMinute ?? p.clockMinute ?? p.periodFrom;
-  const span = Math.max(1, p.periodTo - p.periodFrom);
-  const revealedPct = p.clockMinute == null ? 0 : ((p.clockMinute - p.periodFrom) / span) * 100;
+  const view = p.reviewMinute ?? p.clockMinute;
   const reviewing = p.reviewMinute != null;
+  const stepLabel = intervalLabel(settings.playbackTf);
+  const stepDisabled = (!p.canMove && !reviewing) || p.busy || p.playing;
 
   const onHandleDown = (e: React.PointerEvent) => {
     if (bar.pinned || bar.mode !== "floating") return;
@@ -126,7 +113,7 @@ export function ReplayBar(p: ReplayBarProps) {
 
   if (!bar.visible) {
     return (
-      <button type="button" onClick={() => onBar({ visible: true })} className="absolute bottom-3 left-1/2 z-30 -translate-x-1/2 rounded-full border border-white/10 bg-[#1b1c20]/95 px-3 py-1 text-xs text-muted-foreground shadow-lg hover:text-foreground">
+      <button type="button" onClick={() => onBar({ visible: true })} className="absolute bottom-3 left-1/2 z-30 -translate-x-1/2 rounded-full border border-zinc-300 bg-white/95 px-3 py-1 text-xs font-medium text-zinc-800 shadow-lg hover:bg-white dark:border-white/15 dark:bg-[#262a31]/95 dark:text-zinc-100">
         Show replay controls
       </button>
     );
@@ -140,7 +127,7 @@ export function ReplayBar(p: ReplayBarProps) {
       data-replay-bar
       onPointerDown={(e) => e.stopPropagation()}
       style={pos ? { left: pos.left, top: pos.top } : { left: "50%", bottom: 12, transform: "translateX(-50%)" }}
-      className="absolute z-30 flex max-w-[calc(100%-1rem)] items-center gap-0.5 rounded-lg border border-white/10 bg-[#1b1c20]/95 p-1 text-foreground shadow-xl backdrop-blur-sm"
+      className="absolute z-30 flex max-w-[calc(100%-1rem)] items-center gap-0.5 overflow-x-auto rounded-lg border border-zinc-300/90 bg-white/95 p-1 text-zinc-900 shadow-xl backdrop-blur-sm [scrollbar-width:none] dark:border-white/15 dark:bg-[#262a31]/95 dark:text-zinc-50"
     >
       <button
         type="button"
@@ -149,7 +136,7 @@ export function ReplayBar(p: ReplayBarProps) {
         onPointerDown={onHandleDown}
         onPointerMove={onHandleMove}
         onPointerUp={onHandleUp}
-        className={cn(btn, "w-5 touch-none", !bar.pinned && bar.mode === "floating" ? "cursor-grab active:cursor-grabbing" : "cursor-default opacity-50")}
+        className={cn(ICON_BTN, "w-5 touch-none text-zinc-500 dark:text-zinc-400", !bar.pinned && bar.mode === "floating" ? "cursor-grab active:cursor-grabbing" : "cursor-default")}
       >
         <GripVertical className="size-4" />
       </button>
@@ -157,89 +144,47 @@ export function ReplayBar(p: ReplayBarProps) {
       {bar.collapsed ? (
         <>
           <PlayPause {...p} />
-          <TimeLabel minute={view} reviewing={reviewing} />
-          <button type="button" className={btn} onClick={() => onBar({ collapsed: false })} aria-label="Expand replay controls" title="Expand">
+          <SpeedValue ms={settings.speedMs} onChange={(speedMs) => p.onSettings({ speedMs })} compact />
+          {view != null && <TimeLabel minute={view} reviewing={reviewing} />}
+          <button type="button" className={ICON_BTN} onClick={() => onBar({ collapsed: false })} aria-label="Expand replay controls" title="Expand">
             <ChevronUp className="size-4" />
           </button>
         </>
       ) : (
         <>
-          <button type="button" className={btn} onClick={p.onPrevCandle} disabled={!p.clockMinute || p.playing} aria-label={`Back to the previous ${p.chartTf} boundary`} title={`Previous ${p.chartTf} boundary (review)`}>
-            <ChevronFirst className="size-4" />
-          </button>
-          <button type="button" className={btn} onClick={p.onPrevBar} disabled={!p.clockMinute || p.playing} aria-label={`Back one ${settings.playbackTf} bar`} title={`Back one ${settings.playbackTf} bar (review)`}>
+          <button type="button" className={ICON_BTN} onClick={p.onPrevBar} disabled={!p.clockMinute || p.playing} aria-label={`Previous step: back one ${stepLabel} (review)`} title={`Back one ${stepLabel} step (←). Reviews revealed bars; the replay itself never moves back.`}>
             <ChevronLeft className="size-4" />
           </button>
 
-          <div className="relative mx-1 hidden w-40 items-center sm:flex lg:w-56">
-            <input
-              type="range"
-              aria-label="Timeline"
-              min={p.periodFrom}
-              max={p.periodTo}
-              step={1}
-              value={scrub ?? view}
-              disabled={!p.clockMinute || p.playing}
-              onChange={(e) => setScrub(Number(e.target.value))}
-              onPointerUp={() => {
-                if (scrub != null) p.onGoTo(scrub);
-                setScrub(null);
-              }}
-              onKeyUp={(e) => {
-                if (scrub != null && (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End" || e.key.startsWith("Page"))) {
-                  p.onGoTo(scrub);
-                  setScrub(null);
-                }
-              }}
-              className="replay-slider h-1.5 w-full cursor-pointer appearance-none rounded-full"
-              style={{ background: `linear-gradient(to right, rgba(138,180,248,.75) ${revealedPct}%, rgba(255,255,255,.12) ${revealedPct}%)` }}
-            />
-            {scrub != null && (
-              <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black/80 px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
-                {formatReplayTime(scrub)}
-                {p.clockMinute != null && scrub > p.clockMinute ? " · jump forward" : ""}
-              </span>
-            )}
-          </div>
+          <SpeedSlider ms={settings.speedMs} onChange={(speedMs) => p.onSettings({ speedMs })} />
 
           <PlayPause {...p} />
 
-          <select
-            aria-label="Playback timeframe"
-            title="Playback timeframe: the bar each step reveals (independent of the chart timeframe)"
-            value={settings.playbackTf}
-            onChange={(e) => p.onSettings({ playbackTf: e.target.value as PlaybackTimeframe })}
-            className="h-7 rounded-md border border-white/10 bg-transparent px-1 font-mono text-[11px] text-foreground"
-          >
-            {PLAYBACK_TIMEFRAMES.map((tf) => (
-              <option key={tf} value={tf} className="bg-[#1b1c20]">
-                {tf}
-              </option>
-            ))}
-          </select>
+          <StepSelect value={settings.playbackTf} onChange={(playbackTf) => p.onSettings({ playbackTf })} />
 
-          <button type="button" className={btn} onClick={p.onNextBar} disabled={(!p.canMove && !reviewing) || p.busy || p.playing} aria-label={`Next ${settings.playbackTf} bar`} title={`Next ${settings.playbackTf} bar (→)`}>
+          <button type="button" className={ICON_BTN} onClick={p.onNextBar} disabled={stepDisabled} aria-label={`Next step: ${stepLabel}`} title={`Next ${stepLabel} step (→)`}>
             <ChevronRight className="size-4" />
           </button>
-          <button type="button" className={btn} onClick={p.onNextCandle} disabled={(!p.canMove && !reviewing) || p.busy || p.playing} aria-label={`Next ${p.chartTf} candle`} title={`Finish the ${p.chartTf} candle (Shift+→)`}>
+          <button type="button" className={ICON_BTN} onClick={p.onNextCandle} disabled={stepDisabled} aria-label={`Next ${p.chartTf} chart candle`} title={`Finish the current ${p.chartTf} chart candle (Shift+→)`}>
             <ChevronLast className="size-4" />
           </button>
 
-          <SpeedControl ms={settings.speedMs} onChange={(speedMs) => p.onSettings({ speedMs })} />
+          <span className={DIVIDER} aria-hidden />
           {p.extra}
-          <TimeLabel minute={view} reviewing={reviewing} />
+          <JumpTo {...p} />
+          {view != null && <TimeLabel minute={view} reviewing={reviewing} />}
           {reviewing && (
-            <button type="button" onClick={p.onLive} className="inline-flex h-7 items-center gap-1 rounded-md bg-sky-500/15 px-2 text-[11px] font-medium text-sky-300 hover:bg-sky-500/25" title="Back to the live replay position">
+            <button type="button" onClick={p.onLive} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-sky-600 px-2 text-[11px] font-semibold text-white hover:bg-sky-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300" title="Back to the live replay position">
               <Radio className="size-3" /> Live
             </button>
           )}
-          {p.busy && <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-label="Working" />}
+          {p.busy && <Loader2 className="size-3.5 shrink-0 animate-spin text-zinc-600 dark:text-zinc-300" aria-label="Working" />}
 
           <MoreMenu {...p} />
-          <button type="button" className={btn} onClick={() => onBar({ pinned: !bar.pinned })} aria-pressed={bar.pinned} aria-label={bar.pinned ? "Unpin toolbar" : "Pin toolbar"} title={bar.pinned ? "Unpin (allow moving)" : "Pin in place"}>
+          <button type="button" className={ICON_BTN} onClick={() => onBar({ pinned: !bar.pinned })} aria-pressed={bar.pinned} aria-label={bar.pinned ? "Unpin toolbar" : "Pin toolbar"} title={bar.pinned ? "Unpin (allow moving)" : "Pin in place"}>
             {bar.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
           </button>
-          <button type="button" className={btn} onClick={() => onBar({ collapsed: true })} aria-label="Collapse replay controls" title="Collapse">
+          <button type="button" className={ICON_BTN} onClick={() => onBar({ collapsed: true })} aria-label="Collapse replay controls" title="Collapse">
             <ChevronDown className="size-4" />
           </button>
         </>
@@ -257,47 +202,78 @@ function PlayPause(p: ReplayBarProps) {
       aria-pressed={p.playing}
       aria-label={p.playing ? "Pause" : "Play"}
       title="Play / pause (Space)"
-      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-white/10 text-foreground hover:bg-white/20 disabled:opacity-35"
+      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-sky-600 text-white shadow-sm transition-colors hover:bg-sky-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-600 dark:disabled:text-zinc-300"
     >
-      {p.playing ? <Pause className="size-4" /> : <Play className="size-4" />}
+      {p.playing ? <Pause className="size-4" fill="currentColor" /> : <Play className="size-4" fill="currentColor" />}
     </button>
   );
 }
 
-function TimeLabel({ minute, reviewing }: { minute: number; reviewing: boolean }) {
+/**
+ * Playback speed: the real time between two steps. Stops on a log scale;
+ * dragging applies immediately (also while playing). Nothing here touches
+ * the replay position or loads data.
+ */
+function SpeedSlider({ ms, onChange }: { ms: number; onChange: (ms: number) => void }) {
+  const position = speedToPosition(ms);
+  const max = SPEED_STOPS_MS.length - 1;
+  // Left = fast, right = slow? Traders expect "more" to the right = faster, so invert.
+  const sliderValue = max - position;
+  const fill = (sliderValue / max) * 100;
   return (
-    <span className={cn("hidden whitespace-nowrap px-1.5 font-mono text-[11px] tabular-nums md:inline", reviewing ? "text-sky-300" : "text-muted-foreground")} aria-live="polite" title={reviewing ? "Reviewing (live replay is further on)" : "Replay time (broker server clock)"}>
-      {formatReplayTime(minute)}
-    </span>
+    <div className="mx-1 flex shrink-0 items-center gap-1.5" title="Playback speed: real time between steps (← slower · faster →). It never changes where the replay is.">
+      <Gauge className="size-3.5 shrink-0 text-zinc-600 dark:text-zinc-300" aria-hidden />
+      <input
+        type="range"
+        min={0}
+        max={max}
+        step={1}
+        value={sliderValue}
+        onChange={(e) => onChange(positionToSpeed(max - Number(e.target.value)))}
+        aria-label="Playback speed"
+        aria-valuetext={`${formatSpeed(ms)} per bar`}
+        className="speed-slider w-24 cursor-pointer lg:w-32"
+        style={{ "--fill": `${fill}%` } as React.CSSProperties}
+      />
+      <SpeedValue ms={ms} onChange={onChange} />
+    </div>
   );
 }
 
-function SpeedControl({ ms, onChange }: { ms: number; onChange: (ms: number) => void }) {
+/** The numeric speed; click for presets and a custom value. */
+function SpeedValue({ ms, onChange, compact = false }: { ms: number; onChange: (ms: number) => void; compact?: boolean }) {
   const [custom, setCustom] = useState("");
   return (
     <Popover>
-      <PopoverTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 font-mono text-[11px] text-muted-foreground hover:bg-white/10 hover:text-foreground" aria-label={`Playback speed: one bar every ${fmtSpeed(ms)}`} title="Time between playback bars">
-        <Gauge className="size-3.5" />
-        {fmtSpeed(ms)}
+      <PopoverTrigger
+        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-zinc-300 bg-zinc-100 px-1.5 font-mono text-[11px] font-medium tabular-nums text-zinc-900 hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-white/15 dark:bg-white/10 dark:text-zinc-50 dark:hover:bg-white/20"
+        aria-label={`Playback speed: ${formatSpeed(ms)} per bar. Change`}
+        title="Playback speed (time between steps) — presets and custom"
+      >
+        {compact && <Gauge className="size-3" aria-hidden />}
+        {formatSpeed(ms)}
+        <span className="font-sans text-[10px] font-normal text-zinc-600 dark:text-zinc-300">/bar</span>
       </PopoverTrigger>
-      <PopoverContent side="top" align="center" className="w-52 p-1.5">
-        <p className="px-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">One playback bar every</p>
+      <PopoverContent side="top" align="center" className="w-56 p-2">
+        <p className="pb-1 text-xs font-semibold">Playback speed: {formatSpeed(ms)}/bar</p>
+        <p className="pb-2 text-[11px] text-muted-foreground">Real time between steps. How much market time a step reveals is set by Step.</p>
         <div className="grid grid-cols-3 gap-1">
           {PLAYBACK_SPEEDS_MS.map((s) => (
-            <button key={s} type="button" onClick={() => onChange(s)} aria-pressed={ms === s} className={cn("rounded px-1 py-1 font-mono text-xs", ms === s ? "bg-foreground text-background" : "hover:bg-muted")}>
-              {fmtSpeed(s)}
+            <button key={s} type="button" onClick={() => onChange(s)} aria-pressed={ms === s} className={cn("rounded px-1 py-1 font-mono text-xs", ms === s ? "bg-sky-600 text-white" : "hover:bg-muted")}>
+              {formatSpeed(s)}
             </button>
           ))}
         </div>
         <form
-          className="mt-1.5 flex items-center gap-1 border-t border-border pt-1.5"
+          className="mt-2 flex items-center gap-1 border-t border-border pt-2"
           onSubmit={(e) => {
             e.preventDefault();
-            const v = Math.round(Number(custom));
-            if (Number.isFinite(v)) onChange(Math.min(MAX_SPEED_MS, Math.max(MIN_SPEED_MS, v)));
+            const v = Number(custom);
+            if (Number.isFinite(v) && v > 0) onChange(clampSpeed(v));
+            setCustom("");
           }}
         >
-          <input value={custom} onChange={(e) => setCustom(e.target.value)} inputMode="numeric" placeholder="Custom ms" aria-label="Custom speed in milliseconds" className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs tabular-nums" />
+          <input value={custom} onChange={(e) => setCustom(e.target.value)} inputMode="numeric" placeholder="Custom ms (50–60000)" aria-label="Custom speed in milliseconds" className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs tabular-nums" />
           <button type="submit" className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">Set</button>
         </form>
       </PopoverContent>
@@ -305,26 +281,89 @@ function SpeedControl({ ms, onChange }: { ms: number; onChange: (ms: number) => 
   );
 }
 
-function MoreMenu(p: ReplayBarProps) {
-  const [jump, setJump] = useState(false);
-  const [value, setValue] = useState("");
+/** Playback interval: how much market time each step reveals. Independent of the chart timeframe. */
+function StepSelect({ value, onChange }: { value: PlaybackTimeframe; onChange: (tf: PlaybackTimeframe) => void }) {
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger className={btn} aria-label="More replay actions">
-          <MoreHorizontal className="size-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="end" className="w-56">
-          <DropdownMenuItem
-            onClick={() => {
-              setValue("");
-              setJump(true);
-            }}
-          >
-            Jump to date & time…
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={!p.canMove || p.playing} onClick={p.onNextDay}>Finish the trading day</DropdownMenuItem>
-          <DropdownMenuSeparator />
+    <label className="ml-0.5 inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-sky-600/50 bg-sky-500/10 pl-1.5 text-sky-800 focus-within:ring-2 focus-within:ring-sky-500 dark:border-sky-400/50 dark:text-sky-200" title="Step: market time revealed per playback step (independent of the chart timeframe)">
+      <Footprints className="size-3.5" aria-hidden />
+      <span className="text-[10px] font-semibold uppercase tracking-wide">Step</span>
+      <select
+        aria-label="Playback interval (market time per step)"
+        value={value}
+        onChange={(e) => onChange(e.target.value as PlaybackTimeframe)}
+        className="h-full w-[3.25rem] cursor-pointer rounded-r-md bg-transparent pr-1 font-mono text-[11px] font-semibold text-inherit outline-none"
+      >
+        {PLAYBACK_INTERVALS.map((i) => {
+          const ok = intervalAvailable(i, DATA_RESOLUTION_SECONDS);
+          return (
+            <option key={i.id} value={i.timeframe ?? i.id} disabled={!ok} className="bg-white text-zinc-900 dark:bg-[#262a31] dark:text-zinc-100">
+              {i.label}
+              {ok ? "" : " (no second data)"}
+            </option>
+          );
+        })}
+      </select>
+    </label>
+  );
+}
+
+function TimeLabel({ minute, reviewing }: { minute: number; reviewing: boolean }) {
+  return (
+    <span className={cn("hidden shrink-0 whitespace-nowrap px-1 font-mono text-[11px] font-medium tabular-nums md:inline", reviewing ? "text-sky-700 dark:text-sky-300" : "text-zinc-800 dark:text-zinc-100")} aria-live="polite" title={reviewing ? "Reviewing (the live replay is further on)" : "Replay time (broker server clock)"}>
+      {formatReplayTime(minute)}
+    </span>
+  );
+}
+
+/** Historical navigation: jump to a date & time. Separate from speed by design. */
+function JumpTo(p: ReplayBarProps) {
+  const [value, setValue] = useState("");
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setValue(p.reviewMinute != null || p.clockMinute != null ? formatWallClock((p.reviewMinute ?? p.clockMinute)!) : "");
+      }}
+    >
+      <PopoverTrigger className={ICON_BTN} disabled={!p.clockMinute || p.playing} aria-label="Jump to date and time" title="Jump to a date & time">
+        <CalendarClock className="size-3.5" />
+      </PopoverTrigger>
+      <PopoverContent side="top" align="center" className="w-64 p-2">
+        <form
+          className="space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const m = parseWallClock(value);
+            if (m != null) p.onGoTo(m);
+            setOpen(false);
+          }}
+        >
+          <p className="text-xs font-semibold">Jump to (server time)</p>
+          <input type="datetime-local" autoFocus value={value} onChange={(e) => setValue(e.target.value)} aria-label="Jump to (server time)" className="h-8 w-full rounded-md border border-border bg-background px-1.5 text-xs tabular-nums" />
+          <p className="text-[11px] text-muted-foreground">Earlier than now: review what&apos;s already revealed. Later: the replay moves forward to the first bar at that time.</p>
+          <button type="submit" className="w-full rounded-md bg-sky-600 py-1 text-xs font-medium text-white hover:bg-sky-500">Go</button>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function MoreMenu(p: ReplayBarProps) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger className={ICON_BTN} aria-label="More replay actions">
+        <MoreHorizontal className="size-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="end" className="w-60">
+        <DropdownMenuItem disabled={!p.clockMinute || p.playing} onClick={p.onPrevCandle}>
+          Back to the previous {p.chartTf} candle (Shift+←)
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={!p.canMove || p.playing} onClick={p.onNextDay}>Finish the trading day</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {/* Base UI: a menu label must live inside a group. */}
+        <DropdownMenuGroup>
           <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Toolbar</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={p.settings.bar.mode} onValueChange={(v) => p.onBar({ mode: v as ReplayBarSettings["mode"] })}>
             <DropdownMenuRadioItem value="floating">Floating</DropdownMenuRadioItem>
@@ -333,23 +372,8 @@ function MoreMenu(p: ReplayBarProps) {
           </DropdownMenuRadioGroup>
           <DropdownMenuItem onClick={() => p.onBar({ mode: "floating", x: 0.5, y: 0.9, pinned: false, collapsed: false })}>Reset position</DropdownMenuItem>
           <DropdownMenuItem onClick={() => p.onBar({ visible: false })}>Hide toolbar</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {jump && (
-        <form
-          className="absolute bottom-full right-0 mb-2 flex items-center gap-1 rounded-md border border-white/10 bg-[#1b1c20] p-1.5 shadow-lg"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const m = parseWallClock(value);
-            if (m != null) p.onGoTo(m);
-            setJump(false);
-          }}
-        >
-          <input type="datetime-local" autoFocus value={value} onChange={(e) => setValue(e.target.value)} aria-label="Jump to (server time)" className="h-7 rounded-md border border-white/10 bg-transparent px-1.5 text-xs tabular-nums" />
-          <button type="submit" className="rounded-md bg-white/10 px-2 py-1 text-xs hover:bg-white/20">Go</button>
-          <button type="button" onClick={() => setJump(false)} className="px-1 text-xs text-muted-foreground">Cancel</button>
-        </form>
-      )}
-    </>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
