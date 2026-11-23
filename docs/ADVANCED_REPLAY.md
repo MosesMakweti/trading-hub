@@ -79,6 +79,15 @@ Setting: **Sync position drawing with order entry** (`ws.trading.syncPositionDra
   - Prop Firm accounts can't be deleted, because fees, breaches and payouts are append-only financial records. `deleteSimAccount` refuses them as well. They can be archived.
 - **Access control:** every operation is owner-scoped on the server, and the kind must match the row. A test checks that another user can't list, rename, archive, duplicate, inspect or delete a session.
 
+### 5.1 Deleting, bulk actions and the open session
+
+- **Rows** show instrument, historical period, replay position, created and modified dates, status, trades and a performance summary (net result from the ledger, closed trades, win rate, open positions). Sort by "Best result" is available.
+- **Delete** asks "Delete Backtesting Session?" with the session name and what goes with it; **Cancel** has focus, so Enter or a stray click never deletes. One request at a time; a second request for a session that's already gone answers `gone` (the same as for a session that was never the user's), and the row is dropped instead of showing an error.
+- **Lab deletes** are one statement scoped by owner (`deleteMany where id, userId, product`), so the database cascade (orders, fills, positions, ledger, events, pins, drawings) is atomic; a failure deletes nothing (tested with an injected DB error).
+- **Bulk** archive/restore/delete: the whole selection is validated first (owned, kind matches, no Prop Firm in a delete) and refused as a whole otherwise. Archive/restore run in one transaction; Lab deletes in one transaction; legacy runs then go through the existing run delete (its own transaction + media cleanup after commit). Max 100 per request; duplicates ignored.
+- **The open session** has a session menu in the terminal header (All sessions / Archive / Delete). Before the confirmation shows, the terminal is quiesced: playback stopped and its last responses settled, new steps blocked, in-flight drawing saves awaited (≤3 s, with a warning if any are still running); late responses are ignored and late errors silenced. After deletion the trader is taken to the library. On the server, any late request for the deleted account (step, order, drawing save) fails and recreates nothing (tested).
+- **Chart and playback timeframes** are workspace settings (per user, not per session), so the library doesn't list them per session.
+
 ## 6. Limits
 
 - No sub-minute playback. The data is M1, and seconds or ticks are never simulated.

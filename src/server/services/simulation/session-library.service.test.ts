@@ -11,10 +11,13 @@ import { createBacktestRunSchema } from "@/lib/validation/backtesting";
 import { createBacktestRun } from "@/server/services/backtest-run.service";
 import { saveSimDrawing } from "@/server/services/charting/sim-drawing.service";
 import { createLabAccount, deleteSimAccount, startSimClock } from "./sim-account.service";
-import { placeOrder } from "./sim-execution.service";
+import { closePosition, placeOrder } from "./sim-execution.service";
+import { advanceSimClock } from "./sim-clock.service";
+import { saveDrawing as saveRunDrawing, listDrawings as listRunDrawings } from "@/server/services/native-replay/chart-drawing.service";
+import { SimNotFoundError } from "./sim-account.service";
 import { createFirmModel, purchaseChallenge } from "./sim-prop.service";
 import { addSetup, createStudy, getStudyDetail, recordObservation } from "./sim-study.service";
-import { applyLibraryQuery, deleteSession, deletionImpact, duplicateLabAccount, listLibrary, renameSession, setSessionArchived, type LibrarySession } from "./session-library.service";
+import { applyLibraryQuery, bulkDelete, bulkSetArchived, deleteSession, deletionImpact, duplicateLabAccount, listLibrary, renameSession, setSessionArchived, type LibrarySession } from "./session-library.service";
 
 const userIds: string[] = [];
 afterAll(() => deleteTestUsers(...userIds));
@@ -118,7 +121,7 @@ describe("session library", () => {
 describe("applyLibraryQuery", () => {
   const s = (id: string, over: Partial<LibrarySession>): LibrarySession => ({
     kind: "LAB", id, name: id, status: "ACTIVE", archived: false, assets: ["EURUSD"], periodStart: "2024-01-01", periodEnd: "2024-01-31", clock: null,
-    createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z", counts: { trades: 0, orders: 0, drawings: 0, observations: 0 }, href: "", can: { rename: true, duplicate: true, archive: true, delete: true }, deleteNote: null, ...over,
+    createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z", counts: { trades: 0, orders: 0, drawings: 0, observations: 0 }, performance: null, href: "", can: { rename: true, duplicate: true, archive: true, delete: true }, deleteNote: null, ...over,
   });
   const list = [s("beta", { updatedAt: "2024-03-01T00:00:00Z", counts: { trades: 5, orders: 0, drawings: 0, observations: 0 } }), s("Alpha", { kind: "PROP", assets: ["XAUUSD"] }), s("gamma", { archived: true })];
   it("filters by scope, kind and text (name or instrument) and sorts", () => {
@@ -130,3 +133,127 @@ describe("applyLibraryQuery", () => {
     expect(applyLibraryQuery(list, { sort: "trades" })[0].id).toBe("beta");
   });
 });
+
+const drawingOf = (id: string) => ({ id, type: "HLINE" as const, assetSymbol: "EURUSD", anchors: [{ time: 1, price: 1.08 }], style: { color: "#8ab4f8", width: 1 as const, dash: "solid" as const, opacity: 1 }, data: {}, locked: false, hidden: false });
+const childCounts = async (accountId: string) => ({
+  orders: await prisma.simOrder.count({ where: { accountId } }),
+  fills: await prisma.simFill.count({ where: { accountId } }),
+  positions: await prisma.simPosition.count({ where: { accountId } }),
+  ledger: await prisma.simLedgerEntry.count({ where: { accountId } }),
+  events: await prisma.simEvent.count({ where: { accountId } }),
+  pins: await prisma.simDatasetPin.count({ where: { accountId } }),
+  drawings: await prisma.simChartDrawing.count({ where: { accountId } }),
+});
+
+describe("session deletion — dependent data, integrity and races", () => {
+  it("a session with many trades: every dependent row goes; other sessions, datasets and other users are untouched; performance is listed", async () => {
+    const { userId, lab, datasets } = await setup("many");
+    const other = await createLabAccount(userId, { name: "Keep me", datasets, periodStart: "2024-05-14", periodEnd: "2024-05-14", startingBalance: 5000, currency: "USD" });
+    const stranger = await setup("many-other");
+    await startSimClock(userId, lab.id);
+    for (let i = 0; i < 25; i++) {
+      const o = await placeOrder(userId, lab.id, { symbol: "EURUSD", side: i % 2 ? "SELL" : "BUY", type: "MARKET", sizing: { mode: "QUANTITY", quantity: "0.1" } });
+      await closePosition(userId, lab.id, o.positionId!, {});
+    }
+    await saveSimDrawing(userId, lab.id, drawingOf("many-draw-1"));
+    await saveSimDrawing(userId, other.id, drawingOf("many-draw-2"));
+
+    const row = (await listLibrary(userId, { scope: "all" })).find((s) => s.id === lab.id)!;
+    expect(row.counts.trades).toBe(25);
+    expect(row.performance).toMatchObject({ currency: "USD", closedTrades: 25, openPositions: 0 });
+    expect(typeof row.performance!.netResult).toBe("number");
+
+    const before = await childCounts(lab.id);
+    expect(before.orders).toBeGreaterThanOrEqual(25);
+    expect(before.fills).toBeGreaterThanOrEqual(50);
+    const keep = await childCounts(other.id);
+    await deleteSession(userId, "LAB", lab.id);
+    expect(await childCounts(lab.id)).toEqual({ orders: 0, fills: 0, positions: 0, ledger: 0, events: 0, pins: 0, drawings: 0 });
+    expect(await childCounts(other.id)).toEqual(keep); // the user's other session
+    expect(await prisma.simAccount.findUnique({ where: { id: stranger.lab.id } })).not.toBeNull(); // another user's
+    expect(await prisma.historicalDataset.count({ where: { id: datasets[0].datasetId } })).toBe(1); // shared dataset kept
+  });
+
+  it("a session with no trades deletes cleanly", async () => {
+    const { userId, lab } = await setup("empty");
+    expect(await deletionImpact(userId, "LAB", lab.id)).toMatchObject({ trades: 0, orders: 0, drawings: 0, allowed: true });
+    await deleteSession(userId, "LAB", lab.id);
+    expect(await prisma.simAccount.findUnique({ where: { id: lab.id } })).toBeNull();
+  });
+
+  it("a database failure deletes nothing", async () => {
+    const { userId, lab } = await setup("fail");
+    await saveSimDrawing(userId, lab.id, drawingOf("fail-draw-1"));
+    const before = await childCounts(lab.id);
+    const spy = vi.spyOn(prisma.simAccount, "deleteMany").mockRejectedValueOnce(new Error("connection reset"));
+    await expect(deleteSession(userId, "LAB", lab.id)).rejects.toThrow(/connection reset/);
+    spy.mockRestore();
+    expect(await prisma.simAccount.findUnique({ where: { id: lab.id } })).not.toBeNull();
+    expect(await childCounts(lab.id)).toEqual(before);
+  });
+
+  it("duplicate delete requests: exactly one succeeds, the other is 'not found' — nothing else happens", async () => {
+    const { userId, lab, datasets } = await setup("dup");
+    const sibling = await createLabAccount(userId, { name: "Sibling", datasets, periodStart: "2024-05-14", periodEnd: "2024-05-14", startingBalance: 1000, currency: "USD" });
+    const results = await Promise.allSettled([deleteSession(userId, "LAB", lab.id), deleteSession(userId, "LAB", lab.id)]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect(rejected.reason).toBeInstanceOf(SimNotFoundError);
+    await expect(deleteSession(userId, "LAB", lab.id)).rejects.toBeInstanceOf(SimNotFoundError);
+    expect(await prisma.simAccount.findUnique({ where: { id: sibling.id } })).not.toBeNull();
+  });
+
+  it("an open session deleted mid-replay: late steps, orders and drawing saves fail and recreate nothing", async () => {
+    const { userId, lab } = await setup("open");
+    await startSimClock(userId, lab.id);
+    await deleteSession(userId, "LAB", lab.id);
+    await expect(advanceSimClock(userId, lab.id, { kind: "BARS", count: 1 })).rejects.toThrow();
+    await expect(placeOrder(userId, lab.id, { symbol: "EURUSD", side: "BUY", type: "MARKET", sizing: { mode: "QUANTITY", quantity: "1" } })).rejects.toThrow();
+    await expect(saveSimDrawing(userId, lab.id, drawingOf("late-draw-1"))).rejects.toThrow();
+    expect(await childCounts(lab.id)).toEqual({ orders: 0, fills: 0, positions: 0, ledger: 0, events: 0, pins: 0, drawings: 0 });
+  });
+
+  it("a legacy run with drawings is deleted with them", async () => {
+    const { userId } = await setup("legacy");
+    const run = await createBacktestRun(userId, createBacktestRunSchema.parse({ name: "Old run", assets: ["EURUSD"], startDate: "2024-01-01", endDate: "2024-01-31", tradingWeekdays: [1, 2, 3, 4, 5] }));
+    await saveRunDrawing(userId, run.id, { ...drawingOf("8f0c1d1e-0000-4000-8000-000000000001") });
+    expect(await listRunDrawings(userId, run.id, "EURUSD")).toHaveLength(1);
+    expect((await deletionImpact(userId, "LEGACY", run.id)).drawings).toBe(1);
+    await deleteSession(userId, "LEGACY", run.id);
+    expect(await prisma.backtestRun.findUnique({ where: { id: run.id } })).toBeNull();
+    expect(await prisma.replayChartDrawing.count({ where: { backtestRunId: run.id } })).toBe(0);
+  });
+});
+
+describe("bulk archive / restore / delete", () => {
+  it("archives and restores several at once; deletes several (Lab + legacy) at once", async () => {
+    const { userId, lab, datasets } = await setup("bulk");
+    const lab2 = await createLabAccount(userId, { name: "B2", datasets, periodStart: "2024-05-14", periodEnd: "2024-05-14", startingBalance: 1000, currency: "USD" });
+    const run = await createBacktestRun(userId, createBacktestRunSchema.parse({ name: "Bulk run", assets: ["EURUSD"], startDate: "2024-01-01", endDate: "2024-01-31", tradingWeekdays: [1, 2, 3, 4, 5] }));
+    const refs = [{ kind: "LAB" as const, id: lab.id }, { kind: "LAB" as const, id: lab2.id }, { kind: "LEGACY" as const, id: run.id }];
+    expect(await bulkSetArchived(userId, refs, true)).toBe(3);
+    expect((await listLibrary(userId, { scope: "archived" })).map((s) => s.id).sort()).toEqual([lab.id, lab2.id, run.id].sort());
+    expect(await bulkSetArchived(userId, refs, false)).toBe(3);
+    expect((await listLibrary(userId, { scope: "archived" }))).toHaveLength(0);
+    expect(await prisma.backtestRun.findUniqueOrThrow({ where: { id: run.id } })).toMatchObject({ archivedAt: null });
+
+    expect(await bulkDelete(userId, [...refs, refs[0]])).toBe(3); // duplicates in the selection are ignored
+    expect(await prisma.simAccount.count({ where: { id: { in: [lab.id, lab2.id] } } })).toBe(0);
+    expect(await prisma.backtestRun.count({ where: { id: run.id } })).toBe(0);
+  });
+
+  it("refuses the whole batch if any session isn't the user's or is a Prop Firm account — nothing is deleted", async () => {
+    const a = await setup("bulk-a");
+    const b = await setup("bulk-b");
+    await expect(bulkDelete(a.userId, [{ kind: "LAB", id: a.lab.id }, { kind: "LAB", id: b.lab.id }])).rejects.toThrow();
+    await expect(bulkSetArchived(a.userId, [{ kind: "LAB", id: a.lab.id }, { kind: "LAB", id: b.lab.id }], true)).rejects.toThrow();
+    expect(await prisma.simAccount.findUniqueOrThrow({ where: { id: a.lab.id } })).toMatchObject({ archivedAt: null });
+
+    const model = await createFirmModel(a.userId, MODEL);
+    const { account: prop } = await purchaseChallenge(a.userId, { modelRef: model.id, accountSize: 10_000, datasets: a.datasets, periodStart: "2024-05-14", periodEnd: "2024-05-14" });
+    await expect(bulkDelete(a.userId, [{ kind: "LAB", id: a.lab.id }, { kind: "PROP", id: prop.id }])).rejects.toThrow(/financial records/);
+    expect(await prisma.simAccount.count({ where: { id: { in: [a.lab.id, prop.id, b.lab.id] } } })).toBe(3);
+    await expect(bulkDelete(a.userId, [])).rejects.toThrow(/at least one/);
+  });
+});
+

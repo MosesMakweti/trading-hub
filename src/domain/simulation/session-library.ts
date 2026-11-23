@@ -9,6 +9,16 @@ export interface SessionCounts {
   observations: number;
 }
 
+/** Results so far (simulated accounts; legacy runs have none here). */
+export interface SessionPerformance {
+  currency: string;
+  /** Balance − starting balance, from the ledger (closed trades and costs). */
+  netResult: number;
+  closedTrades: number;
+  wins: number;
+  openPositions: number;
+}
+
 export interface LibrarySession {
   kind: SessionKind;
   id: string;
@@ -24,6 +34,7 @@ export interface LibrarySession {
   createdAt: string;
   updatedAt: string;
   counts: SessionCounts;
+  performance: SessionPerformance | null;
   href: string;
   /** What the trader may do with it. */
   can: { rename: boolean; duplicate: boolean; archive: boolean; delete: boolean };
@@ -36,7 +47,7 @@ export interface LibraryQuery {
   kind?: SessionKind | "ALL";
   /** "active" (not archived), "archived", or "all". */
   scope?: "active" | "archived" | "all";
-  sort?: "updated" | "created" | "name" | "trades";
+  sort?: "updated" | "created" | "name" | "trades" | "result";
 }
 
 /** Pure filter + sort. */
@@ -55,6 +66,7 @@ export function applyLibraryQuery(list: LibrarySession[], query: LibraryQuery): 
     created: (a, b) => b.createdAt.localeCompare(a.createdAt),
     name: (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
     trades: (a, b) => b.counts.trades - a.counts.trades || b.updatedAt.localeCompare(a.updatedAt),
+    result: (a, b) => (b.performance?.netResult ?? -Infinity) - (a.performance?.netResult ?? -Infinity) || b.updatedAt.localeCompare(a.updatedAt),
   };
   return out.sort(by[sort]);
 }

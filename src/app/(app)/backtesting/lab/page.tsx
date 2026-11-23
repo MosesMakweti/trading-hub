@@ -7,6 +7,7 @@ import { SimulationBadge } from "@/components/backtesting/simulation-badge";
 import { SimulationNav } from "@/components/simulation/simulation-nav";
 import { SimAccountCard } from "@/components/simulation/account-card";
 import { CreateLabAccountDialog } from "@/components/simulation/create-lab-account-dialog";
+import { ButtonLink } from "@/components/backtesting/button-link";
 
 /** Strategy Lab — the trader's backtest accounts. */
 export default async function StrategyLabPage() {
@@ -32,7 +33,10 @@ export default async function StrategyLabPage() {
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Strategy Lab</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">Backtest a strategy bar by bar with a simulated account: real order types, stops and targets, commissions and swaps, all on historical MT5 data.</p>
         </div>
-        <CreateLabAccountDialog datasets={datasetOptions} strategies={strategyOptions} />
+        <div className="flex items-center gap-2">
+          <ButtonLink href="/backtesting/sessions" variant="outline" size="sm">Manage sessions</ButtonLink>
+          <CreateLabAccountDialog datasets={datasetOptions} strategies={strategyOptions} />
+        </div>
       </div>
       <SimulationNav />
       {groups.length === 0 ? (
