@@ -115,3 +115,70 @@ describe("session jumps", () => {
     expect(await reviewTarget(feeds, now, now, periodMinutes(acc).from, { kind: "SEEK", to: now + 10, align: "AT_OR_AFTER" })).toBeNull();
   });
 });
+
+describe("acceptance: playback interval × chart timeframe (independent controls)", () => {
+  let u2 = "";
+  let a2 = "";
+  beforeAll(async () => {
+    const u = await createTestUser("sim-playback-accept");
+    userIds.push(u.id);
+    u2 = u.id;
+    const ds = await importHistoricalDataset(u.id, { bytes: new TextEncoder().encode(syntheticMt5Export({ startDay: "2024-05-13", days: 3 }).text), fileName: "EURUSD_M1_202405130000_202405152359.csv" });
+    const acct = await createLabAccount(u.id, { name: "Accept", datasets: [{ assetSymbol: "EURUSD", datasetId: ds.id }], periodStart: "2024-05-13", periodEnd: "2024-05-15", startingBalance: 10000, currency: "USD" });
+    a2 = acct.id;
+    await startSimClock(u.id, acct.id);
+  });
+  const now2 = async () => (await prisma.simAccount.findUniqueOrThrow({ where: { id: a2 } })).currentMinute!;
+  const step = (tf: "M1" | "M5" | "H1") => advanceSimClock(u2, a2, { kind: "CANDLE", timeframe: tf });
+  const last = async (tf: "M30" | "H1" | "M1") => {
+    const c = await getSimCandles(u2, a2, { symbol: "EURUSD", timeframe: tf, limit: 5 });
+    return c.candles[c.candles.length - 1];
+  };
+  /** Every revealed M1 bar, in order — to prove nothing was skipped or duplicated. */
+  const revealed = async () => (await getSimCandles(u2, a2, { symbol: "EURUSD", timeframe: "M1", limit: 5000 })).candles.map((b) => b.minute);
+
+  it("B: 5-minute steps — six steps complete a 30-minute candle, which forms between", async () => {
+    // Line up on a closed 30-minute candle first.
+    while ((await now2()) % 30 !== 29) await step("M1");
+    const base = await now2();
+    for (let k = 1; k <= 6; k++) {
+      await step("M5");
+      expect(await now2()).toBe(base + 5 * k);
+      const c = await last("M30");
+      expect(c.minute).toBe(base + 1);
+      expect(c.state).toBe(k === 6 ? "COMPLETED" : "FORMING");
+    }
+  });
+
+  it("C/A: 1-minute steps — an hour candle forms over 60 steps; a 30-minute one over 30", async () => {
+    while ((await now2()) % 60 !== 59) await step("M1");
+    const base = await now2();
+    for (let k = 1; k <= 60; k++) {
+      await step("M1");
+      expect(await now2()).toBe(base + k);
+      const h = await last("H1");
+      expect(h.minute).toBe(base + 1);
+      expect(h.state).toBe(k === 60 ? "COMPLETED" : "FORMING");
+      const m30 = await last("M30");
+      expect(m30.state).toBe(k === 30 || k === 60 ? "COMPLETED" : "FORMING");
+    }
+  });
+
+  it("E: switching the interval mid-play continues from the current position, to the next boundary of the new interval, skipping nothing", async () => {
+    const before = await now2();
+    await step("M1");
+    await step("M1");
+    await step("M1");
+    expect(await now2()).toBe(before + 3);
+    await step("M5"); // next step uses the new interval: to the end of the 5-minute bucket after the current minute
+    const after = await now2();
+    expect(after).toBe(bucketStart(before + 4, "M5") + 4);
+    expect(after - (before + 3)).toBeLessThanOrEqual(5);
+    // Contiguous, no duplicates, nothing beyond the clock.
+    const ms = await revealed();
+    expect(new Set(ms).size).toBe(ms.length);
+    expect(ms[ms.length - 1]).toBe(after);
+    for (let i = 1; i < ms.length; i++) if (ms[i] - ms[i - 1] !== 1) expect(Math.floor(ms[i] / 1440)).not.toBe(Math.floor(ms[i - 1] / 1440)); // gaps only between days of data
+  });
+});
+

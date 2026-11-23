@@ -143,7 +143,6 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
     replayRef.current = ws.replay;
   }, [ws.replay]);
   const periodFrom = parseWallClock(`${state.period.start}T00:00`) ?? 0;
-  const periodTo = (parseWallClock(`${state.period.end}T00:00`) ?? 0) + 1439;
   const mainRef = useRef<HTMLElement>(null);
   useEffect(() => {
     void listTradingSessionsAction().then((r) => r.success && setCustomSessions(r.sessions));
@@ -780,8 +779,6 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
               onSettings={(patch) => updateWs((w) => ({ ...w, replay: { ...w.replay, ...patch } }))}
               onBar={(patch) => updateWs((w) => ({ ...w, replay: { ...w.replay, bar: { ...w.replay.bar, ...patch } } }))}
               clockMinute={state.clock?.minute ?? null}
-              periodFrom={periodFrom}
-              periodTo={periodTo}
               reviewMinute={review}
               chartTf={timeframe}
               playing={playing}

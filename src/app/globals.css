@@ -515,24 +515,44 @@
   }
 }
 
-/* Replay toolbar timeline slider */
-.replay-slider::-webkit-slider-thumb {
+/* Replay toolbar: playback SPEED slider (not a timeline). --fill = filled part. */
+.speed-slider {
+  --track: #d4d4d8;
+  --accent: #0284c7;
+  --thumb: #ffffff;
   appearance: none;
-  width: 12px;
-  height: 12px;
+  height: 6px;
   border-radius: 9999px;
-  background: #e6e8ec;
-  border: 2px solid #1b1c20;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+  background: linear-gradient(to right, var(--accent) var(--fill, 50%), var(--track) var(--fill, 50%));
 }
-.replay-slider::-moz-range-thumb {
+.dark .speed-slider {
+  --track: rgba(255, 255, 255, 0.22);
+  --accent: #38bdf8;
+  --thumb: #ffffff;
+}
+.speed-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--thumb);
+  border: 3px solid var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  cursor: grab;
+}
+.speed-slider::-moz-range-thumb {
   width: 10px;
   height: 10px;
   border-radius: 9999px;
-  background: #e6e8ec;
-  border: 2px solid #1b1c20;
+  background: var(--thumb);
+  border: 3px solid var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  cursor: grab;
 }
-.replay-slider:focus-visible {
-  outline: 2px solid rgba(138, 180, 248, 0.8);
-  outline-offset: 3px;
+.speed-slider:active::-webkit-slider-thumb {
+  cursor: grabbing;
+}
+.speed-slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
 }

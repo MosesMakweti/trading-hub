@@ -52,4 +52,33 @@ describe("playback scheduler", () => {
     p = planPlayback(c, 500);
     expect(p).toMatchObject({ kind: "step", count: 1 });
   });
+
+  it("scenario D: 500 ms → 100 ms while playing keeps every bar exactly once, at the new pace", () => {
+    // Player loop with a speed change at t=3000 (as the terminal does: re-read the speed each tick).
+    let c = startPlayback(0, 500);
+    let now = 0;
+    const at: number[] = []; // time each bar was requested
+    while (now < 6000) {
+      if (now >= 3000 && c.intervalMs !== 100) c = changeSpeed(c, now, 100);
+      const p = planPlayback(c, now);
+      if (p.kind === "wait") {
+        now += Math.min(p.ms, 50);
+        continue;
+      }
+      for (let k = 0; k < p.count; k++) at.push(now);
+      c = p.clock;
+      now += 5; // request cost
+    }
+    // Bars are numbered by `done`: one request per bar index, never repeated or skipped.
+    expect(c.done).toBe(at.length);
+    const before = at.filter((t) => t < 3000);
+    const after = at.filter((t) => t >= 3000);
+    expect(before.length).toBe(6); // 0, 500, …, 2500
+    // After the change: ~one bar per 100 ms (first one 100 ms after the change), no burst.
+    expect(after.length).toBeGreaterThanOrEqual(29);
+    expect(after.length).toBeLessThanOrEqual(31);
+    expect(after[0]).toBeGreaterThanOrEqual(3000 + 100 - 5);
+    for (let i = 1; i < after.length; i++) expect(after[i] - after[i - 1]).toBeGreaterThanOrEqual(90);
+  });
 });
+
