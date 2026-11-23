@@ -13,7 +13,7 @@
  */
 import { MAX_SPEED_MS, MIN_SPEED_MS, type PlaybackTimeframe } from "./workspace";
 
-export const SPEED_STOPS_MS = [50, 75, 100, 150, 200, 250, 300, 400, 500, 600, 750, 1000, 1250, 1500, 2000, 2500, 3000, 4000, 5000, 7500, 10_000, 15_000, 20_000, 30_000, 60_000] as const;
+export const SPEED_STOPS_MS = [5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 250, 300, 400, 500, 600, 750, 1000, 1250, 1500, 2000, 2500, 3000, 4000, 5000, 7500, 10_000, 15_000, 20_000, 30_000, 60_000] as const;
 
 export const clampSpeed = (ms: number) => Math.min(MAX_SPEED_MS, Math.max(MIN_SPEED_MS, Math.round(ms)));
 

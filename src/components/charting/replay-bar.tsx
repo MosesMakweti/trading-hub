@@ -273,7 +273,7 @@ function SpeedValue({ ms, onChange, compact = false }: { ms: number; onChange: (
             setCustom("");
           }}
         >
-          <input value={custom} onChange={(e) => setCustom(e.target.value)} inputMode="numeric" placeholder="Custom ms (50–60000)" aria-label="Custom speed in milliseconds" className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs tabular-nums" />
+          <input value={custom} onChange={(e) => setCustom(e.target.value)} inputMode="numeric" placeholder="Custom ms (5–60000)" aria-label="Custom speed in milliseconds" className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs tabular-nums" />
           <button type="submit" className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">Set</button>
         </form>
       </PopoverContent>
