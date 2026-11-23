@@ -416,7 +416,7 @@ function drawOne(ctx: CanvasRenderingContext2D, d: ChartDrawing, view: DrawView,
       });
       label(ctx, `SL ${fmt(p.stop, view.priceScale)} · −${fmt(calc.risk, view.priceScale)} (${calc.riskPoints} pts${calc.riskPips != null ? `, ${calc.riskPips} pips` : ""}) · 1R`, right - 2, yS + (d.type === "LONG" ? 10 : -10), view, { align: "right", color: BAD });
       const head = calc.valid
-        ? `${d.type === "LONG" ? "Long" : "Short"} ${fmt(p.entry, view.priceScale)} · R:R 1:${calc.targets[0].rr}${p.targets.length > 1 ? ` … 1:${calc.targets[calc.targets.length - 1].rr}` : ""}${d.linkedTradeId ? " · in Trade Idea" : ""}`
+        ? `${d.type === "LONG" ? "Long" : "Short"} ${fmt(p.entry, view.priceScale)} · R:R 1:${calc.targets[0].rr}${p.targets.length > 1 ? ` … 1:${calc.targets[calc.targets.length - 1].rr}` : ""}${d.linkedTradeId ? " · in Trade Idea" : ""}${d.data.orderRef ? ` · ${d.data.orderRef.status === "FILLED" ? "executed" : "order placed"}` : ""}`
         : `Invalid: ${calc.issues[0]}`;
       label(ctx, head, left + 2, yE + (d.type === "LONG" ? 10 : -10), view, { color: calc.valid ? undefined : BAD });
       handles.push({ x: right, y: yE }, { x: right, y: yS }, { x: left, y: yE });

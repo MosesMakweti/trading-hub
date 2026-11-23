@@ -55,6 +55,8 @@ export const orderSchema = z
     expiresMinute: z.number().int().nullish(),
     clientRequestId: id.nullish(),
     note: z.string().trim().max(2000).nullish(),
+    /** A position drawing this order was drafted from (checked and linked server-side). */
+    drawingId: z.string().regex(/^[A-Za-z0-9-]{8,64}$/).nullish(),
   })
   .refine((v) => v.type === "MARKET" || (v.price != null && v.price !== ""), { message: "A pending order needs a price.", path: ["price"] });
 

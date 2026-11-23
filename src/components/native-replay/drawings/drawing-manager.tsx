@@ -16,6 +16,7 @@ export function DrawingManager({
   onToggleLock,
   onDelete,
   onClose,
+  badgeFor,
 }: {
   drawings: readonly ChartDrawing[];
   selectedId: string | null;
@@ -25,6 +26,8 @@ export function DrawingManager({
   onToggleLock: (id: string) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
+  /** Optional status chip per drawing (e.g. order link state). */
+  badgeFor?: (d: ChartDrawing) => { label: string; tone: "muted" | "info" | "good" } | null;
 }) {
   return (
     <section aria-label="Drawings" className="absolute bottom-3 left-2 z-30 w-64 rounded-lg border border-border bg-card/95 text-xs shadow-sm backdrop-blur-sm">
@@ -45,6 +48,10 @@ export function DrawingManager({
                 <button type="button" className={cn("flex min-w-0 flex-1 items-center gap-1.5 text-left", d.hidden && "text-muted-foreground")} onClick={() => onSelect(d.id)} disabled={d.hidden}>
                   <Icon className="size-3.5 shrink-0" style={{ color: d.style.color }} />
                   <span className="truncate">{d.type === "TEXT" ? d.data.text || "Note" : TOOLS[d.type].label}</span>
+                  {(() => {
+                    const b = badgeFor?.(d);
+                    return b ? <span className={cn("shrink-0 rounded px-1 text-[10px]", b.tone === "good" ? "bg-emerald-500/15 text-emerald-400" : b.tone === "info" ? "bg-sky-500/15 text-sky-300" : "bg-muted text-muted-foreground")}>{b.label}</span> : null;
+                  })()}
                 </button>
                 <button type="button" disabled={readOnly} onClick={() => onToggleHidden(d.id)} aria-label={d.hidden ? "Show drawing" : "Hide drawing"} className="text-muted-foreground hover:text-foreground disabled:opacity-40">
                   {d.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}

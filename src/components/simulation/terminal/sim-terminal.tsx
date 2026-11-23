@@ -11,7 +11,9 @@ import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { parseWallClock } from "@/domain/native-replay/wall-clock";
 import { REPLAY_TIMEFRAMES, type ReplayTimeframe } from "@/domain/native-replay/timeframes";
-import { advanceSimClockAction, getSimAccountStateAction, getSimCandlesAction, reviewTargetAction, startSimClockAction } from "@/actions/simulation.actions";
+import { advanceSimClockAction, cancelSimOrderAction, getSimAccountStateAction, getSimCandlesAction, reviewTargetAction, startSimClockAction } from "@/actions/simulation.actions";
+import { isPositionDrawing, linkStatus, positionFromTicket, samePosition, LINK_LABEL } from "@/domain/charting/order-sync";
+import type { InstrumentEconomics, TicketLink } from "./order-ticket";
 import { formatReplayTime } from "@/domain/native-replay/chart-time";
 import { changeSpeed, planPlayback, startPlayback } from "@/domain/charting/playback-scheduler";
 import { ReplayBar } from "@/components/charting/replay-bar";
@@ -103,6 +105,13 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const [customSessions, setCustomSessions] = useState<SessionDef[]>([]);
   const [sessionEditor, setSessionEditor] = useState(false);
   const lastMoveRef = useRef<{ moved: boolean; toMinute: number } | null>(null);
+  /** The position drawing linked to the order ticket (stable across selection changes). */
+  const [linkedId, setLinkedId] = useState<string | null>(null);
+  const linkedIdRef = useRef(linkedId);
+  useEffect(() => {
+    linkedIdRef.current = linkedId;
+  }, [linkedId]);
+  const [economics, setEconomics] = useState<{ symbol: string; value: InstrumentEconomics | null } | null>(null);
   // Live sizes while dragging (committed to the workspace on release).
   const [rightWidth, setRightWidth] = useState(ws.panels.right.width);
   const [bottomHeight, setBottomHeight] = useState(ws.panels.bottom.height);
@@ -119,6 +128,13 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   }, [timeframe]);
 
   const quote = state.quotes.find((q) => q.symbol === symbol);
+  useEffect(() => {
+    let live = true;
+    void getInstrumentPointValueAction({ accountId: state.id, symbol }).then((r) => live && setEconomics({ symbol, value: r.success && r.value ? r.value : null }));
+    return () => {
+      live = false;
+    };
+  }, [state.id, symbol]);
   const started = state.clock != null;
   const tradable = started && state.status === "ACTIVE";
   const canMove = tradable && !state.clock?.atPeriodEnd;
@@ -237,6 +253,21 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const onDrawingCommit = useCallback(
     (index: number, sym: string, op: DrawingOp, list: ChartDrawing[]) => {
       setDrawingsBySymbol((m) => new Map(m).set(sym, { list, origin: index, rev: ++revRef.current }));
+      if (op.kind === "delete") {
+        if (op.drawing.id === linkedIdRef.current) setLinkedId(null);
+        const ref = op.drawing.data.orderRef;
+        // Deleting the plan never touches the order it became — but offer it.
+        if (ref && stateRef.current.orders.some((o) => o.id === ref.orderId)) {
+          toast.message("The drawing is gone; its pending order is still working.", {
+            duration: 10_000,
+            action: {
+              label: "Cancel order",
+              onClick: () =>
+                void cancelSimOrderAction({ accountId: stateRef.current.id, orderId: ref.orderId }).then((r) => (r.success ? (setState(r.state), toast.success("Order cancelled")) : toast.error(r.error))),
+            },
+          });
+        }
+      }
       const task =
         op.kind === "delete"
           ? deleteSimDrawingAction({ accountId: state.id, assetSymbol: sym, drawingId: op.drawing.id })
@@ -258,7 +289,11 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const onDrawingState = useCallback(
     (index: number, ev: DrawingStateEvent) => {
       if (index !== activeIndex) return;
-      if ("selected" in ev) setDrawSelected(ev.selected);
+      if ("selected" in ev) {
+        setDrawSelected(ev.selected);
+        // Selecting a long/short drawing links it to the ticket; it stays linked until another is selected or it's unlinked.
+        if (isPositionDrawing(ev.selected)) setLinkedId(ev.selected.id);
+      }
       else if ("tool" in ev) setDrawTool(ev.tool);
       else {
         setDrawList(ev.list);
@@ -270,6 +305,28 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   useEffect(() => {
     activeCtl()?.setMagnet(magnet);
   }, [magnet, activeCtl]);
+  const live = useMemo(() => ({ orderIds: new Set(state.orders.map((o) => o.id)), positionIds: new Set(state.positions.map((p) => p.id)) }), [state.orders, state.positions]);
+  const syncOn = ws.trading.syncPositionDrawing;
+  const linkedDrawing = syncOn && linkedId ? (drawList.find((d) => d.id === linkedId && d.assetSymbol === symbol) ?? null) : null;
+  const ticketLink: TicketLink | null =
+    linkedDrawing && isPositionDrawing(linkedDrawing)
+      ? {
+          drawing: linkedDrawing,
+          status: linkStatus(linkedDrawing.data.orderRef, true, live),
+          onEdit: (edit) =>
+            activeCtl()?.update(linkedDrawing.id, (d) => {
+              if (!d.data.position) return;
+              const next = positionFromTicket(d.data.position, edit);
+              if (!samePosition(next, d.data.position)) d.data.position = next;
+            }),
+          onUnlink: () => setLinkedId(null),
+        }
+      : null;
+  const badgeFor = (d: ChartDrawing) => {
+    if (!isPositionDrawing(d)) return null;
+    const st = linkStatus(d.data.orderRef, syncOn && d.id === linkedId, live);
+    return { label: LINK_LABEL[st], tone: st === "draft" ? ("muted" as const) : st === "linked" ? ("info" as const) : ("good" as const) };
+  };
   const pipSize = (() => {
     const spec = lookupInstrument(symbol);
     return spec?.pipSize ? Number(spec.pipSize) : null;
@@ -709,6 +766,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
                       onToggleLock={(id) => activeCtl()?.update(id, (d) => void (d.locked = !d.locked), { allowLocked: true })}
                       onDelete={(id) => activeCtl()?.remove(id)}
                       onClose={() => setManagerOpen(false)}
+                      badgeFor={badgeFor}
                     />
                   )}
                 </>
@@ -777,7 +835,22 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
             <ResizeHandle direction="left" value={rightWidth} min={240} max={560} label="Resize order panel" onChange={setRightWidth} onCommit={(width) => updateWs((w) => ({ ...w, panels: { ...w.panels, right: { ...w.panels.right, width } } }))} />
             <aside data-sim-side aria-label="Trade" style={{ width: rightWidth }} className="flex shrink-0 flex-col gap-4 overflow-y-auto p-3 max-md:hidden">
               {review != null && <p className="rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-xs text-sky-300">Reviewing earlier bars. Return to live to trade.</p>}
-              <OrderTicket state={state} quote={quote} disabled={!tradable || playing || review != null} onPlaced={setState} />
+              <OrderTicket
+                state={state}
+                quote={quote}
+                disabled={!tradable || playing || review != null}
+                link={ticketLink}
+                economics={economics?.symbol === symbol ? economics.value : null}
+                confirmAll={ws.trading.confirmOrders}
+                onPlaced={(next, drawing) => {
+                  setState(next);
+                  if (drawing) void reloadDrawings(drawing.assetSymbol);
+                }}
+              />
+              <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <input type="checkbox" className="size-3.5" checked={syncOn} onChange={(e) => updateWs((w) => ({ ...w, trading: { ...w.trading, syncPositionDrawing: e.target.checked } }))} />
+                Sync position drawing with order entry
+              </label>
               {studies && started && <QuickObservation state={state} studies={studies} timeframe={timeframe} />}
               {state.product === "PROP_FIRM" && <PropRulesPanel state={state} onPaidOut={() => void refreshState()} />}
             </aside>

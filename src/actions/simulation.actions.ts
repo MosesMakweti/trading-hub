@@ -21,6 +21,8 @@ import { CandleRangeTooLargeError } from "@/server/services/native-replay/histor
 import * as accounts from "@/server/services/simulation/sim-account.service";
 import { advanceSimClock, type AdvanceOutcome } from "@/server/services/simulation/sim-clock.service";
 import * as execution from "@/server/services/simulation/sim-execution.service";
+import * as drawingsSvc from "@/server/services/charting/sim-drawing.service";
+import type { ChartDrawing } from "@/domain/native-replay/drawings/model";
 import { getRevealedBars, getSimAccountState, getSimCandles, getSimStepPatch } from "@/server/services/simulation/sim-state.service";
 import { accountFeedsCached, periodMinutes, reviewTarget } from "@/server/services/simulation/sim-market";
 import { prefetchAfter } from "@/server/services/market-data/bar-cache";
@@ -145,14 +147,29 @@ export async function getSimCandlesAction(input: unknown) {
   }
 }
 
-export async function placeSimOrderAction(input: unknown): Promise<Ok<{ outcome: execution.OrderOutcome; state: SimAccountStateDTO }> | Fail> {
+export async function placeSimOrderAction(input: unknown): Promise<Ok<{ outcome: execution.OrderOutcome; state: SimAccountStateDTO; drawing: ChartDrawing | null; warning: string | null }> | Fail> {
   const user = await requireUser();
   const parsed = orderSchema.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
-  const { accountId, ...order } = parsed.data;
+  const { accountId, drawingId, ...order } = parsed.data;
   try {
+    // A drafted order is still just an order: every level and the size are
+    // validated by placeOrder exactly as if typed. The drawing is checked
+    // first so a wrong link never produces an order.
+    if (drawingId) await drawingsSvc.requireOrderDrawing(user.id, accountId, order.symbol.trim().toUpperCase(), drawingId, order.side);
     const outcome = await execution.placeOrder(user.id, accountId, order);
-    return { success: true, outcome, state: await getSimAccountState(user.id, accountId) };
+    let drawing: ChartDrawing | null = null;
+    let warning: string | null = null;
+    if (drawingId && !outcome.duplicate) {
+      const st0 = await getSimAccountState(user.id, accountId);
+      try {
+        drawing = await drawingsSvc.linkDrawingToOrder(user.id, accountId, drawingId, { orderId: outcome.orderId, positionId: outcome.positionId, side: order.side, status: outcome.status, minute: st0.clock?.minute ?? 0 });
+      } catch {
+        warning = "The order was placed, but the drawing couldn't be marked as executed.";
+      }
+      return { success: true, outcome, state: st0, drawing, warning };
+    }
+    return { success: true, outcome, state: await getSimAccountState(user.id, accountId), drawing, warning };
   } catch (e) {
     return fail(e, "Couldn't place the order.");
   }

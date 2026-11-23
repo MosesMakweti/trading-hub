@@ -68,6 +68,15 @@ export const chartSettingsSchema = z.object({
 });
 export type ChartSettings = z.infer<typeof chartSettingsSchema>;
 
+/** Order entry preferences. */
+export const tradingSettingsSchema = z.object({
+  /** "Sync Position Drawing with Order Entry": the selected long/short drawing drafts the ticket, and ticket edits move it. Never places an order by itself. */
+  syncPositionDrawing: z.boolean().default(true),
+  /** Ask before placing an order drafted from a drawing. Always on for drafted orders; this covers typed ones too. */
+  confirmOrders: z.boolean().default(false),
+});
+export type TradingSettings = z.infer<typeof tradingSettingsSchema>;
+
 export const panelsSchema = z.object({
   left: z.object({ visible: z.boolean().default(true) }).prefault({}),
   right: z.object({ visible: z.boolean().default(true), width: z.number().int().min(240).max(560).default(304) }).prefault({}),
@@ -131,6 +140,7 @@ export const workspaceSchema = z.object({
   presets: z.array(presetSchema).max(12).default([]),
   replay: replaySettingsSchema.prefault({}),
   sessions: sessionSettingsSchema.prefault({}),
+  trading: tradingSettingsSchema.prefault({}),
 });
 export type Workspace = z.infer<typeof workspaceSchema>;
 
