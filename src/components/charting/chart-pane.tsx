@@ -7,7 +7,7 @@ import { AlertTriangle, Eye, EyeOff, Loader2, Redo2, Settings2, X } from "lucide
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getSimCandlesAction } from "@/actions/simulation.actions";
-import { fromWire } from "@/domain/native-replay/chart-model";
+import { applyRevealed, fromWire, wireToBars } from "@/domain/native-replay/chart-model";
 import type { EngineCandle } from "@/domain/native-replay/candle-engine";
 import { CHART_TYPES } from "@/domain/indicators/chart-types";
 import { buildDisplay, buildStudies, type ScriptState, type StudyRender } from "@/domain/charting/render-model";
@@ -19,6 +19,8 @@ import type { DrawingOp } from "@/domain/native-replay/drawings/history";
 import { nominalMinutes } from "@/domain/native-replay/timeframes";
 import { lookupInstrument } from "@/domain/trade-plan/instrument-catalog";
 import type { IChartApi, ISeriesApi } from "lightweight-charts";
+import type { SimRevealedDTO } from "@/types/simulation";
+import { notePerf } from "./replay-perf";
 import { SimChart, type PriceLineSpec, type SimChartHandle } from "./sim-chart";
 
 /** Chart types whose time axis is price-driven: drawings (anchored in time) can't be placed there. */
@@ -35,6 +37,8 @@ export type DrawingStateEvent = { selected: ChartDrawing | null } | { tool: Draw
 
 /** Candles per chart: enough warm-up for long indicators, small enough to stay fast. */
 const CANDLE_LIMIT = 1500;
+/** Incremental steps grow the window; past this it is trimmed back to CANDLE_LIMIT. */
+const CANDLE_TRIM_AT = CANDLE_LIMIT + 500;
 
 export interface ScriptSource {
   id: string;
@@ -46,6 +50,15 @@ export interface ScriptSource {
 export interface ChartPaneHandle {
   sim(): SimChartHandle | null;
   drawings(): DrawingController;
+  /**
+   * Folds a step's newly revealed M1 bars (fromMinute, toMinute] into this
+   * chart's candles — no request. If the chart's candles don't end exactly at
+   * fromMinute (still loading, or a different instrument), it reloads its
+   * window from the server instead. Returns true when applied in place.
+   */
+  reveal(revealed: SimRevealedDTO | undefined, fromMinute: number, toMinute: number): boolean;
+  /** The instrument this chart shows. */
+  symbol(): string;
 }
 
 interface Props {
@@ -84,6 +97,11 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
   const { accountId, symbol, config, settings, theme, priceDigits, refreshKey, started, active, multi, priceLines, scripts, onActivate, onStudiesChange, onEditStudy, index, onCrosshair, onTimeRange, onCandles } = props;
   const [candles, setCandles] = useState<EngineCandle[]>([]);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  /** Bumped to reload the window from the server (a step this chart couldn't fold in). */
+  const [reloadNonce, setReloadNonce] = useState(0);
+  /** The candles this chart holds and the account clock they reflect. */
+  const candlesRef = useRef<EngineCandle[]>([]);
+  const clockRef = useRef<number | null>(null);
   const [hover, setHover] = useState<number | null>(null);
   const [following, setFollowing] = useState(true);
   const [scriptStates, setScriptStates] = useState(new Map<string, ScriptState>());
@@ -147,18 +165,43 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the shared revision
   }, [ctl, shared?.rev, symbol]);
 
-  useImperativeHandle(ref, () => ({ sim: () => simRef.current, drawings: () => ctl }));
+  useImperativeHandle(ref, () => ({
+    sim: () => simRef.current,
+    drawings: () => ctl,
+    symbol: () => latest.current.symbol,
+    reveal(revealed, fromMinute, toMinute) {
+      const t0 = performance.now();
+      const list = candlesRef.current;
+      if (!revealed || revealed.symbol !== latest.current.symbol || !revealed.bars || clockRef.current !== fromMinute || list.length === 0) {
+        clockRef.current = null;
+        setReloadNonce((n) => n + 1);
+        return false;
+      }
+      // Same pure fold as Native Replay and the server's aggregation (tested equal).
+      const next = list.length > CANDLE_TRIM_AT ? list.slice(list.length - CANDLE_LIMIT) : [...list];
+      applyRevealed(next, wireToBars(revealed.bars, revealed.priceScale), latest.current.config.timeframe, toMinute);
+      candlesRef.current = next;
+      clockRef.current = toMinute;
+      setCandles(next);
+      latest.current.onCandles?.(next);
+      notePerf("pane:fold", performance.now() - t0);
+      return true;
+    },
+  }));
 
   // ── Candles (server-bounded by the account clock: never future bars) ──────
   useEffect(() => {
     if (!started) return;
     let cancelled = false;
     const key = viewKey;
+    clockRef.current = null; // nothing can be folded in until this load lands
     void getSimCandlesAction({ accountId, symbol, timeframe: config.timeframe, limit: CANDLE_LIMIT }).then((res) => {
       if (cancelled || viewRef.current !== key) return;
-      setLoadedKey(`${key}|${refreshKey}`);
+      setLoadedKey(`${key}|${refreshKey}|${reloadNonce}`);
       if (!res.success) return void toast.error(res.error);
       const list = res.candles.candles.map((c) => fromWire(c, res.candles.priceScale));
+      candlesRef.current = list;
+      clockRef.current = res.candles.clockMinute;
       setCandles(list);
       onCandles?.(list);
     });
@@ -166,9 +209,9 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, symbol, config.timeframe, refreshKey, started]);
+  }, [accountId, symbol, config.timeframe, refreshKey, reloadNonce, started]);
 
-  const loading = started && loadedKey !== `${viewKey}|${refreshKey}`;
+  const loading = started && loadedKey !== `${viewKey}|${refreshKey}|${reloadNonce}`;
   const display = useMemo(() => buildDisplay(candles, priceDigits, config.chartType, config.chartParam), [candles, priceDigits, config.chartType, config.chartParam]);
 
   // ── Scripts: run each in its own sandboxed worker when its inputs change ──
@@ -197,9 +240,9 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
   const studies = useMemo(() => buildStudies(display, config, scriptStates, priceDigits), [display, config, scriptStates, priceDigits]);
 
   const onChartCrosshair = useCallback(
-    (i: number | null, t: number | null) => {
+    (i: number | null, t: number | null, local?: boolean) => {
       setHover(i);
-      onCrosshair(index, t);
+      if (!local) onCrosshair(index, t);
     },
     [onCrosshair, index],
   );

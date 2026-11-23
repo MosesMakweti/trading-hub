@@ -31,6 +31,8 @@ import { formatCrosshairTime, formatTickMark } from "@/domain/native-replay/char
 import type { ChartSettings } from "@/domain/charting/workspace";
 import { barIndexAt, studySignature, type Display, type StudyRender } from "@/domain/charting/render-model";
 import { replayChartPalette } from "@/components/native-replay/chart/chart-theme";
+import { syncSeries, type SeriesLike, type SyncResult } from "./series-sync";
+import { notePerf } from "./replay-perf";
 
 /**
  * Simulation chart: one lightweight-charts instance showing a chart type,
@@ -71,7 +73,8 @@ interface Props {
   priceLines: PriceLineSpec[];
   /** Changes when the view should re-fit (instrument / timeframe / type switch). */
   fitKey: string;
-  onCrosshair: (index: number | null, time: number | null) => void;
+  /** `local` = caused by a synced chart: update this chart only, don't re-broadcast. */
+  onCrosshair: (index: number | null, time: number | null, local?: boolean) => void;
   onTimeRange: (range: { from: number; to: number } | null) => void;
   onFollowChange: (following: boolean) => void;
   /** The chart was rebuilt (theme/precision) or its main series replaced. */
@@ -110,7 +113,11 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
   const callbacks = useRef(props);
   const followRef = useRef(true);
   const syncingRange = useRef(false);
+  /** A synced clear is in progress: its leave event must not be re-broadcast. */
+  const syncClearing = useRef(false);
   const lastFit = useRef<string | null>(null);
+  /** Points each series currently holds — the base for incremental updates. */
+  const held = useRef(new WeakMap<object, { time: unknown }[]>());
   const [gen, setGen] = useState(0); // bumps when the chart is rebuilt
   const [mainGen, setMainGen] = useState(0); // bumps when the main series is replaced
   const [structGen, setStructGen] = useState(0); // bumps when study series are rebuilt
@@ -175,8 +182,14 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
     const onMove = (p: MouseEventParams) => {
+      // Pointer left the chart (no point): the legend returns to the latest bar.
+      // This also arrives without a sourceEvent, so check it first.
+      if (p.point == null || p.time == null) {
+        const local = syncClearing.current;
+        syncClearing.current = false;
+        return callbacks.current.onCrosshair(null, null, local);
+      }
       if (!p.sourceEvent) return; // programmatic (synced) moves don't echo back
-      if (p.time == null) return callbacks.current.onCrosshair(null, null);
       const t = p.time as number;
       callbacks.current.onCrosshair(barIndexAt(displayRef.current.bars, t), t);
     };
@@ -260,13 +273,17 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
     const chart = chartRef.current;
     const s = mainRef.current;
     if (!chart || !s) return;
+    const t0 = performance.now();
     const bars = display.bars;
-    if (mainKind === "line" || mainKind === "area" || mainKind === "baseline") {
-      s.setData(bars.map((b) => ({ time: ts(b.time), value: b.close })));
-      if (mainKind === "baseline" && bars.length) (s as ISeriesApi<"Baseline">).applyOptions({ baseValue: { type: "price", price: bars[0].close } });
-    } else {
-      s.setData(bars.map((b, i) => (barColors?.[i] ? { time: ts(b.time), open: b.open, high: b.high, low: b.low, close: b.close, color: barColors[i]!, wickColor: barColors[i]!, borderColor: barColors[i]! } : { time: ts(b.time), open: b.open, high: b.high, low: b.low, close: b.close })));
-    }
+    const points =
+      mainKind === "line" || mainKind === "area" || mainKind === "baseline"
+        ? bars.map((b) => ({ time: ts(b.time), value: b.close }))
+        : bars.map((b, i) => (barColors?.[i] ? { time: ts(b.time), open: b.open, high: b.high, low: b.low, close: b.close, color: barColors[i]!, wickColor: barColors[i]!, borderColor: barColors[i]! } : { time: ts(b.time), open: b.open, high: b.high, low: b.low, close: b.close }));
+    // Incremental: only the changed tail goes to the chart (setData on first load / big changes).
+    const res = syncSeries(s as unknown as SeriesLike<(typeof points)[number]>, held.current.get(s) as typeof points | undefined, points);
+    held.current.set(s, points);
+    if (mainKind === "baseline" && bars.length && res.kind === "set") (s as ISeriesApi<"Baseline">).applyOptions({ baseValue: { type: "price", price: bars[0].close } });
+    notePerf("chart:main", performance.now() - t0, res.kind);
     const markers = studies
       .filter((st) => st.visible)
       .flatMap((st) => st.markers.filter((m) => bars[m.bar]).map((m) => ({ time: ts(bars[m.bar].time), position: m.position === "inBar" ? ("inBar" as const) : m.position, shape: m.shape, color: m.color, text: m.text })))
@@ -339,24 +356,31 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `signature` captures the structure of `studies`
   }, [gen, signature]);
 
-  // ── Study data ────────────────────────────────────────────────────────────
+  // ── Study data (incremental, like the main series) ────────────────────────
   useEffect(() => {
+    const t0 = performance.now();
     const bars = display.bars;
+    const sync = <P extends { time: unknown }>(series: ISeriesApi<SeriesType>, points: P[]): SyncResult => {
+      const r = syncSeries(series as unknown as SeriesLike<P>, held.current.get(series) as P[] | undefined, points);
+      held.current.set(series, points);
+      return r;
+    };
     for (const st of studies) {
       const list = studySeries.current.get(st.uid);
       if (!list) continue;
       let k = 0;
       if (st.bgcolor) {
         const bg = st.bgcolor;
-        list[k++].setData(bars.map((b, i) => (bg[i] ? { time: ts(b.time), value: 1, color: bg[i]! } : { time: ts(b.time) })));
+        sync(list[k++], bars.map((b, i) => (bg[i] ? { time: ts(b.time), value: 1, color: bg[i]! } : { time: ts(b.time) })));
       }
       for (const p of st.plots) {
         const s = list[k++];
         if (!s) break;
-        s.setData(
+        sync(
+          s,
           bars.map((b, i) => {
             const v = p.values[i];
-            if (v === undefined || !Number.isFinite(v)) return { time: ts(b.time) };
+            if (v === undefined || !Number.isFinite(v)) return { time: ts(b.time) } as { time: UTCTimestamp; value?: number; color?: string };
             const c = p.colors?.[i];
             return c && c !== p.color ? { time: ts(b.time), value: v, color: c } : { time: ts(b.time), value: v };
           }),
@@ -364,8 +388,9 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
       }
     }
     if (volumeRef.current) {
-      volumeRef.current.setData(bars.map((b) => (b.volume == null ? { time: ts(b.time) } : { time: ts(b.time), value: b.volume, color: b.close >= b.open ? palette.volumeUp : palette.volumeDown })));
+      sync(volumeRef.current, bars.map((b) => (b.volume == null ? { time: ts(b.time) } : { time: ts(b.time), value: b.volume, color: b.close >= b.open ? palette.volumeUp : palette.volumeDown })));
     }
+    notePerf("chart:studies", performance.now() - t0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structGen, display, studies]);
 
@@ -376,7 +401,10 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
       if (!chart || !s) return;
       const bars = displayRef.current.bars;
       const i = t == null ? -1 : barIndexAt(bars, t);
-      if (i < 0) chart.clearCrosshairPosition();
+      if (i < 0) {
+        syncClearing.current = true;
+        chart.clearCrosshairPosition();
+      }
       else chart.setCrosshairPosition(bars[i].close, ts(bars[i].time), s);
     },
     syncTimeRange(range) {

@@ -104,3 +104,30 @@ export interface SimAccountSummaryDTO {
   closedTrades: number;
   updatedAt: string;
 }
+
+/**
+ * What a replay step that changed no trading state sends back instead of the
+ * whole account: positions, orders, history and ledger totals are unchanged,
+ * so only the clock, marks and money that depends on marks are included.
+ */
+export interface SimStepPatchDTO {
+  clock: NonNullable<SimAccountStateDTO["clock"]>;
+  status: SimAccountStatusValue;
+  statusReason: string | null;
+  quotes: SimQuoteDTO[];
+  positions: SimPositionDTO[];
+  money: Pick<SimAccountStateDTO["money"], "balance" | "equity" | "floatingPnl">;
+}
+
+/** Newly revealed M1 bars of one instrument (decimal prices), for the charts to fold in. */
+export interface SimRevealedDTO {
+  symbol: string;
+  priceScale: number;
+  /** null = too many to send; the chart reloads its window instead. */
+  bars: { minute: number; open: number; high: number; low: number; close: number; tickVolume: number | null; realVolume: number | null; spread: number | null; barCount: number; state: "COMPLETED" }[] | null;
+}
+
+/** Merges a step patch into the full state the terminal holds. */
+export function applyStepPatch(state: SimAccountStateDTO, patch: SimStepPatchDTO): SimAccountStateDTO {
+  return { ...state, clock: patch.clock, status: patch.status, statusReason: patch.statusReason, quotes: patch.quotes, positions: patch.positions, money: { ...state.money, ...patch.money } };
+}

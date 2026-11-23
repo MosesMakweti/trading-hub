@@ -13,25 +13,19 @@ import { isReplayTimeframe, type ReplayTimeframe } from "@/domain/native-replay/
 import { getHistoricalCandles, type CandlesResult } from "@/server/services/native-replay/historical-candles.service";
 import { accountRules, requireSimAccount, SimError } from "./sim-account.service";
 import { verifyLedger } from "./sim-ledger";
-import { accountFeeds, latestBars, periodMinutes } from "./sim-market";
-import type { SimAccountStateDTO, SimAccountSummaryDTO } from "@/types/simulation";
+import { accountFeeds, latestBars, latestBarsBuffered, periodMinutes, revealedWireBars, type SimFeed } from "./sim-market";
+import type { SimBar } from "@/domain/simulation/market";
+import type { StepSnapshot } from "./sim-clock.service";
+import type { SimAccountStateDTO, SimAccountSummaryDTO, SimRevealedDTO, SimStepPatchDTO } from "@/types/simulation";
 
 const price = (points: number | null, scale: number) => (points == null ? null : pointsToPrice(points, scale).toFixed(scale));
 
-export async function getSimAccountState(userId: string, accountId: string): Promise<SimAccountStateDTO> {
-  const account = await requireSimAccount(userId, accountId);
-  const rules = accountRules(account);
-  const [ledger, feeds, open, pending, closed] = await Promise.all([
-    prisma.$transaction((tx) => verifyLedger(tx, account.id)),
-    accountFeeds(prisma, account.id),
-    prisma.simPosition.findMany({ where: { accountId: account.id, status: "OPEN" }, orderBy: { openedMinute: "asc" } }),
-    prisma.simOrder.findMany({ where: { accountId: account.id, status: "PENDING" }, orderBy: { placedMinute: "asc" } }),
-    prisma.simPosition.findMany({ where: { accountId: account.id, status: "CLOSED" }, orderBy: { closedMinute: "desc" }, take: 100 }),
-  ]);
-  const marks = account.currentMinute == null ? new Map() : await latestBars(prisma, feeds, account.currentMinute);
+type PositionRow = Awaited<ReturnType<typeof prisma.simPosition.findMany>>[number];
 
+/** Open positions marked at the clock, the quotes, and the floating P&L — shared by the full state and the step patch. */
+function markedPositions(open: PositionRow[], feeds: SimFeed[], marks: Map<string, SimBar>, rules: ReturnType<typeof accountRules>) {
   let floating = dec(0);
-  const positions = open.map((p) => {
+  const positions = [...open].sort((a, b) => a.openedMinute - b.openedMinute).map((p) => {
     const bar = marks.get(p.symbol);
     const mark = bar ? markPrice(p.side, bar, effectiveSpread(bar, rules.costs.defaultSpreadPoints)) : null;
     const unrealized =
@@ -68,6 +62,21 @@ export async function getSimAccountState(userId: string, accountId: string): Pro
       barTime: bar ? formatWallClock(bar.minute) : null,
     };
   });
+  return { positions, quotes, floating };
+}
+
+export async function getSimAccountState(userId: string, accountId: string): Promise<SimAccountStateDTO> {
+  const account = await requireSimAccount(userId, accountId);
+  const rules = accountRules(account);
+  const [ledger, feeds, open, pending, closed] = await Promise.all([
+    prisma.$transaction((tx) => verifyLedger(tx, account.id)),
+    accountFeeds(prisma, account.id),
+    prisma.simPosition.findMany({ where: { accountId: account.id, status: "OPEN" }, orderBy: { openedMinute: "asc" } }),
+    prisma.simOrder.findMany({ where: { accountId: account.id, status: "PENDING" }, orderBy: { placedMinute: "asc" } }),
+    prisma.simPosition.findMany({ where: { accountId: account.id, status: "CLOSED" }, orderBy: { closedMinute: "desc" }, take: 100 }),
+  ]);
+  const marks = account.currentMinute == null ? new Map() : await latestBars(prisma, feeds, account.currentMinute);
+  const { positions, quotes, floating } = markedPositions(open, feeds, marks, rules);
 
   const period = periodMinutes(account);
   return {
@@ -123,6 +132,47 @@ export async function getSimAccountState(userId: string, accountId: string): Pro
       };
     }),
   };
+}
+
+/**
+ * The step patch: built from what the step already holds in memory (the
+ * locked account row, its open positions, balance) plus marks from the
+ * server's bar buffer — no account re-read, no ledger replay. Only valid when
+ * the step changed no trading state (AdvanceOutcome.tradingChanged = false);
+ * the ledger totals the client already has are then still exact.
+ */
+export async function getSimStepPatch(snapshot: StepSnapshot): Promise<SimStepPatchDTO> {
+  const { account, feeds, openPositions, balance } = snapshot;
+  const rules = accountRules(account);
+  const minute = account.currentMinute!;
+  const marks = await latestBarsBuffered(feeds, minute);
+  const { positions, quotes, floating } = markedPositions(openPositions, feeds, marks, rules);
+  const period = periodMinutes(account);
+  return {
+    clock: { minute, time: formatWallClock(minute), version: account.clockVersion, atPeriodEnd: minute >= period.to },
+    status: account.status,
+    statusReason: account.statusReason,
+    quotes,
+    positions,
+    money: { balance: balance.toFixed(2), equity: balance.plus(floating).toFixed(2), floatingPnl: floating.toFixed(2) },
+  };
+}
+
+/** Steps that reveal more than this many M1 bars per instrument make the charts reload instead. */
+export const MAX_REVEALED_BARS = 3000;
+
+/**
+ * Newly revealed M1 bars (fromMinute, toMinute] for the requested
+ * instruments — exactly the bars the step just made visible, never later.
+ */
+export async function getRevealedBars(feeds: SimFeed[], symbols: string[], fromMinute: number, toMinute: number): Promise<SimRevealedDTO[]> {
+  const wanted = feeds.filter((f) => symbols.includes(f.symbol));
+  return Promise.all(
+    wanted.map(async (f) => {
+      const bars = await revealedWireBars(f, fromMinute, toMinute);
+      return { symbol: f.symbol, priceScale: f.priceScale, bars: bars.length > MAX_REVEALED_BARS ? null : bars };
+    }),
+  );
 }
 
 /**

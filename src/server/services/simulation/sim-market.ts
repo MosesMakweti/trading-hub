@@ -8,6 +8,7 @@ import { bucketEnd, bucketStart, type ReplayTimeframe } from "@/domain/native-re
 import { MINUTES_PER_DAY, parseWallClock } from "@/domain/native-replay/wall-clock";
 import { utcDateToKey } from "@/lib/date";
 import type { SimBar } from "@/domain/simulation/market";
+import { barsBetween, lastMinuteIn, latestAtOrBefore, minutesAfter } from "@/server/services/market-data/bar-cache";
 
 type Db = TransactionClient | typeof prisma;
 
@@ -26,6 +27,23 @@ export async function accountFeeds(db: Db, accountId: string): Promise<SimFeed[]
     WHERE p."accountId" = ${accountId} AND d."status" = 'READY'
     ORDER BY p."assetSymbol"
   `;
+}
+
+/**
+ * `accountFeeds`, remembered per account. An account's pins are written once
+ * when it is created and never change, and a pinned dataset can't be deleted
+ * (FK NO ACTION), so the answer is immutable for the account's lifetime.
+ */
+const feedsByAccount = new Map<string, SimFeed[]>();
+export async function accountFeedsCached(db: Db, accountId: string): Promise<SimFeed[]> {
+  const hit = feedsByAccount.get(accountId);
+  if (hit) return hit;
+  const feeds = await accountFeeds(db, accountId);
+  if (feeds.length) {
+    if (feedsByAccount.size >= 5000) feedsByAccount.delete(feedsByAccount.keys().next().value as string);
+    feedsByAccount.set(accountId, feeds);
+  }
+  return feeds;
 }
 
 /** First and last broker minute of an account's inclusive period. */
@@ -144,4 +162,81 @@ export async function targetMinute(db: Db, feeds: SimFeed[], cur: number, comman
   if (inDay != null) return inDay;
   const next = await firstMinuteFrom(db, feeds, cur + 1, Math.min(limit, cur + MAX_SEEK_MINUTES));
   return next == null ? null : lastBarUpTo(dayEnd(next));
+}
+
+// ── Buffered reads (server-side bar buffer, market-data/bar-cache.ts) ──────
+// Same contract and results as the SQL functions above (tested for
+// equivalence); they read immutable bars from the server's private buffer so
+// a replay step needs no bar queries once the buffer is warm. Bounds still
+// come from the account clock — the buffer never decides visibility.
+
+/** Buffered `targetMinute`. */
+export async function targetMinuteBuffered(feeds: SimFeed[], cur: number, command: ClockCommand, limit: number, dailyResetHour: number): Promise<number | null> {
+  const seqs = feeds.map((f) => f.seq);
+  if (seqs.length === 0) return null;
+  if (command.kind === "BARS") {
+    const ms = await minutesAfter(seqs, cur, limit, command.count);
+    return ms.length ? ms[ms.length - 1] : null;
+  }
+  const firstFrom = async (fromInclusive: number, upTo: number) => (await minutesAfter(seqs, fromInclusive - 1, upTo, 1))[0] ?? null;
+  if (command.kind === "CANDLE") {
+    const next = await firstFrom(cur + 1, limit);
+    if (next == null) return null;
+    const candleLast = Math.min(bucketEnd(bucketStart(next, command.timeframe), command.timeframe) - 1, limit);
+    return lastMinuteIn(seqs, next - 1, candleLast);
+  }
+  const lastBarUpTo = (to: number) => lastMinuteIn(seqs, cur, Math.min(to, limit, cur + MAX_SEEK_MINUTES));
+  if (command.kind === "SEEK") return lastBarUpTo(command.to);
+  const dayEnd = (m: number) => Math.floor((m - dailyResetHour * 60) / MINUTES_PER_DAY + 1) * MINUTES_PER_DAY + dailyResetHour * 60 - 1;
+  const inDay = await lastBarUpTo(dayEnd(cur));
+  if (inDay != null) return inDay;
+  const next = await firstFrom(cur + 1, Math.min(limit, cur + MAX_SEEK_MINUTES));
+  return next == null ? null : lastBarUpTo(dayEnd(next));
+}
+
+/** Buffered `loadStepBars`. */
+export async function loadStepBarsBuffered(feeds: SimFeed[], fromExclusive: number, toInclusive: number): Promise<{ bars: Map<string, Map<number, SimBar>>; timeline: number[] }> {
+  const bars = new Map<string, Map<number, SimBar>>(feeds.map((f) => [f.symbol, new Map()]));
+  if (feeds.length === 0 || toInclusive <= fromExclusive) return { bars, timeline: [] };
+  const symbolBySeq = new Map(feeds.map((f) => [f.seq, f.symbol]));
+  const rows = await barsBetween(feeds.map((f) => f.seq), fromExclusive, toInclusive);
+  const minutes = new Set<number>();
+  for (const r of rows) {
+    bars.get(symbolBySeq.get(r.seq)!)!.set(r.minute, toBar(r));
+    minutes.add(r.minute);
+  }
+  return { bars, timeline: [...minutes].sort((a, b) => a - b) };
+}
+
+/** Buffered `latestBars` (falls back to SQL for a feed with no bar in the last week). */
+export async function latestBarsBuffered(feeds: SimFeed[], minute: number): Promise<Map<string, SimBar>> {
+  const out = new Map<string, SimBar>();
+  if (feeds.length === 0) return out;
+  const found = await latestAtOrBefore(feeds.map((f) => f.seq), minute);
+  const missing: SimFeed[] = [];
+  for (const f of feeds) {
+    const b = found.get(f.seq);
+    if (b) out.set(f.symbol, toBar(b));
+    else missing.push(f);
+  }
+  if (missing.length) for (const [k, v] of await latestBars(prisma, missing, minute)) out.set(k, v);
+  return out;
+}
+
+/** Revealed M1 bars of one feed in (fromExclusive, toInclusive], as wire bars (decimal prices). */
+export async function revealedWireBars(feed: SimFeed, fromExclusive: number, toInclusive: number) {
+  const rows = await barsBetween([feed.seq], fromExclusive, toInclusive);
+  const s = 10 ** feed.priceScale;
+  return rows.map((r) => ({
+    minute: r.minute,
+    open: r.open / s,
+    high: r.high / s,
+    low: r.low / s,
+    close: r.close / s,
+    tickVolume: r.tickVolume,
+    realVolume: r.realVolume,
+    spread: r.spread,
+    barCount: 1,
+    state: "COMPLETED" as const,
+  }));
 }

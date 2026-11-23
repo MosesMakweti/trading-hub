@@ -34,6 +34,7 @@ import { bucketEnd, bucketStart, isReplayTimeframe, type ReplayTimeframe } from 
 import { formatWallClock, MINUTES_PER_DAY, parseWallClock, type WallClockMinute } from "@/domain/native-replay/wall-clock";
 import { assertDateWithinRun, requireBacktestRun } from "@/server/services/backtest-run.service";
 import { getHistoricalCandles, type CandleDTO, type CandlesResult } from "@/server/services/native-replay/historical-candles.service";
+import { barsBetween, dayStats, lastMinuteIn, minutesAfter } from "@/server/services/market-data/bar-cache";
 
 /** Largest single +N step: one full day of M1. */
 export const MAX_STEP_BARS = 1440;
@@ -137,15 +138,10 @@ async function buildState(userId: string, ctx: Context): Promise<ReplayStateDTO>
   const [pins, pos] = await Promise.all([loadPins(ctx), findPosition(userId, ctx)]);
   const world = pos?.currentMinute ?? null;
   const readyPins = pins.filter((p) => p.dataset.status === "READY");
-  const perSeq = readyPins.length
-    ? await prisma.$queryRaw<{ seq: number; first: number; last: number; count: number; latest: number | null }[]>`
-        SELECT "datasetSeq" AS seq, min("minute") AS first, max("minute") AS last, count(*)::int AS count,
-               max("minute") FILTER (WHERE "minute" <= ${world ?? -1}) AS latest
-        FROM "HistoricalBar"
-        WHERE "datasetSeq" = ANY(${readyPins.map((p) => p.dataset.seq)}::int4[]) AND "minute" BETWEEN ${ctx.dayStart} AND ${ctx.dayEnd}
-        GROUP BY "datasetSeq"
-      `
-    : [];
+  // Day statistics from the server's bar buffer (immutable bars; bounded by
+  // this run's own pins and the stored world time).
+  const stats = await dayStats(readyPins.map((p) => p.dataset.seq), ctx.dayStart, ctx.dayEnd, world);
+  const perSeq = stats.perSeq;
   const bySeq = new Map(perSeq.map((r) => [r.seq, r]));
 
   const assets: ReplayAssetDTO[] = ctx.run.assets.map((assetSymbol) => {
@@ -163,11 +159,7 @@ async function buildState(userId: string, ctx: Context): Promise<ReplayStateDTO>
 
   if (readyPins.length === 0) return { ...base, status: "NO_DATASETS", assets, day: null, position: null };
   if (perSeq.length === 0) return { ...base, status: "NO_BARS_FOR_DATE", assets, day: null, position: null };
-  const [timeline] = await prisma.$queryRaw<{ minutes: number; revealed: number }[]>`
-    SELECT count(DISTINCT "minute")::int AS minutes, count(DISTINCT "minute") FILTER (WHERE "minute" <= ${world ?? -1})::int AS revealed
-    FROM "HistoricalBar"
-    WHERE "datasetSeq" = ANY(${readyPins.map((p) => p.dataset.seq)}::int4[]) AND "minute" BETWEEN ${ctx.dayStart} AND ${ctx.dayEnd}
-  `;
+  const timeline = { minutes: stats.minutes, revealed: stats.revealed };
   const firstMinute = Math.min(...perSeq.map((r) => r.first));
   const lastMinute = Math.max(...perSeq.map((r) => r.last));
   const day = { firstBar: formatWallClock(firstMinute), lastBar: formatWallClock(lastMinute), firstMinute, lastMinute, minutes: timeline.minutes };
@@ -254,37 +246,27 @@ interface LockedPosition {
   recentCommands: { id: string; from: number; to: number }[];
 }
 
-/** The target world minute for a command, or null to stay put. Pure SQL over immutable bars. */
-async function targetMinute(tx: TransactionClient, seqs: number[], cur: number, command: ReplayCommand, ctx: Context): Promise<number | null> {
+/**
+ * The target world minute for a command, or null to stay put. Read from the
+ * server's bar buffer (immutable bars); bounds come from the locked position
+ * and the simulation day.
+ */
+async function targetMinute(_tx: TransactionClient, seqs: number[], cur: number, command: ReplayCommand, ctx: Context): Promise<number | null> {
   const { dayStart, dayEnd } = ctx;
   if (command.kind === "BARS") {
-    const [row] = await tx.$queryRaw<{ m: number | null }[]>`
-      SELECT max(m) AS m FROM (
-        SELECT DISTINCT "minute" AS m FROM "HistoricalBar"
-        WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" > ${cur} AND "minute" <= ${dayEnd}
-        ORDER BY m LIMIT ${command.count}
-      ) s
-    `;
-    return row.m;
+    const ms = await minutesAfter(seqs, cur, dayEnd, command.count);
+    return ms.length ? ms[ms.length - 1] : null;
   }
   if (command.kind === "CANDLE") {
-    const [next] = await tx.$queryRaw<{ m: number | null }[]>`
-      SELECT min("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" > ${cur} AND "minute" <= ${dayEnd}
-    `;
-    if (next.m == null) return null;
-    const candleLast = Math.min(bucketEnd(bucketStart(next.m, command.timeframe), command.timeframe) - 1, dayEnd);
-    const [row] = await tx.$queryRaw<{ m: number | null }[]>`
-      SELECT max("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" BETWEEN ${next.m} AND ${candleLast}
-    `;
-    return row.m;
+    const next = (await minutesAfter(seqs, cur, dayEnd, 1))[0];
+    if (next == null) return null;
+    const candleLast = Math.min(bucketEnd(bucketStart(next, command.timeframe), command.timeframe) - 1, dayEnd);
+    return lastMinuteIn(seqs, next - 1, candleLast);
   }
   // SEEK
   if (command.to < dayStart || command.to > dayEnd) throw new ReplayError("You can only jump within the current simulation day.");
   if (command.to < cur) throw new ReplayError("Replay only moves forward — you can scroll back over what's already revealed on the chart.");
-  const [row] = await tx.$queryRaw<{ m: number | null }[]>`
-    SELECT max("minute") AS m FROM "HistoricalBar" WHERE "datasetSeq" = ANY(${seqs}::int4[]) AND "minute" > ${cur} AND "minute" <= ${command.to}
-  `;
-  return row.m;
+  return lastMinuteIn(seqs, cur, command.to);
 }
 
 function validateCommand(command: ReplayCommand): void {
@@ -343,7 +325,23 @@ export async function advanceReplay(
   let revealed: CandleDTO[] = [];
   const viewed = viewAsset ? state.assets.find((a) => a.assetSymbol === viewAsset)?.dataset : null;
   if (viewed && outcome.to > outcome.from) {
-    revealed = (await getHistoricalCandles(userId, { datasetId: viewed.id, timeframe: "M1", cutoff: outcome.to, from: outcome.from + 1, to: outcome.to, limit: MAX_STEP_BARS })).candles;
+    // Exactly the bars this step revealed, from the server's bar buffer
+    // (the dataset is one of this run's pins — already ownership-checked).
+    const seq = (await prisma.historicalDataset.findUniqueOrThrow({ where: { id: viewed.id }, select: { seq: true } })).seq;
+    const scale = 10 ** viewed.priceScale;
+    revealed = (await barsBetween([seq], outcome.from, outcome.to)).slice(-MAX_STEP_BARS).map((b) => ({
+      time: formatWallClock(b.minute),
+      minute: b.minute,
+      open: b.open / scale,
+      high: b.high / scale,
+      low: b.low / scale,
+      close: b.close / scale,
+      tickVolume: b.tickVolume,
+      realVolume: b.realVolume,
+      spread: b.spread,
+      barCount: 1,
+      state: "COMPLETED" as const,
+    }));
   }
   return { applied: outcome.applied, moved: outcome.to > outcome.from, fromMinute: outcome.from, toMinute: outcome.to, revealed, state };
 }
