@@ -1,84 +1,75 @@
 import { describe, expect, it } from "vitest";
 
-import { changeSpeed, planPlayback, startPlayback, type PlaybackClock } from "./playback-scheduler";
+import { pace, paceIdle, startPacer, type Pacer } from "./playback-scheduler";
 
-/** Simulates the player loop: a step takes `cost(i)` ms; waits are exact. Returns bars per step. */
-function simulate(c: PlaybackClock, until: number, cost: (i: number) => number, maxBatch = 120) {
-  let now = c.start;
-  let lastStepAt = now;
-  const steps: number[] = [];
-  while (now < until) {
-    const p = planPlayback(c, now, maxBatch);
-    if (p.kind === "wait") {
-      now += p.ms;
+/**
+ * Simulates the consumer loop: steps become available at `arrivals` times
+ * (one each); the loop sleeps as asked (min 1 ms). Returns when each was shown.
+ */
+function simulate(arrivals: number[], until: number, interval: (now: number) => number): number[] {
+  let p: Pacer = startPacer();
+  let now = 0;
+  let ready = 0;
+  const shown: number[] = [];
+  while (now < until && shown.length < arrivals.length) {
+    while (ready < arrivals.length && arrivals[ready] <= now) ready++;
+    if (ready === shown.length) {
+      p = paceIdle(p, now, interval(now));
+      now += 1;
       continue;
     }
-    steps.push(p.count);
-    lastStepAt = now;
-    c = p.clock;
-    now += cost(steps.length);
+    const d = pace(p, now, interval(now));
+    if (d.kind === "wait") {
+      now += Math.max(1, Math.min(d.ms, 25)); // the loop re-checks at least every 25 ms
+      continue;
+    }
+    p = d.pacer;
+    shown.push(now);
   }
-  return { steps, clock: c, lastStepAt };
+  return shown;
 }
 
-describe("playback scheduler", () => {
-  it("first bar immediately, then exactly one bar per interval with no drift", () => {
-    const { steps } = simulate(startPlayback(0, 500), 10_000, () => 37); // 37 ms per step
-    expect(steps.every((n) => n === 1)).toBe(true);
-    expect(steps.length).toBe(20); // bars at 0, 500, …, 9500
+const allAt = (t: number, n: number) => Array.from({ length: n }, () => t);
+const gaps = (xs: number[]) => xs.slice(1).map((x, i) => x - xs[i]);
+
+describe("playback pacing", () => {
+  it("shows a batch one step per interval — never several at once", () => {
+    const shown = simulate(allAt(0, 20), 10_000, () => 500); // 20 steps arrive together
+    expect(shown).toHaveLength(20);
+    expect(gaps(shown).every((g) => g === 500)).toBe(true);
   });
 
-  it("a slow server is caught up by batching — total bars still match elapsed time (nothing skipped)", () => {
-    const { steps, lastStepAt } = simulate(startPlayback(0, 100), 10_000, () => 230); // each step 230 ms at 100 ms/bar
-    const total = steps.reduce((a, b) => a + b, 0);
-    expect(Math.max(...steps)).toBeGreaterThan(1);
-    expect(total).toBe(Math.floor(lastStepAt / 100) + 1); // exactly every bar due by the last request
+  it("5 ms per step: 200 steps in a second, evenly", () => {
+    const shown = simulate(allAt(0, 200), 2_000, () => 5);
+    expect(shown[199]).toBe(995);
+    expect(gaps(shown).every((g) => g === 5)).toBe(true);
   });
 
-  it("drops the backlog instead of jumping when hopelessly behind", () => {
-    const { steps } = simulate(startPlayback(0, 10), 5_000, (i) => (i === 3 ? 3_000 : 5), 50);
-    expect(Math.max(...steps)).toBe(50);
-    const after = steps.slice(steps.indexOf(50) + 1);
-    expect(after.every((n) => n <= 2)).toBe(true); // back to steady pacing
+  it("waiting on the server doesn't cause a catch-up burst", () => {
+    // 3 steps, then the next batch of 5 arrives 400 ms late.
+    const shown = simulate([...allAt(0, 3), ...allAt(600, 5)], 10_000, () => 100);
+    expect(shown.slice(0, 3)).toEqual([0, 100, 200]);
+    expect(shown[3]).toBe(600); // first of the late batch at once…
+    expect(gaps(shown.slice(3)).every((g) => g === 100)).toBe(true); // …then the normal pace
   });
 
-  it("changing speed mid-playback: next bar one new interval later, no burst", () => {
-    let c = startPlayback(0, 1000);
-    let p = planPlayback(c, 0);
-    expect(p).toMatchObject({ kind: "step", count: 1 });
-    c = (p as Extract<typeof p, { kind: "step" }>).clock;
-    c = changeSpeed(c, 400, 100);
-    expect(planPlayback(c, 450)).toEqual({ kind: "wait", ms: 50 });
-    p = planPlayback(c, 500);
-    expect(p).toMatchObject({ kind: "step", count: 1 });
+  it("scenario D: 500 ms → 100 ms while playing — applies at once, every step exactly once", () => {
+    const shown = simulate(allAt(0, 40), 20_000, (now) => (now < 2_100 ? 500 : 100));
+    expect(shown).toHaveLength(40);
+    expect(new Set(shown).size).toBe(40);
+    const before = shown.filter((t) => t < 2_100);
+    expect(before).toEqual([0, 500, 1000, 1500, 2000]);
+    // The next step comes one NEW interval after the last one (2000 + 100), not after the old one.
+    expect(shown[5]).toBe(2_100);
+    expect(gaps(shown.slice(5)).every((g) => g === 100)).toBe(true);
   });
 
-  it("scenario D: 500 ms → 100 ms while playing keeps every bar exactly once, at the new pace", () => {
-    // Player loop with a speed change at t=3000 (as the terminal does: re-read the speed each tick).
-    let c = startPlayback(0, 500);
-    let now = 0;
-    const at: number[] = []; // time each bar was requested
-    while (now < 6000) {
-      if (now >= 3000 && c.intervalMs !== 100) c = changeSpeed(c, now, 100);
-      const p = planPlayback(c, now);
-      if (p.kind === "wait") {
-        now += Math.min(p.ms, 50);
-        continue;
-      }
-      for (let k = 0; k < p.count; k++) at.push(now);
-      c = p.clock;
-      now += 5; // request cost
-    }
-    // Bars are numbered by `done`: one request per bar index, never repeated or skipped.
-    expect(c.done).toBe(at.length);
-    const before = at.filter((t) => t < 3000);
-    const after = at.filter((t) => t >= 3000);
-    expect(before.length).toBe(6); // 0, 500, …, 2500
-    // After the change: ~one bar per 100 ms (first one 100 ms after the change), no burst.
-    expect(after.length).toBeGreaterThanOrEqual(29);
-    expect(after.length).toBeLessThanOrEqual(31);
-    expect(after[0]).toBeGreaterThanOrEqual(3000 + 100 - 5);
-    for (let i = 1; i < after.length; i++) expect(after[i] - after[i - 1]).toBeGreaterThanOrEqual(90);
+  it("falls behind gracefully: slows down instead of jumping ahead", () => {
+    let p: Pacer = { last: 0 };
+    const d = pace(p, 5_000, 10); // 5 s late at 10 ms/step
+    expect(d.kind).toBe("show");
+    p = (d as Extract<typeof d, { kind: "show" }>).pacer;
+    expect(p.last).toBe(5_000); // re-anchored: the next is 10 ms from now, not 500 steps owed
+    expect(pace(p, 5_001, 10)).toEqual({ kind: "wait", ms: 9 });
   });
 });
-
