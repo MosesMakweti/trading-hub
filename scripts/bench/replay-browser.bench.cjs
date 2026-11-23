@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- plain Node (CommonJS) benchmark script */
 /**
  * Browser benchmark for the simulation terminal's Next Candle (the "Candle"
  * button). Measures, inside the page, click → replay clock updated and
@@ -59,9 +60,11 @@ const { chromium } = require("playwright");
       // Wait until the button is usable again (the step fully finished).
       const t1 = performance.now();
       while (btn.disabled && performance.now() - t1 < 10000) await new Promise((r) => setTimeout(r, 5));
-      return { clock: tClock, chart: tChart, done: performance.now() - t0 };
+      const lEnd = document.querySelector('main[aria-label="Charts"] .pointer-events-none.absolute');
+      return { clock: tClock, chart: tChart, done: performance.now() - t0, debug: [legend0.slice(0, 80), lEnd ? lEnd.textContent.slice(0, 80) : null] };
     });
     results.push(r);
+    if (process.env.BENCH_DEBUG) console.log(JSON.stringify(r));
     await p.waitForTimeout(150);
   }
   const stat = (k) => {
@@ -72,6 +75,11 @@ const { chromium } = require("playwright");
   console.log(`click → clock updated : ${stat("clock")}`);
   console.log(`click → chart updated : ${stat("chart")}`);
   console.log(`click → step finished : ${stat("done")}`);
+  const perf = await p.evaluate(() => (window.__replayPerf ? window.__replayPerf.summary() : null));
+  if (perf) {
+    console.log("in-app instrumentation (window.__replayPerf):");
+    for (const [k, v] of Object.entries(perf)) console.log(`  ${k.padEnd(20)} median ${String(v.median).padStart(6)} ms  p90 ${String(v.p90).padStart(6)} ms  (n=${v.n})`);
+  }
   if (errors.length) console.log("page errors:", errors);
   await b.close();
 })().catch(async (e) => {

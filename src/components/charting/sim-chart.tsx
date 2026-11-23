@@ -73,7 +73,8 @@ interface Props {
   priceLines: PriceLineSpec[];
   /** Changes when the view should re-fit (instrument / timeframe / type switch). */
   fitKey: string;
-  onCrosshair: (index: number | null, time: number | null) => void;
+  /** `local` = caused by a synced chart: update this chart only, don't re-broadcast. */
+  onCrosshair: (index: number | null, time: number | null, local?: boolean) => void;
   onTimeRange: (range: { from: number; to: number } | null) => void;
   onFollowChange: (following: boolean) => void;
   /** The chart was rebuilt (theme/precision) or its main series replaced. */
@@ -112,6 +113,8 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
   const callbacks = useRef(props);
   const followRef = useRef(true);
   const syncingRange = useRef(false);
+  /** A synced clear is in progress: its leave event must not be re-broadcast. */
+  const syncClearing = useRef(false);
   const lastFit = useRef<string | null>(null);
   /** Points each series currently holds — the base for incremental updates. */
   const held = useRef(new WeakMap<object, { time: unknown }[]>());
@@ -179,8 +182,14 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
     const onMove = (p: MouseEventParams) => {
+      // Pointer left the chart (no point): the legend returns to the latest bar.
+      // This also arrives without a sourceEvent, so check it first.
+      if (p.point == null || p.time == null) {
+        const local = syncClearing.current;
+        syncClearing.current = false;
+        return callbacks.current.onCrosshair(null, null, local);
+      }
       if (!p.sourceEvent) return; // programmatic (synced) moves don't echo back
-      if (p.time == null) return callbacks.current.onCrosshair(null, null);
       const t = p.time as number;
       callbacks.current.onCrosshair(barIndexAt(displayRef.current.bars, t), t);
     };
@@ -392,7 +401,10 @@ const SimChartInner = forwardRef<SimChartHandle, Props>(function SimChart(props,
       if (!chart || !s) return;
       const bars = displayRef.current.bars;
       const i = t == null ? -1 : barIndexAt(bars, t);
-      if (i < 0) chart.clearCrosshairPosition();
+      if (i < 0) {
+        syncClearing.current = true;
+        chart.clearCrosshairPosition();
+      }
       else chart.setCrosshairPosition(bars[i].close, ts(bars[i].time), s);
     },
     syncTimeRange(range) {

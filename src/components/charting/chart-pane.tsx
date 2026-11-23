@@ -240,9 +240,9 @@ export const ChartPane = forwardRef<ChartPaneHandle, Props>(function ChartPane(p
   const studies = useMemo(() => buildStudies(display, config, scriptStates, priceDigits), [display, config, scriptStates, priceDigits]);
 
   const onChartCrosshair = useCallback(
-    (i: number | null, t: number | null) => {
+    (i: number | null, t: number | null, local?: boolean) => {
       setHover(i);
-      onCrosshair(index, t);
+      if (!local) onCrosshair(index, t);
     },
     [onCrosshair, index],
   );

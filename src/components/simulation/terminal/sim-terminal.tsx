@@ -303,8 +303,11 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const step = async (command: Command) => {
     if (busy || playingRef.current) return;
     setBusy(true);
-    await run(command);
-    setBusy(false);
+    try {
+      await run(command);
+    } finally {
+      setBusy(false); // never leave the controls disabled after an error
+    }
   };
 
   const pause = useCallback(() => {
