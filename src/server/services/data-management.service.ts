@@ -2,6 +2,7 @@ import { prisma, type TransactionClient } from "@/server/db";
 import { deleteMediaFile } from "@/lib/media-storage";
 import { getOrCreatePerformanceAccount } from "@/server/services/accounts.service";
 import { deleteBacktestRun } from "@/server/services/backtest-run.service";
+import { deleteAllSimulations } from "@/server/services/simulation/session-library.service";
 import {
   collectMediaCandidates,
   deleteUnreferencedMediaAssets,
@@ -96,6 +97,9 @@ async function deleteAllBacktestRuns(userId: string): Promise<void> {
 export async function deleteDataSection(userId: string, section: DataSection): Promise<void> {
   switch (section) {
     case "backtesting": {
+      // Every kind of backtesting session: Strategy Lab and Prop Firm
+      // simulations (with all their history) and legacy Backtest Runs.
+      await deleteAllSimulations(userId);
       await deleteAllBacktestRuns(userId);
       return;
     }
@@ -201,6 +205,7 @@ export async function deleteDataSection(userId: string, section: DataSection): P
 export async function resetAllData(userId: string): Promise<void> {
   // Everything trader-created includes Backtesting — removed deliberately
   // (each run with its media-safe cleanup), never as a side effect.
+  await deleteAllSimulations(userId);
   await deleteAllBacktestRuns(userId);
 
   const media = await prisma.mediaAsset.findMany({
@@ -232,6 +237,8 @@ export async function resetAllData(userId: string): Promise<void> {
 
 export interface DataCounts {
   backtestRuns: number;
+  /** Strategy Lab accounts + Prop Firm challenges (each challenge counts once). */
+  simSessions: number;
   /** LIVE trades (Backtest Runs are counted separately). */
   trades: number;
   tradingDays: number;
@@ -244,9 +251,11 @@ export interface DataCounts {
 
 /** Live counts for the Data Management cards (active rows; soft-deleted excluded). */
 export async function getDataCounts(userId: string): Promise<DataCounts> {
-  const [backtestRuns, trades, tradingDays, strategies, psychology, accounts, routineSections, notes] =
+  const [backtestRuns, labAccounts, challenges, trades, tradingDays, strategies, psychology, accounts, routineSections, notes] =
     await Promise.all([
       prisma.backtestRun.count({ where: { userId } }),
+      prisma.simAccount.count({ where: { userId, challengeId: null } }),
+      prisma.simChallenge.count({ where: { userId } }),
       prisma.trade.count({ where: { userId } }),
       prisma.tradingDay.count({ where: { userId } }),
       prisma.strategy.count({ where: { userId } }),
@@ -255,5 +264,5 @@ export async function getDataCounts(userId: string): Promise<DataCounts> {
       prisma.routineSection.count({ where: { userId } }),
       prisma.dailyNote.count({ where: { userId } }),
     ]);
-  return { backtestRuns, trades, tradingDays, strategies, psychology, accounts, routineSections, notes };
+  return { backtestRuns, simSessions: labAccounts + challenges, trades, tradingDays, strategies, psychology, accounts, routineSections, notes };
 }

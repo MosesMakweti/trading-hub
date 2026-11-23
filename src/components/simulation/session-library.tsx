@@ -149,7 +149,7 @@ export function SessionLibrary({ sessions }: { sessions: LibrarySession[] }) {
               <ArchiveRestore /> Restore
             </Button>
           )}
-          <Button size="sm" variant="destructive" onClick={() => setBulk("delete")} disabled={pending || chosen.some((s) => !s.can.delete)} title={chosen.some((s) => !s.can.delete) ? "Prop Firm accounts can be archived but not deleted — unselect them to delete the rest." : undefined}>
+          <Button size="sm" variant="destructive" onClick={() => setBulk("delete")} disabled={pending}>
             <Trash2 /> Delete
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} aria-label="Clear selection">
@@ -177,7 +177,7 @@ export function SessionLibrary({ sessions }: { sessions: LibrarySession[] }) {
             <span className="flex-1">Session</span>
             <span className="hidden w-40 sm:block">Result</span>
             <span className="hidden w-24 md:block">Updated</span>
-            <span className="w-8" />
+            <span className="w-16" />
           </div>
           <ul aria-label="Sessions" className="divide-y divide-border">
             {list.map((s) => {
@@ -213,6 +213,9 @@ export function SessionLibrary({ sessions }: { sessions: LibrarySession[] }) {
                     )}
                   </div>
                   <span className="hidden w-24 text-xs text-muted-foreground md:block" title={`Last modified ${new Date(s.updatedAt).toLocaleString()}`}>{fmtDate(s.updatedAt)}</span>
+                  <Button variant="ghost" size="icon-sm" onClick={() => void openDelete(s)} disabled={pending} aria-label={`Delete ${s.name}`} title="Delete permanently" className="text-muted-foreground hover:bg-red-500/10 hover:text-red-500">
+                    <Trash2 />
+                  </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${s.name}`} />} disabled={pending}>
                       <MoreHorizontal />
@@ -239,8 +242,8 @@ export function SessionLibrary({ sessions }: { sessions: LibrarySession[] }) {
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem variant="destructive" disabled={!s.can.delete} onClick={() => void openDelete(s)} title={s.deleteNote ?? undefined}>
-                        <Trash2 /> Delete{!s.can.delete && " (archive only)"}
+                      <DropdownMenuItem variant="destructive" onClick={() => void openDelete(s)}>
+                        <Trash2 /> Delete permanently
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -298,6 +301,7 @@ export function SessionLibrary({ sessions }: { sessions: LibrarySession[] }) {
             <p className="text-sm text-amber-500">{del.impact.note}</p>
           ) : (
             <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3 text-sm">
+              {del.impact.note && <p className="font-medium text-amber-500">{del.impact.note}</p>}
               <p className="font-medium">Deleted with it:</p>
               <ul className="list-inside list-disc text-muted-foreground">
                 <li>{del.impact.trades} {del.s.kind === "LEGACY" ? "journaled trade" : "trade"}{del.impact.trades === 1 ? "" : "s"}{del.s.kind !== "LEGACY" && <>, {del.impact.orders} order{del.impact.orders === 1 ? "" : "s"}, their fills and the account ledger</>}</li>
@@ -337,7 +341,7 @@ export function SessionLibrary({ sessions }: { sessions: LibrarySession[] }) {
             </DialogTitle>
             <DialogDescription>
               {bulk === "delete"
-                ? "These sessions and their associated data will be permanently deleted. This cannot be undone."
+                ? `These sessions and their associated data will be permanently deleted.${chosen.some((s) => s.kind === "PROP") ? " Prop Firm sessions take their whole challenge (every phase) with them." : ""} This cannot be undone.`
                 : bulk === "archive"
                   ? "They leave your active list; all their data is kept and you can restore them at any time."
                   : "They return to your active list exactly as they were."}

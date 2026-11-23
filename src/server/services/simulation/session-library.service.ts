@@ -31,7 +31,8 @@ import { applyLibraryQuery } from "@/domain/simulation/session-library";
 const dateKey = (d: Date) => d.toISOString().slice(0, 10);
 const isArchivedSim = (a: Pick<SimAccount, "archivedAt" | "status">) => a.archivedAt != null || a.status === "ARCHIVED";
 
-const PROP_DELETE_NOTE = "Prop Firm accounts are financial records (fees, breaches, payouts) and can be archived but not deleted.";
+/** A Prop Firm session is one stage of a challenge: deleting it deletes the whole challenge (every stage). */
+const propNote = (stages: number) => (stages > 1 ? `Deletes the whole challenge — all ${stages} of its accounts (evaluation phases and funded), with their trades and history.` : "Deletes the challenge with its trades and history.");
 
 async function simCounts(userId: string, ids: string[]): Promise<Map<string, SessionCounts>> {
   const m = new Map<string, SessionCounts>(ids.map((id) => [id, { trades: 0, orders: 0, drawings: 0, observations: 0 }]));
@@ -89,7 +90,7 @@ async function simPerformance(userId: string, accounts: SimAccount[]): Promise<M
   return m;
 }
 
-function fromAccount(a: SimAccount, counts: SessionCounts, performance: SessionPerformance | null = null): LibrarySession {
+function fromAccount(a: SimAccount, counts: SessionCounts, performance: SessionPerformance | null = null, challengeStages = 1): LibrarySession {
   const prop = a.product === "PROP_FIRM";
   return {
     kind: prop ? "PROP" : "LAB",
@@ -106,8 +107,8 @@ function fromAccount(a: SimAccount, counts: SessionCounts, performance: SessionP
     counts,
     performance,
     href: `/backtesting/terminal/${a.id}`,
-    can: { rename: true, duplicate: !prop, archive: true, delete: !prop },
-    deleteNote: prop ? PROP_DELETE_NOTE : null,
+    can: { rename: true, duplicate: !prop, archive: true, delete: true },
+    deleteNote: prop ? propNote(challengeStages) : null,
   };
 }
 
@@ -135,7 +136,9 @@ function fromRun(r: BacktestRun, counts: SessionCounts): LibrarySession {
 export async function listLibrary(userId: string, query: LibraryQuery = {}): Promise<LibrarySession[]> {
   const [accounts, runs] = await Promise.all([prisma.simAccount.findMany({ where: { userId } }), prisma.backtestRun.findMany({ where: { userId } })]);
   const [ac, rc, perf] = await Promise.all([simCounts(userId, accounts.map((a) => a.id)), runCounts(userId, runs.map((r) => r.id)), simPerformance(userId, accounts)]);
-  const all = [...accounts.map((a) => fromAccount(a, ac.get(a.id)!, perf.get(a.id) ?? null)), ...runs.map((r) => fromRun(r, rc.get(r.id)!))];
+  const stages = new Map<string, number>();
+  for (const a of accounts) if (a.challengeId) stages.set(a.challengeId, (stages.get(a.challengeId) ?? 0) + 1);
+  const all = [...accounts.map((a) => fromAccount(a, ac.get(a.id)!, perf.get(a.id) ?? null, a.challengeId ? stages.get(a.challengeId) : 1)), ...runs.map((r) => fromRun(r, rc.get(r.id)!))];
   return applyLibraryQuery(all, query);
 }
 
@@ -156,9 +159,16 @@ export async function renameSession(userId: string, kind: SessionKind, id: strin
 
 /** What a delete would remove — for the confirmation. */
 export async function deletionImpact(userId: string, kind: SessionKind, id: string): Promise<SessionCounts & { allowed: boolean; note: string | null }> {
-  await requireKind(userId, kind, id);
+  const row = await requireKind(userId, kind, id);
+  if (kind === "PROP") {
+    // The whole challenge goes: count every stage.
+    const ids = await challengeAccountIds(userId, row as SimAccount);
+    const per = await simCounts(userId, ids);
+    const sum = [...per.values()].reduce((t, c) => ({ trades: t.trades + c.trades, orders: t.orders + c.orders, drawings: t.drawings + c.drawings, observations: t.observations + c.observations }), { trades: 0, orders: 0, drawings: 0, observations: 0 });
+    return { ...sum, allowed: true, note: propNote(ids.length) };
+  }
   const counts = (kind === "LEGACY" ? await runCounts(userId, [id]) : await simCounts(userId, [id])).get(id)!;
-  return { ...counts, allowed: kind !== "PROP", note: kind === "PROP" ? PROP_DELETE_NOTE : null };
+  return { ...counts, allowed: true, note: null };
 }
 
 export async function setSessionArchived(userId: string, kind: SessionKind, id: string, archived: boolean): Promise<void> {
@@ -204,8 +214,11 @@ export async function duplicateLabAccount(userId: string, id: string, name?: str
 }
 
 export async function deleteSession(userId: string, kind: SessionKind, id: string): Promise<void> {
-  await requireKind(userId, kind, id);
-  if (kind === "PROP") throw new SimError(PROP_DELETE_NOTE);
+  const row = await requireKind(userId, kind, id);
+  if (kind === "PROP") {
+    await deletePropChallenge(userId, row as SimAccount);
+    return;
+  }
   if (kind === "LEGACY") {
     await deleteBacktestRun(userId, id);
     return;
@@ -262,14 +275,50 @@ export async function bulkSetArchived(userId: string, refs: SessionRef[], archiv
  */
 export async function bulkDelete(userId: string, refs: SessionRef[]): Promise<number> {
   const list = await requireAll(userId, refs);
-  if (list.some((r) => r.kind === "PROP")) throw new SimError(`${PROP_DELETE_NOTE} Remove them from the selection or archive them.`);
   const lab = list.filter((r) => r.kind === "LAB").map((r) => r.id);
-  if (lab.length) {
+  const propAccounts = await prisma.simAccount.findMany({ where: { userId, id: { in: list.filter((r) => r.kind === "PROP").map((r) => r.id) } } });
+  const challengeIds = [...new Set(propAccounts.map((a) => a.challengeId).filter((c): c is string => c != null))];
+  const loose = propAccounts.filter((a) => a.challengeId == null).map((a) => a.id);
+  if (lab.length || propAccounts.length) {
     await prisma.$transaction(async (tx) => {
-      const r = await tx.simAccount.deleteMany({ where: { userId, id: { in: lab }, product: "STRATEGY_LAB" } });
-      if (r.count !== lab.length) throw new SimError("Some of these sessions changed meanwhile — nothing was deleted. Refresh and try again.");
+      const r = await tx.simAccount.deleteMany({ where: { userId, id: { in: [...lab, ...loose] } } });
+      if (r.count !== lab.length + loose.length) throw new SimError("Some of these sessions changed meanwhile — nothing was deleted. Refresh and try again.");
+      // A challenge's accounts (and their history) cascade with it.
+      const c = await tx.simChallenge.deleteMany({ where: { userId, id: { in: challengeIds } } });
+      if (c.count !== challengeIds.length) throw new SimError("Some of these sessions changed meanwhile — nothing was deleted. Refresh and try again.");
     });
   }
   for (const r of list.filter((x) => x.kind === "LEGACY")) await deleteBacktestRun(userId, r.id);
   return list.length;
 }
+
+/** Every account of the challenge a Prop Firm account belongs to (just itself if it has none). */
+async function challengeAccountIds(userId: string, a: SimAccount): Promise<string[]> {
+  if (!a.challengeId) return [a.id];
+  return (await prisma.simAccount.findMany({ where: { userId, challengeId: a.challengeId }, select: { id: true } })).map((x) => x.id);
+}
+
+/**
+ * Deletes a Prop Firm challenge with every stage account. One owner-scoped
+ * statement: the database cascades accounts → orders, fills, positions,
+ * ledger, events, breaches, payouts, drawings (observations are unlinked).
+ */
+async function deletePropChallenge(userId: string, a: SimAccount): Promise<void> {
+  const r = a.challengeId
+    ? await prisma.simChallenge.deleteMany({ where: { id: a.challengeId, userId } })
+    : await prisma.simAccount.deleteMany({ where: { id: a.id, userId, product: "PROP_FIRM" } });
+  if (r.count !== 1) throw new SimNotFoundError();
+}
+
+/**
+ * Every simulated session of the user — Strategy Lab accounts and Prop Firm
+ * challenges (with all their history) — in one transaction. Historical
+ * datasets, strategies and studies are kept (observations are unlinked).
+ */
+export async function deleteAllSimulations(userId: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.simChallenge.deleteMany({ where: { userId } });
+    await tx.simAccount.deleteMany({ where: { userId } });
+  });
+}
+

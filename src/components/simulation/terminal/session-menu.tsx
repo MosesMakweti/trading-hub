@@ -96,8 +96,8 @@ export function SessionMenu({
           <DropdownMenuItem onClick={() => void open("archive")}>
             <Archive /> Archive session
           </DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" disabled={session.kind === "PROP"} onClick={() => void open("delete")} title={session.kind === "PROP" ? "Prop Firm accounts are financial records: archive them instead." : undefined}>
-            <Trash2 /> Delete session{session.kind === "PROP" && " (archive only)"}
+          <DropdownMenuItem variant="destructive" onClick={() => void open("delete")}>
+            <Trash2 /> {session.kind === "PROP" ? "Delete challenge" : "Delete session"}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -129,6 +129,7 @@ export function SessionMenu({
               <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Checking what it holds…</p>
             ) : (
               <div className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-sm">
+                {impact.note && <p className="font-medium text-amber-500">{impact.note}</p>}
                 <p className="font-medium">Deleted with it:</p>
                 <ul className="list-inside list-disc text-muted-foreground">
                   <li>{impact.trades} trade{impact.trades === 1 ? "" : "s"}, {impact.orders} order{impact.orders === 1 ? "" : "s"}, their fills and the account ledger</li>
