@@ -21,7 +21,7 @@ export default async function BacktestingHomePage() {
     prisma.backtestRun.count({ where: { userId: user.id } }),
     prisma.historicalDataset.count({ where: { userId: user.id, status: "READY" } }),
   ]);
-  const inProgress = accounts.filter((a) => a.status === "ACTIVE" || a.status === "CREATED").slice(0, 6);
+  const inProgress = accounts.filter((a) => !a.archived && (a.status === "ACTIVE" || a.status === "CREATED")).slice(0, 6);
   const lab = accounts.filter((a) => a.product === "STRATEGY_LAB");
   const prop = accounts.filter((a) => a.product === "PROP_FIRM");
 

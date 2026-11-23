@@ -103,6 +103,8 @@ export interface SimAccountSummaryDTO {
   openPositions: number;
   closedTrades: number;
   updatedAt: string;
+  /** Archived from the session library (or the older ARCHIVED status). */
+  archived: boolean;
 }
 
 /**

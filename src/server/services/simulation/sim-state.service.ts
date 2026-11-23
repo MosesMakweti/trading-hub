@@ -249,6 +249,7 @@ export async function listSimAccountSummaries(userId: string, filter: { product?
       openPositions: counts.find((c) => c.status === "OPEN")?._count._all ?? 0,
       closedTrades: counts.find((c) => c.status === "CLOSED")?._count._all ?? 0,
       updatedAt: a.updatedAt.toISOString(),
+      archived: a.archivedAt != null || a.status === "ARCHIVED",
     };
   });
 }
