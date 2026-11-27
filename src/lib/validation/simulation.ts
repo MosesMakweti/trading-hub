@@ -12,6 +12,18 @@ export const createLabAccountSchema = z
     name: z.string().trim().min(1, "Name is required.").max(120),
     description: z.string().trim().max(2000).nullish(),
     strategyId: id.nullish(),
+    /**
+     * How the session uses a strategy (default: EXISTING when strategyId is
+     * set, otherwise NONE):
+     *  NONE        discretionary backtest, no structured strategy;
+     *  EXISTING    backtest mode — test a Strategy Lab strategy as-is;
+     *  REFINE      refinement mode — fork strategyId into a new experiment and test that;
+     *  EXPERIMENT  test an existing ACTIVE experiment (experimentId);
+     *  BUILD       strategy-building mode — start a blank strategy (newStrategyName).
+     */
+    strategyMode: z.enum(["NONE", "EXISTING", "REFINE", "EXPERIMENT", "BUILD"]).optional(),
+    experimentId: id.nullish(),
+    newStrategyName: z.string().trim().max(120).nullish(),
     datasets: z.array(z.object({ assetSymbol: z.string().trim().toUpperCase().min(1).max(20), datasetId: id })).min(1, "Add at least one instrument.").max(10),
     periodStart: dateKey,
     periodEnd: dateKey,

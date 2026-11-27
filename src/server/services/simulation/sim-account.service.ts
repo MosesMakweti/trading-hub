@@ -71,6 +71,7 @@ export interface CreateLabAccountInput {
   name: string;
   description?: string | null;
   strategyId?: string | null;
+  experimentId?: string | null;
   /** asset symbol → dataset id */
   datasets: { assetSymbol: string; datasetId: string }[];
   periodStart: string;
@@ -104,6 +105,8 @@ export async function createSimAccount(
     name: string;
     description?: string | null;
     strategyId?: string | null;
+    /** A strategy experiment under test: its working strategy is the strategy snapshotted. */
+    experimentId?: string | null;
     datasets: { assetSymbol: string; datasetId: string }[];
     periodStart: string;
     periodEnd: string;
@@ -124,12 +127,25 @@ export async function createSimAccount(
   const period = periodMinutes({ periodStart, periodEnd });
   for (const d of input.datasets) await checkPin(userId, d.assetSymbol, d.datasetId, period);
 
-  let strategy: Pick<Prisma.SimAccountUncheckedCreateInput, "strategyId" | "strategyNameSnapshot" | "strategyVersionSnapshot" | "strategySnapshot"> = {};
-  if (input.strategyId) {
-    const captured = await captureStrategySnapshot(userId, input.strategyId);
+  let strategy: Pick<Prisma.SimAccountUncheckedCreateInput, "strategyId" | "strategyNameSnapshot" | "strategyVersionSnapshot" | "strategySnapshot" | "experimentId"> = {};
+  let strategyId = input.strategyId ?? null;
+  if (input.experimentId) {
+    const experiment = await prisma.strategyExperiment.findFirst({
+      where: { id: input.experimentId, userId },
+      select: { id: true, status: true, workingStrategyId: true },
+    });
+    if (!experiment) throw new SimError("That experiment wasn't found.");
+    if (experiment.status !== "ACTIVE") throw new SimError("That experiment is closed — start a new one to keep testing.");
+    if (strategyId && strategyId !== experiment.workingStrategyId) throw new SimError("Choose either a strategy or an experiment, not both.");
+    strategyId = experiment.workingStrategyId;
+    strategy.experimentId = experiment.id;
+  }
+  if (strategyId) {
+    const captured = await captureStrategySnapshot(userId, strategyId);
     if (!captured) throw new SimError("That strategy no longer exists.");
     strategy = {
-      strategyId: input.strategyId,
+      ...strategy,
+      strategyId,
       strategyNameSnapshot: captured.name,
       strategyVersionSnapshot: captured.version,
       strategySnapshot: captured.snapshot as unknown as Prisma.InputJsonValue,
@@ -184,6 +200,7 @@ export async function createLabAccount(userId: string, input: CreateLabAccountIn
     name: input.name,
     description: input.description,
     strategyId: input.strategyId,
+    experimentId: input.experimentId,
     datasets: input.datasets,
     periodStart: input.periodStart,
     periodEnd: input.periodEnd,

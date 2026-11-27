@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 
-import { prisma } from "@/server/db";
+import { prisma, type TransactionClient } from "@/server/db";
 import {
   buildSnapshot,
   loadStrategyTree,
@@ -29,9 +29,11 @@ export type VersionRef = number | "current";
 // extension in server/db.ts auto-filters `deletedAt: null` on find/list/count.
 // The full strategy tree (snapshot + materialize) lives in strategy-tree.ts.
 
+/** The user's strategy library. Backtesting experiments (isolated working
+ *  copies, see strategy-experiments.service.ts) are never listed here. */
 export async function listStrategies(userId: string) {
   return prisma.strategy.findMany({
-    where: { userId },
+    where: { userId, isExperiment: false },
     orderBy: [{ sortOrder: "asc" }, { updatedAt: "desc" }],
   });
 }
@@ -78,25 +80,7 @@ export async function publishStrategyVersion(
   note: string | null,
 ) {
   try {
-    return await prisma.$transaction(async (tx) => {
-      const strategy = await loadStrategyTree(tx, userId, strategyId);
-      if (!strategy) throw new StrategyLabError("Strategy not found.", "NOT_FOUND");
-
-      const bumped = await tx.strategy.updateMany({
-        where: { id: strategyId, userId, deletedAt: null, version: strategy.version },
-        data: { version: strategy.version + 1 },
-      });
-      if (bumped.count === 0) throw publishConflict();
-
-      return tx.strategyVersion.create({
-        data: {
-          strategyId,
-          version: strategy.version,
-          note: note?.trim() ? note.trim() : null,
-          snapshot: buildSnapshot(strategy) as unknown as Prisma.InputJsonValue,
-        },
-      });
-    }, TREE_TX_OPTIONS);
+    return await prisma.$transaction((tx) => publishStrategyVersionInTx(tx, userId, strategyId, note), TREE_TX_OPTIONS);
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === "P2002" || error.code === "P2034")) {
       throw publishConflict();
@@ -105,7 +89,33 @@ export async function publishStrategyVersion(
   }
 }
 
-function publishConflict() {
+/** publishStrategyVersion's body, for callers that already hold a transaction. */
+export async function publishStrategyVersionInTx(
+  tx: TransactionClient,
+  userId: string,
+  strategyId: string,
+  note: string | null,
+) {
+  const strategy = await loadStrategyTree(tx, userId, strategyId);
+  if (!strategy) throw new StrategyLabError("Strategy not found.", "NOT_FOUND");
+
+  const bumped = await tx.strategy.updateMany({
+    where: { id: strategyId, userId, deletedAt: null, version: strategy.version },
+    data: { version: strategy.version + 1 },
+  });
+  if (bumped.count === 0) throw publishConflict();
+
+  return tx.strategyVersion.create({
+    data: {
+      strategyId,
+      version: strategy.version,
+      note: note?.trim() ? note.trim().slice(0, 500) : null,
+      snapshot: buildSnapshot(strategy) as unknown as Prisma.InputJsonValue,
+    },
+  });
+}
+
+export function publishConflict() {
   return new StrategyLabError(
     "This strategy was just published from another tab or device. Refresh to see the new version, then publish again if needed.",
     "CONFLICT",

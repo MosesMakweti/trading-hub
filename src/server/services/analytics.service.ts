@@ -128,7 +128,7 @@ export async function getAnalyticsFilterOptions(userId: string): Promise<Analyti
       where: { userId },
       select: { assetSymbol: true, selectedSession: true, selectedEntryModel: true },
     }),
-    prisma.strategy.findMany({ where: { userId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.strategy.findMany({ where: { userId, isExperiment: false }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     prisma.tradingAccount.findMany({
       where: { userId, kind: { not: "PERFORMANCE" } },
       select: { id: true, name: true },
