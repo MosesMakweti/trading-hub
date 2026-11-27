@@ -48,7 +48,9 @@ export function findHistoricalScenario(
 export function toReplayResolvedConditions(
   scenario: StrategyVersionSetupScenarioSnapshot,
 ): ResolvedSetupCondition[] {
-  return scenario.conditions.map((c) => ({
+  // A condition whose checklist item was disabled at publish time is not
+  // scored (same rule as live getEffectiveScenario). Absent flag = enabled.
+  return scenario.conditions.filter((c) => c.enabled !== false).map((c) => ({
     id: c.checklistItemId,
     checklistItemId: c.checklistItemId,
     name: c.name,
