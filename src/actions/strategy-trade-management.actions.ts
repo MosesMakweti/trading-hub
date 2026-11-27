@@ -33,7 +33,7 @@ export async function updateTradeManagement(
     return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   try {
-    await tmService.updateTradeManagement(user.id, id, parsed.data);
+    await tmService.updateTradeManagement(user.id, await tmService.ensureTradeManagement(user.id, strategyId), parsed.data);
   } catch (error) {
     return { success: false, error: errorMessage(error, "Failed to save.") };
   }
@@ -44,11 +44,13 @@ export async function updateTradeManagement(
 // ── Partial take-profits ─────────────────────────────────────────────────────
 export async function createPartialTakeProfit(
   strategyId: string,
-  tradeManagementId: string,
+  /** Ignored — the record is resolved (and created on first use) through the owned strategy. */
+  tradeManagementId?: string,
 ): Promise<CreateResult> {
+  void tradeManagementId;
   const user = await requireUser();
   try {
-    const tp = await tmService.createPartialTakeProfit(user.id, tradeManagementId);
+    const tp = await tmService.createPartialTakeProfit(user.id, await tmService.ensureTradeManagement(user.id, strategyId));
     revalidate(strategyId);
     return { success: true, id: tp.id };
   } catch (error) {
@@ -99,7 +101,7 @@ export async function reorderPartialTakeProfits(
   try {
     await tmService.reorderPartialTakeProfits(
       user.id,
-      parsed.data.tradeManagementId,
+      await tmService.ensureTradeManagement(user.id, strategyId),
       parsed.data.orderedIds,
     );
   } catch (error) {
@@ -121,7 +123,7 @@ export async function createCustomRule(
     return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   try {
-    await tmService.createCustomRule(user.id, tradeManagementId, parsed.data.text);
+    await tmService.createCustomRule(user.id, await tmService.ensureTradeManagement(user.id, strategyId), parsed.data.text);
   } catch (error) {
     return { success: false, error: errorMessage(error, "Failed to add rule.") };
   }
@@ -168,7 +170,7 @@ export async function reorderCustomRules(
   const parsed = customRuleReorderSchema.safeParse({ tradeManagementId, orderedIds });
   if (!parsed.success) return { success: false, error: "Invalid input." };
   try {
-    await tmService.reorderCustomRules(user.id, tradeManagementId, orderedIds);
+    await tmService.reorderCustomRules(user.id, await tmService.ensureTradeManagement(user.id, strategyId), orderedIds);
   } catch (error) {
     return { success: false, error: errorMessage(error, "Failed to reorder.") };
   }

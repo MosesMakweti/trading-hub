@@ -7,7 +7,7 @@ import { listArsenalConcepts } from "@/server/services/arsenal.service";
 import { listFrameworkSteps } from "@/server/services/framework.service";
 import { listTimeframes } from "@/server/services/timeframes.service";
 import { listEntryModels } from "@/server/services/strategy-entry-models.service";
-import { getOrCreateTradeManagement } from "@/server/services/strategy-trade-management.service";
+import { getTradeManagement } from "@/server/services/strategy-trade-management.service";
 import { getStrategyExpectancy, getStrategyPerformance } from "@/server/services/analytics.service";
 import { listStrategyChecklist, listStrategySessions } from "@/server/services/strategy-sot.service";
 import { listSetupTypesWithScenarios } from "@/server/services/strategy-setup-types.service";
@@ -53,7 +53,7 @@ export default async function StrategyWorkspacePage({
     listFrameworkSteps(user.id, strategyId),
     listTimeframes(user.id, strategyId),
     listEntryModels(user.id, strategyId),
-    getOrCreateTradeManagement(user.id, strategyId),
+    getTradeManagement(user.id, strategyId),
     getStrategyPerformance(user.id, strategyId),
     getStrategyExpectancy(user.id, strategyId),
     listStrategyVersions(user.id, strategyId),
@@ -177,30 +177,33 @@ export default async function StrategyWorkspacePage({
     notes: m.notes,
   }));
 
-  const tradeManagementDto: TradeManagementDTO = {
-    id: tradeManagement.id,
-    takeProfitPhilosophy: tradeManagement.takeProfitPhilosophy,
-    initialStopPlacement: tradeManagement.initialStopPlacement,
-    breakEvenRules: tradeManagement.breakEvenRules,
-    trailingStopRules: tradeManagement.trailingStopRules,
-    scalingInRules: tradeManagement.scalingInRules,
-    scalingOutRules: tradeManagement.scalingOutRules,
-    maxHoldingTime: tradeManagement.maxHoldingTime,
-    maxRiskPercent: tradeManagement.maxRiskPercent ? tradeManagement.maxRiskPercent.toNumber() : null,
-    expectedWinRate: tradeManagement.expectedWinRate,
-    expectedAvgRr: tradeManagement.expectedAvgRr,
-    expectedExpectancy: tradeManagement.expectedExpectancy,
-    minExecutionScore: tradeManagement.minExecutionScore,
-    maxDailyRiskPercent: tradeManagement.maxDailyRiskPercent,
-    maxTradesPerDay: tradeManagement.maxTradesPerDay,
-    partialTakeProfits: tradeManagement.partialTakeProfits.map((p) => ({
-      id: p.id,
-      trigger: p.trigger,
-      percentToClose: p.percentToClose ? p.percentToClose.toNumber() : null,
-      reason: p.reason,
-    })),
-    customRules: tradeManagement.customRules.map((r) => ({ id: r.id, text: r.text })),
-  };
+  // No record yet = nothing saved; the first edit creates it server-side.
+  const tradeManagementDto: TradeManagementDTO = tradeManagement
+    ? {
+        id: tradeManagement.id,
+        takeProfitPhilosophy: tradeManagement.takeProfitPhilosophy,
+        initialStopPlacement: tradeManagement.initialStopPlacement,
+        breakEvenRules: tradeManagement.breakEvenRules,
+        trailingStopRules: tradeManagement.trailingStopRules,
+        scalingInRules: tradeManagement.scalingInRules,
+        scalingOutRules: tradeManagement.scalingOutRules,
+        maxHoldingTime: tradeManagement.maxHoldingTime,
+        maxRiskPercent: tradeManagement.maxRiskPercent ? tradeManagement.maxRiskPercent.toNumber() : null,
+        expectedWinRate: tradeManagement.expectedWinRate,
+        expectedAvgRr: tradeManagement.expectedAvgRr,
+        expectedExpectancy: tradeManagement.expectedExpectancy,
+        minExecutionScore: tradeManagement.minExecutionScore,
+        maxDailyRiskPercent: tradeManagement.maxDailyRiskPercent,
+        maxTradesPerDay: tradeManagement.maxTradesPerDay,
+        partialTakeProfits: tradeManagement.partialTakeProfits.map((p) => ({
+          id: p.id,
+          trigger: p.trigger,
+          percentToClose: p.percentToClose ? p.percentToClose.toNumber() : null,
+          reason: p.reason,
+        })),
+        customRules: tradeManagement.customRules.map((r) => ({ id: r.id, text: r.text })),
+      }
+    : emptyTradeManagement();
 
   return (
     <FadeIn>
@@ -221,4 +224,26 @@ export default async function StrategyWorkspacePage({
       />
     </FadeIn>
   );
+}
+
+function emptyTradeManagement(): TradeManagementDTO {
+  return {
+    id: "",
+    takeProfitPhilosophy: null,
+    initialStopPlacement: null,
+    breakEvenRules: null,
+    trailingStopRules: null,
+    scalingInRules: null,
+    scalingOutRules: null,
+    maxHoldingTime: null,
+    maxRiskPercent: null,
+    expectedWinRate: null,
+    expectedAvgRr: null,
+    expectedExpectancy: null,
+    minExecutionScore: null,
+    maxDailyRiskPercent: null,
+    maxTradesPerDay: null,
+    partialTakeProfits: [],
+    customRules: [],
+  };
 }

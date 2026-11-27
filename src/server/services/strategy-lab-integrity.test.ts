@@ -160,3 +160,22 @@ describe("#10 concurrent publishing", () => {
     expect(after.map((v) => v.version)).toEqual([1, 2]);
   });
 });
+
+describe("opening a strategy never writes", () => {
+  it("getTradeManagement is read-only; ensureTradeManagement creates once, scoped to the owner", async () => {
+    const { userId, strategyId } = await setup("lazy-tm");
+    const tmSvc = await import("@/server/services/strategy-trade-management.service");
+    expect(await tmSvc.getTradeManagement(userId, strategyId)).toBeNull();
+    expect(await prisma.strategyTradeManagement.count({ where: { strategyId } })).toBe(0);
+
+    const [a, b] = await Promise.all([
+      tmSvc.ensureTradeManagement(userId, strategyId),
+      tmSvc.ensureTradeManagement(userId, strategyId),
+    ]);
+    expect(a).toBe(b);
+    expect(await prisma.strategyTradeManagement.count({ where: { strategyId } })).toBe(1);
+
+    const intruder = await setup("lazy-tm-intruder");
+    await expect(tmSvc.ensureTradeManagement(intruder.userId, strategyId)).rejects.toThrow(/not found/i);
+  });
+});
