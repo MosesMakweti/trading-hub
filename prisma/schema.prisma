@@ -5224,6 +5224,9 @@ model SimOrder {
   positionId      String? @unique
   note            String?
 
+  /// Strategy evaluation captured when the order was placed (the decision time).
+  strategyEvaluation Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -5255,15 +5258,23 @@ model SimPosition {
   conversionRate    Decimal           @db.Decimal(30, 12)
   specSnapshot      Json
 
-  openedMinute  Int
-  closedMinute  Int?
-  realizedPnl   Decimal        @default(0) @db.Decimal(14, 2)
-  commissions   Decimal        @default(0) @db.Decimal(14, 2)
-  swaps         Decimal        @default(0) @db.Decimal(14, 2)
-  closeReason   SimFillReason?
+  openedMinute        Int
+  closedMinute        Int?
+  realizedPnl         Decimal        @default(0) @db.Decimal(14, 2)
+  commissions         Decimal        @default(0) @db.Decimal(14, 2)
+  swaps               Decimal        @default(0) @db.Decimal(14, 2)
+  closeReason         SimFillReason?
   /// An exit where one bar reached both stop and target (stop assumed first).
-  ambiguousExit Boolean        @default(false)
-  note          String?
+  ambiguousExit       Boolean        @default(false)
+  note                String?
+  /// Strategy evaluation frozen at the trade decision (domain/strategies/strategy-evaluation.ts),
+  /// copied from the order. Null = no structured strategy or nothing confirmed.
+  strategyEvaluation  Json?
+  /// Denormalized from strategyEvaluation for analytics grouping.
+  setupTypeName       String?
+  strategySessionName String?
+  executionScore      Int?
+  followedRules       Boolean?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

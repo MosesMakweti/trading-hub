@@ -29,7 +29,13 @@ function Field({ label, value }: { label: string; value: unknown }) {
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="glass space-y-2 rounded-2xl p-4">
       <h3 className="font-medium">{title}</h3>
@@ -38,10 +44,18 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <section className="space-y-2">
-      <h2 className="text-sm font-semibold tracking-tight text-muted-foreground">{title}</h2>
+      <h2 className="text-sm font-semibold tracking-tight text-muted-foreground">
+        {title}
+      </h2>
       {children}
     </section>
   );
@@ -99,9 +113,15 @@ function ChecklistCard({
               </span>
             )}
             {c.weight != null && (
-              <span className="text-xs text-muted-foreground tabular-nums">w{c.weight}</span>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                w{c.weight}
+              </span>
             )}
-            {c.category && <span className="text-xs text-muted-foreground">{c.category}</span>}
+            {c.category && (
+              <span className="text-xs text-muted-foreground">
+                {c.category}
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -115,12 +135,15 @@ export function StrategyVersionSnapshotView({
   note,
   createdAt,
   snapshot,
+  embedded = false,
 }: {
   strategyId: string;
   version: number;
   note: string | null;
   createdAt: string;
   snapshot: StrategyVersionSnapshot;
+  /** Inside another surface (the Backtesting terminal): no page header / width cap. */
+  embedded?: boolean;
 }) {
   const s = snapshot;
   const tm = s.tradeManagement;
@@ -129,33 +152,41 @@ export function StrategyVersionSnapshotView({
   const execution = s.execution ?? [];
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-start gap-2">
-        <Link
-          href={`/strategy-lab/${strategyId}`}
-          aria-label="Back to strategy"
-          className="mt-1 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <ChevronLeft className="size-4" />
-        </Link>
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold tracking-tight">{s.name}</h1>
-            <Badge variant="outline" className="tabular-nums">
-              Version {version}
-            </Badge>
-            <StrategyStatusBadge status={s.status} />
+    <div className={embedded ? "space-y-4" : "mx-auto max-w-4xl space-y-6"}>
+      {!embedded && (
+        <div className="flex items-start gap-2">
+          <Link
+            href={`/strategy-lab/${strategyId}`}
+            aria-label="Back to strategy"
+            className="mt-1 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <ChevronLeft className="size-4" />
+          </Link>
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-semibold tracking-tight">{s.name}</h1>
+              <Badge variant="outline" className="tabular-nums">
+                Version {version}
+              </Badge>
+              <StrategyStatusBadge status={s.status} />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Read-only snapshot · published{" "}
+              {new Date(createdAt).toLocaleString(undefined, {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
+            </p>
+            {note && <p className="text-sm">{note}</p>}
           </div>
-          <p className="text-xs text-muted-foreground">
-            Read-only snapshot · published {new Date(createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
-          </p>
-          {note && <p className="text-sm">{note}</p>}
         </div>
-      </div>
+      )}
 
       {(s.description || s.applicableAssets.length > 0) && (
         <Card title="Overview">
-          {s.description && <p className="text-sm whitespace-pre-wrap">{s.description}</p>}
+          {s.description && (
+            <p className="text-sm whitespace-pre-wrap">{s.description}</p>
+          )}
           {s.applicableAssets.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {s.applicableAssets.map((a) => (
@@ -176,7 +207,8 @@ export function StrategyVersionSnapshotView({
                 {sess.name}
                 {sess.startMinutes != null && sess.endMinutes != null && (
                   <span className="ml-1 opacity-70 tabular-nums">
-                    {minutesToTimeString(sess.startMinutes)}–{minutesToTimeString(sess.endMinutes)}
+                    {minutesToTimeString(sess.startMinutes)}–
+                    {minutesToTimeString(sess.endMinutes)}
                   </span>
                 )}
               </Tag>
@@ -215,7 +247,10 @@ export function StrategyVersionSnapshotView({
             {s.frameworkSteps.map((step, i) => (
               <li key={step.id} className="glass space-y-1 rounded-2xl p-4">
                 <h3 className="font-medium">
-                  <span className="text-muted-foreground tabular-nums">{i + 1}.</span> {step.title}
+                  <span className="text-muted-foreground tabular-nums">
+                    {i + 1}.
+                  </span>{" "}
+                  {step.title}
                 </h3>
                 <Field label="Description" value={step.description} />
                 <Field label="Notes" value={step.notes} />
@@ -230,11 +265,16 @@ export function StrategyVersionSnapshotView({
           {s.timeframes.map((tf) => (
             <Card key={tf.id} title={tf.name}>
               {tf.checkpoints.length === 0 ? (
-                <p className="text-xs text-muted-foreground/50 italic">No checkpoints.</p>
+                <p className="text-xs text-muted-foreground/50 italic">
+                  No checkpoints.
+                </p>
               ) : (
                 <ul className="space-y-2">
                   {tf.checkpoints.map((cp) => (
-                    <li key={cp.id} className="rounded-lg border border-border bg-background/40 p-2">
+                    <li
+                      key={cp.id}
+                      className="rounded-lg border border-border bg-background/40 p-2"
+                    >
                       <div className="text-sm font-medium">{cp.title}</div>
                       <Field label="Description" value={cp.description} />
                       <Field label="Notes" value={cp.notes} />
@@ -268,12 +308,16 @@ export function StrategyVersionSnapshotView({
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
               {tm.maxRiskPercent != null && (
                 <span>
-                  Max risk: <span className="text-foreground tabular-nums">{tm.maxRiskPercent}%</span>
+                  Max risk:{" "}
+                  <span className="text-foreground tabular-nums">
+                    {tm.maxRiskPercent}%
+                  </span>
                 </span>
               )}
               {tm.maxHoldingTime && (
                 <span>
-                  Max hold: <span className="text-foreground">{tm.maxHoldingTime}</span>
+                  Max hold:{" "}
+                  <span className="text-foreground">{tm.maxHoldingTime}</span>
                 </span>
               )}
             </div>

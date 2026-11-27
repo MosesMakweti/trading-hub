@@ -27,17 +27,46 @@ export interface StrategyOption {
   version: number;
 }
 
+export interface ExperimentOption {
+  id: string;
+  name: string;
+  label: string;
+}
+
+type StrategyMode = "NONE" | "EXISTING" | "REFINE" | "EXPERIMENT" | "BUILD";
+
+const MODES: { value: StrategyMode; label: string; hint: string }[] = [
+  { value: "EXISTING", label: "Test a strategy", hint: "Backtest a Strategy Lab strategy exactly as it is. Its rules are frozen into this session." },
+  { value: "REFINE", label: "Refine a strategy", hint: "Start an isolated experiment from a strategy. Edits in the terminal never change the original until you save them back." },
+  { value: "EXPERIMENT", label: "Continue an experiment", hint: "Test an experiment you already started." },
+  { value: "BUILD", label: "Build a new strategy", hint: "Start from a blank strategy and develop it in the terminal while you study the chart." },
+  { value: "NONE", label: "No strategy", hint: "Discretionary backtesting without a structured strategy." },
+];
+
 /**
  * Creates a Strategy Lab backtest account: instruments (each backed by one of
  * the trader's MT5 datasets), a historical period, a simulated balance and
  * trading costs. Costs are locked once the replay starts.
  */
-export function CreateLabAccountDialog({ datasets, strategies, trigger = "New backtest" }: { datasets: DatasetOption[]; strategies: StrategyOption[]; trigger?: string }) {
+export function CreateLabAccountDialog({
+  datasets,
+  strategies,
+  experiments = [],
+  trigger = "New backtest",
+}: {
+  datasets: DatasetOption[];
+  strategies: StrategyOption[];
+  experiments?: ExperimentOption[];
+  trigger?: string;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
+  const [mode, setMode] = useState<StrategyMode>(strategies.length ? "EXISTING" : "NONE");
   const [strategyId, setStrategyId] = useState("");
+  const [experimentId, setExperimentId] = useState("");
+  const [newStrategyName, setNewStrategyName] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
@@ -64,7 +93,10 @@ export function CreateLabAccountDialog({ datasets, strategies, trigger = "New ba
     startTransition(async () => {
       const res = await createLabAccountAction({
         name,
-        strategyId: strategyId || null,
+        strategyMode: mode,
+        strategyId: mode === "EXISTING" || mode === "REFINE" ? strategyId || null : null,
+        experimentId: mode === "EXPERIMENT" ? experimentId || null : null,
+        newStrategyName: mode === "BUILD" ? newStrategyName || null : null,
         datasets: picked.map((id) => ({ assetSymbol: datasets.find((d) => d.id === id)!.symbol, datasetId: id })),
         periodStart,
         periodEnd,
@@ -103,14 +135,43 @@ export function CreateLabAccountDialog({ datasets, strategies, trigger = "New ba
               <Input id="lab-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="London breakout · Q1 2024" required maxLength={120} />
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="lab-strategy">Strategy <span className="text-muted-foreground">(optional)</span></Label>
-              <select id="lab-strategy" value={strategyId} onChange={(e) => setStrategyId(e.target.value)} className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm">
-                <option value="">No strategy</option>
-                {strategies.map((s) => <option key={s.id} value={s.id}>{s.name} · v{s.version}</option>)}
-              </select>
-              <p className="text-xs text-muted-foreground">Its rules are frozen into the backtest; later edits in Strategy Lab show as a note.</p>
-            </div>
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">Strategy</legend>
+              <div role="radiogroup" aria-label="Strategy mode" className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                {MODES.filter((m) => m.value !== "EXPERIMENT" || experiments.length > 0).map((m) => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={mode === m.value}
+                    onClick={() => setMode(m.value)}
+                    disabled={(m.value === "EXISTING" || m.value === "REFINE") && strategies.length === 0}
+                    className={cn(
+                      "rounded-md border px-2 py-1.5 text-left text-xs transition-colors disabled:opacity-40",
+                      mode === m.value ? "border-primary bg-primary/10 font-medium" : "border-border hover:bg-muted/60",
+                    )}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">{MODES.find((m) => m.value === mode)?.hint}</p>
+              {(mode === "EXISTING" || mode === "REFINE") && (
+                <select aria-label="Strategy" value={strategyId} onChange={(e) => setStrategyId(e.target.value)} required className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm">
+                  <option value="">Choose a strategy…</option>
+                  {strategies.map((s) => <option key={s.id} value={s.id}>{s.name} · v{s.version}</option>)}
+                </select>
+              )}
+              {mode === "EXPERIMENT" && (
+                <select aria-label="Experiment" value={experimentId} onChange={(e) => setExperimentId(e.target.value)} required className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm">
+                  <option value="">Choose an experiment…</option>
+                  {experiments.map((x) => <option key={x.id} value={x.id}>{x.name} ({x.label})</option>)}
+                </select>
+              )}
+              {mode === "BUILD" && (
+                <Input aria-label="New strategy name" value={newStrategyName} onChange={(e) => setNewStrategyName(e.target.value)} placeholder="New strategy name" maxLength={120} required />
+              )}
+            </fieldset>
 
             <fieldset className="space-y-1.5">
               <legend className="text-sm font-medium">Instruments</legend>

@@ -69,6 +69,14 @@ export const orderSchema = z
     note: z.string().trim().max(2000).nullish(),
     /** A position drawing this order was drafted from (checked and linked server-side). */
     drawingId: z.string().regex(/^[A-Za-z0-9-]{8,64}$/).nullish(),
+    /** The trader's strategy checklist for this decision; the server scores it
+     *  against the session's frozen strategy (never trusted as a result). */
+    strategyCheck: z
+      .object({
+        setupTypeName: z.string().trim().max(120).nullish(),
+        checkedNames: z.array(z.string().trim().min(1).max(120)).max(100).default([]),
+      })
+      .nullish(),
   })
   .refine((v) => v.type === "MARKET" || (v.price != null && v.price !== ""), { message: "A pending order needs a price.", path: ["price"] });
 

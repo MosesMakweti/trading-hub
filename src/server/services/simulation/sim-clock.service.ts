@@ -23,6 +23,8 @@ import { runStep, type EngineOrder, type EnginePosition, type MinuteSnapshot, ty
 import { isReplayTimeframe } from "@/domain/native-replay/timeframes";
 import { accountRules, lockAccountWithBalance, SimError } from "./sim-account.service";
 import { appendLedger } from "./sim-ledger";
+import { evaluationColumns } from "./sim-evaluation.service";
+import type { StrategyEvaluation } from "@/domain/strategies/strategy-evaluation";
 import { accountFeedsCached, loadStepBarsBuffered, MAX_STEP_BARS, periodMinutes, targetMinuteBuffered, type ClockCommand, type SimFeed } from "./sim-market";
 
 /** Per-minute rule evaluation supplied by a product (prop firm). */
@@ -231,6 +233,8 @@ async function persistStep(
           specSnapshot: o.specSnapshot ?? {},
           openedMinute: e.minute,
           note: o.note,
+          // The decision-time strategy evaluation travels with the order.
+          ...evaluationColumns(o.strategyEvaluation as unknown as StrategyEvaluation | null),
         },
       });
       await tx.simOrder.update({ where: { id: o.id }, data: { status: "FILLED", resolvedMinute: e.minute, positionId: e.positionId } });

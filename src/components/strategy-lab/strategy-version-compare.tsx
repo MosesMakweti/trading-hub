@@ -46,9 +46,10 @@ function DiffEntryRow({ entry }: { entry: StrategyDiffEntry }) {
   );
 }
 
-function DiffView({ diff }: { diff: StrategyVersionDiff }) {
+/** Readable per-section explanation of a StrategyVersionDiff (also used in the Backtesting terminal). */
+export function DiffView({ diff, emptyText = "No differences between these versions." }: { diff: StrategyVersionDiff; emptyText?: string }) {
   if (!diff.hasChanges) {
-    return <p className="text-sm text-muted-foreground">No differences between these versions.</p>;
+    return <p className="text-sm text-muted-foreground">{emptyText}</p>;
   }
   return (
     <div className="space-y-4">
