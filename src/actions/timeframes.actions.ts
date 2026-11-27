@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
+import { toStrategyActionError } from "@/server/services/strategy-errors";
 import {
   checkpointCreateSchema,
   checkpointReorderSchema,
@@ -16,9 +17,8 @@ import * as timeframesService from "@/server/services/timeframes.service";
 type ActionResult = { success: true } | { success: false; error: string };
 type CreateResult = { success: true; id: string } | { success: false; error: string };
 
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
+// Service-authored messages pass through; raw database errors never reach the UI.
+const errorMessage = toStrategyActionError;
 
 const revalidate = (strategyId: string) => revalidatePath(`/strategy-lab/${strategyId}`);
 

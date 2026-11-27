@@ -15,6 +15,22 @@ import type {
   SetupScenarioUpdateInput,
   SetupTypeUpdateInput,
 } from "@/lib/validation/strategy-setup-types";
+import { StrategyLabError } from "@/server/services/strategy-errors";
+
+const DUPLICATE_NAME = "A setup type with this name already exists.";
+
+/** The DB index (unique among LIVE setup types) is the race-proof backstop for
+ *  assertUniqueSetupTypeName; translate its violation into the same message. */
+async function withDuplicateNameGuard<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      throw new StrategyLabError(DUPLICATE_NAME, "DUPLICATE");
+    }
+    throw error;
+  }
+}
 
 async function assertOwnsStrategy(userId: string, strategyId: string) {
   const strategy = await prisma.strategy.findFirst({ where: { id: strategyId, userId }, select: { id: true } });
@@ -35,7 +51,7 @@ async function assertUniqueSetupTypeName(
   });
   const normalized = name.trim().toLowerCase();
   if (existing.some((s) => s.name.trim().toLowerCase() === normalized)) {
-    throw new Error("A setup type with this name already exists.");
+    throw new StrategyLabError(DUPLICATE_NAME, "DUPLICATE");
   }
 }
 
@@ -76,7 +92,7 @@ export async function createSetupType(
     orderBy: { sortOrder: "desc" },
   });
 
-  return prisma.$transaction(async (tx) => {
+  return withDuplicateNameGuard(() => prisma.$transaction(async (tx) => {
     const setupType = await tx.strategySetupType.create({
       data: {
         userId,
@@ -93,7 +109,7 @@ export async function createSetupType(
       ],
     });
     return setupType;
-  });
+  }));
 }
 
 export async function updateSetupType(userId: string, id: string, data: SetupTypeUpdateInput) {
@@ -106,13 +122,15 @@ export async function updateSetupType(userId: string, id: string, data: SetupTyp
     await assertUniqueSetupTypeName(existing.strategyId, data.name, id);
   }
 
-  const result = await prisma.strategySetupType.updateMany({
-    where: { id, userId },
-    data: {
-      ...(data.name !== undefined ? { name: data.name } : {}),
-      ...(data.description !== undefined ? { description: data.description } : {}),
-    },
-  });
+  const result = await withDuplicateNameGuard(() =>
+    prisma.strategySetupType.updateMany({
+      where: { id, userId },
+      data: {
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.description !== undefined ? { description: data.description } : {}),
+      },
+    }),
+  );
   if (result.count === 0) throw new Error("Setup type not found.");
 }
 
@@ -416,7 +434,9 @@ export async function getEffectiveScenario(
   scenarioId?: string | null,
 ): Promise<EffectiveSetupScenario | null> {
   const setupType = await prisma.strategySetupType.findFirst({
-    where: { id: setupTypeId, userId },
+    // The parent strategy must still exist: a deleted strategy's setup types
+    // never validate a trade idea (audit #8).
+    where: { id: setupTypeId, userId, strategy: { deletedAt: null } },
     select: {
       id: true,
       name: true,
@@ -426,7 +446,10 @@ export async function getEffectiveScenario(
         orderBy: { sortOrder: "asc" },
         include: {
           conditions: {
-            where: { checklistItem: { deletedAt: null } },
+            // Disabled checklist items are never scored or allowed to gate
+            // validity through a scenario reference (audit #7) — the same rule
+            // getStrategyReference applies to the plain confluence list.
+            where: { checklistItem: { deletedAt: null, enabled: true } },
             include: { checklistItem: true },
           },
         },

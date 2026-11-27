@@ -2094,9 +2094,10 @@ model StrategySetupType {
   // a trade; its frozen setupValidationSnapshot survives regardless.
   trades    Trade[]
 
-  // Case-sensitive defense-in-depth; the service also enforces a
+  // Unique among LIVE (non-archived) setup types only, so an archived name can
+  // be reused. Case-sensitive defense-in-depth; the service also enforces a
   // case-insensitive duplicate-name check for a friendlier error message.
-  @@unique([strategyId, name])
+  @@unique([strategyId, name], map: "StrategySetupType_strategyId_name_key", where: raw("\"deletedAt\" IS NULL"))
   @@index([strategyId, deletedAt, sortOrder])
 }
 

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
+import { toStrategyActionError } from "@/server/services/strategy-errors";
 import {
   strategyCreateSchema,
   strategyRenameSchema,
@@ -25,9 +26,8 @@ function toVersionRef(value: unknown): VersionRef | null {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
+// Service-authored messages pass through; raw database errors never reach the UI.
+const errorMessage = toStrategyActionError;
 
 export async function createStrategy(input: unknown): Promise<CreateResult> {
   const user = await requireUser();
