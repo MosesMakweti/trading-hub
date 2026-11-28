@@ -162,8 +162,9 @@ export async function deleteDataSection(userId: string, section: DataSection): P
       return;
     }
     case "accounts": {
-      // Every prop-firm / brokerage account (their allocations cascade). The
-      // internal Performance Account — the analytics ledger — is preserved.
+      // Every prop-firm / brokerage account (their allocations cascade, and so
+      // does each account's MT5 connection with all of its broker history).
+      // The internal Performance Account — the analytics ledger — is preserved.
       await prisma.tradingAccount.deleteMany({ where: { userId, kind: { not: "PERFORMANCE" } } });
       return;
     }

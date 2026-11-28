@@ -99,6 +99,10 @@ model User {
 
   marketDataImports MarketDataImport[]
 
+  // MT5 Connector (Stage 1) — account-history sync, separate from the
+  // candle import above. See the MT5 Connector model group at the end.
+  mt5Connections Mt5Connection[]
+
   apiTokens          ApiToken[]
   apiIdempotencyKeys ApiIdempotencyKey[]
 
@@ -469,6 +473,10 @@ model TradingAccount {
   // Performance benchmark only — one immutable risk snapshot per trade
   // (see PerformanceRiskSnapshot below).
   performanceRiskSnapshots PerformanceRiskSnapshot[]
+  // MT5 Connector (Stage 1) — at most one connection per account. Broker
+  // history is account-side only: it never feeds the allocation-derived
+  // balance above, the ledger or the journal in Stage 1.
+  mt5Connection            Mt5Connection?
 
   @@index([userId, kind, deletedAt])
 }
@@ -5717,4 +5725,445 @@ model StrategyExperiment {
 
   @@index([userId, status])
   @@index([baselineStrategyId, sequence])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MT5 CONNECTOR (Stage 1) — docs/MT5_CONNECTOR.md
+//
+// Read-only account-history sync from a Windows MT5 terminal via the
+// TraditoriumConnector Expert Advisor (extensions/mt5). Entirely separate from
+// the MT5 *candle* imports (MarketDataImport / HistoricalDataset).
+//
+// Layers:
+//   1. RAW, immutable broker records: Mt5Deal, Mt5Order (first copy wins —
+//      a re-sent ticket is a duplicate, never an overwrite), plus live
+//      Mt5AccountSnapshot / Mt5PositionEvent observations.
+//   2. DERIVED Mt5Position — one row per DEAL_POSITION_ID, recomputed
+//      deterministically from the stored deals (domain/mt5-account).
+//
+// Stage 1 boundaries (enforced in services, covered by tests): nothing here
+// posts to AccountLedgerEntry, changes any account balance, creates or links
+// a journal Trade, or touches PerformanceRiskSnapshot / PositionFill /
+// Trade.actualRR. Tickets are strings (MT5 tickets are ulong); money and
+// prices are Decimal; MT5 millisecond times are BigInt.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Mt5ConnectionStatus {
+  PENDING_PAIRING // pairing code issued, no device token yet
+  ACTIVE
+  PAUSED // token valid, ingestion refused until resumed
+  REVOKED // token destroyed; broker history kept until explicitly deleted
+}
+
+enum Mt5MarginMode {
+  NETTING
+  HEDGING
+  EXCHANGE
+}
+
+enum Mt5TradeMode {
+  DEMO
+  CONTEST
+  REAL
+}
+
+enum Mt5SyncBatchKind {
+  BACKFILL
+  RECONCILE
+  LIVE
+}
+
+enum Mt5DealCategory {
+  TRADE // DEAL_TYPE_BUY / DEAL_TYPE_SELL
+  TRADE_CANCELED // DEAL_TYPE_BUY_CANCELED / DEAL_TYPE_SELL_CANCELED
+  BALANCE
+  CREDIT
+  CHARGE
+  CORRECTION
+  BONUS
+  COMMISSION
+  INTEREST
+  DIVIDEND
+  TAX
+  UNKNOWN
+}
+
+enum Mt5Side {
+  BUY
+  SELL
+}
+
+enum Mt5DealEntry {
+  IN
+  OUT
+  INOUT
+  OUT_BY
+}
+
+enum Mt5PositionStatus {
+  OPEN
+  CLOSED
+}
+
+// Where Mt5Position.initialStopLoss came from. Never guessed: UNAVAILABLE
+// means the history does not say; NONE_AT_OPEN means the opening deal/order
+// explicitly carried no stop (a stop may still have been added later — MT5
+// keeps no history of position SL modifications).
+enum Mt5InitialStopSource {
+  OPENING_DEAL
+  OPENING_ORDER
+  NONE_AT_OPEN
+  UNAVAILABLE
+}
+
+/// One MT5 account (login@server) feeding one TradingAccount.
+model Mt5Connection {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The account anchor. Hard-deleting the TradingAccount deletes the
+  /// connection and all broker history (cascade); soft-deleting it revokes
+  /// the connection (accounts.service / prop-firms.service).
+  tradingAccountId String         @unique
+  tradingAccount   TradingAccount @relation(fields: [tradingAccountId], references: [id], onDelete: Cascade)
+
+  status Mt5ConnectionStatus @default(PENDING_PAIRING)
+
+  // ── Broker identity — bound at the FIRST successful pairing, never
+  // changed afterwards (a re-pair must present the same login + server).
+  login           String?
+  server          String?
+  brokerCompany   String?
+  accountName     String?
+  accountCurrency String?
+  currencyDigits  Int?
+  leverage        Int?
+  marginMode      Mt5MarginMode?
+  tradeMode       Mt5TradeMode?
+  terminalBuild   Int?
+  eaVersion       String?
+
+  /// ServerTimeConvention (domain/mt5-account/server-time.ts) used to turn
+  /// MT5 trade-server wall-clock times into UTC. Raw server times are always
+  /// kept, so a corrected convention can re-normalize history.
+  timeConventionJson    Json?
+  /// Server − GMT offset the terminal reported on its latest contact.
+  observedOffsetMinutes Int?
+
+  // ── Pairing (short-lived, single use). HMAC of the code, never the code.
+  pairingCodeHash  String?   @unique
+  pairingExpiresAt DateTime?
+
+  // ── Device token: sha256 of the raw `td_mt5_…` value, never the value.
+  tokenHash   String? @unique
+  tokenPrefix String?
+
+  pairedAt        DateTime?
+  lastHeartbeatAt DateTime?
+  /// Last batch that was accepted (history/events).
+  lastSyncedAt    DateTime?
+
+  backfillStartedAt   DateTime?
+  backfillCompletedAt DateTime?
+  historyFromMsc      BigInt?
+  historyToMsc        BigInt?
+  lastDealTimeMsc     BigInt?
+
+  pausedAt      DateTime?
+  revokedAt     DateTime?
+  revokedReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  batches        Mt5SyncBatch[]
+  deals          Mt5Deal[]
+  orders         Mt5Order[]
+  positions      Mt5Position[]
+  positionEvents Mt5PositionEvent[]
+  snapshots      Mt5AccountSnapshot[]
+  symbolSpecs    Mt5SymbolSpec[]
+
+  // One MT5 account can feed only one of a trader's accounts.
+  @@unique([userId, server, login])
+  @@index([userId, status])
+}
+
+/// One accepted ingestion request. (connectionId, idempotencyKey) is the
+/// idempotency guard: an identical retry replays `responseJson`, a reused
+/// key with a different body is refused.
+model Mt5SyncBatch {
+  id           String        @id @default(cuid())
+  connectionId String
+  connection   Mt5Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  kind           Mt5SyncBatchKind
+  idempotencyKey String
+  requestHash    String
+  batchSeq       Int?
+  rangeFromMsc   BigInt?
+  rangeToMsc     BigInt?
+  isFinal        Boolean          @default(false)
+
+  receivedDeals   Int @default(0)
+  insertedDeals   Int @default(0)
+  duplicateDeals  Int @default(0)
+  receivedOrders  Int @default(0)
+  insertedOrders  Int @default(0)
+  duplicateOrders Int @default(0)
+  conflicts       Int @default(0)
+
+  responseJson Json
+  createdAt    DateTime @default(now())
+
+  @@unique([connectionId, idempotencyKey])
+  @@index([connectionId, createdAt])
+}
+
+/// A raw MT5 history deal, preserved as first received.
+model Mt5Deal {
+  id           String        @id @default(cuid())
+  connectionId String
+  connection   Mt5Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  ticket      String
+  orderTicket String?
+  /// DEAL_POSITION_ID; null for balance/credit/etc. operations.
+  positionId  String?
+
+  timeMsc          BigInt
+  /// MT5 trade-server wall clock, stored as-is (NOT UTC).
+  serverTime       DateTime
+  /// Normalized UTC instant under `utcOffsetMinutes`.
+  occurredAt       DateTime
+  utcOffsetMinutes Int
+
+  type     String // raw ENUM_DEAL_TYPE name, e.g. DEAL_TYPE_BUY
+  category Mt5DealCategory
+  side     Mt5Side?
+  entry    Mt5DealEntry?
+  reason   String?
+  symbol   String?
+
+  volume     Decimal? @db.Decimal(24, 10)
+  price      Decimal? @db.Decimal(24, 10)
+  profit     Decimal  @db.Decimal(24, 8)
+  commission Decimal  @db.Decimal(24, 8)
+  swap       Decimal  @db.Decimal(24, 8)
+  fee        Decimal  @db.Decimal(24, 8)
+  stopLoss   Decimal? @db.Decimal(24, 10)
+  takeProfit Decimal? @db.Decimal(24, 10)
+
+  magic      String?
+  comment    String?
+  externalId String?
+
+  /// The deal exactly as the connector sent it.
+  raw         Json
+  /// sha256 of the canonical raw payload — detects a re-sent ticket whose
+  /// content differs (counted as a conflict; the original is kept).
+  payloadHash String
+  batchId     String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([connectionId, ticket])
+  @@index([connectionId, positionId])
+  @@index([connectionId, timeMsc])
+  @@index([connectionId, category])
+}
+
+/// A raw MT5 history order (final state), preserved as first received.
+model Mt5Order {
+  id           String        @id @default(cuid())
+  connectionId String
+  connection   Mt5Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  ticket       String
+  positionId   String?
+  positionById String?
+
+  type   String // raw ENUM_ORDER_TYPE name
+  state  String // raw ENUM_ORDER_STATE name
+  reason String?
+  symbol String?
+
+  timeSetupMsc BigInt?
+  timeDoneMsc  BigInt?
+  setupAt      DateTime?
+  doneAt       DateTime?
+
+  volumeInitial  Decimal? @db.Decimal(24, 10)
+  volumeCurrent  Decimal? @db.Decimal(24, 10)
+  priceOpen      Decimal? @db.Decimal(24, 10)
+  priceStopLimit Decimal? @db.Decimal(24, 10)
+  stopLoss       Decimal? @db.Decimal(24, 10)
+  takeProfit     Decimal? @db.Decimal(24, 10)
+
+  magic      String?
+  comment    String?
+  externalId String?
+
+  raw         Json
+  payloadHash String
+  batchId     String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([connectionId, ticket])
+  @@index([connectionId, positionId])
+  @@index([connectionId, timeDoneMsc])
+}
+
+/// DERIVED: one row per DEAL_POSITION_ID, rebuilt from that position's
+/// stored deals by domain/mt5-account/position-derivation.ts. Never edited
+/// by hand; `derivationVersion` + `sourceHash` say exactly what it was
+/// computed from. The `live*` columns are the latest terminal observation of
+/// an open position and are not part of the derivation.
+model Mt5Position {
+  id           String        @id @default(cuid())
+  connectionId String
+  connection   Mt5Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  positionId String
+  symbol     String
+  /// Direction of the position's FIRST segment (a netting reversal keeps
+  /// the same position id — see `segments`).
+  direction  Direction
+  status     Mt5PositionStatus
+
+  openedMsc BigInt?
+  openedAt  DateTime?
+  closedMsc BigInt?
+  closedAt  DateTime?
+
+  volumeIn      Decimal  @db.Decimal(24, 10)
+  volumeOut     Decimal  @db.Decimal(24, 10)
+  openVolume    Decimal  @db.Decimal(24, 10)
+  /// VWAPs; null when a reversal mixes directions or the opening deals are
+  /// missing from the available history.
+  avgEntryPrice Decimal? @db.Decimal(24, 10)
+  avgExitPrice  Decimal? @db.Decimal(24, 10)
+
+  profit     Decimal @db.Decimal(24, 8)
+  commission Decimal @db.Decimal(24, 8)
+  swap       Decimal @db.Decimal(24, 8)
+  fee        Decimal @db.Decimal(24, 8)
+  /// profit + commission + swap + fee (MT5 signs: costs are negative).
+  netProfit  Decimal @db.Decimal(24, 8)
+
+  dealCount     Int
+  entryCount    Int
+  exitCount     Int
+  reversalCount Int @default(0)
+
+  initialStopLoss   Decimal?             @db.Decimal(24, 10)
+  initialTakeProfit Decimal?             @db.Decimal(24, 10)
+  initialStopSource Mt5InitialStopSource @default(UNAVAILABLE)
+
+  /// Ordered lifecycle segments (string decimals) — see PositionSegment.
+  segments Json
+  /// Derivation flags, e.g. INCOMPLETE_HISTORY, REVERSED, CLOSED_BY.
+  flags    String[] @default([])
+
+  derivationVersion Int
+  sourceHash        String
+  derivedAt         DateTime
+
+  liveOpen         Boolean   @default(false)
+  liveStopLoss     Decimal?  @db.Decimal(24, 10)
+  liveTakeProfit   Decimal?  @db.Decimal(24, 10)
+  liveCurrentPrice Decimal?  @db.Decimal(24, 10)
+  liveProfit       Decimal?  @db.Decimal(24, 8)
+  liveObservedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([connectionId, positionId])
+  @@index([connectionId, status])
+  @@index([connectionId, openedMsc])
+  @@index([connectionId, closedMsc])
+}
+
+/// A live-observed SL/TP state of an open position (OnTradeTransaction).
+/// Observations only — never back-filled into history.
+model Mt5PositionEvent {
+  id           String        @id @default(cuid())
+  connectionId String
+  connection   Mt5Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  positionId  String
+  stopLoss    Decimal? @db.Decimal(24, 10)
+  takeProfit  Decimal? @db.Decimal(24, 10)
+  observedMsc BigInt
+  observedAt  DateTime
+  raw         Json
+
+  createdAt DateTime @default(now())
+
+  @@unique([connectionId, positionId, observedMsc])
+  @@index([connectionId, positionId])
+}
+
+/// Account state reported by the terminal's heartbeat (throttled).
+model Mt5AccountSnapshot {
+  id           String        @id @default(cuid())
+  connectionId String
+  connection   Mt5Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  balance    Decimal @db.Decimal(24, 8)
+  equity     Decimal @db.Decimal(24, 8)
+  margin     Decimal @db.Decimal(24, 8)
+  freeMargin Decimal @db.Decimal(24, 8)
+  credit     Decimal @db.Decimal(24, 8)
+  profit     Decimal @db.Decimal(24, 8)
+
+  /// Open positions as the terminal reported them at this moment.
+  openPositions Json
+  serverTimeMsc BigInt?
+  capturedAt    DateTime @default(now())
+
+  @@index([connectionId, capturedAt])
+}
+
+/// Broker symbol specification as reported by the terminal. Informational
+/// in Stage 1 — never written into UserInstrumentSpec.
+model Mt5SymbolSpec {
+  id           String        @id @default(cuid())
+  connectionId String
+  connection   Mt5Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  symbol         String
+  description    String?
+  digits         Int?
+  contractSize   Decimal? @db.Decimal(24, 10)
+  tickSize       Decimal? @db.Decimal(24, 10)
+  tickValue      Decimal? @db.Decimal(24, 10)
+  volumeMin      Decimal? @db.Decimal(24, 10)
+  volumeMax      Decimal? @db.Decimal(24, 10)
+  volumeStep     Decimal? @db.Decimal(24, 10)
+  currencyBase   String?
+  currencyProfit String?
+  currencyMargin String?
+  raw            Json
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@unique([connectionId, symbol])
+}
+
+/// Failed/successful pairing attempts per hashed client IP — the DB-backed
+/// rate limit for the unauthenticated pair endpoint (serverless instances
+/// share no memory). Pruned lazily.
+model Mt5PairingAttempt {
+  id        String   @id @default(cuid())
+  ipHash    String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([ipHash, createdAt])
+  @@index([createdAt])
 }

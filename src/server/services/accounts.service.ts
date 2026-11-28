@@ -1,4 +1,5 @@
 import { prisma } from "@/server/db";
+import { revokeMt5ConnectionForTradingAccount } from "@/server/services/mt5-connector.service";
 import { utcDateToKey } from "@/lib/date";
 import type { BrokerageAccountInput, PropFirmAccountInput } from "@/lib/validation/accounts";
 
@@ -167,9 +168,14 @@ export async function archiveTradingAccount(userId: string, id: string) {
   if (account?.kind === "PERFORMANCE") {
     throw new Error("The Performance Account can't be deleted.");
   }
-  return prisma.tradingAccount.update({
-    where: { id, userId },
-    data: { deletedAt: new Date() },
+  return prisma.$transaction(async (tx) => {
+    const archived = await tx.tradingAccount.update({
+      where: { id, userId },
+      data: { deletedAt: new Date() },
+    });
+    // MT5 Connector: a deleted account's connector token stops working at once.
+    await revokeMt5ConnectionForTradingAccount(tx, id);
+    return archived;
   });
 }
 

@@ -1,5 +1,6 @@
 import { requireUser } from "@/server/guards";
 import { listApiTokens } from "@/server/services/api-tokens.service";
+import { listMt5AccountOptions } from "@/server/services/mt5-connector.service";
 import { IntegrationsView } from "@/components/settings/integrations-view";
 import { FadeIn } from "@/components/shared/motion";
 
@@ -16,11 +17,11 @@ import { FadeIn } from "@/components/shared/motion";
  */
 export default async function IntegrationsPage() {
   const user = await requireUser();
-  const tokens = await listApiTokens(user.id);
+  const [tokens, mt5Accounts] = await Promise.all([listApiTokens(user.id), listMt5AccountOptions(user.id)]);
 
   return (
     <FadeIn className="mx-auto max-w-2xl">
-      <IntegrationsView initialTokens={tokens} />
+      <IntegrationsView initialTokens={tokens} mt5Accounts={mt5Accounts} />
     </FadeIn>
   );
 }

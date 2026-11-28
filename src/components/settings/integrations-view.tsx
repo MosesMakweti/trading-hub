@@ -19,8 +19,10 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { ExtensionInstallCard } from "@/components/settings/extension-install-card";
+import { Mt5ConnectorCard } from "@/components/settings/mt5-connector-card";
 import { createApiTokenAction, listApiTokensAction, revokeApiTokenAction } from "@/actions/api-tokens.actions";
 import type { ApiTokenSummary } from "@/server/services/api-tokens.service";
+import type { Mt5AccountOptionDTO } from "@/server/services/mt5-connector.service";
 
 /**
  * TradingView Extension — Step 9, Part 10. The trader's own token
@@ -37,7 +39,7 @@ function formatDate(value: Date | string | null): string {
   return new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-export function IntegrationsView({ initialTokens }: { initialTokens: ApiTokenSummary[] }) {
+export function IntegrationsView({ initialTokens, mt5Accounts }: { initialTokens: ApiTokenSummary[]; mt5Accounts: Mt5AccountOptionDTO[] }) {
   const [tokens, setTokens] = useState(initialTokens);
   const [name, setName] = useState("");
   const [justCreated, setJustCreated] = useState<{ rawToken: string; name: string } | null>(null);
@@ -96,6 +98,8 @@ export function IntegrationsView({ initialTokens }: { initialTokens: ApiTokenSum
       </div>
 
       <ExtensionInstallCard />
+
+      <Mt5ConnectorCard initialAccounts={mt5Accounts} />
 
       <div>
         <h2 className="text-base font-semibold">Extension tokens</h2>

@@ -2,6 +2,7 @@ import { Decimal } from "decimal.js";
 
 import { prisma, type TransactionClient } from "@/server/db";
 import { postLedgerEntry } from "@/server/services/account-ledger.service";
+import { revokeMt5ConnectionForTradingAccount } from "@/server/services/mt5-connector.service";
 import { isFundedStageType } from "@/domain/prop-firms/metrics";
 import { computePayoutSplit } from "@/domain/prop-firms/payout-math";
 import { Prisma } from "@prisma/client";
@@ -389,6 +390,8 @@ export async function deletePropFirmAccount(
   await tx.propFirmAccount.update({ where: { id }, data: { deletedAt: now } });
   if (owned.tradingAccountId) {
     await tx.tradingAccount.update({ where: { id: owned.tradingAccountId }, data: { deletedAt: now } });
+    // MT5 Connector: revoke the deleted account's connector token.
+    await revokeMt5ConnectionForTradingAccount(tx, owned.tradingAccountId, now);
   }
 }
 
