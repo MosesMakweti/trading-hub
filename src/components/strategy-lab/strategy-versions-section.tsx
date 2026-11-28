@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { publishStrategyVersion, restoreStrategyVersion } from "@/actions/strategies.actions";
+import { flushPendingAutosaves } from "@/hooks/use-debounced-autosave";
 import { StrategyVersionCompare } from "@/components/strategy-lab/strategy-version-compare";
 import type { StrategyVersionDTO } from "@/types/strategies";
 
@@ -137,6 +138,13 @@ export function StrategyVersionsSection({
 
   function publish() {
     startTransition(async () => {
+      // A version snapshots what's in the DB — make sure every edit still
+      // waiting on its autosave debounce lands first.
+      const saved = await flushPendingAutosaves();
+      if (!saved) {
+        toast.error("Some changes couldn't be saved. Fix them before publishing so the version includes them.");
+        return;
+      }
       const result = await publishStrategyVersion(strategyId, note);
       if (!result.success) {
         toast.error(result.error);

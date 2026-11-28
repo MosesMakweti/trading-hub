@@ -1,7 +1,16 @@
 import { Prisma } from "@prisma/client";
 
-import { prisma } from "@/server/db";
-import { readExecutionPlan, readScenarioContext } from "@/domain/strategies/scenario-playbook";
+import { prisma, type TransactionClient } from "@/server/db";
+import {
+  buildSnapshot,
+  loadStrategyTree,
+  materializeSnapshot,
+  nameWithSuffix,
+  strategyTreeInclude,
+  TREE_TX_OPTIONS,
+  type MaterializeReport,
+} from "@/server/services/strategy-tree";
+import { StrategyLabError } from "@/server/services/strategy-errors";
 import { summarizeStrategyVersionSnapshot } from "@/domain/strategies/version-snapshot";
 import { diffStrategyVersions } from "@/domain/strategies/version-diff";
 import type {
@@ -16,196 +25,15 @@ import type {
 
 export type VersionRef = number | "current";
 
-// Full-tree include shared by publish (snapshot) and duplicate.
-const strategyTreeInclude = {
-  arsenalConcepts: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-  frameworkSteps: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-  timeframes: {
-    where: { deletedAt: null },
-    orderBy: { sortOrder: "asc" },
-    include: { checkpoints: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } } },
-  },
-  entryModels: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-  // SOT strategy-scoped sessions + confluences/execution (frozen in version snapshots).
-  sessions: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-  checklistItems: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-  // Setup Types (Stage 3) — scenarios' conditions are resolved against their
-  // checklist item so the snapshot below can freeze EFFECTIVE mandatory/weight
-  // (after any scenario override), never the live checklist item's own values.
-  setupTypes: {
-    where: { deletedAt: null },
-    orderBy: { sortOrder: "asc" },
-    include: {
-      scenarios: {
-        where: { deletedAt: null },
-        orderBy: { sortOrder: "asc" },
-        include: {
-          conditions: {
-            orderBy: { sortOrder: "asc" },
-            include: { checklistItem: true },
-          },
-        },
-      },
-    },
-  },
-  tradeManagement: {
-    include: {
-      partialTakeProfits: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-      customRules: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-    },
-  },
-} satisfies Prisma.StrategyInclude;
-
-type StrategyTree = Prisma.StrategyGetPayload<{ include: typeof strategyTreeInclude }>;
-
-function buildSnapshot(s: StrategyTree): StrategyVersionSnapshot {
-  return {
-    name: s.name,
-    description: s.description,
-    applicableAssets: s.applicableAssets,
-    status: s.status,
-    arsenalConcepts: s.arsenalConcepts.map((c) => ({
-      id: c.id,
-      name: c.name,
-      definition: c.definition,
-      purpose: c.purpose,
-      howIIdentify: c.howIIdentify,
-      whyItMatters: c.whyItMatters,
-      whenIUse: c.whenIUse,
-      whenIIgnore: c.whenIIgnore,
-      examples: c.examples,
-      personalNotes: c.personalNotes,
-    })),
-    frameworkSteps: s.frameworkSteps.map((f) => ({
-      id: f.id,
-      title: f.title,
-      description: f.description,
-      notes: f.notes,
-    })),
-    timeframes: s.timeframes.map((t) => ({
-      id: t.id,
-      name: t.name,
-      checkpoints: t.checkpoints.map((c) => ({
-        id: c.id,
-        title: c.title,
-        description: c.description,
-        notes: c.notes,
-      })),
-    })),
-    entryModels: s.entryModels.map((m) => ({
-      id: m.id,
-      name: m.name,
-      description: m.description,
-      conditions: m.conditions,
-      confirmationChecklist: m.confirmationChecklist,
-      invalidation: m.invalidation,
-      stopPlacement: m.stopPlacement,
-      targetLogic: m.targetLogic,
-      notes: m.notes,
-    })),
-    tradeManagement: s.tradeManagement
-      ? {
-          id: s.tradeManagement.id,
-          takeProfitPhilosophy: s.tradeManagement.takeProfitPhilosophy,
-          initialStopPlacement: s.tradeManagement.initialStopPlacement,
-          breakEvenRules: s.tradeManagement.breakEvenRules,
-          trailingStopRules: s.tradeManagement.trailingStopRules,
-          scalingInRules: s.tradeManagement.scalingInRules,
-          scalingOutRules: s.tradeManagement.scalingOutRules,
-          maxHoldingTime: s.tradeManagement.maxHoldingTime,
-          maxRiskPercent: s.tradeManagement.maxRiskPercent
-            ? s.tradeManagement.maxRiskPercent.toNumber()
-            : null,
-          expectedWinRate: s.tradeManagement.expectedWinRate,
-          expectedAvgRr: s.tradeManagement.expectedAvgRr,
-          expectedExpectancy: s.tradeManagement.expectedExpectancy,
-          minExecutionScore: s.tradeManagement.minExecutionScore,
-          maxDailyRiskPercent: s.tradeManagement.maxDailyRiskPercent,
-          maxTradesPerDay: s.tradeManagement.maxTradesPerDay,
-          partialTakeProfits: s.tradeManagement.partialTakeProfits.map((p) => ({
-            id: p.id,
-            trigger: p.trigger,
-            percentToClose: p.percentToClose ? p.percentToClose.toNumber() : null,
-            reason: p.reason,
-          })),
-          customRules: s.tradeManagement.customRules.map((r) => ({ id: r.id, text: r.text })),
-        }
-      : null,
-    sessions: s.sessions.map((x) => ({
-      name: x.name,
-      color: x.color,
-      startMinutes: x.startMinutes,
-      endMinutes: x.endMinutes,
-      enabled: x.enabled,
-    })),
-    confluences: s.checklistItems
-      .filter((c) => c.kind === "CONFLUENCE")
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        color: c.color,
-        category: c.category,
-        description: c.description,
-        weight: c.weight,
-        mandatory: c.mandatory,
-        // Frozen so a later strategy edit can't retro-change a trade's eligible set.
-        directionApplicability: c.directionApplicability,
-        pairId: c.pairId,
-        validationCriteria: c.validationCriteria,
-        enabled: c.enabled,
-      })),
-    execution: s.checklistItems
-      .filter((c) => c.kind === "EXECUTION")
-      .map((c) => ({
-        name: c.name,
-        color: c.color,
-        category: c.category,
-        description: c.description,
-        weight: c.weight,
-        mandatory: c.mandatory,
-        validationCriteria: c.validationCriteria,
-        enabled: c.enabled,
-      })),
-    // Setup Types (Stage 3) — mandatory/weight are the EFFECTIVE values (scenario
-    // override ?? the checklist item's own), frozen here so a later edit to
-    // either the Setup Type or the underlying checklist item can never retroactively
-    // change what a historical trade was validated against.
-    setupTypes: s.setupTypes.map((st) => ({
-      name: st.name,
-      description: st.description,
-      scenarios: st.scenarios.map((sc) => ({
-        direction: sc.direction,
-        name: sc.name,
-        scenarioType: sc.scenarioType,
-        sortOrder: sc.sortOrder,
-        context: readScenarioContext(sc.context),
-        executionPlan: readExecutionPlan(sc.executionPlan),
-        description: sc.description,
-        conditions: sc.conditions.map((c) => ({
-          checklistItemId: c.checklistItemId,
-          name: c.checklistItem.name,
-          directionApplicability: c.checklistItem.directionApplicability,
-          mandatory: c.mandatoryOverride ?? c.checklistItem.mandatory,
-          weight: c.weightOverride ?? c.checklistItem.weight,
-          sortOrder: c.sortOrder,
-        })),
-      })),
-    })),
-  };
-}
-
 // Everything here is scoped by `userId` (tenant isolation) and the soft-delete
 // extension in server/db.ts auto-filters `deletedAt: null` on find/list/count.
+// The full strategy tree (snapshot + materialize) lives in strategy-tree.ts.
 
-// When re-inserting a nullable Json column, a stored SQL NULL reads back as
-// `null` but must be written as `Prisma.DbNull` (not the literal `null`).
-function toJsonInput(value: Prisma.JsonValue | null): Prisma.InputJsonValue | typeof Prisma.DbNull {
-  return value === null ? Prisma.DbNull : (value as Prisma.InputJsonValue);
-}
-
+/** The user's strategy library. Backtesting experiments (isolated working
+ *  copies, see strategy-experiments.service.ts) are never listed here. */
 export async function listStrategies(userId: string) {
   return prisma.strategy.findMany({
-    where: { userId },
+    where: { userId, isExperiment: false },
     orderBy: [{ sortOrder: "asc" }, { updatedAt: "desc" }],
   });
 }
@@ -239,34 +67,59 @@ export async function captureStrategySnapshot(
  * then bumps `Strategy.version` so the live strategy becomes the next (editable,
  * unpublished) version. Every published version is preserved verbatim as JSON, so
  * a trade's `strategyVersionSnapshot` always has a concrete version to point at.
+ *
+ * Concurrency: the version bump is a compare-and-set on the version that was
+ * read. A second, simultaneous publish blocks on the row lock, then finds the
+ * version already moved and fails with a clear CONFLICT — it never creates a
+ * duplicate/skipped version number and never surfaces a raw DB error. Not
+ * auto-retried: a double-click must not publish the same content twice.
  */
 export async function publishStrategyVersion(
   userId: string,
   strategyId: string,
   note: string | null,
 ) {
-  return prisma.$transaction(async (tx) => {
-    const strategy = await tx.strategy.findFirst({
-      where: { id: strategyId, userId },
-      include: strategyTreeInclude,
-    });
-    if (!strategy) throw new Error("Strategy not found.");
+  try {
+    return await prisma.$transaction((tx) => publishStrategyVersionInTx(tx, userId, strategyId, note), TREE_TX_OPTIONS);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === "P2002" || error.code === "P2034")) {
+      throw publishConflict();
+    }
+    throw error;
+  }
+}
 
-    const snapshot = buildSnapshot(strategy);
-    const created = await tx.strategyVersion.create({
-      data: {
-        strategyId,
-        version: strategy.version,
-        note: note?.trim() ? note.trim() : null,
-        snapshot: snapshot as unknown as Prisma.InputJsonValue,
-      },
-    });
-    await tx.strategy.update({
-      where: { id: strategyId },
-      data: { version: strategy.version + 1 },
-    });
-    return created;
+/** publishStrategyVersion's body, for callers that already hold a transaction. */
+export async function publishStrategyVersionInTx(
+  tx: TransactionClient,
+  userId: string,
+  strategyId: string,
+  note: string | null,
+) {
+  const strategy = await loadStrategyTree(tx, userId, strategyId);
+  if (!strategy) throw new StrategyLabError("Strategy not found.", "NOT_FOUND");
+
+  const bumped = await tx.strategy.updateMany({
+    where: { id: strategyId, userId, deletedAt: null, version: strategy.version },
+    data: { version: strategy.version + 1 },
   });
+  if (bumped.count === 0) throw publishConflict();
+
+  return tx.strategyVersion.create({
+    data: {
+      strategyId,
+      version: strategy.version,
+      note: note?.trim() ? note.trim().slice(0, 500) : null,
+      snapshot: buildSnapshot(strategy) as unknown as Prisma.InputJsonValue,
+    },
+  });
+}
+
+export function publishConflict() {
+  return new StrategyLabError(
+    "This strategy was just published from another tab or device. Refresh to see the new version, then publish again if needed.",
+    "CONFLICT",
+  );
 }
 
 /**
@@ -322,183 +175,30 @@ export async function getStrategyVersion(
 /**
  * Restores a published version by rebuilding its snapshot into a **new** DRAFT
  * strategy — never mutating the live one, so a restore can't clobber current
- * work. Mirrors duplicateStrategy's deep-copy, but the source is the frozen JSON
- * snapshot (order comes from array position). Rich-text fields are re-inserted
- * via toJsonInput (a stored SQL NULL must be written as Prisma.DbNull).
+ * work. Shares strategy-tree.ts's materializer with duplicate, so every
+ * section (incl. sessions, checklist, setup types, trade-management targets)
+ * comes back with fresh ids and internally-remapped references.
  */
 export async function restoreStrategyVersionAsNewStrategy(
   userId: string,
   strategyId: string,
   version: number,
-) {
+): Promise<MaterializeReport["strategy"] & { droppedConditions: MaterializeReport["droppedConditions"] }> {
   const owned = await prisma.strategy.findFirst({ where: { id: strategyId, userId }, select: { id: true } });
-  if (!owned) throw new Error("Strategy not found.");
+  if (!owned) throw new StrategyLabError("Strategy not found.", "NOT_FOUND");
   const row = await prisma.strategyVersion.findFirst({ where: { strategyId, version } });
-  if (!row) throw new Error("Version not found.");
+  if (!row) throw new StrategyLabError("Version not found.", "NOT_FOUND");
   const snap = row.snapshot as unknown as StrategyVersionSnapshot;
 
-  const last = await prisma.strategy.findFirst({ where: { userId }, orderBy: { sortOrder: "desc" } });
-  const json = (value: unknown) => toJsonInput(value as Prisma.JsonValue | null);
-
-  return prisma.$transaction(async (tx) => {
-    const created = await tx.strategy.create({
-      data: {
-        userId,
-        name: `${snap.name} (v${version} restored)`,
-        description: snap.description,
-        applicableAssets: snap.applicableAssets ?? [],
+  const report = await prisma.$transaction(
+    (tx) =>
+      materializeSnapshot(tx, userId, snap, {
+        name: nameWithSuffix(snap.name, ` (v${version} restored)`),
         status: "DRAFT",
-        sortOrder: (last?.sortOrder ?? -1) + 1,
-      },
-    });
-
-    if (snap.arsenalConcepts?.length) {
-      await tx.arsenalConcept.createMany({
-        data: snap.arsenalConcepts.map((c, i) => ({
-          strategyId: created.id,
-          name: c.name,
-          sortOrder: i,
-          definition: json(c.definition),
-          purpose: json(c.purpose),
-          howIIdentify: json(c.howIIdentify),
-          whyItMatters: json(c.whyItMatters),
-          whenIUse: json(c.whenIUse),
-          whenIIgnore: json(c.whenIIgnore),
-          examples: json(c.examples),
-          personalNotes: json(c.personalNotes),
-        })),
-      });
-    }
-
-    if (snap.frameworkSteps?.length) {
-      await tx.strategyFrameworkStep.createMany({
-        data: snap.frameworkSteps.map((s, i) => ({
-          strategyId: created.id,
-          title: s.title,
-          sortOrder: i,
-          description: json(s.description),
-          notes: json(s.notes),
-        })),
-      });
-    }
-
-    for (const [i, tf] of (snap.timeframes ?? []).entries()) {
-      const newTf = await tx.strategyTimeframe.create({
-        data: { strategyId: created.id, name: tf.name, sortOrder: i },
-      });
-      if (tf.checkpoints?.length) {
-        await tx.strategyCheckpoint.createMany({
-          data: tf.checkpoints.map((cp, j) => ({
-            timeframeId: newTf.id,
-            title: cp.title,
-            sortOrder: j,
-            description: json(cp.description),
-            notes: json(cp.notes),
-          })),
-        });
-      }
-    }
-
-    if (snap.entryModels?.length) {
-      await tx.strategyEntryModel.createMany({
-        data: snap.entryModels.map((m, i) => ({
-          strategyId: created.id,
-          name: m.name,
-          sortOrder: i,
-          description: json(m.description),
-          conditions: json(m.conditions),
-          confirmationChecklist: json(m.confirmationChecklist),
-          invalidation: json(m.invalidation),
-          stopPlacement: json(m.stopPlacement),
-          targetLogic: json(m.targetLogic),
-          notes: json(m.notes),
-        })),
-      });
-    }
-
-    const tm = snap.tradeManagement;
-    if (tm) {
-      const newTm = await tx.strategyTradeManagement.create({
-        data: {
-          strategyId: created.id,
-          takeProfitPhilosophy: json(tm.takeProfitPhilosophy),
-          initialStopPlacement: json(tm.initialStopPlacement),
-          breakEvenRules: json(tm.breakEvenRules),
-          trailingStopRules: json(tm.trailingStopRules),
-          scalingInRules: json(tm.scalingInRules),
-          scalingOutRules: json(tm.scalingOutRules),
-          maxHoldingTime: tm.maxHoldingTime,
-          maxRiskPercent: tm.maxRiskPercent,
-        },
-      });
-      if (tm.partialTakeProfits?.length) {
-        await tx.partialTakeProfit.createMany({
-          data: tm.partialTakeProfits.map((p, i) => ({
-            tradeManagementId: newTm.id,
-            trigger: p.trigger,
-            percentToClose: p.percentToClose,
-            reason: p.reason,
-            sortOrder: i,
-          })),
-        });
-      }
-      if (tm.customRules?.length) {
-        await tx.tradeManagementRule.createMany({
-          data: tm.customRules.map((r, i) => ({
-            tradeManagementId: newTm.id,
-            text: r.text,
-            sortOrder: i,
-          })),
-        });
-      }
-    }
-
-    // SOT: restore the frozen sessions + confluences/execution too.
-    if (snap.sessions?.length) {
-      await tx.strategySession.createMany({
-        data: snap.sessions.map((x, i) => ({
-          userId,
-          strategyId: created.id,
-          name: x.name,
-          color: x.color,
-          startMinutes: x.startMinutes,
-          endMinutes: x.endMinutes,
-          enabled: x.enabled,
-          sortOrder: i,
-        })),
-      });
-    }
-    const restoreChecklist = (
-      items: StrategyVersionSnapshot["confluences"],
-      kind: "CONFLUENCE" | "EXECUTION",
-    ) =>
-      items?.length
-        ? tx.strategyChecklistItem.createMany({
-            data: items.map((c, i) => ({
-              userId,
-              strategyId: created.id,
-              kind,
-              name: c.name,
-              color: c.color,
-              category: c.category,
-              description: c.description,
-              weight: c.weight,
-              mandatory: c.mandatory,
-              // Pre-direction snapshots have no applicability → BOTH.
-              directionApplicability:
-                kind === "CONFLUENCE" ? c.directionApplicability ?? "BOTH" : "BOTH",
-              pairId: kind === "CONFLUENCE" ? c.pairId ?? null : null,
-              validationCriteria: c.validationCriteria,
-              enabled: c.enabled,
-              sortOrder: i,
-            })),
-          })
-        : null;
-    await restoreChecklist(snap.confluences, "CONFLUENCE");
-    await restoreChecklist(snap.execution, "EXECUTION");
-
-    return created;
-  });
+      }),
+    TREE_TX_OPTIONS,
+  );
+  return { ...report.strategy, droppedConditions: report.droppedConditions };
 }
 
 /** Published versions of a strategy, newest first, each with a compact summary. */
@@ -710,166 +410,21 @@ export async function deleteStrategy(userId: string, id: string) {
 }
 
 /**
- * Deep-copy a strategy, including (eventually) every nested workspace section.
- *
- * Phase 1 only copies the top-level fields. It is written as a single
- * transaction on purpose: when Phase 2+ adds nested sections (Arsenal concepts,
- * framework steps, timeframes + checkpoints, entry models, trade management),
- * their rows are created inside THIS transaction keyed to `copy.id` — see the
- * marked extension point below — so a duplicate is always all-or-nothing.
+ * Deep-copies a strategy into an independent DRAFT: snapshot the live tree,
+ * then materialize it (strategy-tree.ts) with fresh ids and every reference
+ * remapped. One transaction, so a duplicate is all-or-nothing.
  */
 export async function duplicateStrategy(userId: string, id: string) {
-  const source = await prisma.strategy.findFirst({
-    where: { id, userId },
-    include: {
-      // Only live rows; the extension doesn't filter nested relations.
-      arsenalConcepts: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-      frameworkSteps: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-      timeframes: {
-        where: { deletedAt: null },
-        orderBy: { sortOrder: "asc" },
-        include: { checkpoints: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } } },
-      },
-      entryModels: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-      tradeManagement: {
-        include: {
-          partialTakeProfits: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-          customRules: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-        },
-      },
-    },
-  });
-  if (!source) throw new Error("Strategy not found.");
-
-  const last = await prisma.strategy.findFirst({
-    where: { userId },
-    orderBy: { sortOrder: "desc" },
-  });
-
-  return prisma.$transaction(async (tx) => {
-    const copy = await tx.strategy.create({
-      data: {
-        userId,
-        name: `${source.name} (copy)`,
-        description: source.description,
-        applicableAssets: source.applicableAssets,
-        // A duplicate starts as a working draft you then adapt.
-        status: "DRAFT",
-        sortOrder: (last?.sortOrder ?? -1) + 1,
-      },
+  const report = await prisma.$transaction(async (tx) => {
+    const source = await loadStrategyTree(tx, userId, id);
+    if (!source) throw new StrategyLabError("Strategy not found.", "NOT_FOUND");
+    return materializeSnapshot(tx, userId, buildSnapshot(source), {
+      name: nameWithSuffix(source.name, " (copy)"),
+      description: source.description,
+      status: "DRAFT",
     });
-
-    // ── Deep-copy nested sections into `copy` (add future sections here) ─────
-    // Section 1 — Arsenal:
-    if (source.arsenalConcepts.length > 0) {
-      await tx.arsenalConcept.createMany({
-        data: source.arsenalConcepts.map((c) => ({
-          strategyId: copy.id,
-          name: c.name,
-          sortOrder: c.sortOrder,
-          definition: toJsonInput(c.definition),
-          purpose: toJsonInput(c.purpose),
-          howIIdentify: toJsonInput(c.howIIdentify),
-          whyItMatters: toJsonInput(c.whyItMatters),
-          whenIUse: toJsonInput(c.whenIUse),
-          whenIIgnore: toJsonInput(c.whenIIgnore),
-          examples: toJsonInput(c.examples),
-          personalNotes: toJsonInput(c.personalNotes),
-        })),
-      });
-    }
-
-    // Section 2 — Framework:
-    if (source.frameworkSteps.length > 0) {
-      await tx.strategyFrameworkStep.createMany({
-        data: source.frameworkSteps.map((s) => ({
-          strategyId: copy.id,
-          title: s.title,
-          sortOrder: s.sortOrder,
-          description: toJsonInput(s.description),
-          notes: toJsonInput(s.notes),
-        })),
-      });
-    }
-
-    // Section 3 — Timeframes (nested): create each timeframe, then its checkpoints
-    // under the new timeframe id, all inside this transaction.
-    for (const tf of source.timeframes) {
-      const newTf = await tx.strategyTimeframe.create({
-        data: { strategyId: copy.id, name: tf.name, sortOrder: tf.sortOrder },
-      });
-      if (tf.checkpoints.length > 0) {
-        await tx.strategyCheckpoint.createMany({
-          data: tf.checkpoints.map((cp) => ({
-            timeframeId: newTf.id,
-            title: cp.title,
-            sortOrder: cp.sortOrder,
-            description: toJsonInput(cp.description),
-            notes: toJsonInput(cp.notes),
-          })),
-        });
-      }
-    }
-
-    // Section 4 — Entry Models:
-    if (source.entryModels.length > 0) {
-      await tx.strategyEntryModel.createMany({
-        data: source.entryModels.map((m) => ({
-          strategyId: copy.id,
-          name: m.name,
-          sortOrder: m.sortOrder,
-          description: toJsonInput(m.description),
-          conditions: toJsonInput(m.conditions),
-          confirmationChecklist: toJsonInput(m.confirmationChecklist),
-          invalidation: toJsonInput(m.invalidation),
-          stopPlacement: toJsonInput(m.stopPlacement),
-          targetLogic: toJsonInput(m.targetLogic),
-          notes: toJsonInput(m.notes),
-        })),
-      });
-    }
-
-    // Section 5 — Trade Management (1:1 + two child lists): create the record,
-    // then its partial TPs and custom rules under the new record id.
-    const tm = source.tradeManagement;
-    if (tm) {
-      const newTm = await tx.strategyTradeManagement.create({
-        data: {
-          strategyId: copy.id,
-          takeProfitPhilosophy: toJsonInput(tm.takeProfitPhilosophy),
-          initialStopPlacement: toJsonInput(tm.initialStopPlacement),
-          breakEvenRules: toJsonInput(tm.breakEvenRules),
-          trailingStopRules: toJsonInput(tm.trailingStopRules),
-          scalingInRules: toJsonInput(tm.scalingInRules),
-          scalingOutRules: toJsonInput(tm.scalingOutRules),
-          maxHoldingTime: tm.maxHoldingTime,
-          maxRiskPercent: tm.maxRiskPercent,
-        },
-      });
-      if (tm.partialTakeProfits.length > 0) {
-        await tx.partialTakeProfit.createMany({
-          data: tm.partialTakeProfits.map((p) => ({
-            tradeManagementId: newTm.id,
-            trigger: p.trigger,
-            percentToClose: p.percentToClose,
-            reason: p.reason,
-            sortOrder: p.sortOrder,
-          })),
-        });
-      }
-      if (tm.customRules.length > 0) {
-        await tx.tradeManagementRule.createMany({
-          data: tm.customRules.map((r) => ({
-            tradeManagementId: newTm.id,
-            text: r.text,
-            sortOrder: r.sortOrder,
-          })),
-        });
-      }
-    }
-
-    return copy;
-  });
+  }, TREE_TX_OPTIONS);
+  return report.strategy;
 }
 
 /** Ready for drag-and-drop reordering of the strategy list (Phase 2 UI). */

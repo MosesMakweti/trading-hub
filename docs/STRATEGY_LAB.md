@@ -287,6 +287,90 @@ The module is now feature-complete for the original brief; future work is the
 
 ---
 
+## ✅ Integrity & Backtesting strategy development (Nov 2026)
+
+One strategy model, two working environments: the Strategy Lab workspace and
+the Backtesting terminal's embedded **Strategy Builder**. Both edit the same
+rows through the same services, validation and scoring.
+
+### The strategy tree (`server/services/strategy-tree.ts`)
+- `buildSnapshot` freezes a live strategy as a `StrategyVersionSnapshot`
+  (publish, backtest capture, duplicate). It includes every section, icons,
+  scenario custom type/instruments/timeframes, condition notes, raw overrides
+  and the enabled flag. Conditions of deleted checklist items are never frozen.
+- `writeSnapshotInto` makes a strategy's configuration equal to a snapshot.
+  Rows other records reference — checklist items (kind + name), sessions,
+  setup types and scenarios (direction + name) — are **updated in place**;
+  descriptive rows are archived and re-created; removed rows are archived,
+  never hard-deleted. `materializeSnapshot` = new strategy + write.
+- Duplicate, restore-a-version, experiment forks and save-as-version all use
+  this one path; round-trip tests (`strategy-tree.test.ts`) fail if a field
+  is missed.
+
+### Version comparison (`domain/strategies/version-diff.ts`)
+Per-section explanation (`sections`) of confluence / execution / session /
+setup-type / trade-management / rich-text changes, matched by name (never by
+id), with `affectsScoring`. Sessions store no timezone or trading-day list, so
+those can't differ.
+
+### Integrity rules
+- Publishing is a compare-and-set on `Strategy.version` (simultaneous
+  publishes → one version + a clear conflict). Publish flushes pending
+  autosaves first; autosaves are serialized (`lib/autosave-queue.ts`).
+- Setup-type names are unique among live rows (partial unique index).
+- A confluence's direction can't change while a live scenario it can't serve uses it.
+- Effective scenarios exclude disabled items and deleted strategies.
+- All actions map errors through `strategy-errors.ts` (no raw DB errors).
+- Opening a strategy never writes (trade management is created on first edit).
+
+### Experiments (`StrategyExperiment`, `strategy-experiments.service.ts`)
+An experiment's configuration is a hidden Strategy row (`isExperiment`),
+forked from the baseline — so every editor works on it unchanged — plus a log
+(hypothesis, expected effect, actual outcome, notes) and lifecycle:
+`ACTIVE → SAVED_AS_VERSION | PROMOTED | DISCARDED`. Experiments are numbered
+per baseline, can branch from each other, and never appear in strategy lists.
+- **Save as new version**: if the baseline has unpublished changes they are
+  published first; if it was edited after the fork the trader must confirm;
+  then the experiment is written onto the baseline (ids preserved) and
+  published. Published versions are never modified.
+- **Create new strategy**: the working copy becomes a normal strategy.
+- **Discard**: the working copy is archived; sessions keep their results.
+- DB triggers refuse experiments/sessions that reference another user's rows.
+
+### Backtesting integration
+- Lab sessions start in one of five modes (`sim-strategy.service.ts`): test a
+  strategy, refine (new experiment), continue an experiment, build a new
+  strategy, or no strategy. Sessions freeze the strategy snapshot at creation;
+  `cloneSessionConditions` re-runs identical data/period/costs with another
+  configuration.
+- Terminal side panel → **Strategy** tab (`strategy-builder-panel.tsx`):
+  original read-only, experiment editing with the Strategy Lab section
+  components, change list, log, save / promote / discard / test actions.
+- **Evaluation** (`domain/strategies/strategy-evaluation.ts`): what is
+  scorable (confluences, execution, setup types — the trader confirms, the
+  existing engine scores), executable (session window, trades/day, risk,
+  daily risk, minimum score — automatic, server clock only, no bar reads) and
+  descriptive (framework, entry models, timeframes, arsenal — listed as not
+  auto-checked). Evaluated at order placement on the session's frozen
+  snapshot, stored on the order, copied to the position on fill; never blocks
+  an order. Session windows are read in the trader's timezone, converting the
+  replay minute via the chart workspace's data timezone.
+- **Comparison** (`/backtesting/lab/experiments/[id]`): baseline vs
+  experiment results, flags differing test conditions, small samples and
+  many tested variations. Market-condition breakdowns aren't available (no
+  regime data is recorded).
+
+### Known limitations
+- Automated execution of strategy logic is not implemented: descriptive
+  sections are text and are never turned into trading rules.
+- Strategy session windows have no timezone of their own (trader timezone is
+  assumed) and no weekday list.
+- Session results reflect the configuration frozen at session creation; edits
+  apply to new sessions ("Test on same conditions").
+- Daily-risk uses the current balance as the denominator.
+
+---
+
 ## Future integrations the architecture already supports
 - ✅ **Win-rate / RR / psychology / adherence by strategy** — DONE. A **Performance**
   tab on the strategy workspace shows per-strategy win rate, avg/total return,

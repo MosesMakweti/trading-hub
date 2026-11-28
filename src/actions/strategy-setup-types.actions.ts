@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/server/guards";
+import { toStrategyActionError } from "@/server/services/strategy-errors";
 import {
   setupScenarioConditionAddSchema,
   setupScenarioConditionReorderSchema,
@@ -23,9 +24,8 @@ type CreateResult = { success: true; id: string } | { success: false; error: str
 
 const rev = (strategyId: string) => revalidatePath(`/strategy-lab/${strategyId}`);
 
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
+// Service-authored messages pass through; raw database errors never reach the UI.
+const errorMessage = toStrategyActionError;
 
 /**
  * Trade Idea Validation Shield (Stage 4) — the exact read path the "Add

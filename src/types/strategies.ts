@@ -200,6 +200,8 @@ export interface StrategySetupTypeDTO {
 // Stored as JSON on StrategyVersion.snapshot; reuses the section DTOs so it is a
 // faithful record (viewable/restorable later), not just names.
 export interface StrategyVersionSessionSnapshot {
+  /** Optional — snapshots published before full-fidelity capture don't have it. */
+  id?: string;
   name: string;
   color: TagColor;
   startMinutes: number | null;
@@ -221,6 +223,8 @@ export interface StrategyVersionConfluenceSnapshot {
   pairId?: string | null;
   validationCriteria: string | null;
   enabled: boolean;
+  /** Optional lucide icon name (absent in older snapshots). */
+  icon?: string | null;
 }
 
 // Setup Types frozen at publish time (Stage 3) — enough to reconstruct the
@@ -231,15 +235,28 @@ export interface StrategyVersionSetupConditionSnapshot {
   checklistItemId: string;
   name: string;
   directionApplicability: ConfluenceDirectionValue;
+  /** EFFECTIVE values (override ?? checklist item) — what historical scoring uses. */
   mandatory: boolean;
   weight: number | null;
   sortOrder: number;
+  // Full-fidelity fields (optional — absent in older snapshots). The raw
+  // overrides let a restore/duplicate rebuild the condition exactly, so later
+  // edits to the base checklist item keep flowing through where they used to.
+  kind?: "CONFLUENCE" | "EXECUTION";
+  mandatoryOverride?: boolean | null;
+  weightOverride?: number | null;
+  note?: string | null;
+  /** false = the underlying checklist item was disabled; never scored. */
+  enabled?: boolean;
 }
 export interface StrategyVersionSetupScenarioSnapshot {
   direction: "BULLISH" | "BEARISH" | "NEUTRAL";
   /** Optional — snapshots published before named scenarios don't have them. */
   name?: string;
   scenarioType?: "CONTINUATION" | "REVERSAL" | "BREAKOUT" | "CUSTOM" | null;
+  customType?: string | null;
+  instruments?: string[];
+  timeframes?: string[];
   sortOrder?: number;
   context?: ScenarioContext;
   executionPlan?: ScenarioExecutionPlan;
@@ -334,5 +351,40 @@ export interface StrategyVersionDiff {
     customRuleCountDelta: number;
     partialTpCountDelta: number;
   };
+  /** Detailed, human-readable explanation of every change, grouped by section. */
+  sections: StrategyDiffSection[];
+  /** True when a change touches confluences / execution / setup types /
+   *  sessions — i.e. what the scoring engine actually evaluates. */
+  affectsScoring: boolean;
   hasChanges: boolean;
+}
+
+export type StrategyDiffSectionKey =
+  | "overview"
+  | "arsenal"
+  | "framework"
+  | "timeframes"
+  | "entryModels"
+  | "sessions"
+  | "confluences"
+  | "execution"
+  | "setupTypes"
+  | "tradeManagement";
+
+/** One changed property: `from`/`to` are display strings ("—" when empty). */
+export interface StrategyDiffField {
+  field: string;
+  from: string;
+  to: string;
+}
+export interface StrategyDiffEntry {
+  change: "added" | "removed" | "changed" | "reordered";
+  /** What changed, e.g. a confluence name or "Type A › Bullish". */
+  subject: string;
+  fields: StrategyDiffField[];
+}
+export interface StrategyDiffSection {
+  key: StrategyDiffSectionKey;
+  label: string;
+  entries: StrategyDiffEntry[];
 }

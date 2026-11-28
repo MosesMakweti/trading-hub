@@ -20,6 +20,7 @@ import { accountRules, assertTradable, lockAccount, SimError } from "./sim-accou
 import { appendLedger, currentBalance } from "./sim-ledger";
 import { accountFeeds, latestBars, type SimFeed } from "./sim-market";
 import { notePropTradingDay } from "./sim-prop.service";
+import { evaluateOrderDecision, evaluationColumns, type StrategyCheckRequest } from "./sim-evaluation.service";
 
 export type SizingRequest =
   | { mode: "QUANTITY"; quantity: string }
@@ -38,6 +39,8 @@ export interface OrderRequest {
   expiresMinute?: number | null;
   clientRequestId?: string | null;
   note?: string | null;
+  /** The trader's strategy checklist for this decision (sessions with a strategy). */
+  strategyCheck?: StrategyCheckRequest | null;
 }
 
 export interface OrderOutcome {
@@ -186,6 +189,9 @@ export async function placeOrder(userId: string, accountId: string, req: OrderRe
       }
     }
 
+    // Strategy evaluation, frozen at the decision (never blocks the order).
+    const evaluation = await evaluateOrderDecision(tx, account, { side: req.side, check: req.strategyCheck, intendedRisk, balance });
+
     const specSnapshot = toSpecSnapshot(spec) as unknown as Prisma.InputJsonValue;
     const common = {
       userId,
@@ -204,6 +210,7 @@ export async function placeOrder(userId: string, accountId: string, req: OrderRe
       placedMinute: minute,
       clientRequestId: req.clientRequestId ?? null,
       note: req.note ?? null,
+      ...(evaluation ? { strategyEvaluation: evaluationColumns(evaluation).strategyEvaluation } : {}),
     };
 
     if (req.type !== "MARKET") {
@@ -234,6 +241,7 @@ export async function placeOrder(userId: string, accountId: string, req: OrderRe
         specSnapshot,
         openedMinute: minute,
         note: req.note ?? null,
+        ...evaluationColumns(evaluation),
       },
     });
     await tx.simOrder.update({ where: { id: order.id }, data: { positionId: position.id } });

@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+
+import { StrategyChecklist, type StrategyCheckState } from "./strategy-checklist";
+import type { StrategyVersionSnapshot } from "@/types/strategies";
 import { Link2, Link2Off, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -55,6 +58,7 @@ export function OrderTicket({
   link,
   economics,
   confirmAll = false,
+  strategySnapshot = null,
 }: {
   state: SimAccountStateDTO;
   quote: SimQuoteDTO | undefined;
@@ -63,6 +67,8 @@ export function OrderTicket({
   link?: TicketLink | null;
   economics?: InstrumentEconomics | null;
   confirmAll?: boolean;
+  /** The session's frozen strategy (Strategy Lab sessions with a strategy). */
+  strategySnapshot?: StrategyVersionSnapshot | null;
 }) {
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
   const [type, setType] = useState<OrderType>("MARKET");
@@ -72,6 +78,7 @@ export function OrderTicket({
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
   const [busy, setBusy] = useState(false);
+  const [check, setCheck] = useState<StrategyCheckState>({ setupTypeName: null, checked: [] });
   const [confirming, setConfirming] = useState(false);
 
   const symbol = quote?.symbol ?? state.assets[0];
@@ -145,6 +152,7 @@ export function OrderTicket({
       sizing: sizing === "QUANTITY" ? { mode: "QUANTITY", quantity: size } : sizing === "RISK_PERCENT" ? { mode: "RISK_PERCENT", riskPercent: n } : { mode: "RISK_AMOUNT", amount: n },
       clientRequestId: crypto.randomUUID(),
       drawingId: linked ? link!.drawing.id : null,
+      strategyCheck: strategySnapshot ? { setupTypeName: check.setupTypeName, checkedNames: check.checked } : null,
     });
     setBusy(false);
     setConfirming(false);
@@ -153,6 +161,8 @@ export function OrderTicket({
     if (res.warning) toast.warning(res.warning);
     toast.success(res.outcome.status === "FILLED" ? `${side === "BUY" ? "Bought" : "Sold"} ${symbol}` : `${type === "LIMIT" ? "Limit" : "Stop"} order placed`);
     if (type !== "MARKET" && !linked) setPrice("");
+    // Each decision is confirmed afresh.
+    setCheck((c) => ({ setupTypeName: c.setupTypeName, checked: [] }));
   }
 
   function submit(e: React.FormEvent) {
@@ -258,6 +268,8 @@ export function OrderTicket({
           <p className="text-muted-foreground">Estimate from the contract spec{convertNote}. The server sizes and checks the order when it&apos;s placed.</p>
         </div>
       )}
+
+      {strategySnapshot && <StrategyChecklist snapshot={strategySnapshot} side={side} value={check} onChange={setCheck} />}
 
       <Button type="submit" className={cn("w-full", side === "BUY" ? "bg-emerald-600 text-white hover:bg-emerald-600/90" : "bg-red-500 text-white hover:bg-red-500/90")} disabled={disabled || busy || !quote?.bid}>
         {busy && <Loader2 className="animate-spin" />}

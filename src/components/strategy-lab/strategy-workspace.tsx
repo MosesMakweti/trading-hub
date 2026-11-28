@@ -58,102 +58,17 @@ import type {
   TradeManagementDTO,
 } from "@/types/strategies";
 
-// Section tabs. Settings is live in Phase 1; the rest are documented placeholders
-// whose phase components slot straight into these panels (see STRATEGY_LAB.md).
+// Workspace section tabs (after the fixed Settings / Performance / Versions tabs).
 const SECTIONS = [
-  {
-    value: "arsenal",
-    label: "Arsenal",
-    icon: Boxes,
-    phase: "Phase 2",
-    description:
-      "Your toolbox of concepts — Fair Value Gaps, Liquidity, Order Blocks, and anything else this strategy relies on.",
-    plannedFeatures: [
-      "Unlimited expandable concept cards",
-      "Definition, purpose, how I identify it, why it matters, when I use / ignore it",
-      "Rich-text fields, example charts, and images per concept",
-    ],
-  },
-  {
-    value: "framework",
-    label: "Framework",
-    icon: ListOrdered,
-    phase: "Phase 3",
-    description: "Your decision process as an ordered, drag-and-drop sequence of steps.",
-    plannedFeatures: [
-      "Unlimited sequential steps (Determine HTF bias → … → Manage position)",
-      "Title, description, and optional notes per step",
-      "Drag-and-drop reordering",
-    ],
-  },
-  {
-    value: "timeframes",
-    label: "Timeframes",
-    icon: Clock,
-    phase: "Phase 4",
-    description: "What you look for on each timeframe, from Monthly down to M1.",
-    plannedFeatures: [
-      "Unlimited timeframe workspaces",
-      "Unlimited checkpoints per timeframe",
-      "Title, description, notes, and optional images per checkpoint",
-    ],
-  },
-  {
-    value: "entry-models",
-    label: "Entry Models",
-    icon: Crosshair,
-    phase: "Phase 5",
-    description: "The specific ways you enter — each with its own conditions and rules.",
-    plannedFeatures: [
-      "Unlimited entry models",
-      "Conditions, confirmation checklist, invalidation, stop placement, target logic",
-      "Example images and notes",
-    ],
-  },
-  {
-    value: "sessions",
-    label: "Sessions",
-    icon: CalendarClock,
-    phase: "SOT",
-    description: "The market sessions you trade this strategy in.",
-    plannedFeatures: [],
-  },
-  {
-    value: "confluences",
-    label: "Confluences",
-    icon: Sparkles,
-    phase: "SOT",
-    description: "The confluences this strategy looks for — colored, weighted, reusable.",
-    plannedFeatures: [],
-  },
-  {
-    value: "execution",
-    label: "Execution",
-    icon: ClipboardCheck,
-    phase: "SOT",
-    description: "The execution confirmations required before entry.",
-    plannedFeatures: [],
-  },
-  {
-    value: "setup-types",
-    label: "Setup Types",
-    icon: Layers,
-    phase: "Stage 3",
-    description: "Named setup structures — a Bullish and Bearish scenario built from this strategy's own confluences.",
-    plannedFeatures: [],
-  },
-  {
-    value: "trade-management",
-    label: "Trade Management",
-    icon: SlidersHorizontal,
-    phase: "Phase 6",
-    description: "How you manage a position after entry.",
-    plannedFeatures: [
-      "TP philosophy, stop / break-even / trailing / scaling rules, max hold & risk",
-      "Unlimited partial take-profit levels (trigger, % to close, reason)",
-      "Unlimited custom rules",
-    ],
-  },
+  { value: "arsenal", label: "Arsenal", icon: Boxes },
+  { value: "framework", label: "Framework", icon: ListOrdered },
+  { value: "timeframes", label: "Timeframes", icon: Clock },
+  { value: "entry-models", label: "Entry Models", icon: Crosshair },
+  { value: "sessions", label: "Sessions", icon: CalendarClock },
+  { value: "confluences", label: "Confluences", icon: Sparkles },
+  { value: "execution", label: "Execution", icon: ClipboardCheck },
+  { value: "setup-types", label: "Setup Types", icon: Layers },
+  { value: "trade-management", label: "Trade Management", icon: SlidersHorizontal },
 ] as const;
 
 export function StrategyWorkspace({
@@ -269,12 +184,10 @@ export function StrategyWorkspace({
           </div>
         </TabsContent>
 
-        {/* Per-strategy performance (Future integration: analytics by strategy). */}
         <TabsContent value="performance" className="mt-4">
           <StrategyPerformanceSection performance={performance} />
         </TabsContent>
 
-        {/* Version history (Future integration: strategy version snapshots). */}
         <TabsContent value="versions" className="mt-4">
           <StrategyVersionsSection
             strategyId={strategy.id}
@@ -283,27 +196,22 @@ export function StrategyWorkspace({
           />
         </TabsContent>
 
-        {/* Section 1 — Arsenal is live (Phase 2). */}
         <TabsContent value="arsenal" className="mt-4">
           <ArsenalSection strategyId={strategy.id} initialConcepts={arsenalConcepts} />
         </TabsContent>
 
-        {/* Section 2 — Framework is live (Phase 3). */}
         <TabsContent value="framework" className="mt-4">
           <FrameworkSection strategyId={strategy.id} initialSteps={frameworkSteps} />
         </TabsContent>
 
-        {/* Section 3 — Timeframe workspace is live (Phase 4). */}
         <TabsContent value="timeframes" className="mt-4">
           <TimeframesSection strategyId={strategy.id} initialTimeframes={timeframes} />
         </TabsContent>
 
-        {/* Section 4 — Entry Models is live (Phase 5). */}
         <TabsContent value="entry-models" className="mt-4">
           <EntryModelsSection strategyId={strategy.id} initialModels={entryModels} />
         </TabsContent>
 
-        {/* Section 5 — Trade Management is live (Phase 6). */}
         <TabsContent value="trade-management" className="mt-4">
           <TradeManagementSection
             strategyId={strategy.id}
@@ -312,7 +220,6 @@ export function StrategyWorkspace({
           />
         </TabsContent>
 
-        {/* SOT refactor — sessions / confluences / execution now live inside the strategy. */}
         <TabsContent value="sessions" className="mt-4">
           <StrategySessionsSection strategyId={strategy.id} initialSessions={sessions} />
         </TabsContent>

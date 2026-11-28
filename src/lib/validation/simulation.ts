@@ -12,6 +12,18 @@ export const createLabAccountSchema = z
     name: z.string().trim().min(1, "Name is required.").max(120),
     description: z.string().trim().max(2000).nullish(),
     strategyId: id.nullish(),
+    /**
+     * How the session uses a strategy (default: EXISTING when strategyId is
+     * set, otherwise NONE):
+     *  NONE        discretionary backtest, no structured strategy;
+     *  EXISTING    backtest mode — test a Strategy Lab strategy as-is;
+     *  REFINE      refinement mode — fork strategyId into a new experiment and test that;
+     *  EXPERIMENT  test an existing ACTIVE experiment (experimentId);
+     *  BUILD       strategy-building mode — start a blank strategy (newStrategyName).
+     */
+    strategyMode: z.enum(["NONE", "EXISTING", "REFINE", "EXPERIMENT", "BUILD"]).optional(),
+    experimentId: id.nullish(),
+    newStrategyName: z.string().trim().max(120).nullish(),
     datasets: z.array(z.object({ assetSymbol: z.string().trim().toUpperCase().min(1).max(20), datasetId: id })).min(1, "Add at least one instrument.").max(10),
     periodStart: dateKey,
     periodEnd: dateKey,
@@ -57,6 +69,14 @@ export const orderSchema = z
     note: z.string().trim().max(2000).nullish(),
     /** A position drawing this order was drafted from (checked and linked server-side). */
     drawingId: z.string().regex(/^[A-Za-z0-9-]{8,64}$/).nullish(),
+    /** The trader's strategy checklist for this decision; the server scores it
+     *  against the session's frozen strategy (never trusted as a result). */
+    strategyCheck: z
+      .object({
+        setupTypeName: z.string().trim().max(120).nullish(),
+        checkedNames: z.array(z.string().trim().min(1).max(120)).max(100).default([]),
+      })
+      .nullish(),
   })
   .refine((v) => v.type === "MARKET" || (v.price != null && v.price !== ""), { message: "A pending order needs a price.", path: ["price"] });
 

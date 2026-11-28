@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 
 import { requireUser } from "@/server/guards";
+import { createLabSession } from "@/server/services/simulation/sim-strategy.service";
+import { StrategyLabError } from "@/server/services/strategy-errors";
 import type { ReplayTimeframe } from "@/domain/native-replay/timeframes";
 import {
   advanceSchema,
@@ -35,7 +37,7 @@ type Ok<T> = { success: true } & T;
 
 /** Errors written for the trader pass through verbatim; anything else is logged and hidden. */
 function fail(error: unknown, fallback: string): Fail {
-  if (error instanceof accounts.SimError || error instanceof accounts.SimNotFoundError || error instanceof CandleRangeTooLargeError) {
+  if (error instanceof accounts.SimError || error instanceof accounts.SimNotFoundError || error instanceof CandleRangeTooLargeError || error instanceof StrategyLabError) {
     return { success: false, error: error.message };
   }
   console.error("[simulation.actions]", error);
@@ -55,10 +57,13 @@ export async function createLabAccountAction(input: unknown): Promise<Ok<{ id: s
   if (!parsed.success) return invalid(parsed.error);
   const v = parsed.data;
   try {
-    const account = await accounts.createLabAccount(user.id, {
+    const { account } = await createLabSession(user.id, {
       name: v.name,
       description: v.description,
       strategyId: v.strategyId,
+      strategyMode: v.strategyMode,
+      experimentId: v.experimentId,
+      newStrategyName: v.newStrategyName,
       datasets: v.datasets,
       periodStart: v.periodStart,
       periodEnd: v.periodEnd,

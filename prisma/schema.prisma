@@ -107,6 +107,7 @@ model User {
   historicalDatasets      HistoricalDataset[]
   simAccounts             SimAccount[]
   simStudies              SimStudy[]
+  strategyExperiments     StrategyExperiment[]
   simFirmModels           SimFirmModel[]
   simChallenges           SimChallenge[]
   chartWorkspaces         ChartWorkspace[]
@@ -1815,30 +1816,36 @@ model Strategy {
   deletedAt DateTime? // soft delete (registered in server/db.ts); Archive is a status, Delete sets this
 
   // ── Workspace sections ─────────────────────────────────────────────────────
-  arsenalConcepts      ArsenalConcept[] // Section 1 — Arsenal (expandable concept cards)
-  frameworkSteps       StrategyFrameworkStep[] // Section 2 — Framework (ordered decision steps)
-  timeframes           StrategyTimeframe[] // Section 3 — Timeframe workspace (each has checkpoints)
-  entryModels          StrategyEntryModel[] // Section 4 — Entry Models
-  tradeManagement      StrategyTradeManagement? // Section 5 — Trade Management (1:1 + partial TPs, custom rules)
-  sessions             StrategySession[] // Section — Trading Sessions (SOT refactor)
-  checklistItems       StrategyChecklistItem[] // Sections — Confluences + Execution Confirmations (SOT)
-  setupTypes           StrategySetupType[] // Section — Setup Types (Today ↔ Journal refinement, Stage 3)
+  arsenalConcepts       ArsenalConcept[] // Section 1 — Arsenal (expandable concept cards)
+  frameworkSteps        StrategyFrameworkStep[] // Section 2 — Framework (ordered decision steps)
+  timeframes            StrategyTimeframe[] // Section 3 — Timeframe workspace (each has checkpoints)
+  entryModels           StrategyEntryModel[] // Section 4 — Entry Models
+  tradeManagement       StrategyTradeManagement? // Section 5 — Trade Management (1:1 + partial TPs, custom rules)
+  sessions              StrategySession[] // Section — Trading Sessions (SOT refactor)
+  checklistItems        StrategyChecklistItem[] // Sections — Confluences + Execution Confirmations (SOT)
+  setupTypes            StrategySetupType[] // Section — Setup Types (Today ↔ Journal refinement, Stage 3)
   // Journal link: a trade references a strategy (not a copy). onDelete: SetNull
   // on the Trade side keeps completed trades (with their snapshots) intact.
-  trades               Trade[]
+  trades                Trade[]
   // Today V2 (T3) — day-plan "active strategy" preference on DailyAssetAnalysis
   // (a default for new Trade Ideas, never a historical trade owner). SetNull
   // on the other side, same as trades above.
-  activeInDailyPlans   DailyAssetAnalysis[]
-  opportunities        TradeOpportunity[] // valid setups spotted under this strategy (executed or missed)
-  versions             StrategyVersion[] // published, immutable snapshots of the tree
-  replayReviewSessions ReplayReviewSession[] // optional scope narrowing (Replay foundation, Stage 12)
-  replayTrades         ReplayTrade[]
-  backtestRuns         BacktestRun[] // experiments run against this strategy (SetNull on delete)
-  simAccounts          SimAccount[] // simulation accounts testing this strategy (SetNull on delete)
-  simStudies           SimStudy[] // Strategy Lab studies of this strategy (SetNull on delete)
-  weeklyTradeAudits    WeeklyTradeAudit[]
-  auditExpectedTrades  AuditExpectedTrade[]
+  activeInDailyPlans    DailyAssetAnalysis[]
+  opportunities         TradeOpportunity[] // valid setups spotted under this strategy (executed or missed)
+  versions              StrategyVersion[] // published, immutable snapshots of the tree
+  replayReviewSessions  ReplayReviewSession[] // optional scope narrowing (Replay foundation, Stage 12)
+  replayTrades          ReplayTrade[]
+  backtestRuns          BacktestRun[] // experiments run against this strategy (SetNull on delete)
+  simAccounts           SimAccount[] // simulation accounts testing this strategy (SetNull on delete)
+  simStudies            SimStudy[] // Strategy Lab studies of this strategy (SetNull on delete)
+  // Backtesting strategy development: an EXPERIMENT is a real strategy tree
+  // (same sections, validation and scoring) forked from a baseline and kept
+  // out of normal strategy lists until saved back. See StrategyExperiment.
+  isExperiment          Boolean                  @default(false)
+  experiment            StrategyExperiment?      @relation("ExperimentWorkingStrategy")
+  experimentsAsBaseline StrategyExperiment[]     @relation("ExperimentBaseline")
+  weeklyTradeAudits     WeeklyTradeAudit[]
+  auditExpectedTrades   AuditExpectedTrade[]
 
   @@index([userId, deletedAt, sortOrder])
 }
@@ -2094,9 +2101,10 @@ model StrategySetupType {
   // a trade; its frozen setupValidationSnapshot survives regardless.
   trades    Trade[]
 
-  // Case-sensitive defense-in-depth; the service also enforces a
+  // Unique among LIVE (non-archived) setup types only, so an archived name can
+  // be reused. Case-sensitive defense-in-depth; the service also enforces a
   // case-insensitive duplicate-name check for a friendlier error message.
-  @@unique([strategyId, name])
+  @@unique([strategyId, name], map: "StrategySetupType_strategyId_name_key", where: raw("\"deletedAt\" IS NULL"))
   @@index([strategyId, deletedAt, sortOrder])
 }
 
@@ -5118,10 +5126,13 @@ model SimAccount {
   periodEnd   DateTime @db.Date
 
   strategyId              String?
-  strategy                Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  strategy                Strategy?           @relation(fields: [strategyId], references: [id], onDelete: SetNull)
   strategyNameSnapshot    String?
   strategyVersionSnapshot Int?
   strategySnapshot        Json?
+  /// The strategy experiment this session tests (null = plain backtest).
+  experimentId            String?
+  experiment              StrategyExperiment? @relation(fields: [experimentId], references: [id], onDelete: SetNull)
 
   /// The continuous replay clock: a broker wall-clock minute (null = not started).
   /// Only ever increases (trigger); moved under a row lock by the clock service.
@@ -5159,6 +5170,7 @@ model SimAccount {
 
   @@unique([challengeId, phaseIndex])
   @@index([userId, product, status])
+  @@index([experimentId])
 }
 
 /// account × asset → historical dataset. Frozen once the clock starts (trigger).
@@ -5212,6 +5224,9 @@ model SimOrder {
   positionId      String? @unique
   note            String?
 
+  /// Strategy evaluation captured when the order was placed (the decision time).
+  strategyEvaluation Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -5243,15 +5258,23 @@ model SimPosition {
   conversionRate    Decimal           @db.Decimal(30, 12)
   specSnapshot      Json
 
-  openedMinute  Int
-  closedMinute  Int?
-  realizedPnl   Decimal        @default(0) @db.Decimal(14, 2)
-  commissions   Decimal        @default(0) @db.Decimal(14, 2)
-  swaps         Decimal        @default(0) @db.Decimal(14, 2)
-  closeReason   SimFillReason?
+  openedMinute        Int
+  closedMinute        Int?
+  realizedPnl         Decimal        @default(0) @db.Decimal(14, 2)
+  commissions         Decimal        @default(0) @db.Decimal(14, 2)
+  swaps               Decimal        @default(0) @db.Decimal(14, 2)
+  closeReason         SimFillReason?
   /// An exit where one bar reached both stop and target (stop assumed first).
-  ambiguousExit Boolean        @default(false)
-  note          String?
+  ambiguousExit       Boolean        @default(false)
+  note                String?
+  /// Strategy evaluation frozen at the trade decision (domain/strategies/strategy-evaluation.ts),
+  /// copied from the order. Null = no structured strategy or nothing confirmed.
+  strategyEvaluation  Json?
+  /// Denormalized from strategyEvaluation for analytics grouping.
+  setupTypeName       String?
+  strategySessionName String?
+  executionScore      Int?
+  followedRules       Boolean?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -5636,4 +5659,62 @@ model UserTradingSession {
   updatedAt   DateTime @updatedAt
 
   @@index([userId])
+}
+
+// ── Strategy development experiments (Backtesting terminal) ─────────────────
+// One isolated variation of a strategy. Its configuration lives in a normal
+// (hidden) Strategy row — `workingStrategy` — so every Strategy Lab editor,
+// validator and scoring rule applies unchanged; this row is the experiment's
+// log and lifecycle. The baseline strategy is never modified unless the
+// trader explicitly saves the experiment back as a new version.
+enum StrategyExperimentMode {
+  REFINEMENT // forked from an existing strategy
+  BUILD // a new strategy developed from scratch in the terminal
+}
+
+enum StrategyExperimentStatus {
+  ACTIVE
+  SAVED_AS_VERSION // applied to the baseline and published as a new version
+  PROMOTED // became a standalone strategy
+  DISCARDED
+}
+
+model StrategyExperiment {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name     String
+  mode     StrategyExperimentMode
+  status   StrategyExperimentStatus @default(ACTIVE)
+  /// Per-baseline sequence number (Experiment 1, 2, …).
+  sequence Int                      @default(1)
+
+  baselineStrategyId String?
+  baselineStrategy   Strategy? @relation("ExperimentBaseline", fields: [baselineStrategyId], references: [id], onDelete: SetNull)
+  /// Baseline Strategy.version (its working draft number) when forked.
+  baselineVersion    Int?
+  /// The baseline's full configuration when forked — the fixed reference
+  /// every comparison uses, even if the baseline is edited later.
+  baselineSnapshot   Json?
+
+  workingStrategyId String   @unique
+  workingStrategy   Strategy @relation("ExperimentWorkingStrategy", fields: [workingStrategyId], references: [id], onDelete: Cascade)
+
+  // Experiment log.
+  hypothesis     String? // what changed and why
+  expectedEffect String?
+  actualOutcome  String?
+  notes          String?
+
+  /// SAVED_AS_VERSION: the baseline version that was published from it.
+  resultVersion Int?
+  closedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions SimAccount[]
+
+  @@index([userId, status])
+  @@index([baselineStrategyId, sequence])
 }

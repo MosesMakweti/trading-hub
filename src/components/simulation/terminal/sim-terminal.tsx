@@ -45,6 +45,9 @@ import { applyStepPatch, type SimAccountStateDTO } from "@/types/simulation";
 import { splitRevealed, type RevealStep } from "@/domain/charting/reveal-steps";
 import { noteStep } from "@/components/charting/replay-perf";
 import { fmtMoney, fmtWallClock, pnlTone } from "../format";
+import { StrategyBuilderPanel } from "./strategy-builder-panel";
+import { getTerminalStrategyContextAction } from "@/actions/strategy-experiments.actions";
+import type { StrategyVersionSnapshot } from "@/types/strategies";
 import { OrderTicket } from "./order-ticket";
 import { SessionMenu } from "./session-menu";
 import { TradeDock } from "./trade-dock";
@@ -116,6 +119,19 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
   const [economics, setEconomics] = useState<{ symbol: string; value: InstrumentEconomics | null } | null>(null);
   // Live sizes while dragging (committed to the workspace on release).
   const [rightWidth, setRightWidth] = useState(ws.panels.right.width);
+  /** The session's frozen strategy, for the order ticket's strategy checklist. */
+  const [sessionStrategy, setSessionStrategy] = useState<StrategyVersionSnapshot | null>(null);
+  useEffect(() => {
+    if (initialState.product !== "STRATEGY_LAB") return;
+    let live = true;
+    void getTerminalStrategyContextAction({ accountId: initialState.id }).then((r) => live && r.success && setSessionStrategy(r.context.session.snapshot));
+    return () => {
+      live = false;
+    };
+  }, [initialState.id, initialState.product]);
+  /** Side panel: order entry, or the embedded Strategy Builder (Strategy Lab sessions). */
+  const [sideTab, setSideTab] = useState<"trade" | "strategy">("trade");
+  const [strategyWidth, setStrategyWidth] = useState(480);
   const [bottomHeight, setBottomHeight] = useState(ws.panels.bottom.height);
   const paneRefs = useRef<(ChartPaneHandle | null)[]>([]);
   const playingRef = useRef(false);
@@ -965,8 +981,32 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
 
         {showRight && (
           <>
-            <ResizeHandle direction="left" value={rightWidth} min={240} max={560} label="Resize order panel" onChange={setRightWidth} onCommit={(width) => updateWs((w) => ({ ...w, panels: { ...w.panels, right: { ...w.panels.right, width } } }))} />
-            <aside data-sim-side aria-label="Trade" style={{ width: rightWidth }} className="flex shrink-0 flex-col gap-4 overflow-y-auto p-3 max-md:hidden">
+            {sideTab === "strategy" ? (
+              <ResizeHandle direction="left" value={strategyWidth} min={320} max={960} label="Resize strategy panel" onChange={setStrategyWidth} onCommit={setStrategyWidth} />
+            ) : (
+              <ResizeHandle direction="left" value={rightWidth} min={240} max={560} label="Resize order panel" onChange={setRightWidth} onCommit={(width) => updateWs((w) => ({ ...w, panels: { ...w.panels, right: { ...w.panels.right, width } } }))} />
+            )}
+            <aside data-sim-side aria-label={sideTab === "strategy" ? "Strategy" : "Trade"} style={{ width: sideTab === "strategy" ? strategyWidth : rightWidth }} className="flex shrink-0 flex-col gap-4 overflow-y-auto p-3 max-md:hidden">
+              {state.product === "STRATEGY_LAB" && (
+                <div role="tablist" aria-label="Side panel" className="flex gap-1 rounded-md bg-muted/50 p-0.5 text-xs">
+                  {(["trade", "strategy"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      role="tab"
+                      aria-selected={sideTab === t}
+                      onClick={() => setSideTab(t)}
+                      className={cn("flex-1 rounded px-2 py-1 transition-colors", sideTab === t ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground")}
+                    >
+                      {t === "trade" ? "Trade" : "Strategy"}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {sideTab === "strategy" && state.product === "STRATEGY_LAB" ? (
+                <StrategyBuilderPanel accountId={state.id} />
+              ) : (
+              <>
               {review != null && <p className="rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-xs text-sky-300">Reviewing earlier bars. Return to live to trade.</p>}
               <OrderTicket
                 state={state}
@@ -975,6 +1015,7 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
                 link={ticketLink}
                 economics={economics?.symbol === symbol ? economics.value : null}
                 confirmAll={ws.trading.confirmOrders}
+                strategySnapshot={sessionStrategy}
                 onPlaced={(next, drawing) => {
                   setState(next);
                   if (drawing) void reloadDrawings(drawing.assetSymbol);
@@ -986,6 +1027,8 @@ export function SimTerminal({ initialState, initialWorkspace, backHref, studies,
               </label>
               {studies && started && <QuickObservation state={state} studies={studies} timeframe={timeframe} />}
               {state.product === "PROP_FIRM" && <PropRulesPanel state={state} onPaidOut={() => void refreshState()} />}
+              </>
+              )}
             </aside>
           </>
         )}

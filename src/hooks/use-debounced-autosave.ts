@@ -1,21 +1,33 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 
-export type SaveState = "idle" | "saving" | "saved" | "error";
+import { AutosaveQueue, type SaveResult, type SaveState } from "@/lib/autosave-queue";
 
-type SaveResult = { success: true } | { success: false; error: string };
+export type { SaveState } from "@/lib/autosave-queue";
+
+// ── Page-wide flush registry ─────────────────────────────────────────────────
+// Every mounted autosave registers its queue. Actions that must see the
+// latest edits (e.g. publishing a strategy version, which snapshots the DB)
+// call flushPendingAutosaves() first, so a debounce that hasn't fired yet can
+// never be left out of the snapshot.
+const queues = new Set<AutosaveQueue<unknown>>();
 
 /**
- * Debounced autosave for a controlled value.
- *
- * Reusable across Strategy Lab editors (Settings now; Arsenal / Framework /
- * Timeframes / Entry Models / Trade Management in later phases). The caller owns
- * the value; this hook serializes it, and whenever it diverges from the last
- * saved snapshot it waits `delay` ms of quiet, then persists via `save`.
- *
- * All state updates happen inside async callbacks (timeout / transition), never
- * synchronously in the effect body — keeps it clear of cascading-render lint.
+ * Immediately saves every pending (debounced or in-flight) autosave on the
+ * page and waits for them. Resolves `true` when everything is persisted,
+ * `false` if any save failed (the caller should not proceed as if saved).
+ */
+export async function flushPendingAutosaves(): Promise<boolean> {
+  const results = await Promise.all(Array.from(queues, (q) => q.flush()));
+  return results.every(Boolean);
+}
+
+/**
+ * Debounced autosave for a controlled value. The caller owns the value; this
+ * hook serializes it, and whenever it diverges from the last saved snapshot
+ * it waits `delay` ms of quiet, then persists via `save`. Saves are strictly
+ * sequential (see AutosaveQueue), and a pending edit is flushed on unmount.
  */
 export function useDebouncedAutosave<T>({
   value,
@@ -31,52 +43,32 @@ export function useDebouncedAutosave<T>({
   onError?: (message: string) => void;
 }): SaveState {
   const snapshot = serialize(value);
-  const lastSaved = useRef(snapshot);
+  const [queue] = useState(() => new AutosaveQueue<T>(snapshot));
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [, startTransition] = useTransition();
 
-  // Latest value/snapshot/save, so the unmount flush uses current data.
-  const latest = useRef({ value, snapshot, save });
+  // Keep the queue's view of the latest value + callbacks current.
   useEffect(() => {
-    latest.current = { value, snapshot, save };
-  });
+    queue.update(value, snapshot, { save, onError, onState: setSaveState });
+  }, [queue, value, snapshot, save, onError]);
 
   useEffect(() => {
-    // The effect re-runs whenever `snapshot` changes, so its closure always
-    // holds the `value` that produced the current snapshot — no ref needed.
-    if (snapshot === lastSaved.current) return;
-
-    const timeout = setTimeout(() => {
-      setSaveState("saving");
-      startTransition(async () => {
-        const result = await save(value);
-        if (result.success) {
-          lastSaved.current = snapshot;
-          setSaveState("saved");
-        } else {
-          setSaveState("error");
-          onError?.(result.error);
-        }
-      });
-    }, delay);
-
-    return () => clearTimeout(timeout);
+    queue.schedule(value, snapshot, delay);
+    return () => queue.cancelTimer();
     // Intentionally keyed only on the serialized snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot]);
 
-  // Flush a still-pending edit on unmount — e.g. switching the focused trade
-  // before the debounce fires (which remounts this field). The save is scoped to
-  // this field's own tradeId via its closure, so it can't leak into another trade.
   useEffect(() => {
+    const q = queue as AutosaveQueue<unknown>;
+    queues.add(q);
     return () => {
-      const { value: v, snapshot: s, save: sv } = latest.current;
-      if (s !== lastSaved.current) {
-        lastSaved.current = s;
-        void sv(v);
-      }
+      queues.delete(q);
+      // Flush a still-pending edit on unmount — e.g. switching the focused
+      // record before the debounce fires. The save is scoped to this field's
+      // own record via its closure, so it can't leak elsewhere.
+      void queue.flush(false);
     };
-  }, []);
+  }, [queue]);
 
   return saveState;
 }

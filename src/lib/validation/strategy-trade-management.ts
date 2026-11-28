@@ -44,7 +44,8 @@ export const partialTakeProfitUpdateSchema = z.object({
 });
 
 export const partialTakeProfitReorderSchema = z.object({
-  tradeManagementId: z.string().min(1),
+  // Informational only — actions resolve the record through the owned strategy.
+  tradeManagementId: z.string(),
   orderedIds: z.array(z.string()).min(1),
 });
 
@@ -54,7 +55,8 @@ export const customRuleSchema = z.object({
 });
 
 export const customRuleReorderSchema = z.object({
-  tradeManagementId: z.string().min(1),
+  // Informational only — actions resolve the record through the owned strategy.
+  tradeManagementId: z.string(),
   orderedIds: z.array(z.string()).min(1),
 });
 

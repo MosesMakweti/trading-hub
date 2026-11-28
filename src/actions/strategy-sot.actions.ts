@@ -10,8 +10,11 @@ import {
   strategySessionSchema,
 } from "@/lib/validation/strategy-sot";
 import * as svc from "@/server/services/strategy-sot.service";
+import { runStrategyAction, type ActionResult } from "@/server/services/strategy-errors";
 
-type Result = { success: true } | { success: false; error: string };
+// Every action returns a structured, readable result — never a thrown raw
+// database error (audit #9).
+type Result = ActionResult;
 const rev = (strategyId: string) => revalidatePath(`/strategy-lab/${strategyId}`);
 const invalid = (msg?: string): Result => ({ success: false, error: msg ?? "Invalid input." });
 
@@ -26,9 +29,11 @@ export async function createStrategyChecklistItem(
   const k = checklistKindSchema.safeParse(kind);
   const parsed = strategyChecklistItemSchema.safeParse(input);
   if (!k.success || !parsed.success) return invalid(parsed.success ? undefined : parsed.error.issues[0]?.message);
-  await svc.createChecklistItem(user.id, strategyId, k.data, parsed.data);
-  rev(strategyId);
-  return { success: true };
+  const result = await runStrategyAction("Couldn't add this item.", () =>
+    svc.createChecklistItem(user.id, strategyId, k.data, parsed.data),
+  );
+  if (result.success) rev(strategyId);
+  return result;
 }
 
 export async function updateStrategyChecklistItem(
@@ -39,16 +44,16 @@ export async function updateStrategyChecklistItem(
   const user = await requireUser();
   const parsed = strategyChecklistItemSchema.safeParse(input);
   if (!parsed.success) return invalid(parsed.error.issues[0]?.message);
-  await svc.updateChecklistItem(user.id, id, parsed.data);
-  rev(strategyId);
-  return { success: true };
+  const result = await runStrategyAction("Couldn't save this item.", () => svc.updateChecklistItem(user.id, id, parsed.data));
+  if (result.success) rev(strategyId);
+  return result;
 }
 
 export async function deleteStrategyChecklistItem(id: string, strategyId: string): Promise<Result> {
   const user = await requireUser();
-  await svc.deleteChecklistItem(user.id, id);
+  const result = await runStrategyAction("Couldn't delete this item.", () => svc.deleteChecklistItem(user.id, id));
   rev(strategyId);
-  return { success: true };
+  return result;
 }
 
 export async function reorderStrategyChecklistItems(
@@ -58,9 +63,9 @@ export async function reorderStrategyChecklistItems(
   const user = await requireUser();
   const parsed = sotReorderSchema.safeParse(input);
   if (!parsed.success) return invalid();
-  await svc.reorderChecklistItems(user.id, parsed.data.orderedIds);
+  const result = await runStrategyAction("Couldn't reorder.", () => svc.reorderChecklistItems(user.id, parsed.data.orderedIds));
   rev(strategyId);
-  return { success: true };
+  return result;
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
@@ -69,9 +74,11 @@ export async function createStrategySession(strategyId: string, input: unknown):
   const user = await requireUser();
   const parsed = strategySessionSchema.safeParse(input);
   if (!parsed.success) return invalid(parsed.error.issues[0]?.message);
-  await svc.createStrategySession(user.id, strategyId, parsed.data);
-  rev(strategyId);
-  return { success: true };
+  const result = await runStrategyAction("Couldn't add this session.", () =>
+    svc.createStrategySession(user.id, strategyId, parsed.data),
+  );
+  if (result.success) rev(strategyId);
+  return result;
 }
 
 export async function updateStrategySession(
@@ -82,23 +89,23 @@ export async function updateStrategySession(
   const user = await requireUser();
   const parsed = strategySessionSchema.safeParse(input);
   if (!parsed.success) return invalid(parsed.error.issues[0]?.message);
-  await svc.updateStrategySession(user.id, id, parsed.data);
-  rev(strategyId);
-  return { success: true };
+  const result = await runStrategyAction("Couldn't save this session.", () => svc.updateStrategySession(user.id, id, parsed.data));
+  if (result.success) rev(strategyId);
+  return result;
 }
 
 export async function deleteStrategySession(id: string, strategyId: string): Promise<Result> {
   const user = await requireUser();
-  await svc.deleteStrategySession(user.id, id);
+  const result = await runStrategyAction("Couldn't delete this session.", () => svc.deleteStrategySession(user.id, id));
   rev(strategyId);
-  return { success: true };
+  return result;
 }
 
 export async function reorderStrategySessions(strategyId: string, input: unknown): Promise<Result> {
   const user = await requireUser();
   const parsed = sotReorderSchema.safeParse(input);
   if (!parsed.success) return invalid();
-  await svc.reorderStrategySessions(user.id, parsed.data.orderedIds);
+  const result = await runStrategyAction("Couldn't reorder.", () => svc.reorderStrategySessions(user.id, parsed.data.orderedIds));
   rev(strategyId);
-  return { success: true };
+  return result;
 }

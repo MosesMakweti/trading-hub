@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/server/db";
+import { StrategyLabError } from "@/server/services/strategy-errors";
 import {
   TRADE_MANAGEMENT_RICH_FIELDS,
   type PartialTakeProfitUpdateInput,
@@ -23,11 +24,27 @@ const ownedChild = (userId: string, id: string) => ({
   tradeManagement: { deletedAt: null, strategy: { userId, deletedAt: null } },
 });
 
-/** Lazily create the singleton trade-management record so the section always has
- *  a row (and an id its children can attach to), then return it with its lists. */
-export async function getOrCreateTradeManagement(userId: string, strategyId: string) {
-  const strategy = await prisma.strategy.findFirst({ where: { id: strategyId, userId } });
-  if (!strategy) throw new Error("Strategy not found.");
+const tradeManagementInclude = {
+  partialTakeProfits: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+  customRules: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
+} satisfies Prisma.StrategyTradeManagementInclude;
+
+/** Read-only: the strategy's trade-management record with its lists, or null
+ *  when nothing has been saved yet. Opening a strategy never writes. */
+export async function getTradeManagement(userId: string, strategyId: string) {
+  // findFirst (not findUnique) so the soft-delete extension applies.
+  return prisma.strategyTradeManagement.findFirst({
+    where: { strategyId, strategy: { userId, deletedAt: null } },
+    include: tradeManagementInclude,
+  });
+}
+
+/** Ensures the singleton record exists (first edit creates it) and returns
+ *  its id. Write actions resolve the record THROUGH the owned strategy, never
+ *  from a client-supplied id. */
+export async function ensureTradeManagement(userId: string, strategyId: string): Promise<string> {
+  const strategy = await prisma.strategy.findFirst({ where: { id: strategyId, userId }, select: { id: true } });
+  if (!strategy) throw new StrategyLabError("Strategy not found.", "NOT_FOUND");
 
   try {
     await prisma.strategyTradeManagement.upsert({
@@ -36,19 +53,25 @@ export async function getOrCreateTradeManagement(userId: string, strategyId: str
       update: {},
     });
   } catch (error) {
-    // Under a concurrent first-load the row may already exist — that's fine.
+    // Under a concurrent first edit the row may already exist — that's fine.
     if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) {
       throw error;
     }
   }
+  const record = await prisma.strategyTradeManagement.findFirst({
+    where: { strategyId, strategy: { userId, deletedAt: null } },
+    select: { id: true },
+  });
+  if (!record) throw new StrategyLabError("Trade management not found.", "NOT_FOUND");
+  return record.id;
+}
 
-  // findFirstOrThrow bypasses the soft-delete extension, so filter deletedAt here.
+/** ensure + read (tests / callers that need the full record immediately). */
+export async function getOrCreateTradeManagement(userId: string, strategyId: string) {
+  await ensureTradeManagement(userId, strategyId);
   return prisma.strategyTradeManagement.findFirstOrThrow({
     where: { strategyId, deletedAt: null, strategy: { userId, deletedAt: null } },
-    include: {
-      partialTakeProfits: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-      customRules: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } },
-    },
+    include: tradeManagementInclude,
   });
 }
 
