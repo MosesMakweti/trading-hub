@@ -4,6 +4,7 @@ import type { LedgerEventType, Prisma } from "@prisma/client";
 import { prisma, type TransactionClient } from "@/server/db";
 import { postLedgerEntry, removeLedgerEntriesForSource } from "@/server/services/account-ledger.service";
 import { postPayoutPaidLedgerEntry, resolveCurrentProfitSplitPercent } from "@/server/services/prop-firms.service";
+import { assertStatementImportAllowed } from "@/server/services/mt5-connector.service";
 import { detectPlatform, getAdapter } from "@/domain/prop-firms/import/adapter-registry";
 import { buildBestGuessMapping } from "@/domain/prop-firms/import/adapters/generic-csv";
 import { classifyTransaction, type TransactionClassification } from "@/domain/prop-firms/import/classify-transaction";
@@ -453,6 +454,8 @@ export async function previewImport(userId: string, input: ImportRunInput): Prom
     select: { id: true, startingBalance: true },
   });
   if (!account) throw new Error("Account not found.");
+  // MT5 Connector: the same history must not arrive through both channels.
+  await assertStatementImportAllowed(userId, input.accountId);
 
   const pipeline = await runPipeline(input.accountId, input);
 
@@ -664,6 +667,8 @@ export async function confirmImport(userId: string, input: ImportRunInput): Prom
     select: { id: true, startingBalance: true },
   });
   if (!account) throw new Error("Account not found.");
+  // MT5 Connector: refuse (never overwrite) when the account is MT5-synced.
+  await assertStatementImportAllowed(userId, input.accountId);
 
   const pipeline = await runPipeline(input.accountId, input);
   const profitSplitPercent =
